@@ -69,7 +69,7 @@ const CINEMATIC_PROOFS: ImageProof[] = [
 ];
 
 const CINEMATIC_IDENTITY_HOLD =
-  "Reference hold: these legacy stills contain a distinctive photorealistic face. They are not an approved visual target for source-bound Casefile work. That route requires the reviewed faceless mannequin cast, wardrobe and prop locks, LTX clip review, exact edit binding, and a promoted multi-shot render before it can be shown as Golden evidence.";
+  "Reference hold: these legacy stills contain a distinctive photorealistic face. They are not an approved visual target for source-bound Casefile work. That route requires the reviewed faceless mannequin cast, wardrobe and prop locks, motion-clip review, exact edit binding, and a promoted multi-shot render before it can be shown as Golden evidence.";
 
 interface VideoProof { media: GoldenProofMediaPresentation; poster?: GoldenProofMediaPresentation; device: string; meta: string }
 
@@ -137,7 +137,7 @@ const ASSEMBLY_PROOFS: TextProof[] = [
 
 const STUDIO_ASSET_PROOFS: TextProof[] = [
   { device: "owner-scoped record", channel: "compatible channel only", line: "camera / motion / prompt / treatment / presentation recipe", note: "treatment binds storyboard, motion, continuity and review locks; reuse requires matching approved evidence" },
-  { device: "quality control", channel: "LTX / Comfy", line: "standard LoRA vs IC-LoRA control", note: "IC controls remain unavailable until exact workflow, guide, source bytes, licence, and benchmark agree" },
+  { device: "quality control", channel: "Legacy Comfy control", line: "standard adapter vs IC control", note: "IC controls remain unavailable until exact workflow, guide, source bytes, licence, and benchmark agree" },
 ];
 
 const CREW_PROOFS: TextProof[] = [

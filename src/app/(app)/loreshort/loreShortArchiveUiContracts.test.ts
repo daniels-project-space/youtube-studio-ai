@@ -18,7 +18,7 @@ async function main() {
 
   assert.match(page, /Lore references/);
   assert.match(page, /Reference media/);
-  assert.match(page, /open-weight LTX 2\.5 Novita runtime/);
+  assert.match(page, /MiniMax H3 Novita runtime/);
   assert.match(page, /Historical samples remain retained for audit/);
   assert.match(page, /Draw every narrated beat/);
   assert.match(page, /not just the opening/);

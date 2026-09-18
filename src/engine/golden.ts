@@ -50,7 +50,7 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate", "chess_script_integrity"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration. The registered chess gate verifies an exact source transcript only; it is not a creative-critique substitute." },
   { stage: "voice", blocks: ["narration_tts", "chess_narration_timing"], note: "Voice = #1 retention factor; tiered provider per niche. The registered chess cue adapter binds the existing TTS timing receipt to each legal move and remains private-review-only." },
   { stage: "sound", blocks: ["music_program_plan", "music"], note: "A route-sealed original-music program locks one episode’s instrumental and loop-visual intent before the channel-scoped score or long-form music product is generated." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "studio_reusable_media_resolve", "studio_asset_resolve", "visual_matter", "visual_matter_references", "novita_render_images", "studio_ltx_adapter_resolve", "novita_render_video", "scene_compiler", "chess_episode_graph", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs. Before any visual source, Studio claims an immutable channel episode ordinal: eligible channel-scoped media can cover at most 40% of a timeline, every third episode is fully original, and history/crime/heist/lore or unknown programs remain original by default. Cinematic resolves only its owner-scoped camera/motion/prompt recipes, then plans new Visual Matter. After keyframe QA, MiniMax H3 receives the exact accepted first frame, while the direct worker independently verifies the immutable model-manifest digest, native bytes, geometry, duration, and immediate opening motion before assembly. `studio_ltx_adapter_resolve` is retained only to inspect historical LTX manifests and is never compiled into a new H3 route. Cinematic can optionally add a bounded, direct-Novita text-to-image Visual Matter QA-reference pack after its mood/cast/setting/storyboard plan; it is not primary-keyframe image conditioning. The deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, while the registered private chess graph creates only a source-bound native board manifest; neither chess discovery nor production qualification is implied. Documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "studio_reusable_media_resolve", "studio_asset_resolve", "visual_matter", "visual_matter_references", "novita_render_images", "studio_ltx_adapter_resolve", "novita_render_video", "scene_compiler", "chess_episode_graph", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs. Before any visual source, Studio claims an immutable channel episode ordinal: eligible channel-scoped media can cover at most 40% of a timeline, every third episode is fully original, and history/crime/heist/lore or unknown programs remain original by default. Cinematic resolves only its owner-scoped camera/motion/prompt recipes, then plans new Visual Matter. After keyframe QA, MiniMax H3 receives the exact accepted first frame, while the direct worker independently verifies the immutable model-manifest digest, native bytes, geometry, duration, and immediate opening motion before assembly. The historical manifest adapter is read-only audit support and is never compiled into a new H3 route. Cinematic can optionally add a bounded, direct-Novita text-to-image Visual Matter QA-reference pack after its mood/cast/setting/storyboard plan; it is not primary-keyframe image conditioning. The deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, while the registered private chess graph creates only a source-bound native board manifest; neither chess discovery nor production qualification is implied. Documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["studio_postproduction_asset_resolve", "captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz. The Studio resolver can reuse only approved, module-specific audio direction, quote-card grammar, motion-graphics treatment, and a closed title-to-body transition choice; it cannot override story, sources, timing, cuts, or accessibility." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. Narrated assembly accepts only the Studio's closed hard-cut, crossfade, or dip-to-black title transition and each path has real render-parity coverage. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["package_to_opening_plan", "thumbnail_gen", "metadata", "quiz_metadata"], note: "SEO metadata plus a required thumbnail description first seal a package-to-opening plan. Non-Lo-Fi channels then use the sealed Nano Banana scene route with deterministic Style-DNA typography. Lo-Fi alone takes an isolated Nano Banana reference-edit lane using the exact 15-second frame from its rendered 4K scene, the normal playbook as read-only style input, a minimal mood label, and a truthful 4K badge. Both routes pass the same independent mobile publishing gate. Production QA rebinds the package to exact cover bytes, a retained reviewed opening frame, and the final master; that is structural evidence, not a fabricated semantic-equality claim." },
@@ -786,7 +786,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Lore Short — Loreshort Engine",
     engine:
-      "Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
+      "Loreshort — OpenRouter first-person lore script + attested Novita stills + per-line cast-voice TTS + sealed MiniMax H3 image-to-video camera moves + free FFmpeg 2K finish",
     how:
       "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one OpenRouter creative-text call writes a paced " +
       "narration arc plus per-beat layered-depth SCENE prompts; the attested Novita image lane paints each beat; ElevenLabs voices each line " +
@@ -795,12 +795,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "shot — real perspective and parallax, never a 2D pan. A title card plays before the " +
       "narration; ffmpeg fits each shot to its beat, dissolves, titles and grades. Self-describing (LORESHORT_MODULE contract), " +
       "fail-proof (retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts. " +
-      "WIRED: the engine's providers are now INJECTED (LoreShortDeps), and the `lore_short` block " +
-      "(src/trigger/blocks/loreShortBlocks.ts, registered in src/engine/blocks.ts) supplies the attested Novita render farm for " +
-      "both stills (createAttestedNovitaImageGenerator) and the i2v camera move (generateI2V -> renderNovitaI2V), the channel's " +
-      "cast voice instead of a hardcoded ElevenLabs id, and an R2 putObjectFromFile sink instead of the nginx docroot copy. " +
-      "Every receipt accumulates with `+=`. Real-ESRGAN is NOT purchased: the block pins the engine's free ffmpeg 2K lane. " +
-      "Calling craftLoreShort with no deps still runs the original standalone Replicate/ElevenLabs/nginx path unchanged.",
+      "WIRED: the `lore_short` block (src/trigger/blocks/loreShortBlocks.ts, registered in src/engine/blocks.ts) supplies the attested " +
+      "Novita still farm and MiniMax H3 camera move, the channel's declared cast voice, and an R2 putObjectFromFile sink. Every receipt " +
+      "accumulates with `+=`; the production route never invokes a standalone historical renderer. Real-ESRGAN is not purchased: the block " +
+      "pins the engine's free FFmpeg 2K lane.",
     gates: [
       "required inputs validated (topic / narrator / title / kicker / slug)",
       "de-branded visuals (content-policy safe)",
@@ -810,6 +808,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "genuine-3D camera move (not a 2D pan)",
       "beat sheet settled by the Director at TEXT prices, then frozen to a content-addressed R2 checkpoint — a rejected draft never costs a render",
       "all paid stills and clips run through the attested Novita farm with per-call receipts",
+      "fresh motion footage uses only the admitted MiniMax H3 Novita route",
     ],
     status: "reference",
   },
@@ -858,24 +857,17 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "videocraft-novita",
     stage: "visual",
-    title: "Videocraft (Novita LTX-2.5 x2)",
+    title: "Videocraft — Retired Route Record",
     engine:
-      "Videocraft — LTX-2.5 distilled image-to-video on an exact RTX 4090 spot profile: 640×352 stage one → native latent-space x2 refinement → 1280×704 final output, FP8-cast + CPU offload, with no model or hardware fallback.",
+      "Historical image-to-video receipts only. New Studio footage is owned by the sealed MiniMax H3 Novita route.",
     how:
-      "Each already-reviewed Z-Image still, camera move, motion cue, continuity lock, and duration is sealed into a one-shot direct " +
-      "worker manifest. The worker verifies the digest-pinned LTX-2.5 components, probes the encoded 1280×704 MP4 at 25fps, and " +
-      "returns exact scene order, frame geometry, GPU identity, and x2 evidence before timeline assembly. Accepted footage keeps the " +
-      "same footageClips/footageKeys handoff, while the cinematic manifest preserves the source-to-shot binding. The legacy bridge " +
-      "and retired videocraft module cannot be used as an alternative path. This module is deliberately not a production admission " +
-      "until a sealed live RTX 4090 benchmark records the exact profile in the local allow-list.",
+      "This card retains past receipt structure for audit, comparison, and migration proof only. It cannot render, spend, admit a channel, " +
+      "or publish. New footage enters through an accepted Z-Image keyframe, the H3 motion route, native-byte/opening-motion QA, and the " +
+      "same source-to-shot evidence chain before assembly.",
     gates: [
-      "accepted Z-Image keyframes bind identity, wardrobe, props, text/logo rejection, and first/last-frame continuity before LTX starts",
-      "FFmpeg temporal-dynamism, pacing, black/dead-air, and final-master QA reject a clip that does not move or cut as planned",
-      "video frames always 8n+1 — rounded, never truncated silently",
-      "every shot needs a stillKey + motion cue (cameraMove !== 'static' or a non-empty motion field) — validate() fails loud",
-      "only the local benchmark allow-list can unlock the exact LTX-2.5 RTX 4090 profile",
-      "no cross-engine or old-bridge fallback — a failed take is repaired or fails loud",
-      "R2-idempotent receipts plus all-settled worker teardown prevent double-rendering and ghost billing",
+      "historical receipts remain read-only",
+      "the card cannot admit a render, spend, channel, or release",
+      "new footage must use the current H3 route and its sealed evidence chain",
     ],
     status: "reference",
   },
@@ -884,14 +876,14 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Lofi Loop — Novita Ambient Engine",
     engine:
-      "A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified Novita LTX-2.5 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
+      "A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified MiniMax H3 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     how:
-      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured non-Google reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still anchors two independently attested 15-second LTX FLF2V segments. loop_clips measures both the internal join and wraparound seam before upscale. assemble normalizes one intro unit and one plain body unit, then packet-loops those pixels under mastered music for the selected one-to-eight-hour runtime.",
+      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured non-Google reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still anchors two independently attested 15-second H3 source segments. loop_clips measures both the internal join and wraparound seam before upscale. assemble normalizes one intro unit and one plain body unit, then packet-loops those pixels under mastered music for the selected one-to-eight-hour runtime.",
     gates: [
       "production keyframes require a grounded Style DNA subject and setting before any paid image work",
-      "production keyframes require Groq or FAL review; Google/Gemini is not an eligible reviewer",
+      "production keyframes require the approved non-thumbnail vision review route",
       "the accepted still is reviewed for channel identity, motifs, indoor-weather physics, and no baked-in text",
-      "one exact accepted still anchors both Novita LTX-2.5 image-to-video jobs; the camera is explicitly locked",
+      "one exact accepted still anchors both MiniMax H3 image-to-video source segments; the camera is explicitly locked",
       "the source is exactly two nominal 15-second FLF2V segments; both receive the accepted still as their terminal keyframe",
       "the 30-second unit must pass internal-join and wraparound SSIM gates before upscale",
       "one-to-eight-hour masters repeat H.264 packets instead of re-encoding identical pixels for the whole runtime",
@@ -1134,7 +1126,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "script",
     stage: "write",
     title: "Script + Hook",
-    engine: "Hookcraft cold-open engine + latest Gemini Pro narration (gemini-3.1-pro-preview)",
+    engine: "Hookcraft cold-open engine + pinned OpenRouter creative-text narration",
     how:
       "The cold open comes FIRST: hookcraft writes four device-diverse candidates (cold-open scene, " +
       "receipt, contrarian verdict, flash-forward, result-first, …) that must be SPECIFICALLY about the " +
@@ -1142,7 +1134,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "0-5s, explicit payoff promise by ~15s (52% vs 44% retention), stakes + open loop by 30s. A " +
       "deterministic craft lint (first sentence ≤7s, banned filler/disclaimer openers, concrete anchor, " +
       "<15-word sentences) runs before a judge gates punch/specificity/curiosity/voiceMatch/promise ≥7 " +
-      "with one feedback retry — loud failure, never a could-open-any-video line. The latest Gemini Pro " +
+      "with one feedback retry — loud failure, never a could-open-any-video line. The pinned OpenRouter creative-text route " +
       "then writes the narration continuing from it under CRAFT_RULES, in the Show Bible's register, as a " +
       "STORY JOURNEY (Calm-style): arrival ritual → experience-before-explanation movements carried by ONE " +
       "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
@@ -1383,7 +1375,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "metadata",
     stage: "package",
     title: "SEO Metadata",
-    engine: "Metacraft — autocomplete-grounded candidates (latest Gemini Pro) + claims lint + feed judge",
+    engine: "Metacraft — autocomplete-grounded candidates + claims lint + feed judge",
     how:
       "Seven title candidates across distinct frames, grounded in LIVE YouTube autocomplete (what people " +
       "actually type) and the niche's real top titles. A deterministic lint then enforces what the old " +

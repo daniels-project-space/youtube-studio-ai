@@ -19,7 +19,7 @@ const CONTINUITY_GATES = [
 ];
 
 const EXECUTION_RAILS = [
-  { title: "Runtime not qualified", detail: "Lore Short is unavailable to the automatic creator until its exact open-weight LTX 2.5 Novita runtime is benchmarked and route qualification is sealed. This reference grants no rendering authority." },
+  { title: "Runtime not qualified", detail: "Lore Short is unavailable to the automatic creator until its exact MiniMax H3 Novita runtime is qualified and its route evidence is sealed. This reference grants no rendering authority." },
   { title: "Original plan required", detail: "Use a self-contained original story plan and critic receipt. Named franchises, their characters, worlds, plots and visual identifiers cannot seed new work." },
   { title: "Archive only", detail: "Historical samples remain retained for audit and comparison, not as executable renderers, channel recipes or release-quality proof. This page triggers no rendering, provider work, training or publishing." },
 ];
