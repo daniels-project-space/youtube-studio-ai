@@ -123,7 +123,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const musicSeed = channelProgramRouteRunSeed({ route: musicRoute, programBrief: musicBrief });
   const topic = "Rainy city focus after midnight";
   const planned = await musicProgramPlan(stageContext({
-    params: { visualStyle: "lofi", provider: "suno" },
+    params: { visualStyle: "lofi", provider: "minimax_music3" },
     store: {
       channelProgramRoute: musicSeed,
       topic,
@@ -133,11 +133,12 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   }));
   const sealed = planned.musicProgramPlan as {
     fingerprint: string;
-    audio: { direction: string };
+    audio: { direction: string; providerPreference: string };
     visual: { motionIntent: string };
   };
   assert.match(sealed.fingerprint, /^[a-f0-9]{64}$/iu);
   assert.match(sealed.audio.direction, /Original instrumental program/u);
+  assert.equal(sealed.audio.providerPreference, "minimax_music3");
 
   const scenes = await scenePlanner(stageContext({
     params: { visualStyle: "lofi" },
@@ -162,6 +163,20 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   }));
   assert.equal(reused.musicProvider, "reuse");
   assert.equal(reused.musicKey, "owner/test/channel/program-route/reused-music.mp3");
+
+  await assert.rejects(
+    music(stageContext({
+      params: { provider: "suno" },
+      store: {
+        channelProgramRoute: musicSeed,
+        topic,
+        musicProgramPlan: planned.musicProgramPlan,
+        reuseMusicKey: "owner/test/channel/program-route/reused-music.mp3",
+      },
+    })),
+    /does not match sealed music program provider/u,
+    "a later stage cannot override the selected paid music route, even on a no-cost reuse branch",
+  );
 
   await assert.rejects(
     music(stageContext({

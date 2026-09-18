@@ -8,10 +8,11 @@ import {
 } from "./channelProgramRoute";
 
 /**
- * A sealed, provider-free music-loop episode handoff.  It deliberately plans
- * the identity of the visual loop and the instrumental program before either
- * Novita or a music provider is allowed to make an asset.  It is not a music
- * generation receipt, cost reservation, or publication authority.
+ * A sealed, provider-selection music-loop episode handoff. It deliberately
+ * plans the identity of the visual loop, instrumental program, and the chosen
+ * audio route before either Novita or a music provider is allowed to make an
+ * asset. It is not a music-generation receipt, cost reservation, or
+ * publication authority.
  */
 export const ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION = "original-music-program-plan/v1" as const;
 export const ORIGINAL_MUSIC_PROGRAM_ROUTE_KEY = "music-loop/foundation/v1" as const;
@@ -35,7 +36,7 @@ const PlanBodySchema = z.object({
   }).strict(),
   audio: z.object({
     direction: boundedText(900),
-    providerPreference: z.enum(["suno", "mureka"]),
+    providerPreference: z.enum(["minimax_music3", "suno", "mureka"]),
     instrumentalOnly: z.literal(true),
     noVocals: z.literal(true),
     loopable: z.literal(true),
@@ -64,7 +65,12 @@ export interface CreateOriginalMusicProgramPlanInput {
   readonly visualStyle?: string;
   readonly motionIntent?: string;
   readonly audioDirection?: string;
-  readonly providerPreference?: "suno" | "mureka";
+  /**
+   * The exact paid route expected by the later music block. MiniMax remains
+   * explicit rather than a fallback: its worker independently fails closed
+   * until its current quality qualification is present.
+   */
+  readonly providerPreference?: "minimax_music3" | "suno" | "mureka";
 }
 
 function normalizedText(value: string | undefined, fallback: string, maximum: number): string {

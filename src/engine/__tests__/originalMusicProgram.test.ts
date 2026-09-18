@@ -41,6 +41,22 @@ assert.equal(assertOriginalMusicProgramPlanBinding({
   topic: "Rainy city focus after midnight",
 }).fingerprint, plan.fingerprint);
 
+const minimaxPlan = createOriginalMusicProgramPlan({
+  route: seed,
+  topic: "Rainy city focus after midnight",
+  providerPreference: "minimax_music3",
+});
+assert.equal(
+  minimaxPlan.audio.providerPreference,
+  "minimax_music3",
+  "the sealed route must be able to select MiniMax before either paid branch starts",
+);
+assert.equal(assertOriginalMusicProgramPlanBinding({
+  plan: minimaxPlan,
+  route: seed,
+  topic: "Rainy city focus after midnight",
+}).fingerprint, minimaxPlan.fingerprint);
+
 assert.throws(() => assertOriginalMusicProgramPlanBinding({
   plan,
   route: seed,
