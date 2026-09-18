@@ -47,7 +47,12 @@ def cache_model() -> None:
             raise RuntimeError("Qwen model cache exists without a verified marker; refusing an unsafe overwrite")
         snapshot_download(repo_id=MODEL, revision=REVISION, cache_dir=str(cache))
         write_marker(marker)
-    os.environ["HF_HOME"] = str(cache)
+    # snapshot_download's cache_dir is the Hugging Face *hub* cache, not a
+    # HF_HOME parent directory. Keep both environment variables aligned so
+    # Transformers' later from_pretrained calls resolve this exact cache while
+    # offline instead of looking in an accidental hf/hub sibling.
+    os.environ["HF_HOME"] = str(volume)
+    os.environ["HF_HUB_CACHE"] = str(cache)
     os.environ["HF_HUB_OFFLINE"] = "1"
 
 

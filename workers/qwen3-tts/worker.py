@@ -40,7 +40,9 @@ from contract import (
 
 VOLUME = Path(os.environ.get("QWEN3_TTS_VOLUME", "/workspace/qwen3-tts"))
 VOLUME.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("HF_HOME", str(VOLUME / "hf"))
+HF_CACHE = VOLUME / "hf"
+os.environ.setdefault("HF_HOME", str(VOLUME))
+os.environ.setdefault("HF_HUB_CACHE", str(HF_CACHE))
 
 app = FastAPI()
 _lock = threading.Lock()
@@ -95,6 +97,8 @@ def _load_model():
     _model = Qwen3TTSModel.from_pretrained(
         MODEL,
         revision=REVISION,
+        cache_dir=str(HF_CACHE),
+        local_files_only=True,
         device_map="cuda",
         dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
