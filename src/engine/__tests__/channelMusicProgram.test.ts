@@ -78,8 +78,18 @@ assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
 assert.equal(
   lofi.generation.lyricsControl,
+  "[Intro]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Bridge]\n[Chorus]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Verse]\n[Chorus]\n[Outro]",
+  "a five-minute music-first program must carry an extended, tag-only Music3 form instead of ending from the short-form map",
+);
+assert.equal(
+  instrumentalLyricsControl("primary_music", 120),
   "[Intro]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Bridge]\n[Chorus]\n[Outro]",
-  "music-first programs must expose a complete form while explicitly preserving Music3 instrumental generation",
+  "normal-duration programs retain the compact proven form",
+);
+assert.match(
+  instrumentalLyricsControl("meditation_bed", 300),
+  /^(?:\[(?:Intro|Instrumental|Verse|Bridge|Outro)\]\n?)+$/u,
+  "long-form Music3 controls must remain entirely tag-only so no arrangement prose can become a vocal",
 );
 assert.match(
   lofi.generation.structuredCaption,

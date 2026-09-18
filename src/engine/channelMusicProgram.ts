@@ -257,19 +257,49 @@ function structuredCaption(input: {
  * the lyrics field prevents an instrumental render from treating phrases such
  * as “add harmonic depth” as performable text.
  */
-export function instrumentalLyricsControl(role: ChannelMusicRole): string {
-  const tags: Record<ChannelMusicRole, readonly string[]> = {
+export function instrumentalLyricsControl(
+  role: ChannelMusicRole,
+  durationSec = 120,
+): string {
+  const forms: Record<ChannelMusicRole, { core: readonly string[]; extension: readonly string[] }> = {
     // Music3 recognises both song-section tags and its native [Instrumental]
     // tag. Keep familiar form cues for coherent progression, but state the
     // no-vocal intent in the control stream as well as in the caption. The
     // latter is prose for arrangement; this must remain tag-only so it can
     // never become accidental sung/spoken text.
-    primary_music: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]", "[Instrumental]", "[Bridge]", "[Chorus]", "[Outro]"],
-    meditation_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]", "[Outro]"],
-    short_form_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]", "[Outro]"],
-    narration_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]", "[Chorus]", "[Outro]"],
+    primary_music: {
+      core: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]", "[Instrumental]", "[Bridge]", "[Chorus]"],
+      extension: ["[Instrumental]", "[Verse]", "[Chorus]"],
+    },
+    meditation_bed: {
+      core: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]"],
+      extension: ["[Instrumental]", "[Verse]", "[Bridge]"],
+    },
+    short_form_bed: {
+      core: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]"],
+      extension: ["[Instrumental]", "[Verse]"],
+    },
+    narration_bed: {
+      core: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]", "[Chorus]"],
+      extension: ["[Instrumental]", "[Verse]", "[Chorus]"],
+    },
   };
-  return tags[role].join("\n");
+  const form = forms[role];
+  // Music3 treats max_duration as a ceiling, rather than a promise. Reusing a
+  // six-section lyric map for a five-minute score made the model conclude well
+  // before the requested duration and weakened the later arc into generic
+  // texture. Repeat only recognised, prose-free section controls for each
+  // extra minute above the normal two-minute form. This tells the model there
+  // is more composition left to write without ever supplying text it could
+  // sing. The conventional outro remains the one final tag.
+  const boundedDuration = Number.isFinite(durationSec)
+    ? Math.max(10, Math.min(300, Math.floor(durationSec)))
+    : 120;
+  const extensionCount = Math.max(0, Math.ceil((boundedDuration - 120) / 60));
+  const tags = [...form.core];
+  for (let index = 0; index < extensionCount; index += 1) tags.push(...form.extension);
+  tags.push("[Outro]");
+  return tags.join("\n");
 }
 
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
@@ -335,7 +365,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
         sections,
         exclusions,
       }),
-      lyricsControl: instrumentalLyricsControl(role),
+      lyricsControl: instrumentalLyricsControl(role, durationSec),
       sections,
     },
     mix: {
