@@ -87,17 +87,18 @@ export async function getOne(
  * Hydrate process.env from a service's secrets (only keys not already set, so
  * an explicit .env.local always wins). Returns the keys that were loaded.
  *
- * Gemini is the one exception: the secret may only enter a process through a
- * sealed Nano Banana image-asset capability. This prevents a legacy script
- * from bypassing the model-call guard merely by asking the vault for a key.
+ * Gemini is the one exception: the secret may only enter a process through
+ * `nanoBananaVault.ts`, the sealed Nano Banana thumbnail adapter. Keeping the
+ * generic vault free of Gemini imports is also essential: pure Convex
+ * functions use this module and must never bundle Node-only provider code.
  */
 export async function hydrateEnv(
   service: string,
-  opts?: { geminiPurpose?: import("@/lib/gemini").GeminiRuntimePurpose },
 ): Promise<string[]> {
   if (service === "gemini") {
-    const { assertGeminiRuntimeAllowed } = await import("@/lib/gemini");
-    assertGeminiRuntimeAllowed("Gemini vault credential hydration", opts?.geminiPurpose);
+    throw new Error(
+      "Gemini vault credential hydration is sealed to the Nano Banana thumbnail adapter",
+    );
   }
   const map = await listByService(service);
   const loaded: string[] = [];

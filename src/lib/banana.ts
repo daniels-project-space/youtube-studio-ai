@@ -19,7 +19,7 @@ import {
 } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
-import { hydrateEnv } from "@/lib/vault";
+import { hydrateSealedNanoBananaThumbnailCredential } from "@/lib/nanoBananaVault";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
@@ -97,15 +97,13 @@ export function hasNanoBanana(): boolean {
  * bootstrap must never make this credential available to scripts, planners,
  * reviewers, or any future Google SDK import.
  */
-async function hydrateSealedNanoBananaThumbnailCredential(): Promise<void> {
+async function ensureSealedNanoBananaThumbnailCredential(): Promise<void> {
   assertGeminiRuntimeAllowed(
     "Nano Banana thumbnail credential",
     sealedNanoBananaThumbnailPurpose(),
   );
   if (!process.env.GEMINI_API_KEY) {
-    await hydrateEnv("gemini", {
-      geminiPurpose: sealedNanoBananaThumbnailPurpose(),
-    });
+    await hydrateSealedNanoBananaThumbnailCredential();
   }
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("nano banana thumbnail: GEMINI_API_KEY is not configured in the sealed thumbnail vault service");
@@ -697,7 +695,7 @@ export async function generateNanoBananaImageWithReceipt(
     idempotencyContext?: string;
   },
 ): Promise<NanoBananaImageResult> {
-  await hydrateSealedNanoBananaThumbnailCredential();
+  await ensureSealedNanoBananaThumbnailCredential();
   const profile = NANO_BANANA_THUMBNAIL_PROFILE;
   const generated = await generateGeminiImage({
     prompt: args.prompt,

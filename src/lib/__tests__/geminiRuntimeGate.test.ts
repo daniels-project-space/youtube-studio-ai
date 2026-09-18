@@ -141,8 +141,8 @@ async function explicitOptInAdmitsOnlySealedImageAssetPurposes(): Promise<void> 
     await assert.rejects(embedText("still-blocked embedding"), isDisabled);
     await assert.rejects(
       hydrateEnv("gemini"),
-      isDisabled,
-      "legacy scripts must not hydrate a Gemini key without the opaque thumbnail capability",
+      /sealed to the Nano Banana thumbnail adapter/,
+      "legacy scripts must not hydrate a Gemini key outside the sealed thumbnail adapter",
     );
     await assert.rejects(
       generateBananaImage({ prompt: "still-blocked generic image" }),
@@ -214,8 +214,11 @@ function directGoogleRuntimeOwnersStaySealed(): void {
   const banana = readFileSync(join(root, "src/lib/banana.ts"), "utf8");
   assert.match(banana, /sealedNanoBananaThumbnailPurpose\(\)/,
     "the sealed thumbnail boundary must present its opaque capability");
-  assert.match(banana, /hydrateEnv\(["']gemini["']\s*,\s*\{/,
+  assert.match(banana, /hydrateSealedNanoBananaThumbnailCredential\(\)/,
     "the sealed thumbnail adapter, not generic bootstrap, must hydrate its own credential");
+  const vault = readFileSync(join(root, "src/lib/vault.ts"), "utf8");
+  assert.doesNotMatch(vault, /@\/lib\/gemini|import\(\s*["']@\/lib\/gemini/,
+    "the generic vault is Convex-safe and must not import Node-only Gemini code");
   assert.doesNotMatch(
     banana,
     /generateNanoBananaProWhiteboard|NanoBananaProWhiteboard|whiteboard-art-provider/,
