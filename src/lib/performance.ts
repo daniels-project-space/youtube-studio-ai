@@ -102,6 +102,34 @@ const score = (e: PerfEntry) => e.avgViewPct * 0.7 + (e.ctr ?? 0) * 0.3;
 export type PerformanceLens = "blended" | "ctr";
 
 /**
+ * A title-learning example needs enough of the exact impression denominator
+ * behind its CTR to be useful.  A rate without that denominator is still
+ * useful for a human dashboard, but it is not evidence we should feed back
+ * into the generator as a winning or losing title pattern.
+ *
+ * Keep this aligned with the native-title-test noise floor: both paths are
+ * trying to learn from a packaging decision rather than a handful of early
+ * subscriber impressions.
+ */
+export const MIN_TITLE_LEARNING_IMPRESSIONS = 2_000;
+
+/**
+ * Select title-learning evidence without conflating an unmeasured CTR with a
+ * poor one.  Exported so the admission rule is directly testable without R2.
+ */
+export function titlePerformanceEntries(
+  entries: readonly PerfEntry[],
+  minImpressions = MIN_TITLE_LEARNING_IMPRESSIONS,
+): PerfEntry[] {
+  return entries.filter((entry) =>
+    typeof entry.ctr === "number" && Number.isFinite(entry.ctr) && entry.ctr > 0 &&
+    typeof entry.thumbnailImpressions === "number" &&
+    Number.isFinite(entry.thumbnailImpressions) &&
+    entry.thumbnailImpressions >= minImpressions,
+  );
+}
+
+/**
  * Compact winners/losers prompt. Returns "" until there's enough signal
  * (≥4 measured videos) so we never bias on noise.
  */
@@ -125,15 +153,20 @@ export async function loadPerformanceContext(
   );
 
   if (lens === "ctr") {
-    // A missing CTR is unknown, not zero. `ctr ?? 0` ranked unmeasured videos
-    // as the worst on the channel, so absent data was taught as failure.
-    const measured = ledger.filter((e) => typeof e.ctr === "number" && e.ctr > 0);
+    // A missing CTR is unknown, not zero. More importantly, a CTR with no raw
+    // impression denominator is not title-learning evidence: a 12% result on
+    // 50 impressions must not outweigh a 5% result on 50,000. The analytics
+    // ingestion already persists both values together; this keeps the title
+    // prompt from learning a pattern until that evidence exists at scale.
+    const measured = titlePerformanceEntries(ledger);
     if (measured.length < 4) return "";
     const sorted = [...measured].sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
-    const fmt = (e: PerfEntry) => `"${e.title}" (CTR ${(e.ctr ?? 0).toFixed(1)}%)`;
+    const fmt = (e: PerfEntry) =>
+      `"${e.title}" (CTR ${(e.ctr ?? 0).toFixed(1)}% across ${e.thumbnailImpressions!.toLocaleString()} impressions)`;
     return (
       `TITLE PERFORMANCE on this channel — CLICK-THROUGH ONLY, because that is what a title controls. ` +
-      `Retention is deliberately excluded: it measures the script, not the title.\n` +
+      `Retention is deliberately excluded: it measures the script, not the title. ` +
+      `Only titles with at least ${MIN_TITLE_LEARNING_IMPRESSIONS.toLocaleString()} raw thumbnail impressions are included.\n` +
       `HIGHEST click-through:\n${sorted.slice(0, 3).map(fmt).join("\n")}\n` +
       `LOWEST click-through:\n${sorted.slice(-3).reverse().map(fmt).join("\n")}`
     );
