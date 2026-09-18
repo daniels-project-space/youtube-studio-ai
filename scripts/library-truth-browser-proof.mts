@@ -33,13 +33,13 @@ const tags = ["burnt year altar of plagues", "what is burnt offering", "clive ba
 // Dates deliberately disagree with both record-ID order and competitor estimates.
 const chronologicalIndices = [3, 11, 0, 16, 7, 12, 1, 15, 5, 13, 2, 17, 4, 9, 6, 14, 8, 10];
 const evidenceStatuses = ["legacy_unverified", "evidence_incomplete", "release_evidence_recorded"];
-const evidenceLabels = ["Legacy output — unverified", "Release evidence incomplete", "Release evidence recorded"];
+const evidenceLabels = ["Legacy output — unverified"];
 const rows = Array.from({ length: 21 }, (_, index) => ({ _id: `run_${String(index).padStart(2, "0")}`,
   title: `Saved master ${String(index).padStart(2, "0")}`, channelId: index % 2 ? "channel_b" : "channel_a",
   channelSlug: index % 2 ? "proof-b" : "proof-a", channelName: index % 2 ? "Second channel" : "First channel",
   createdAt: Date.UTC(2026, 7, (index < 18 ? chronologicalIndices.indexOf(index) : index) + 1), status: index % 3 ? "ok" : "failed", libraryState: index < 18 ? "active" : "archived",
   videoKey: `owner/proof/run_${String(index).padStart(2, "0")}/final.mp4`, thumbnailKey: "owner/proof/thumbnail.svg",
-  youtubeVideoId: "proofVideo01", releaseEvidenceStatus: evidenceStatuses[index % 3], estimatedViews: index === 1 || index === 10 ? 28_000_000 : (((index * 7) % 19) + 1) * 1_000_000,
+  youtubeVideoId: "proofVideo01", releaseEvidenceStatus: index < 18 ? "legacy_unverified" : evidenceStatuses[index % 3], estimatedViews: index === 1 || index === 10 ? 28_000_000 : (((index * 7) % 19) + 1) * 1_000_000,
   estimatedViewsSource: "tag_overlap" }));
 // Deliberately non-chronological query order; estimates remain on every loaded record.
 const queryRows = [...rows.filter((_, index) => index % 2), ...rows.filter((_, index) => !(index % 2))];
@@ -98,7 +98,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/thumbnail-refresh") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: true, inventory: [] })); return; }
     if (url.pathname === "/fixture/query") {
       const name = url.searchParams.get("name")!;
-      const value = name === "videos:listVideos" ? queryRows : name === "videos:librarySummary" ? { activeCount: 18, archivedCount: 3, totalCount: 21 }
+      const value = name === "videos:listVideos" ? queryRows : name === "videos:librarySummary" ? { currentCount: 0, legacyCount: 18, archivedCount: 3, totalCount: 21 }
         : name === "channels:listChannels" ? channels : name === "videos:getVideoDetail" ? { description: "Retained fixture source. Estimated metadata is present in the stored row, not actual analytics.", tags, script: "Actual saved narration remains readable without remounting the native video." } : undefined;
       requests.push({ method, path: url.pathname, status: value ? 200 : 404, query: name }); res.writeHead(value ? 200 : 404, { "Content-Type": "application/json" }); res.end(JSON.stringify(value ?? { error: "Unknown query" })); return;
     }
@@ -172,6 +172,8 @@ try {
       const injected = await page.evaluate(() => (window as unknown as { loadedQueryRows: typeof rows }).loadedQueryRows);
       assert.deepEqual(injected, queryRows); assert.equal(injected.find(row => row._id === "run_10")!.estimatedViews, 28_000_000); assert.equal(injected.find(row => row._id === "run_01")!.estimatedViews, 28_000_000);
       evidence.injectedRowsSha256 = createHash("sha256").update(JSON.stringify(injected)).digest("hex");
+      await page.getByText("No verified masters", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Open legacy review", exact: true }).click();
       const newest = [...chronologicalIndices].reverse().map(index => rows[index]._id); await waitIds(page, newest.slice(0, 8));
       evidence.initialIds = await visibleIds(page);
       const pageGeometry = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
@@ -184,7 +186,7 @@ try {
       for (const label of evidenceLabels) assert.ok(cardText.includes(label), `actual cards must exercise ${label}`);
       await page.locator("#page .video-grid").screenshot({ path: join(outputDir, `${profile.name}-cards.png`) });
       await page.locator("#page .video-card").first().screenshot({ path: join(outputDir, `${profile.name}-card-detail.png`) });
-      if (profile.zoom === 2 && profile.width < 600) for (const [index, name] of [[0, "legacy"], [2, "recorded"]] as const) {
+      if (profile.zoom === 2 && profile.width < 600) for (const [index, name] of [[0, "legacy"]] as const) {
         await page.locator("#page .video-card").filter({ hasText: evidenceLabels[index] }).first().screenshot({ path: join(outputDir, `${profile.name}-${name}-card.png`) });
       }
       check(`${profile.name}: VideoCard must not display stored competitor estimate`, () => assert.doesNotMatch(cardText, /28M|est\.?\s*views|tag_overlap/i));
@@ -275,7 +277,7 @@ try {
         await page.getByLabel("From", { exact: true }).fill("2026-08-04"); await page.getByLabel("To", { exact: true }).fill("2026-08-06"); await waitIds(page, ["run_12", "run_07", "run_16"]);
         await page.getByLabel("From", { exact: true }).fill(""); await page.getByLabel("To", { exact: true }).fill("");
         await page.getByRole("tab", { name: /^Archive/ }).click(); await waitIds(page, ["run_20", "run_19", "run_18"]);
-        await page.getByRole("tab", { name: /^Active masters/ }).click(); await waitIds(page, newest.slice(0, 8));
+        await page.getByRole("tab", { name: /^Legacy review/ }).click(); await waitIds(page, newest.slice(0, 8));
         assert.equal(requests.filter(request => request.query === "videos:listVideos").length, listRequestsBefore, "sorting/filtering/paging must use the same already loaded rows");
         assert.deepEqual(await page.evaluate(() => (window as unknown as { loadedQueryRows: typeof rows }).loadedQueryRows), injected, "historical estimates/query records must remain untouched");
       }

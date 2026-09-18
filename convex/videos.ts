@@ -637,7 +637,7 @@ export const libraryOrderReady = query({
 /**
  * Exact collection badges for the Library. This intentionally avoids the
  * enriched card projection above: counts avoid per-run metadata, certificate,
- * thumbnail and Lo-Fi candidate joins and return only three numbers, while
+ * thumbnail and Lo-Fi candidate joins and return only small collection totals, while
  * listVideos remains bounded for browser payloads.
  */
 export const librarySummary = query({
@@ -662,6 +662,7 @@ export const librarySummary = query({
         status: run.status,
         youtubeVideoId: run.youtubeVideoId,
         libraryState: run.libraryState,
+        releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
       })),
       videoRunIds,
     );

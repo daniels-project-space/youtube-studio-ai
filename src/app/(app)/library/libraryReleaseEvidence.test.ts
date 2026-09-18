@@ -29,7 +29,8 @@ assert.match(videoTypes, /releaseEvidenceStatus:\s*ReleaseEvidenceStatus/);
 assert.match(card, /ReleaseEvidenceBadge/);
 assert.match(card, /Master evidence/);
 assert.match(card, /status=\{video\.releaseEvidenceStatus\}/);
-assert.match(library, /Verified marks a saved final master/);
+assert.match(library, /Current masters have a recorded final-master release proof/);
+assert.match(library, /Saved videos without release proof are kept in Legacy review/);
 assert.match(library, /Hidden videos you can restore/);
 assert.match(library, /role="tab" aria-selected=\{collection === "archived"\}/);
 

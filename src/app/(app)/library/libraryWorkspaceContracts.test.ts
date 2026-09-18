@@ -14,8 +14,8 @@ assert.match(page, /density="library"/,
   "the vault must use its compact, space-efficient review treatment rather than channel-detail cards");
 assert.match(page, /<LibraryMetric label="Visible"/);
 assert.match(page, /<LibraryMetric label="Channels"/);
-assert.match(page, /<LibraryMetric label="Master review"/,
-  "the summary metric must identify final-master evidence rather than imply a thumbnail refresh failure");
+assert.match(page, /<LibraryMetric label="Legacy review"/,
+  "the summary metric must identify retained rows that require release-proof review");
 assert.doesNotMatch(page, /ArtifactWorkRail|Recent masters/,
   "the Library must not render the same masters once in a recent rail and again in the vault");
 assert.equal(

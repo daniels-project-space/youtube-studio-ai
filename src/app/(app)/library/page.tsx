@@ -28,8 +28,20 @@ import styles from "./library.module.css";
 
 /** Open lightbox = the index within the current filtered master collection. */
 type LightboxTarget = { index: number };
-type CollectionMode = "active" | "archived";
-type LibrarySummary = { activeCount: number; archivedCount: number; totalCount: number };
+type CollectionMode = "current" | "legacy" | "archived";
+type LibraryState = "active" | "archived";
+type LibrarySummary = {
+  currentCount: number;
+  legacyCount: number;
+  archivedCount: number;
+  totalCount: number;
+};
+
+function isCurrentLibraryMaster(video: VideoRow): boolean {
+  return (video.libraryState ?? "active") === "active"
+    && video.releaseEvidenceStatus === "release_evidence_recorded";
+}
+
 const LIBRARY_LOADING_TIMEOUT_MS = 8_000;
 export default function LibraryPage() {
   const ownerId = useOwnerId();
@@ -57,9 +69,9 @@ export default function LibraryPage() {
   });
   const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
-  const [collection, setCollection] = useState<CollectionMode>("active");
+  const [collection, setCollection] = useState<CollectionMode>("current");
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
-  const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
+  const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: LibraryState } | null>(null);
   const [changeError, setChangeError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkReceiptId, setBulkReceiptId] = useState<Id<"libraryActionReceipts"> | null>(null);
@@ -81,7 +93,11 @@ export default function LibraryPage() {
     const needle = filters.search.trim().toLowerCase();
 
     const out = libraryVideos.filter((v) => {
-      if ((v.libraryState ?? "active") !== collection) return false;
+      const libraryState = v.libraryState ?? "active";
+      const isCurrent = isCurrentLibraryMaster(v);
+      if (collection === "archived" && libraryState !== "archived") return false;
+      if (collection === "current" && !isCurrent) return false;
+      if (collection === "legacy" && (libraryState !== "active" || isCurrent)) return false;
       // Global ChannelSwitcher wins; the filter dropdown narrows further.
       if (selectedSlug && v.channelSlug !== selectedSlug) return false;
       if (filters.channelSlug && v.channelSlug !== filters.channelSlug)
@@ -101,9 +117,6 @@ export default function LibraryPage() {
   // keeps its channel identity, but matching masters share one dense grid.
   const page = pageLibraryGroup(filtered, visibleLimit);
   const matchingChannelCount = new Set(filtered.map((video) => video.channelSlug)).size;
-  const reviewCount = filtered.filter(
-    (video) => video.releaseEvidenceStatus !== "release_evidence_recorded",
-  ).length;
   const lightboxVideos = lightbox ? filtered : [];
 
   const openLightbox = (video: VideoRow) => {
@@ -122,10 +135,11 @@ export default function LibraryPage() {
     }, LIBRARY_LOADING_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [loading]);
-  const activeCount = summary?.activeCount ?? 0;
+  const currentCount = summary?.currentCount ?? 0;
+  const legacyCount = summary?.legacyCount ?? 0;
   const archivedCount = summary?.archivedCount ?? 0;
 
-  const changeLibraryState = async (video: VideoRow, state: CollectionMode) => {
+  const changeLibraryState = async (video: VideoRow, state: LibraryState) => {
     if (busyIds.has(video._id)) return;
     setChangeError(null);
     setBusyIds((current) => new Set(current).add(video._id));
@@ -186,7 +200,7 @@ export default function LibraryPage() {
       const result = await applyBulkLibraryState({
         ownerId,
         runIds: runIds as Id<"runs">[],
-        state: collection === "active" ? "archived" : "active",
+      state: collection === "archived" ? "active" : "archived",
         actionKey: `library-bulk:${collection}:${runIds.slice().sort().join(",")}:${Date.now()}`,
       });
       setBulkReceiptId(result.actionId);
@@ -222,8 +236,11 @@ export default function LibraryPage() {
       <div className={styles.libraryDashboard}>
         <section className={styles.collectionBar} aria-label="Library collections">
           <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
-            <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => selectCollection("active")}>
-              <span>Active masters</span><strong>{loading ? "—" : activeCount}</strong>
+            <button type="button" role="tab" aria-selected={collection === "current"} onClick={() => selectCollection("current")}>
+              <span>Current masters</span><strong>{loading ? "—" : currentCount}</strong>
+            </button>
+            <button type="button" role="tab" aria-selected={collection === "legacy"} onClick={() => selectCollection("legacy")}>
+              <span>Legacy review</span><strong>{loading ? "—" : legacyCount}</strong>
             </button>
             <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => selectCollection("archived")}>
               <span>Archive</span><strong>{loading ? "—" : archivedCount}</strong>
@@ -231,21 +248,21 @@ export default function LibraryPage() {
           </div>
           <span
             className={styles.evidenceNote}
-            title="Verified marks a saved final master"
-            aria-label="Verified marks a saved final master"
+            title="Current masters have a recorded final-master release proof"
+            aria-label="Current masters have a recorded final-master release proof"
           >
             <i aria-hidden="true" />
-            Final-master status
+            Release-proof status
           </span>
         </section>
         <dl className={styles.libraryMetrics} aria-label="Current library summary">
           <LibraryMetric label="Visible" value={loading ? "—" : String(filtered.length)} />
           <LibraryMetric label="Channels" value={loading ? "—" : String(matchingChannelCount)} />
-          <LibraryMetric label="Master review" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
+          <LibraryMetric label="Legacy review" value={loading ? "—" : String(legacyCount)} tone={legacyCount ? "attention" : "ready"} />
         </dl>
       </div>
 
-      {collection === "active" ? (
+      {collection !== "archived" ? (
         <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`}>
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
@@ -282,10 +299,17 @@ export default function LibraryPage() {
         />
       ) : filtered.length === 0 ? (
         <EmptyState
-          title={collection === "active" ? "No active masters" : "Archive is empty"}
-          description={collection === "active"
-            ? "Finished and published videos will appear here."
-            : "Hidden videos you can restore."}
+          title={collection === "current" ? "No verified masters" : collection === "legacy" ? "Legacy review is clear" : "Archive is empty"}
+          description={collection === "current"
+            ? "Saved videos without release proof are kept in Legacy review; no media was deleted."
+            : collection === "legacy"
+              ? "All retained videos have recorded release proof or are archived."
+              : "Hidden videos you can restore."}
+          action={collection === "current" && legacyCount > 0 ? (
+            <button type="button" className="btn-secondary" onClick={() => selectCollection("legacy")}>
+              Open legacy review
+            </button>
+          ) : undefined}
           icon={<IconLibrary width={24} height={24} />}
         />
       ) : (
@@ -293,7 +317,7 @@ export default function LibraryPage() {
           <header className={styles.vaultHeader}>
             <div>
               <span>Master vault</span>
-              <h2 id="library-vault-title">{collection === "active" ? "Saved video output" : "Archived video output"}</h2>
+              <h2 id="library-vault-title">{collection === "current" ? "Verified video output" : collection === "legacy" ? "Saved legacy output" : "Archived video output"}</h2>
             </div>
             <p aria-live="polite">Showing {page.visible.length} of {page.total}</p>
           </header>
@@ -304,7 +328,7 @@ export default function LibraryPage() {
               </button>
               {selectedIds.size ? <span>{selectedIds.size} selected</span> : <span>Select masters to organize together</span>}
               <button type="button" className="btn-primary" disabled={!selectedIds.size || bulkBusy} onClick={() => void applyBulk()}>
-                {bulkBusy ? "Saving…" : collection === "active" ? "Archive selected" : "Restore selected"}
+                {bulkBusy ? "Saving…" : collection === "archived" ? "Restore selected" : "Archive selected"}
               </button>
             </div>
           ) : null}
@@ -314,9 +338,9 @@ export default function LibraryPage() {
             onOpen={openLightbox}
             selection={operationsAccess === "owner" ? { selectedIds, onToggle: toggleSelected } : undefined}
             libraryAction={operationsAccess === "owner" ? {
-              label: collection === "active" ? "Archive" : "Restore",
+              label: collection === "archived" ? "Restore" : "Archive",
               busyIds,
-              onAction: (video) => void changeLibraryState(video, collection === "active" ? "archived" : "active"),
+              onAction: (video) => void changeLibraryState(video, collection === "archived" ? "active" : "archived"),
             } : undefined}
           />
           {page.total > LIBRARY_PAGE_SIZE ? (
@@ -351,7 +375,7 @@ export default function LibraryPage() {
       )}
       {recentChange ? (
         <aside className={styles.changeToast} role="status">
-          <span><strong>{recentChange.state === "archived" ? "Moved to archive" : "Restored to active masters"}</strong><small>{recentChange.video.title}</small></span>
+          <span><strong>{recentChange.state === "archived" ? "Moved to archive" : isCurrentLibraryMaster(recentChange.video) ? "Restored to current masters" : "Restored to legacy review"}</strong><small>{recentChange.video.title}</small></span>
           <button type="button" onClick={() => void undoRecentChange()}>
             Undo
           </button>
@@ -360,7 +384,7 @@ export default function LibraryPage() {
       ) : null}
       {bulkReceiptId ? (
         <aside className={styles.changeToast} role="status">
-          <span><strong>{collection === "active" ? "Selected masters archived" : "Selected masters restored"}</strong><small>The exact prior states are saved.</small></span>
+          <span><strong>{collection === "archived" ? "Selected masters restored" : "Selected masters archived"}</strong><small>The exact prior states are saved.</small></span>
           <button type="button" onClick={() => void undoBulk()} disabled={bulkBusy}>Undo</button>
           <button type="button" aria-label="Dismiss" onClick={() => setBulkReceiptId(null)}>×</button>
         </aside>

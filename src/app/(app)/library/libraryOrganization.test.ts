@@ -44,7 +44,9 @@ assert.match(videos, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", run\._i
   "Library cards should not collect unrelated intermediate assets");
 assert.match(videos, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", run\._id\)\.eq\("kind", "thumbnail"\)\)/,
   "Library cards should read thumbnails through the kind-scoped index");
-assert.match(library, /type CollectionMode = "active" \| "archived"/);
+assert.match(library, /type CollectionMode = "current" \| "legacy" \| "archived"/);
+assert.match(library, /Legacy review/);
+assert.match(library, /isCurrentLibraryMaster/);
 assert.match(library, /Moved to archive/);
 assert.match(library, />\s*Undo\s*</);
 assert.match(card, /<article className="glass video-card"/);

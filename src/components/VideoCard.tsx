@@ -115,7 +115,7 @@ export function VideoCard({
       )}
       {libraryAction ? (
         <footer className="video-card-footer">
-          <span>{video.libraryState === "archived" ? "Out of the active library" : "Active collection"}</span>
+          <span>{video.libraryState === "archived" ? "Archived" : video.releaseEvidenceStatus === "release_evidence_recorded" ? "Current master" : "Legacy review"}</span>
           {selection ? (
             <label className="video-card-select">
               <input type="checkbox" checked={selection.selected} onChange={selection.onToggle} aria-label={`Select ${video.title}`} />

@@ -6,10 +6,13 @@ export function EmptyState({
   title,
   description,
   icon,
+  action,
 }: {
   title: string;
   description?: ReactNode;
   icon?: ReactNode;
+  /** Optional next step for a truthful empty collection. */
+  action?: ReactNode;
 }) {
   return (
     <div
@@ -50,6 +53,7 @@ export function EmptyState({
           {description}
         </p>
       )}
+      {action}
     </div>
   );
 }
