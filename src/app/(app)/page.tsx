@@ -212,29 +212,29 @@ export default function OverviewPage() {
       />
 
       <section className={styles.workbench} aria-label="Current production and release queue">
-        <div className={`${styles.workPanel} glass`} data-idle={activeFiltered?.length === 0 || undefined}>
-          <PanelHeading title="In production" href="/runs" action="Open production" />
-          {active === undefined ? (
-            <SkeletonList rows={3} />
-          ) : activeFiltered && activeFiltered.length > 0 ? (
-            <div className={styles.activeList}>
-              {activeFiltered.slice(0, 4).map((run, index) => (
-                <Link key={run._id} href={`/runs/${run._id}`} className={styles.activeRow}>
-                  <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
-                  <span className={styles.activePulse} data-status={run.status} aria-hidden="true"><i /></span>
-                  <span className={styles.rowCopy}>
-                    <strong>{run.channelName}</strong>
-                    <ActiveRunProgress run={run} recent={recentFiltered} />
-                  </span>
-                  <StageBadge status={run.status} size="sm" />
-                  <Elapsed from={run.startedAt} />
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No active runs" detail="New runs appear here." />
-          )}
-        </div>
+        {(active === undefined || (activeFiltered?.length ?? 0) > 0) && (
+          <div className={`${styles.workPanel} glass`}>
+            <PanelHeading title="In production" href="/runs" action="Open production" />
+            {active === undefined ? (
+              <SkeletonList rows={3} />
+            ) : (
+              <div className={styles.activeList}>
+                {activeFiltered!.slice(0, 4).map((run, index) => (
+                  <Link key={run._id} href={`/runs/${run._id}`} className={styles.activeRow}>
+                    <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.activePulse} data-status={run.status} aria-hidden="true"><i /></span>
+                    <span className={styles.rowCopy}>
+                      <strong>{run.channelName}</strong>
+                      <ActiveRunProgress run={run} recent={recentFiltered} />
+                    </span>
+                    <StageBadge status={run.status} size="sm" />
+                    <Elapsed from={run.startedAt} />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className={`${styles.workPanel} glass`}>
           <PanelHeading title="Planned videos" href="/schedule" action="Open calendar" />

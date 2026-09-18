@@ -57,9 +57,6 @@
 .audienceLoading { min-height: 44px; background: var(--color-surface); border-radius: 8px; }
 .workbench { display: grid; gap: .75rem; align-items: start; }
 .workPanel { padding: 1rem; }
-.workPanel[data-idle="true"] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1.5rem; }
-.workPanel[data-idle="true"] .panelHeading { margin: 0; flex: 1 1 20rem; }
-.workPanel[data-idle="true"] .empty { min-height: 44px; }
 .panelHeading, .sectionHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .4rem 1rem; margin-bottom: .6rem; }
 .panelHeading h2, .sectionHeading h2 { font: 650 1.1rem/1.35 var(--font-sans); letter-spacing: -.02em; margin: 0; }
 .panelHeading > a, .sectionHeading a, .runsBodyHeader a { display: inline-flex; align-items: center; min-height: 44px; font-size: .875rem; color: var(--color-muted); }
