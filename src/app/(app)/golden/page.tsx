@@ -614,26 +614,36 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const pitch = moduleSalesPitch(m);
   const isReference = m.status === "reference";
   const isRegistered = m.status === "registered";
+  // This card composes real, independently owned children-learning blocks.
+  // It is intentionally not a second executor, but calling it a “reference”
+  // made a usable supervised path look like documentation-only inventory.
+  const isSupervisedLearningPath = m.key === "children-learning-studio";
   const execution = catalogExecutionBinding(m.key);
   const availability = catalogExecutionAvailability(execution);
   const promotionProof = GOLDEN_PROMOTION_PROOFS[m.key];
-  const executionIsWarning = execution.kind === "catalog-only" || execution.kind === "registered-private-release";
+  const executionIsWarning = !isSupervisedLearningPath &&
+    (execution.kind === "catalog-only" || execution.kind === "registered-private-release");
   const destination = MODULE_DESTINATIONS[m.key];
   const cover = moduleCover(m.key);
-  const binding = execution.kind === "pipeline-module"
+  const binding = isSupervisedLearningPath
+    ? "Supervised learning pathway"
+    : execution.kind === "pipeline-module"
     ? `${execution.executableIds.length} production step${execution.executableIds.length === 1 ? "" : "s"}`
     : execution.kind === "registered-private-release"
       ? "Private-release control"
       : execution.kind === "external-task"
         ? "Connected production task"
         : "Reference card only";
-  const bindingDetail = execution.kind === "catalog-only"
+  const bindingDetail = isSupervisedLearningPath
+    ? "Curriculum intake · Learning Contract · Show Bible · Scene Compiler · child-editor review"
+    : execution.kind === "catalog-only"
     ? "No compiler binding"
     : execution.executableIds.join(" · ");
   return (
     <details
       className={styles.moduleCard}
-      data-reference={isReference}
+      data-reference={isReference && !isSupervisedLearningPath}
+      data-supervised={isSupervisedLearningPath}
       data-module-key={m.key}
       data-category={CATEGORY[m.key] ?? "Post-production"}
     >
@@ -656,7 +666,9 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
           </ul>
         </span>
         <span className={styles.moduleSummaryMeta}>
-          {isReference
+          {isSupervisedLearningPath
+            ? <span className={styles.moduleStatus} data-tone="supervised">SUPERVISED</span>
+            : isReference
             ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE</span>
             : isRegistered
               ? <span className={styles.moduleStatus} data-tone="registered">REGISTERED</span>

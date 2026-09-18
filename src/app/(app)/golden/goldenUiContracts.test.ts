@@ -19,6 +19,8 @@ assert.match(salesPitches, /Find a channel angle worth building/);
 assert.match(page, /promotionProofCount === 0/);
 assert.match(page, /data-warning=\{executionIsWarning\}/);
 assert.match(page, /Reference card only/);
+assert.match(page, /const isSupervisedLearningPath = m\.key === "children-learning-studio"/);
+assert.match(page, /data-tone="supervised">SUPERVISED/);
 assert.match(page, /data-module-key=\{m\.key\}/);
 assert.match(page, /className=\{styles\.moduleSummary\}/);
 assert.match(page, /const MODULE_DESTINATIONS/);
@@ -38,6 +40,8 @@ assert.match(styles, /\.moduleCard/);
 assert.match(styles, /\.moduleCard\[open\]/);
 assert.match(styles, /\.moduleSummary:focus-visible/);
 assert.match(styles, /\.moduleFacts/);
+assert.match(styles, /\.moduleCard\[data-supervised="true"\]/);
+assert.match(styles, /\.moduleStatus\[data-tone="supervised"\]/);
 assert.match(styles, /\.modulePowerPoints li::before/);
 assert.match(styles, /\.modulePromise/);
 assert.match(styles, /\.moduleBody[^}]*max-height:\s*124px/,
