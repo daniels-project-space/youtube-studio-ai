@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   FAMILIES,
   FAMILY_KEYS,
+  familyAutonomousPlanningCapability,
   familyProductionReadiness,
   productionReadyFamilyFallback,
 } from "@/engine/families";
@@ -40,7 +41,7 @@ const narratedReadiness = familyProductionReadiness("narrated_stock");
 assert.equal(
   narratedReadiness.productionReady,
   true,
-  "Narrated Stock is admitted only after its Claude/Story-Spine route, local voice evidence, non-Google art QA, and sealed thumbnail exception are registered",
+  "Narrated Stock is admitted only after its OpenRouter Gemini Story-Spine route, local voice evidence, non-Google art QA, and sealed thumbnail exception are registered",
 );
 assert.deepEqual(narratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("narrated_stock").mode, "registered_non_gemini");
@@ -50,7 +51,7 @@ for (const family of ["sleep", "shorts"] as const) {
   assert.equal(
     readiness.productionReady,
     true,
-    `${family} is admitted only through the shared Claude/Story-Spine foundation, explicit format shape, independent visual review, and sealed thumbnail exception`,
+    `${family} is admitted only through the shared OpenRouter Gemini Story-Spine foundation, explicit format shape, independent visual review, and sealed thumbnail exception`,
   );
   assert.deepEqual(readiness.blockers, []);
   assert.equal(familyChannelInceptionCapability(family).mode, "registered_non_gemini");
@@ -65,6 +66,12 @@ assert.equal(
 assert.deepEqual(illustratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "registered_non_gemini");
 assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "banana");
+const illustratedPlanner = familyAutonomousPlanningCapability("illustrated_explainer");
+assert.equal(illustratedPlanner.mode, "registered_non_gemini");
+if (illustratedPlanner.mode === "registered_non_gemini") {
+  assert.match(illustratedPlanner.id, /openrouter-gemini-3-7-flash/);
+  assert.doesNotMatch(illustratedPlanner.id, /claude|anthropic/i);
+}
 
 const documentaryReadiness = familyProductionReadiness("documentary_collage_short");
 assert.equal(

@@ -1,7 +1,8 @@
 /**
  * Showrunner — writes a channel's Show Bible once at creation. Reuses competitor
  * signals already gathered by auto-SEO to ground the works/avoid doctrine. Runs
- * on Claude (high-value, one-time) via the `showrunner` agent, with a
+ * through the pinned OpenRouter creative-text route via the `showrunner` agent,
+ * with a
  * deterministic fallback so channel creation never hard-fails.
  */
 import { z } from "zod";

@@ -810,7 +810,7 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
   },
   illustrated_explainer: {
     mode: "registered_non_gemini",
-    id: "illustrated-explainer-claude-local-scenario/v1",
+    id: "illustrated-explainer-openrouter-gemini-3-7-flash-local-scenario/v1",
     plannerBlock: "topic_select",
     provenance:
       "metadata-only topic research, OpenRouter Gemini 3.7 Flash crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene rendering, a sealed Nano Banana thumbnail, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",

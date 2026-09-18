@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     route: loreRoute,
     planners: {
       loreshort: async () => ({
-        planner: { id: "lore-short-claude-critic-plan/v1", provenance: "provider-free fixture" },
+        planner: { id: "lore-short-openrouter-critic-plan/v1", provenance: "provider-free fixture" },
         critique: { accepted: true as const, score: 0.91, iterations: 2, issues: [] },
         story: {
           scenes: [{

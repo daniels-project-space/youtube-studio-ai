@@ -103,7 +103,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
 > = Object.freeze({
   narrated_stock: foundation({
     family: "narrated_stock",
-    plannerId: "narrated-stock-claude-story-spine/v1",
+    plannerId: "narrated-stock-openrouter-gemini-3-7-flash-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
       "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash crew/script planning, local narration evidence, Story Spine assembly, and independent non-Google visual review; Nano Banana is sealed to thumbnail_gen only",
@@ -112,7 +112,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     requiredEntries: COMMON_REQUIRED_ENTRIES,
     forbiddenGeminiBlocks: COMMON_FORBIDDEN_GEMINI_BLOCKS,
     inception: {
-      id: "narrated-stock-claude-novita-inception/v1",
+      id: "narrated-stock-openrouter-gemini-3-7-flash-novita-inception/v1",
       provenance:
         "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic ElevenLabs voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,
@@ -120,7 +120,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
   }),
   sleep: foundation({
     family: "sleep",
-    plannerId: "guided-ambient-claude-story-spine/v1",
+    plannerId: "guided-ambient-openrouter-gemini-3-7-flash-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
       "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash-guided original meditation writing, slow narration performance evidence, Story Spine assembly, and independent non-Google visual review; Nano Banana is sealed to thumbnail_gen only",
@@ -134,7 +134,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     ],
     forbiddenGeminiBlocks: COMMON_FORBIDDEN_GEMINI_BLOCKS,
     inception: {
-      id: "guided-ambient-claude-novita-inception/v1",
+      id: "guided-ambient-openrouter-gemini-3-7-flash-novita-inception/v1",
       provenance:
         "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,
@@ -142,7 +142,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
   }),
   shorts: foundation({
     family: "shorts",
-    plannerId: "vertical-short-claude-story-spine/v1",
+    plannerId: "vertical-short-openrouter-gemini-3-7-flash-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
       "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash hook/script/critic loop, portrait Story Spine assembly, independent non-Google visual review, and a sealed Nano Banana thumbnail route",
@@ -161,7 +161,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     ],
     forbiddenGeminiBlocks: COMMON_FORBIDDEN_GEMINI_BLOCKS,
     inception: {
-      id: "vertical-short-claude-novita-inception/v1",
+      id: "vertical-short-openrouter-gemini-3-7-flash-novita-inception/v1",
       provenance:
         "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,

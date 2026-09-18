@@ -930,10 +930,27 @@ async function locatePanelText(imgPath: string, lines: PlanLine[], chars: PlanCh
 }
 
 async function pool<T>(items: T[], n: number, fn: (item: T, i: number) => Promise<void>): Promise<void> {
-  let i = 0;
+  let next = 0;
+  let failed = false;
+  let firstFailure: unknown;
+  // A panel call can be paid even when a concurrent sibling reaches a
+  // terminal result. Stop admitting fresh work, but let in-flight work settle
+  // so any accepted panel can be hash-bound and reused on the recovery run.
   await Promise.all(Array.from({ length: Math.min(n, items.length) || 1 }, async () => {
-    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
+    while (!failed && next < items.length) {
+      const index = next++;
+      try {
+        await fn(items[index], index);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstFailure = error;
+        }
+        return;
+      }
+    }
   }));
+  if (failed) throw firstFailure;
 }
 
 function run(cmd: string, args: string[], log: Logger, capture = false): Promise<string> {

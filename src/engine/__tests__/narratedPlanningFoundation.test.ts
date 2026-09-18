@@ -15,6 +15,10 @@ for (const family of ["narrated_stock", "sleep", "shorts"] as const) {
   const foundation = narratedPlanningFoundation(family);
   assert(foundation, `${family} must opt into the shared narrated foundation explicitly`);
   assert.equal(foundation.version, NON_GEMINI_NARRATED_FOUNDATION_VERSION);
+  assert.match(foundation.plannerId, /openrouter-gemini-3-7-flash/);
+  assert.doesNotMatch(foundation.plannerId, /claude|anthropic/i);
+  assert.match(foundation.inception.id, /openrouter-gemini-3-7-flash/);
+  assert.doesNotMatch(foundation.inception.id, /claude|anthropic/i);
   assert.match(foundation.sourcePolicy, /Topiccraft requires a verified demand\/freshness evidence packet/);
   assert.match(foundation.publishingPolicy, /upload_draft is mandatory/);
   assert.ok(

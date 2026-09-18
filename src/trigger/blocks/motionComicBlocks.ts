@@ -2,7 +2,8 @@
  * motion_comic — the DRAWN-COMIC visual engine (src/lib/motionComic.ts) as a
  * pipeline block, structural twin of whiteboard_scribe.
  *
- * SELF-CONTAINED like whiteboard_scribe: it writes its own storyboard (Claude),
+ * SELF-CONTAINED like whiteboard_scribe: it writes its own storyboard through
+ * the pinned OpenRouter Gemini 3.7 Flash route,
  * renders character-consistent panel art through bounded attested Novita workers, voices every
  * line (ElevenLabs v3 dialogue), lays a Suno bed, and draws the page with the
  * deterministic python renderer — so it REPLACES the script→narration→footage→

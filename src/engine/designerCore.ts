@@ -2,8 +2,9 @@
  * Pipeline designer — derives a concrete, VALIDATED channel pipeline from a
  * family + niche + operator options. This is the deterministic backbone of the
  * channel builder: family → base archetype pipeline → apply length / footage
- * theme / locale / optional-module toggles → validatePipeline. (A Claude
- * "architect" + clip analysis layer on top later only adjusts these inputs.)
+ * theme / locale / optional-module toggles → validatePipeline. (An OpenRouter
+ * Gemini 3.7 Flash architect + clip analysis layer on top later only adjusts
+ * these inputs.)
  */
 import {
   FAMILY_CREW,

@@ -101,9 +101,9 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
   }
 }
 
-// OpenRouter planner migration: invalidate checkpoints written by the retired
-// Claude-labelled planner so a resumed run cannot silently reuse an unbound
-// planning provenance record.
+// OpenRouter planner migration: invalidate checkpoints written by a retired
+// planner identity so a resumed run cannot silently reuse an unbound planning
+// provenance record.
 const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v3";
 const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v2";
 
@@ -390,7 +390,7 @@ export const loreShort: Block = {
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("lore_short: no topic in store");
     // A receipt-bearing route validates its exact story authority before any
-    // cache or legacy Claude planning branch is reachable.
+    // cache or legacy planning branch is reachable.
     const approvedStoryReceipt = ctx.store["selfContainedStoryReceipt"];
     if (
       approvedStoryReceipt === undefined &&

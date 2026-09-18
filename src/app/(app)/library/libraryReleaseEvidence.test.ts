@@ -30,8 +30,8 @@ assert.match(card, /ReleaseEvidenceBadge/);
 assert.match(card, /Master evidence/);
 assert.match(card, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(library, /Current masters have a recorded final-master release proof/);
-assert.match(library, /Saved videos without release proof are kept in Legacy review/);
-assert.match(library, /Hidden videos you can restore/);
+assert.match(library, /Saved videos without release proof remain in Legacy review/);
+assert.match(library, /No hidden videos are available to restore/);
 assert.match(library, /role="tab" aria-selected=\{collection === "archived"\}/);
 
 console.log("Library release-evidence truthfulness contract passed");
