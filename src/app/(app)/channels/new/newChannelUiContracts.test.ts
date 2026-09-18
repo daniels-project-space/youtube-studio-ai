@@ -16,5 +16,10 @@ assert.match(css, /@media \(max-width: 350px\)\s*\{\s*\.nicheGrid\s*\{\s*grid-te
 assert.match(page, /visibleNiches\.map\(\(n\) =>/u, "all featured territory choices must remain selectable");
 assert.match(page, /aria-pressed=\{on\}/u, "the selected territory must remain accessible");
 assert.match(page, /hiddenNicheCount > 0/u, "the full territory catalog must remain one action away");
+assert.match(page, /function creatorReadinessSummary\(/u,
+  "creator holds need a concise user-facing admission explanation");
+assert.match(page, /H3 visual worker needs activation\./u);
+assert.doesNotMatch(page, /nicheBlocker\}>Held: \{defaultFamilyReadiness\.blockers\[0\]\}/u,
+  "the initial territory grid must not expose raw worker/environment variable names");
 
 console.log("CHANNEL WIZARD UI PASS: mobile territory choices are visible without a hidden carousel");

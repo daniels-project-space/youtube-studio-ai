@@ -149,6 +149,16 @@ interface PipelinePreviewState {
   error?: string;
 }
 
+/** Keep creator holds truthful without turning a territory card into a raw infrastructure console. */
+function creatorReadinessSummary(blocker?: string): string {
+  if (!blocker) return "Route activation needs attention.";
+  if (/MINIMAX_H3_NOVITA_WORKER_(?:URL|TOKEN)/.test(blocker)) return "H3 visual worker needs activation.";
+  if (/MINIMAX_H3_NOVITA_QUALIFICATION_RECEIPT/.test(blocker)) return "H3 route needs its qualification receipt.";
+  if (/MINIMAX_H3_NOVITA_QUALIFIED/.test(blocker)) return "H3 route awaits quality qualification.";
+  if (/automatic creator contract check failed/i.test(blocker)) return "Route readiness could not be checked.";
+  return "Route admission needs attention.";
+}
+
 function qualityCalibrationForCreator(family: FamilyKey) {
   const contract = referenceQualityContractFor(family);
   return {
@@ -593,12 +603,12 @@ export default function NewChannelWizard() {
   ) => {
     const automaticReadiness = automaticFamilyCreatorReadiness(next);
     if (!automaticReadiness.ready && !supervised) {
-      setClipNote(`${FAMILIES[next].label} is registered but cannot start automatic production today: ${automaticReadiness.blockers.join(" ")}`);
+      setClipNote(`${FAMILIES[next].label} cannot start automatic production yet. ${creatorReadinessSummary(automaticReadiness.blockers[0])}`);
       return;
     }
     const liveRuntime = automaticFamilyRuntime[next];
     if (!supervised && liveRuntime?.ready === false) {
-      setClipNote(`${FAMILIES[next].label} is held by its creator contract: ${liveRuntime.blockers.join(" ")}`);
+      setClipNote(`${FAMILIES[next].label} is held by its creator contract. ${creatorReadinessSummary(liveRuntime.blockers[0])}`);
       return;
     }
     setFamily(next);
@@ -660,7 +670,7 @@ export default function NewChannelWizard() {
         setFamily("");
         setSupervisedAdmission(null);
         const automaticReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
-        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its automatic creator contract: ${automaticReadiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
+        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently held. ${creatorReadinessSummary(automaticReadiness.blockers[0])} No substitute route was selected automatically.`);
       }
     }
   };
@@ -1464,7 +1474,7 @@ export default function NewChannelWizard() {
                 className={styles.nicheCard}
                 data-active={on ? "true" : undefined}
                 aria-pressed={on}
-                title={`${n.blurb}${!defaultFamilyReadiness.ready && !supervisedDefault && defaultFamilyReadiness.blockers[0] ? ` Held: ${defaultFamilyReadiness.blockers[0]}` : supervisedDefault ? " Review-ready private intake" : ""}`}
+                title={`${n.blurb}${!defaultFamilyReadiness.ready && !supervisedDefault && defaultFamilyReadiness.blockers[0] ? ` Held: ${creatorReadinessSummary(defaultFamilyReadiness.blockers[0])}` : supervisedDefault ? " Review-ready private intake" : ""}`}
               >
                 <span className={styles.nicheMark}><NicheMotionGlyph niche={n.key} /></span>
                 <span className={styles.nicheCopy}>
@@ -1472,7 +1482,7 @@ export default function NewChannelWizard() {
                   <span className={styles.nicheMeta}><span>{n.difficulty}</span><span data-ready={defaultFamilyReadiness.ready || Boolean(supervisedDefault) ? "true" : "false"}>{defaultFamilyReadiness.ready ? "route ready" : supervisedDefault ? "review ready" : "start held"}</span></span>
                   <span className={styles.nicheBlurb}>{n.blurb}</span>
                 {!defaultFamilyReadiness.ready && !supervisedDefault && defaultFamilyReadiness.blockers[0] ? (
-                    <span className={styles.nicheBlocker}>Held: {defaultFamilyReadiness.blockers[0]}</span>
+                    <span className={styles.nicheBlocker}>Held: {creatorReadinessSummary(defaultFamilyReadiness.blockers[0])}</span>
                 ) : null}
                 </span>
               </button>
@@ -1548,9 +1558,9 @@ export default function NewChannelWizard() {
               const routeReason = supervised
                 ? "Registered private-review intake; no automatic render or publishing."
                 : runtimeUnavailable
-                  ? liveRuntime?.blockers[0] ?? "Creator contract unavailable."
+                  ? creatorReadinessSummary(liveRuntime?.blockers[0])
                   : !productionReady
-                    ? automaticReadiness.blockers[0] ?? "Automatic creator admission is held."
+                    ? creatorReadinessSummary(automaticReadiness.blockers[0])
                     : liveRuntime?.scope === "creator_contract"
                       ? "Certified route; providers preflight at build."
                       : "Certified route; contract check pending.";
@@ -1979,7 +1989,7 @@ export default function NewChannelWizard() {
             <strong className={styles.sectionCount}>{approveSetupSpend ? "execution requested" : "plan only"}</strong>
           </header>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
-          {!supervisedAdmission && !automaticFamilyCreatorReadiness(fam.key).ready && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {automaticFamilyCreatorReadiness(fam.key).blockers.join(" ")}</div>}
+          {!supervisedAdmission && !automaticFamilyCreatorReadiness(fam.key).ready && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {creatorReadinessSummary(automaticFamilyCreatorReadiness(fam.key).blockers[0])}</div>}
           {supervisedAdmission && (
             <div className="glass" style={{ padding: "0.9rem 1rem", border: "1px solid rgba(124,124,255,0.55)", color: "#d7d9ff", display: "grid", gap: "0.45rem", fontSize: "0.84rem" }}>
               <strong>Private-review intake selected</strong>
