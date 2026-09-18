@@ -976,6 +976,12 @@ function maxGap(times: readonly number[], durationSec: number): number {
   return Number(max.toFixed(2));
 }
 
+// Frame evidence is independent once its sealed timestamp has been selected.
+// Bounded parallel decoding materially reduces final-review wall time without
+// admitting more frames or more vision requests. Keep this deliberately small:
+// each worker seeks and decodes a full-resolution video frame.
+const FRAME_EXTRACTION_CONCURRENCY = 3;
+
 async function extractFrames(
   videoPath: string,
   frames: readonly VisualReviewFrame[],
@@ -985,14 +991,21 @@ async function extractFrames(
 ): Promise<ExtractedFrame[]> {
   const dir = await makeRunTempDir(runId, `visual-review-${phase}`);
   const extracted: ExtractedFrame[] = [];
-  for (const frame of frames) {
-    const localPath = join(dir, `${frame.id}_${frame.tSec.toFixed(1).replace(".", "_")}.jpg`);
-    try {
-      await grabFrame(videoPath, frame.tSec, localPath);
-      extracted.push({ descriptor: frame, localPath });
-    } catch (error) {
-      log(`visualReview: could not extract ${frame.id} @${frame.tSec.toFixed(1)}s: ${error instanceof Error ? error.message : error}`);
-    }
+  for (let offset = 0; offset < frames.length; offset += FRAME_EXTRACTION_CONCURRENCY) {
+    const batch = frames.slice(offset, offset + FRAME_EXTRACTION_CONCURRENCY);
+    const resolved = await Promise.all(batch.map(async (frame): Promise<ExtractedFrame | null> => {
+      const localPath = join(dir, `${frame.id}_${frame.tSec.toFixed(1).replace(".", "_")}.jpg`);
+      try {
+        await grabFrame(videoPath, frame.tSec, localPath);
+        return { descriptor: frame, localPath };
+      } catch (error) {
+        log(`visualReview: could not extract ${frame.id} @${frame.tSec.toFixed(1)}s: ${error instanceof Error ? error.message : error}`);
+        return null;
+      }
+    }));
+    // Preserve planned-frame order for batch prompts and receipt hashes even
+    // though their independent decoders settle in a different order.
+    extracted.push(...resolved.filter((frame): frame is ExtractedFrame => frame !== null));
   }
   return extracted;
 }
