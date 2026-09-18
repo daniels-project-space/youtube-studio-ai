@@ -25,9 +25,13 @@ import {
 import {
   MINIMAX_H3_WORKER_CONTRACT,
   MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3GpuModel,
   miniMaxH3RequestKey,
+  miniMaxH3RuntimeId,
   type MiniMaxH3Receipt,
   type MiniMaxH3Provider,
   type MiniMaxH3Execution,
@@ -199,7 +203,7 @@ export interface PlanWeekPreparedFootage {
         kind: "minimax-h3";
         provider: MiniMaxH3Provider;
         execution: MiniMaxH3Execution;
-        runtimeId: typeof MINIMAX_H3_RUNTIME_ID;
+        runtimeId: typeof MINIMAX_H3_RUNTIME_ID | typeof MINIMAX_H3_OPENRELAY_RUNTIME_ID;
         profileId: typeof MINIMAX_H3_PROFILE.id;
         modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256;
       };
@@ -980,10 +984,12 @@ export function assertPlanWeekPreparedFootageBinding(args: {
       throw new Error("prepared footage renderer must be the explicit minimax-h3 contract");
     }
     if (
-      rendererRecord.provider !== "salad" && rendererRecord.provider !== "novita" ||
-      rendererRecord.execution !== "weekly-batch" && rendererRecord.execution !== "on-demand" ||
-      (rendererRecord.provider === "salad") !== (rendererRecord.execution === "weekly-batch") ||
-      rendererRecord.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
+      rendererRecord.provider !== "salad" && rendererRecord.provider !== "novita" && rendererRecord.provider !== "openrelay" ||
+      rendererRecord.execution !== "weekly-batch" && rendererRecord.execution !== "on-demand" && rendererRecord.execution !== "weekly-fallback" ||
+      (rendererRecord.provider === "salad" && rendererRecord.execution !== "weekly-batch") ||
+      (rendererRecord.provider === "novita" && rendererRecord.execution !== "on-demand") ||
+      (rendererRecord.provider === "openrelay" && rendererRecord.execution !== "weekly-fallback") ||
+      rendererRecord.runtimeId !== miniMaxH3RuntimeId(rendererRecord.provider as MiniMaxH3Provider) ||
       rendererRecord.profileId !== MINIMAX_H3_PROFILE.id ||
       rendererRecord.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256
     ) {
@@ -993,7 +999,7 @@ export function assertPlanWeekPreparedFootageBinding(args: {
       kind: "minimax-h3",
       provider: rendererRecord.provider as MiniMaxH3Provider,
       execution: rendererRecord.execution as MiniMaxH3Execution,
-      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      runtimeId: miniMaxH3RuntimeId(rendererRecord.provider as MiniMaxH3Provider),
       profileId: MINIMAX_H3_PROFILE.id,
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
     };
@@ -1049,12 +1055,14 @@ export function assertPlanWeekPreparedFootageBinding(args: {
         receiptOutput.contentSha256 !== clip.sha256 ||
         Number(receiptOutput.byteLength) !== clip.byteLength ||
         receiptRuntime.provider !== renderer.provider ||
-        receiptRuntime.gpuModel !== "RTX 5090" ||
-        receiptRuntime.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
+        receiptRuntime.gpuModel !== miniMaxH3GpuModel(renderer.provider) ||
+        receiptRuntime.runtimeId !== miniMaxH3RuntimeId(renderer.provider) ||
         receiptRuntime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
         (renderer.provider === "salad"
           ? receiptRuntime.capacityMode !== "medium" && receiptRuntime.capacityMode !== SALAD_HIGH_FALLBACK_PRIORITY
-          : receiptRuntime.capacityMode !== "spot") ||
+          : renderer.provider === "novita"
+            ? receiptRuntime.capacityMode !== "spot"
+            : receiptRuntime.capacityMode !== MINIMAX_H3_OPENRELAY_CAPACITY_MODE) ||
         canonicalJson(receipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE)
       ) {
         throw new Error("prepared footage H3 receipt binding mismatch");

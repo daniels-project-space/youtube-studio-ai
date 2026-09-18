@@ -22,11 +22,16 @@ import {
   MINIMAX_H3_MODEL,
   MINIMAX_H3_MODEL_REVISION,
   MINIMAX_H3_NOVITA_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_GPU_MODEL,
+  MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MINIMAX_H3_SALAD_CAPACITY_MODE,
   MINIMAX_H3_WORKER_CONTRACT,
+  miniMaxH3GpuModel,
   miniMaxH3RouteEnvironment,
+  miniMaxH3RuntimeId,
   minimaxH3Readiness,
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
@@ -44,10 +49,15 @@ export {
   MINIMAX_H3_MODEL,
   MINIMAX_H3_MODEL_REVISION,
   MINIMAX_H3_NOVITA_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_GPU_MODEL,
+  MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MINIMAX_H3_SALAD_CAPACITY_MODE,
   MINIMAX_H3_WORKER_CONTRACT,
+  miniMaxH3GpuModel,
+  miniMaxH3RuntimeId,
   minimaxH3Readiness,
 };
 export type { MiniMaxH3Execution, MiniMaxH3Provider, MiniMaxH3Readiness } from "@/lib/minimaxH3Admission";
@@ -69,6 +79,8 @@ const MAX_H3_PARALLEL_SALAD_JOBS = 3;
 const MINIMAX_H3_MODEL_BUCKET = "salad-render-infra";
 const MINIMAX_H3_MODEL_MANIFEST_KEY = `${MINIMAX_H3_RUNTIME_ID}/immutable-manifest.json`;
 const MINIMAX_H3_SALAD_COUNTRY_CODES = ["cn"] as const;
+const OPENRELAY_H3_RECEIPT_POLL_INTERVAL_MS = 5_000;
+const OPENRELAY_H3_RECEIPT_POLL_TIMEOUT_MS = 90 * 60 * 1_000;
 /**
  * Salad's availability endpoint is a market snapshot, not a reservation. A
  * country-scoped zero can therefore be a locality artifact rather than proof
@@ -395,10 +407,10 @@ export function buildMiniMaxH3SceneRequest(input: {
 
 export interface MiniMaxH3RuntimeReceipt {
   provider: MiniMaxH3Provider;
-  gpuModel: "RTX 5090";
-  runtimeId: typeof MINIMAX_H3_RUNTIME_ID;
+  gpuModel: "RTX 5090" | typeof MINIMAX_H3_OPENRELAY_GPU_MODEL;
+  runtimeId: typeof MINIMAX_H3_RUNTIME_ID | typeof MINIMAX_H3_OPENRELAY_RUNTIME_ID;
   modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256;
-  capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY | typeof MINIMAX_H3_NOVITA_CAPACITY_MODE;
+  capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY | typeof MINIMAX_H3_NOVITA_CAPACITY_MODE | typeof MINIMAX_H3_OPENRELAY_CAPACITY_MODE;
   costUsd: number;
 }
 
@@ -585,22 +597,91 @@ function boundedCost(value: unknown, label: string): number {
   return value;
 }
 
-function routeEnvironment(provider: MiniMaxH3Provider): { url: string; token: string } {
+interface MiniMaxH3WorkerRoute {
+  url: string;
+  token: string;
+  /** Private OpenRelay gateway credential; never sent to the worker itself. */
+  gatewayApiKey?: string;
+}
+
+function routeEnvironment(provider: MiniMaxH3Provider): MiniMaxH3WorkerRoute {
   try {
-    return miniMaxH3RouteEnvironment(provider);
+    const route = miniMaxH3RouteEnvironment(provider);
+    if (provider !== "openrelay") return route;
+    const gatewayApiKey = process.env.OPENRELAY_API_KEY?.trim() ?? "";
+    if (gatewayApiKey.length < 32) throw new Error("OPENRELAY_API_KEY is missing or too short for the private H3 gateway");
+    return { ...route, gatewayApiKey };
   } catch (error) {
     throw new MiniMaxH3Error(error instanceof Error ? error.message : String(error));
   }
 }
 
+function workerHeaders(provider: MiniMaxH3Provider, route: MiniMaxH3WorkerRoute, contentType = false): Headers {
+  const headers = new Headers(contentType ? { "Content-Type": "application/json" } : undefined);
+  if (provider === "openrelay") {
+    // OpenRelay consumes x-api-key at its private gateway. The worker receives
+    // only this independent, least-privilege token after gateway validation.
+    headers.set("x-api-key", route.gatewayApiKey!);
+    headers.set("x-worker-authorization", `Bearer ${route.token}`);
+  } else {
+    headers.set("Authorization", `Bearer ${route.token}`);
+  }
+  return headers;
+}
+
+function openRelayReceiptUrl(workerUrl: string, requestKey: string): string {
+  const url = new URL(workerUrl);
+  url.pathname = `${url.pathname.replace(/\/$/u, "")}/${requestKey}`;
+  url.search = "";
+  return url.toString();
+}
+
+async function waitForOpenRelayReceipt(args: {
+  route: MiniMaxH3WorkerRoute;
+  requestKey: string;
+  fetchImpl: typeof fetch;
+  wait: (milliseconds: number) => Promise<void>;
+  timeoutMs: number;
+}): Promise<unknown> {
+  const deadline = Date.now() + args.timeoutMs;
+  const url = openRelayReceiptUrl(args.route.url, args.requestKey);
+  for (;;) {
+    let response: Response;
+    try {
+      response = await args.fetchImpl(url, {
+        headers: workerHeaders("openrelay", args.route), cache: "no-store", signal: AbortSignal.timeout(20_000),
+      });
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await args.wait(OPENRELAY_H3_RECEIPT_POLL_INTERVAL_MS);
+      continue;
+    }
+    if (!response.ok) {
+      throw new MiniMaxH3Error(`OpenRelay H3 receipt reconciliation returned HTTP ${response.status}`, args.requestKey, response.status, true);
+    }
+    let body: { status?: unknown; receipt?: unknown };
+    try { body = await response.json() as { status?: unknown; receipt?: unknown }; } catch (error) {
+      throw new MiniMaxH3Error("OpenRelay H3 receipt reconciliation returned malformed JSON", args.requestKey, response.status, true, 0, { cause: error });
+    }
+    if (body.status === "complete" && body.receipt !== undefined) return body.receipt;
+    if (body.status !== "pending") {
+      throw new MiniMaxH3Error("OpenRelay H3 receipt reconciliation returned an invalid state", args.requestKey, response.status, true);
+    }
+    if (Date.now() >= deadline) {
+      throw new MiniMaxH3Error(`OpenRelay H3 receipt did not complete within ${args.timeoutMs}ms; reconcile ${args.requestKey} before another dispatch`, args.requestKey, response.status, true);
+    }
+    await args.wait(OPENRELAY_H3_RECEIPT_POLL_INTERVAL_MS);
+  }
+}
+
 function normaliseRequest(input: MiniMaxH3RenderRequest): MiniMaxH3RenderRequest {
-  if (input.provider !== "salad" && input.provider !== "novita") throw new MiniMaxH3Error("MiniMax H3 provider is invalid");
+  if (input.provider !== "salad" && input.provider !== "novita" && input.provider !== "openrelay") throw new MiniMaxH3Error("MiniMax H3 provider is invalid");
   if (input.execution !== "weekly-batch" && input.execution !== "weekly-fallback" && input.execution !== "on-demand") throw new MiniMaxH3Error("MiniMax H3 execution mode is invalid");
   if (input.execution === "weekly-batch" && input.provider !== "salad") {
     throw new MiniMaxH3Error("weekly MiniMax H3 preparation must use the Salad route");
   }
-  if (input.execution === "weekly-fallback" && input.provider !== "novita") {
-    throw new MiniMaxH3Error("weekly MiniMax H3 fallback must use the Novita route");
+  if (input.execution === "weekly-fallback" && input.provider !== "openrelay") {
+    throw new MiniMaxH3Error("weekly MiniMax H3 fallback must use the OpenRelay persistent-disk route");
   }
   if (input.execution === "on-demand" && input.provider !== "novita") {
     throw new MiniMaxH3Error("on-demand MiniMax H3 rendering must use the Novita route");
@@ -637,8 +718,8 @@ function receiptFrom(value: unknown, expected: {
     profile.height !== MINIMAX_H3_PROFILE.height || profile.fps !== MINIMAX_H3_PROFILE.fps ||
     profile.frames !== MINIMAX_H3_PROFILE.frames || profile.steps !== MINIMAX_H3_PROFILE.steps ||
     output?.r2Key !== expected.request.output.r2Key || output?.contentType !== "video/mp4" ||
-    runtime?.provider !== expected.request.provider || runtime.gpuModel !== "RTX 5090" ||
-    runtime.runtimeId !== MINIMAX_H3_RUNTIME_ID || runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
+    runtime?.provider !== expected.request.provider || runtime.gpuModel !== miniMaxH3GpuModel(expected.request.provider) ||
+    runtime.runtimeId !== miniMaxH3RuntimeId(expected.request.provider) || runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
     runtime.capacityMode !== expected.expectedCapacityMode
   ) {
     throw new MiniMaxH3Error("MiniMax H3 worker receipt does not bind the sealed request/profile/runtime", expected.requestKey);
@@ -664,8 +745,8 @@ function receiptFrom(value: unknown, expected: {
     output: { r2Key: expected.request.output.r2Key, contentSha256, byteLength, contentType: "video/mp4" },
     runtime: {
       provider: expected.request.provider,
-      gpuModel: "RTX 5090",
-      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      gpuModel: miniMaxH3GpuModel(expected.request.provider),
+      runtimeId: miniMaxH3RuntimeId(expected.request.provider),
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
       capacityMode: runtime.capacityMode as MiniMaxH3RuntimeReceipt["capacityMode"],
       costUsd,
@@ -721,6 +802,10 @@ export async function renderMiniMaxH3(
     beforeProviderSpend?: () => void | Promise<void>;
     /** Selected by read-only Salad admission; medium is always the default. */
     saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
+    /** Test seam for the bounded OpenRelay receipt reconciliation loop. */
+    openRelayReceiptWait?: (milliseconds: number) => Promise<void>;
+    /** Test seam; production allows the worker's own 90-minute safety bound. */
+    openRelayReceiptPollTimeoutMs?: number;
   } = {},
 ): Promise<MiniMaxH3RenderedVideo> {
   const request = normaliseRequest(input);
@@ -761,11 +846,12 @@ export async function renderMiniMaxH3(
     (options.presignWrite ?? presignUpload)(request.output.r2Key, { expiresIn: 3_600, contentType: "video/mp4" }),
   ]);
   let response: Response;
+  let receiptPayload: unknown;
   try {
     await options.beforeProviderSpend?.();
     response = await (options.fetch ?? fetch)(route.url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json", "Idempotency-Key": requestKey },
+      headers: { ...Object.fromEntries(workerHeaders(request.provider, route, true)), "Idempotency-Key": requestKey },
       body: JSON.stringify({
         schema: MINIMAX_H3_WORKER_CONTRACT,
         request_key: requestKey,
@@ -783,7 +869,9 @@ export async function renderMiniMaxH3(
         // with existing weekly packets; the receipt binds the actual tier.
         capacity_mode: request.provider === "salad"
           ? options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE
-          : MINIMAX_H3_NOVITA_CAPACITY_MODE,
+          : request.provider === "novita"
+            ? MINIMAX_H3_NOVITA_CAPACITY_MODE
+            : MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
         profile: MINIMAX_H3_PROFILE,
         max_cost_usd: request.maxCostUsd,
       }),
@@ -796,17 +884,40 @@ export async function renderMiniMaxH3(
     );
   }
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new MiniMaxH3Error(`MiniMax H3 worker HTTP ${response.status}: ${detail.slice(0, 220)}`, requestKey, response.status);
+    if (request.provider === "openrelay" && response.status === 504) {
+      try {
+        receiptPayload = await waitForOpenRelayReceipt({
+          route,
+          requestKey,
+          fetchImpl: options.fetch ?? fetch,
+          wait: options.openRelayReceiptWait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+          timeoutMs: options.openRelayReceiptPollTimeoutMs ?? OPENRELAY_H3_RECEIPT_POLL_TIMEOUT_MS,
+        });
+      } catch (error) {
+        if (error instanceof MiniMaxH3Error) throw error;
+        throw new MiniMaxH3Error(
+          `MiniMax H3 OpenRelay outcome is unknown after gateway timeout; reconcile request ${requestKey} before another dispatch`,
+          requestKey, response.status, true, 0, { cause: error },
+        );
+      }
+    } else {
+      const detail = await response.text().catch(() => "");
+      throw new MiniMaxH3Error(`MiniMax H3 worker HTTP ${response.status}: ${detail.slice(0, 220)}`, requestKey, response.status);
+    }
   }
-  let body: { receipt?: unknown };
-  try { body = await response.json() as { receipt?: unknown }; } catch (error) {
-    throw new MiniMaxH3Error("MiniMax H3 worker returned malformed JSON", requestKey, response.status, false, 0, { cause: error });
+  if (receiptPayload === undefined) {
+    let body: { receipt?: unknown };
+    try { body = await response.json() as { receipt?: unknown }; } catch (error) {
+      throw new MiniMaxH3Error("MiniMax H3 worker returned malformed JSON", requestKey, response.status, false, 0, { cause: error });
+    }
+    receiptPayload = body.receipt;
   }
   const expectedCapacityMode = request.provider === "salad"
     ? options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE
-    : MINIMAX_H3_NOVITA_CAPACITY_MODE;
-  const receipt = receiptFrom(body.receipt, { request, requestKey, expectedCapacityMode });
+    : request.provider === "novita"
+      ? MINIMAX_H3_NOVITA_CAPACITY_MODE
+      : MINIMAX_H3_OPENRELAY_CAPACITY_MODE;
+  const receipt = receiptFrom(receiptPayload, { request, requestKey, expectedCapacityMode });
   let outputBytes: Uint8Array;
   try { outputBytes = await readObject(receipt.output.r2Key); } catch (error) {
     throw new MiniMaxH3Error(`MiniMax H3 accepted output cannot be re-read from R2 for request ${requestKey}`, requestKey, response.status, false, receipt.runtime.costUsd, { cause: error });

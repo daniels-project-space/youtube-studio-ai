@@ -1,8 +1,17 @@
-/** Explicit provider fallback for a weekly H3 order held by Salad capacity. */
+/**
+ * Terminal fallback for a weekly H3 order held by Salad capacity.
+ *
+ * The OpenRelay worker is an exact A100 route with a persistent verified model
+ * disk. It is started on demand and stopped by its idle reaper after the batch;
+ * this never replaces Salad's primary medium/high weekly admission behavior.
+ */
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { ensureOpenRelayH3Ready } from "@/lib/openRelayH3";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_OPENRELAY_GPU_MODEL,
+  MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   miniMaxH3RequestKey,
@@ -40,7 +49,7 @@ async function readAggregate(key: string, ownerId: string): Promise<PersistedWee
     throw error;
   }
   let parsed: unknown;
-  try { parsed = JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new Error("weekly H3 Novita fallback receipt is not valid JSON"); }
+  try { parsed = JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new Error("weekly H3 OpenRelay fallback receipt is not valid JSON"); }
   summarizeMiniMaxH3Receipt(parsed, ownerId);
   return parsed as PersistedWeeklyReceipt;
 }
@@ -59,21 +68,21 @@ async function readFallbackClaim(args: {
   }
   let parsed: PersistedWeeklyJobReceipt;
   try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as PersistedWeeklyJobReceipt; } catch {
-    throw new Error("weekly H3 Novita fallback job receipt is not valid JSON");
+    throw new Error("weekly H3 OpenRelay fallback job receipt is not valid JSON");
   }
   const receipt = parsed.providerReceipt;
   if (
     parsed.schema !== "minimax-h3-weekly-job/v1" || parsed.orderKey !== args.orderKey || parsed.requestKey !== args.requestKey ||
     receipt.schema !== "minimax-h3-worker/v1" || receipt.requestKey !== args.requestKey || receipt.execution !== "weekly-fallback" ||
-    receipt.runtime.provider !== "novita" || receipt.runtime.gpuModel !== "RTX 5090" || receipt.runtime.capacityMode !== "spot" ||
-    receipt.runtime.runtimeId !== MINIMAX_H3_RUNTIME_ID || receipt.runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
+    receipt.runtime.provider !== "openrelay" || receipt.runtime.gpuModel !== MINIMAX_H3_OPENRELAY_GPU_MODEL || receipt.runtime.capacityMode !== "persistent-disk-auto-stop" ||
+    receipt.runtime.runtimeId !== MINIMAX_H3_OPENRELAY_RUNTIME_ID || receipt.runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
     canonicalJson(receipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE) || receipt.output.r2Key !== args.outputKey ||
     !Number.isSafeInteger(receipt.output.byteLength) || receipt.output.byteLength < 1_024 ||
     !/^[a-f0-9]{64}$/u.test(receipt.output.contentSha256) || !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0
-  ) throw new Error("weekly H3 Novita fallback job receipt is bound to a different request");
+  ) throw new Error("weekly H3 OpenRelay fallback job receipt is bound to a different request");
   const outputBytes = await getObjectBytes(args.outputKey);
   if (outputBytes.byteLength !== receipt.output.byteLength || sha256BytesHex(outputBytes) !== receipt.output.contentSha256) {
-    throw new Error("weekly H3 Novita fallback job receipt does not match its retained R2 output");
+    throw new Error("weekly H3 OpenRelay fallback job receipt does not match its retained R2 output");
   }
   return { requestKey: args.requestKey, receipt, outputBytes };
 }
@@ -102,7 +111,7 @@ async function persistFallbackClaim(args: {
     outputKey: args.result.receipt.output.r2Key,
   });
   if (!persisted || canonicalJson(persisted.receipt) !== canonicalJson(args.result.receipt)) {
-    throw new Error("weekly H3 Novita fallback job receipt changed after create-only write");
+    throw new Error("weekly H3 OpenRelay fallback job receipt changed after create-only write");
   }
 }
 
@@ -113,45 +122,47 @@ async function readFrozenPacket(payload: MiniMaxH3WeeklyBatchArgs): Promise<stri
   if (
     packet.schema !== "minimax-h3-weekly-request/v1" || packet.orderKey !== payload.orderKey ||
     canonicalJson(packet.requestKeys) !== canonicalJson(sourceRequestKeys) || canonicalJson(packet.jobs) !== canonicalJson(payload.jobs)
-  ) throw new Error("weekly H3 Novita fallback request packet is not bound to the Salad order");
+  ) throw new Error("weekly H3 OpenRelay fallback request packet is not bound to the Salad order");
   return sourceRequestKeys;
 }
 
-export const minimaxH3WeeklyNovitaFallbackTask = task({
-  id: "minimax-h3-weekly-novita-fallback",
+export const minimaxH3WeeklyOpenRelayFallbackTask = task({
+  id: "minimax-h3-weekly-openrelay-fallback",
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
     const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) {
-      throw new Error("weekly H3 Novita fallback requires the signed owner and Salad hold start");
+      throw new Error("weekly H3 OpenRelay fallback requires the signed owner and Salad hold start");
     }
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "novita"],
+      services: ["cloudflare", "openrelay", "youtube"],
       required: [
         "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-        "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN",
+        "OPENRELAY_API_KEY", "MINIMAX_H3_OPENRELAY_VM_ID",
+        "MINIMAX_H3_OPENRELAY_WORKER_URL", "MINIMAX_H3_OPENRELAY_WORKER_TOKEN",
+        "MINIMAX_H3_OPENRELAY_QUALIFIED", "MINIMAX_H3_OPENRELAY_QUALIFICATION_RECEIPT_SHA256",
       ],
     });
     const sourceRequestKeys = await readFrozenPacket(payload);
     const prior = await readAggregate(payload.receiptKey, payload.ownerId);
     if (prior) {
-      const priorIsNovitaFallback = prior.schema === "minimax-h3-weekly-batch/v2";
+      const priorIsOpenRelayFallback = prior.schema === "minimax-h3-weekly-batch/v2";
       const preparedFootageKey = payload.preparedFootage
         ? await materializePreparedFootage(
             payload.preparedFootage,
             await readPreparedFootageManifest(payload.preparedFootage),
             payload.jobs,
             renderedResultsFromPersistedReceipt(prior),
-            priorIsNovitaFallback
-              ? { provider: "novita", execution: "weekly-fallback" }
+            priorIsOpenRelayFallback
+              ? { provider: "openrelay", execution: "weekly-fallback" }
               : { provider: "salad", execution: "weekly-batch" },
           )
         : undefined;
-      return { state: "reconciled" as const, provider: "novita" as const, receiptKey: payload.receiptKey, ...(preparedFootageKey ? { preparedFootageKey } : {}) };
+      return { state: "reconciled" as const, provider: "openrelay" as const, receiptKey: payload.receiptKey, ...(preparedFootageKey ? { preparedFootageKey } : {}) };
     }
-    const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({ ...job, provider: "novita", execution: "weekly-fallback" }));
+    const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({ ...job, provider: "openrelay", execution: "weekly-fallback" }));
     const results: Array<MiniMaxH3RenderedVideo | undefined> = new Array(payload.jobs.length);
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(8, payload.jobs.length) }, async () => {
@@ -168,18 +179,21 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
     }));
     const pendingIndexes = results.flatMap((item, index) => item === undefined ? [index] : []);
     const pendingJobs = pendingIndexes.map((index) => payload.jobs[index]!);
+    // Start once before the batch rather than once per shot. The persistent
+    // disk validates locally after a restart; no model pull is on this path.
+    if (pendingJobs.length) await ensureOpenRelayH3Ready();
     await renderMiniMaxH3WeeklyBatch(pendingJobs, {
-      provider: "novita",
+      provider: "openrelay",
       execution: "weekly-fallback",
       onJobComplete: async (pendingIndex, rendered) => {
         const originalIndex = pendingIndexes[pendingIndex];
-        if (originalIndex === undefined) throw new Error("weekly H3 Novita fallback completion index is invalid");
+        if (originalIndex === undefined) throw new Error("weekly H3 OpenRelay fallback completion index is invalid");
         await persistFallbackClaim({ receiptKey: payload.receiptKey, orderKey: payload.orderKey, result: rendered });
         results[originalIndex] = rendered;
       },
     });
     if (!results.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) {
-      throw new Error("weekly H3 Novita fallback completed without every shot result");
+      throw new Error("weekly H3 OpenRelay fallback completed without every shot result");
     }
     const receipt = createMiniMaxH3WeeklyFallbackReceipt({
       orderKey: payload.orderKey,
@@ -191,7 +205,7 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
     try {
       await putObject(payload.receiptKey, body, {
         contentType: "application/json",
-        metadata: { "h3-batch-receipt": "v2", "h3-batch-sha256": sha256Hex(body), "h3-fallback-provider": "novita" },
+        metadata: { "h3-batch-receipt": "v2", "h3-batch-sha256": sha256Hex(body), "h3-fallback-provider": "openrelay" },
         ifNoneMatch: "*",
       });
     } catch (error) {
@@ -199,7 +213,7 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
       if (status !== 409 && status !== 412) throw error;
       const winner = await readAggregate(payload.receiptKey, payload.ownerId);
       if (!winner) throw error;
-      return { state: "reconciled" as const, provider: "novita" as const, receiptKey: payload.receiptKey };
+      return { state: "reconciled" as const, provider: "openrelay" as const, receiptKey: payload.receiptKey };
     }
     const preparedFootageKey = payload.preparedFootage
       ? await materializePreparedFootage(
@@ -207,9 +221,9 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
           await readPreparedFootageManifest(payload.preparedFootage),
           payload.jobs,
           results,
-          { provider: "novita", execution: "weekly-fallback" },
+          { provider: "openrelay", execution: "weekly-fallback" },
         )
       : undefined;
-    return { state: "complete" as const, provider: "novita" as const, receiptKey: payload.receiptKey, requestKeys, ...(preparedFootageKey ? { preparedFootageKey } : {}) };
+    return { state: "complete" as const, provider: "openrelay" as const, receiptKey: payload.receiptKey, requestKeys, ...(preparedFootageKey ? { preparedFootageKey } : {}) };
   },
 });

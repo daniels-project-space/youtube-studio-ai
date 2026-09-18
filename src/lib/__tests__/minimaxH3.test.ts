@@ -4,14 +4,17 @@ import {
   assertMiniMaxH3R2ModelManifest,
   assertMiniMaxH3SaladCapacity,
   MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
   MINIMAX_H3_SALAD_CAPACITY_MODE,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
   MiniMaxH3OpeningMotionRejectedRenderError,
   minimaxH3Readiness,
+  miniMaxH3GpuModel,
   type MiniMaxH3SaladCapacityClient,
   miniMaxH3RequestKey,
+  miniMaxH3RuntimeId,
   renderMiniMaxH3,
   renderMiniMaxH3WeeklyBatch,
 } from "@/lib/minimaxH3";
@@ -22,12 +25,13 @@ import {
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 const saved = { ...process.env };
-function configure(provider: "salad" | "novita") {
-  const prefix = provider === "salad" ? "MINIMAX_H3_SALAD" : "MINIMAX_H3_NOVITA";
+function configure(provider: "salad" | "novita" | "openrelay") {
+  const prefix = provider === "salad" ? "MINIMAX_H3_SALAD" : provider === "novita" ? "MINIMAX_H3_NOVITA" : "MINIMAX_H3_OPENRELAY";
   process.env[`${prefix}_WORKER_URL`] = "http://127.0.0.1:8080/v1/videos";
   process.env[`${prefix}_WORKER_TOKEN`] = "x".repeat(32);
   process.env[`${prefix}_QUALIFIED`] = "1";
   process.env[`${prefix}_QUALIFICATION_RECEIPT_SHA256`] = "a".repeat(64);
+  if (provider === "openrelay") process.env.OPENRELAY_API_KEY = "o".repeat(32);
   if (provider === "salad") process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "1";
 }
 const output = new Uint8Array(1_024).fill(7);
@@ -49,7 +53,7 @@ const passingOpeningMotion = ({ durationSec }: { durationSec: number }) => {
     violatingIntervals: [],
   };
 };
-function request(provider: "salad" | "novita", execution: "weekly-batch" | "on-demand", output = "owner/o/channel/c/clip.mp4") {
+function request(provider: "salad" | "novita" | "openrelay", execution: "weekly-batch" | "weekly-fallback" | "on-demand", output = "owner/o/channel/c/clip.mp4") {
   return { provider, execution, prompt: "A precise continuous cinematic action with no text.", seed: 42,
     firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: sha256BytesHex(firstFrame) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
 }
@@ -79,12 +83,12 @@ assert.notEqual(
   miniMaxH3RequestKey(request("novita", "on-demand")),
   "weekly and on-demand routes must have distinct idempotency identities",
 );
-function responseFor(input: ReturnType<typeof request>, capacityMode: "medium" | "high" | "spot" = input.provider === "salad" ? "medium" : "spot") {
+function responseFor(input: ReturnType<typeof request>, capacityMode: "medium" | "high" | "spot" | "persistent-disk-auto-stop" = input.provider === "salad" ? "medium" : input.provider === "novita" ? "spot" : "persistent-disk-auto-stop") {
   return new Response(JSON.stringify({ receipt: {
     schema: "minimax-h3-worker/v1", requestKey: "", jobId: "job-1", execution: input.execution,
     profile: MINIMAX_H3_PROFILE, promptSha256: "", seed: input.seed, firstFrame: input.firstFrame,
     output: { r2Key: input.output.r2Key, contentSha256: sha256BytesHex(output), byteLength: output.byteLength, contentType: "video/mp4" },
-    runtime: { provider: input.provider, gpuModel: "RTX 5090", runtimeId: MINIMAX_H3_RUNTIME_ID,
+    runtime: { provider: input.provider, gpuModel: miniMaxH3GpuModel(input.provider), runtimeId: miniMaxH3RuntimeId(input.provider),
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256, capacityMode, costUsd: 0.2 },
   } }), { status: 200, headers: { "content-type": "application/json" } });
 }
@@ -308,7 +312,7 @@ async function test() {
     "a concurrent lease acquired after the market snapshot must block both medium and high dispatch",
   );
   assert.equal(leaseReads, 2, "capacity admission must re-read the shared lease after market availability");
-  configure("salad"); configure("novita");
+  configure("salad"); configure("novita"); configure("openrelay");
   const salad = request("salad", "weekly-batch");
   let seen: Record<string, unknown> | undefined;
   let spendFenceCalls = 0;
@@ -338,6 +342,59 @@ async function test() {
   assert.equal(seen?.capacity_mode, MINIMAX_H3_SALAD_CAPACITY_MODE);
   assert.equal(spendFenceCalls, 1, "one H3 submission must make exactly one final ownership assertion");
   assert.equal(rendered.openingMotionQa?.verdict, "pass", "the default shared H3 path must attach opening-motion evidence");
+
+  const openRelayFallback = request("openrelay", "weekly-fallback", "owner/o/channel/c/openrelay.mp4");
+  const openRelayRendered = await renderMiniMaxH3(openRelayFallback, {
+    presignRead: async () => "https://r2.example/read",
+    presignWrite: async () => "https://r2.example/write",
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
+    assertModelManifest: async () => {},
+    verifyOpeningMotion: passingOpeningMotion,
+    fetch: async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-api-key"), "o".repeat(32), "OpenRelay account auth must terminate at its private gateway");
+      assert.equal(headers.get("x-worker-authorization"), "Bearer " + "x".repeat(32), "the worker must receive its dedicated authorization header");
+      assert.equal(headers.get("authorization"), null, "the gateway key must not be reused as worker authorization");
+      seen = JSON.parse(String(init?.body));
+      const reply = responseFor(openRelayFallback);
+      const body = await reply.json() as { receipt: Record<string, unknown> };
+      body.receipt.requestKey = String(seen?.request_key);
+      body.receipt.promptSha256 = sha256Hex(openRelayFallback.prompt);
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(openRelayRendered.receipt.runtime.provider, "openrelay");
+  assert.equal(seen?.capacity_mode, MINIMAX_H3_OPENRELAY_CAPACITY_MODE);
+
+  let reconciliationPolls = 0;
+  const reconciledOpenRelay = await renderMiniMaxH3(openRelayFallback, {
+    presignRead: async () => "https://r2.example/read",
+    presignWrite: async () => "https://r2.example/write",
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
+    assertModelManifest: async () => {},
+    verifyOpeningMotion: passingOpeningMotion,
+    openRelayReceiptWait: async () => {},
+    openRelayReceiptPollTimeoutMs: 100,
+    fetch: async (url, init) => {
+      if (init?.method === "POST") {
+        seen = JSON.parse(String(init.body));
+        return new Response("upstream produced no response", { status: 504 });
+      }
+      assert.equal(String(url).endsWith(`/${seen?.request_key}`), true, "gateway timeout must reconcile the exact idempotency key");
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("x-api-key"), "o".repeat(32));
+      assert.equal(headers.get("x-worker-authorization"), "Bearer " + "x".repeat(32));
+      reconciliationPolls += 1;
+      if (reconciliationPolls === 1) return new Response(JSON.stringify({ status: "pending" }), { status: 200 });
+      const reply = responseFor(openRelayFallback);
+      const body = await reply.json() as { receipt: Record<string, unknown> };
+      body.receipt.requestKey = String(seen?.request_key);
+      body.receipt.promptSha256 = sha256Hex(openRelayFallback.prompt);
+      return new Response(JSON.stringify({ status: "complete", receipt: body.receipt }), { status: 200 });
+    },
+  });
+  assert.equal(reconciledOpenRelay.receipt.runtime.provider, "openrelay");
+  assert.equal(reconciliationPolls, 2, "a gateway timeout must poll the retained receipt without submitting a second render");
 
   await assert.rejects(
     () => renderMiniMaxH3(salad, {
@@ -465,7 +522,7 @@ async function test() {
   assert.equal(batched.length, 4);
   assert.equal(peak, 3, "weekly Salad work must use the bounded three-GPU wave");
   assert.equal(batchModelManifestChecks, 1, "weekly H3 jobs must share one immutable model-manifest verification");
-  assert.equal(sharedOpeningMotionChecks, 6, "the shared gate must inspect every default H3 result, including each weekly batch child");
+  assert.equal(sharedOpeningMotionChecks, 8, "the shared gate must inspect every default H3 result, including reconciled OpenRelay fallback work");
   assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
 
   let failedBatchModelManifestChecks = 0;

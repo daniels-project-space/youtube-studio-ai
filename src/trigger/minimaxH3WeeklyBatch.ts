@@ -8,6 +8,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3RuntimeId,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_WORKER_CONTRACT,
   MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
@@ -207,9 +208,10 @@ export type PersistedWeeklyReceipt = {
   schema: "minimax-h3-weekly-batch/v1" | "minimax-h3-weekly-batch/v2";
   orderKey: string;
   requestKeys: string[];
-  /** Original Salad request identities when the weekly order falls back to Novita. */
+  /** Original Salad request identities when the weekly order falls back to OpenRelay. */
   sourceRequestKeys?: string[];
-  fallback?: { provider: "novita"; reason: "salad-capacity-timeout"; waitedMs: number };
+  /** Historical Novita receipts remain readable; new fallbacks are OpenRelay only. */
+  fallback?: { provider: "novita" | "openrelay"; reason: "salad-capacity-timeout"; waitedMs: number };
   outputs: Array<{ r2Key: string; contentSha256: string; byteLength: number; costUsd: number }>;
   /** Full validated worker receipts; optional for backward-compatible v1 summaries. */
   providerReceipts?: MiniMaxH3Receipt[];
@@ -420,7 +422,7 @@ export function createMiniMaxH3WeeklyFallbackReceipt(args: {
     schema: "minimax-h3-weekly-batch/v2",
     orderKey: args.orderKey,
     sourceRequestKeys: [...args.sourceRequestKeys],
-    fallback: { provider: "novita", reason: "salad-capacity-timeout", waitedMs: args.waitedMs },
+    fallback: { provider: "openrelay", reason: "salad-capacity-timeout", waitedMs: args.waitedMs },
     requestKeys: args.result.map((item) => item.requestKey),
     outputs,
     providerReceipts: args.result.map((item) => item.receipt),
@@ -661,7 +663,7 @@ export function buildPreparedFootageSidecar(args: {
   binding: PreparedFootageScope;
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
   result: readonly MiniMaxH3RenderedVideo[];
-  provider?: "salad" | "novita";
+  provider?: "salad" | "openrelay";
   execution?: "weekly-batch" | "weekly-fallback";
 }): PlanWeekPreparedFootage {
   const provider = args.provider ?? "salad";
@@ -700,7 +702,7 @@ export function buildPreparedFootageSidecar(args: {
       kind: "minimax-h3",
       provider,
       execution,
-      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      runtimeId: miniMaxH3RuntimeId(provider),
       profileId: MINIMAX_H3_PROFILE.id,
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
     },
@@ -760,7 +762,7 @@ export async function materializePreparedFootage(
   manifest: PlanWeekPreparationManifest,
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"],
   result: readonly MiniMaxH3RenderedVideo[],
-  options: { provider?: "salad" | "novita"; execution?: "weekly-batch" | "weekly-fallback" } = {},
+  options: { provider?: "salad" | "openrelay"; execution?: "weekly-batch" | "weekly-fallback" } = {},
 ): Promise<string> {
   const prepared = buildPreparedFootageSidecar({ ...options, manifest, binding, jobs, result });
   const sidecarKey = planWeekPreparedFootageKey(binding);
