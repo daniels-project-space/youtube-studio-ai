@@ -5,6 +5,7 @@ import {
   ChannelMusicProgramSchema,
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
+  instrumentalLyricsControl,
   musicRoleForRoute,
 } from "@/engine/channelMusicProgram";
 
@@ -40,7 +41,13 @@ assert.match(history.generation.structuredCaption, /^### Global Metadata/mu);
 assert.match(history.generation.structuredCaption, /### Vocal Details/mu);
 assert.match(history.generation.structuredCaption, /### Arrangement/mu);
 assert.match(history.generation.structuredCaption, /Never sentimentalize the loss/u);
-assert.match(history.generation.lyricsControl, /^\[Cold open -/u);
+assert.equal(
+  history.generation.lyricsControl,
+  "[Intro]\n[Instrumental]\n[Instrumental]\n[Instrumental]\n[Outro]",
+  "Music3 lyrics control must be canonical instrumental tags; arrangement prose belongs in the structured caption",
+);
+assert.doesNotMatch(history.generation.lyricsControl, /Establish|Keep the|vocals|spoken/u);
+assert.equal(instrumentalLyricsControl("meditation_bed").split("\n").length, 4);
 assert.equal(history.minimaxLicense.uiAttribution, "MiniMax-Music3");
 assert.equal(history.minimaxLicense.generatedContentDisclosureRequired, true);
 

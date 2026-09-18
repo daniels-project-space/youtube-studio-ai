@@ -25,6 +25,13 @@ Official references:
 
 The production `music` block persists that plan before provider submission. Managed providers receive the same identity and a condensed arrangement map. MiniMax receives the complete structured caption and lyrics-control section tags.
 
+For an instrumental track, that lyrics control is now only Music3's recognised
+section tags (`[Intro]`, `[Instrumental]`, `[Outro]`). The full arrangement,
+instrumentation, energy arc, and exclusions stay in the structured caption.
+This avoids sending prose arranging instructions through the model's lyric
+channel, where they could be interpreted as words to perform. Immutable legacy
+programs remain replayable; new programs use the canonical control surface.
+
 ## Worker and integrity contract
 
 `src/lib/minimaxMusic3.ts` sends one deterministic, idempotency-keyed `minimax-music3-worker/v2` POST. The client accepts a result only when the receipt binds:

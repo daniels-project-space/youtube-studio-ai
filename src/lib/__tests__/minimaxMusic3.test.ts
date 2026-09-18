@@ -93,6 +93,12 @@ async function main(): Promise<void> {
       assert.equal(request.runtimeRepository, MINIMAX_MUSIC3_COMFYUI_REPOSITORY);
       assert.equal(request.runtimeRevision, MINIMAX_MUSIC3_COMFYUI_REVISION);
       assert.match(String(request.caption), /^### Global Metadata/mu);
+      assert.equal(
+        request.lyricsControl,
+        "[Intro]\n[Instrumental]\n[Instrumental]\n[Instrumental]\n[Instrumental]\n[Outro]",
+        "the worker must receive canonical instrumental tags, never caption prose in its lyrics control",
+      );
+      assert.doesNotMatch(String(request.lyricsControl), /Establish|Keep the|vocals|spoken/u);
       assert.deepEqual(request.renderProfile, MINIMAX_MUSIC3_RENDER_PROFILE);
       const runtime = {
         provider: "novita",

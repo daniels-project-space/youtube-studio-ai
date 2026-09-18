@@ -250,6 +250,23 @@ function structuredCaption(input: {
   ].join("\n");
 }
 
+/**
+ * Music3 separates sung words from musical direction. Its lyrics input accepts
+ * recognised section tags, while the Structured Caption owns arrangement,
+ * instrumentation, energy and exclusions. Keeping prose instructions out of
+ * the lyrics field prevents an instrumental render from treating phrases such
+ * as “add harmonic depth” as performable text.
+ */
+export function instrumentalLyricsControl(role: ChannelMusicRole): string {
+  const interiorCount: Record<ChannelMusicRole, number> = {
+    primary_music: 4,
+    meditation_bed: 2,
+    short_form_bed: 2,
+    narration_bed: 3,
+  };
+  return ["[Intro]", ...Array.from({ length: interiorCount[role] }, () => "[Instrumental]"), "[Outro]"].join("\n");
+}
+
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
   const role = input.role ?? musicRoleForRoute(input.family, input.contentLaneKey);
   const genre = cleanText(input.genre, role === "primary_music" ? "warm lo-fi instrumental" : "restrained cinematic ambient", 160);
@@ -313,7 +330,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
         sections,
         exclusions,
       }),
-      lyricsControl: sections.map((section) => `[${section.label} - ${section.instruction}]`).join("\n"),
+      lyricsControl: instrumentalLyricsControl(role),
       sections,
     },
     mix: {
