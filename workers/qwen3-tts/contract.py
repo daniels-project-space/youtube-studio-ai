@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -23,8 +24,29 @@ REVISION = "0c0e3051f131929182e2c023b9537f8b1c68adfe"
 QWEN_TTS_VERSION = "0.1.1"
 TRANSFORMERS_VERSION = "4.57.3"
 SAMPLE_RATE = 24_000
-CAPACITY_MODE = "serverless-scale-to-zero"
 ACCOUNTING = "conservative-upper-bound"
+
+
+def runtime_profile() -> tuple[str, str, str]:
+    """Return the exact provider/GPU contract selected for this worker.
+
+    A provider label is evidence, not decoration.  The two profiles below are
+    deliberately finite so a deploy cannot silently turn a persistent 3090
+    worker into an unqualified accelerator or capacity mode.
+    """
+
+    provider = os.environ.get("QWEN3_TTS_RUNTIME_PROVIDER", "novita").strip().lower()
+    gpu = os.environ.get("QWEN3_TTS_RUNTIME_GPU", "RTX 4090").strip()
+    capacity_mode = os.environ.get(
+        "QWEN3_TTS_RUNTIME_CAPACITY_MODE", "serverless-scale-to-zero"
+    ).strip()
+    allowed = {
+        ("novita", "RTX 4090", "serverless-scale-to-zero"),
+        ("openrelay", "RTX 3090", "persistent-disk-auto-stop"),
+    }
+    if (provider, gpu, capacity_mode) not in allowed:
+        raise ContractError("Qwen3 TTS runtime profile is not an admitted exact provider/GPU configuration")
+    return provider, gpu, capacity_mode
 
 SPEAKERS = {
     "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden",
@@ -125,9 +147,10 @@ def parse_request(payload: Any, idempotency_key: str | None = None) -> SynthRequ
         "provider", "gpu", "capacityMode", "persistentCache",
         "idleShutdownMaxSeconds", "accounting",
     }, "runtime fields")
-    _exact(runtime["provider"], "novita", "runtime.provider")
-    _exact(runtime["gpu"], "RTX 4090", "runtime.gpu")
-    _exact(runtime["capacityMode"], CAPACITY_MODE, "runtime.capacityMode")
+    provider, gpu, capacity_mode = runtime_profile()
+    _exact(runtime["provider"], provider, "runtime.provider")
+    _exact(runtime["gpu"], gpu, "runtime.gpu")
+    _exact(runtime["capacityMode"], capacity_mode, "runtime.capacityMode")
     _exact(runtime["persistentCache"], True, "runtime.persistentCache")
     _exact(runtime["accounting"], ACCOUNTING, "runtime.accounting")
     idle = int(_number(runtime["idleShutdownMaxSeconds"], "idleShutdownMaxSeconds", 30, 900))
@@ -187,6 +210,7 @@ def make_response(
             f"conservative lifecycle cost ${cost_usd:.6f} exceeds request ceiling ${request.max_cost_usd:.6f}"
         )
 
+    provider, gpu, capacity_mode = runtime_profile()
     return {
         "receipt": {
             "schema": CONTRACT,
@@ -207,9 +231,9 @@ def make_response(
             "sampleRateHz": SAMPLE_RATE,
             "durationSec": round(duration, 3),
             "runtime": {
-                "provider": "novita",
-                "gpu": "RTX 4090",
-                "capacityMode": CAPACITY_MODE,
+                "provider": provider,
+                "gpu": gpu,
+                "capacityMode": capacity_mode,
                 "persistentCache": True,
                 "idleShutdownSeconds": request.idle_shutdown_seconds,
                 "accounting": ACCOUNTING,

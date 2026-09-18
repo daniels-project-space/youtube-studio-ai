@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gc
 import importlib.metadata
+import json
 import os
 import subprocess
 import tempfile
@@ -34,6 +35,7 @@ from contract import (
     ContractError,
     make_response,
     parse_request,
+    runtime_profile,
 )
 
 VOLUME = Path(os.environ.get("QWEN3_TTS_VOLUME", "/workspace/qwen3-tts"))
@@ -44,6 +46,18 @@ app = FastAPI()
 _lock = threading.Lock()
 _model: Any | None = None
 _last_used = time.monotonic()
+
+
+def _persistent_cache_ready() -> bool:
+    """Report only an exact, atomically verified persistent model cache."""
+    marker = VOLUME / ".qwen3-tts-model-ready.json"
+    try:
+        return json.loads(marker.read_text(encoding="utf-8")) == {
+            "model": MODEL,
+            "revision": REVISION,
+        }
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
 def _exact_runtime_version(distribution: str, expected: str) -> None:
@@ -59,10 +73,12 @@ def _runtime_attestation() -> None:
     _exact_runtime_version("qwen-tts", QWEN_TTS_VERSION)
     _exact_runtime_version("transformers", TRANSFORMERS_VERSION)
     if not torch.cuda.is_available():
-        raise RuntimeError("Qwen3 TTS requires CUDA; CPU may not attest the RTX 4090 route")
+        raise RuntimeError("Qwen3 TTS requires CUDA")
+    _, expected_gpu, _ = runtime_profile()
     gpu_name = torch.cuda.get_device_name(0)
-    if "4090" not in gpu_name:
-        raise RuntimeError(f"worker GPU is {gpu_name!r}, not the pinned RTX 4090")
+    expected_model = "4090" if expected_gpu == "RTX 4090" else "3090"
+    if expected_model not in gpu_name:
+        raise RuntimeError(f"worker GPU is {gpu_name!r}, not the pinned {expected_gpu}")
     try:
         _exact_runtime_version("flash-attn", os.environ.get("QWEN3_TTS_FLASH_ATTN_VERSION", "2.8.3"))
     except RuntimeError as error:
@@ -116,12 +132,14 @@ def _runtime_number(name: str, minimum: float, maximum: float) -> float:
 def health() -> dict[str, Any]:
     try:
         _runtime_attestation()
-    except RuntimeError as error:
+    except (ContractError, RuntimeError) as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return {
         "schema": CONTRACT,
         "runtimeReady": True,
+        "persistentCacheReady": _persistent_cache_ready(),
         "modelLoaded": _model is not None,
+        "busy": _lock.locked(),
         "idleSeconds": round(time.monotonic() - _last_used, 1),
     }
 
@@ -134,7 +152,10 @@ def synthesize(
 ) -> dict[str, Any]:
     global _last_used
     expected = os.environ.get("QWEN3_TTS_WORKER_TOKEN", "")
-    if not expected or authorization != f"Bearer {expected}":
+    trust_openrelay_gateway = os.environ.get("QWEN3_TTS_TRUST_OPENRELAY_GATEWAY") == "1"
+    if expected and authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not expected and (not trust_openrelay_gateway or not authorization.startswith("Bearer ")):
         raise HTTPException(status_code=401, detail="unauthorized")
     try:
         request = parse_request(payload, idempotency_key)
