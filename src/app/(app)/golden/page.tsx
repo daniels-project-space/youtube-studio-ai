@@ -614,18 +614,18 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const pitch = moduleSalesPitch(m);
   const isReference = m.status === "reference";
   const isRegistered = m.status === "registered";
+  const execution = catalogExecutionBinding(m.key);
   // This card composes real, independently owned children-learning blocks.
   // It is intentionally not a second executor, but calling it a “reference”
   // made a usable supervised path look like documentation-only inventory.
-  const isSupervisedLearningPath = m.key === "children-learning-studio";
-  const execution = catalogExecutionBinding(m.key);
+  const isSupervisedLearningPath = execution.kind === "supervised-pathway";
   const availability = catalogExecutionAvailability(execution);
   const promotionProof = GOLDEN_PROMOTION_PROOFS[m.key];
   const executionIsWarning = !isSupervisedLearningPath &&
     (execution.kind === "catalog-only" || execution.kind === "registered-private-release");
   const destination = MODULE_DESTINATIONS[m.key];
   const cover = moduleCover(m.key);
-  const binding = isSupervisedLearningPath
+  const binding = execution.kind === "supervised-pathway"
     ? "Supervised learning pathway"
     : execution.kind === "pipeline-module"
     ? `${execution.executableIds.length} production step${execution.executableIds.length === 1 ? "" : "s"}`
@@ -634,7 +634,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
       : execution.kind === "external-task"
         ? "Connected production task"
         : "Reference card only";
-  const bindingDetail = isSupervisedLearningPath
+  const bindingDetail = execution.kind === "supervised-pathway"
     ? "Curriculum intake · Learning Contract · Show Bible · Scene Compiler · child-editor review"
     : execution.kind === "catalog-only"
     ? "No compiler binding"

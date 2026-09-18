@@ -19,7 +19,7 @@ assert.match(salesPitches, /Find a channel angle worth building/);
 assert.match(page, /promotionProofCount === 0/);
 assert.match(page, /data-warning=\{executionIsWarning\}/);
 assert.match(page, /Reference card only/);
-assert.match(page, /const isSupervisedLearningPath = m\.key === "children-learning-studio"/);
+assert.match(page, /const isSupervisedLearningPath = execution\.kind === "supervised-pathway"/);
 assert.match(page, /data-tone="supervised">SUPERVISED/);
 assert.match(page, /data-module-key=\{m\.key\}/);
 assert.match(page, /className=\{styles\.moduleSummary\}/);

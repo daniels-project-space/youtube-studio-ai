@@ -32,6 +32,7 @@ async function main(): Promise<void> {
   assert.match(html, /SUPERVISED/);
   assert.match(html, /Supervised learning pathway/);
   assert.match(html, /Curriculum intake · Learning Contract · Show Bible · Scene Compiler · child-editor review/);
+  assert.match(html, /SUPERVISED · PRIVATE REVIEW/);
   assert.match(html, /Open children review desk/);
   assert.match(html, /IC controls remain unavailable until exact workflow/);
   assert.match(html, /MANIFEST REFERENCE/);
