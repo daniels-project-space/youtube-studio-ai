@@ -65,17 +65,21 @@ const phraseReviewer = async () => JSON.stringify({
 function makeBadComic(input: string, output: string): void {
   // The two obvious faults are deliberately present only in the 6–10s window:
   // a large bubble-shaped plate that occludes the panel subject and a second
-  // plate that extends beyond the right edge. This uses the real Golden comic
-  // video rather than a synthetic still.
+  // plate that extends beyond the right edge. This still uses the real Golden
+  // comic video rather than a synthetic still, but only needs a 12-second
+  // 640p derivative: all assertions sample that precise 6–10s interval.
+  // Keeping the temporary fixture small avoids making the direct readiness
+  // suite re-encode an unrelated 18-second 1080p master on every commit.
   const filters = [
-    "drawbox=x=650:y=190:w=560:h=360:color=white@1:t=fill:enable='between(t,6,10)'",
-    "drawbox=x=650:y=190:w=560:h=360:color=black@1:t=7:enable='between(t,6,10)'",
-    "drawbox=x=1810:y=640:w=280:h=200:color=white@1:t=fill:enable='between(t,6,10)'",
-    "drawbox=x=1810:y=640:w=280:h=200:color=black@1:t=7:enable='between(t,6,10)'",
+    "scale=640:360:flags=lanczos",
+    "drawbox=x=217:y=63:w=187:h=120:color=white@1:t=fill:enable='between(t,6,10)'",
+    "drawbox=x=217:y=63:w=187:h=120:color=black@1:t=3:enable='between(t,6,10)'",
+    "drawbox=x=603:y=213:w=93:h=67:color=white@1:t=fill:enable='between(t,6,10)'",
+    "drawbox=x=603:y=213:w=93:h=67:color=black@1:t=3:enable='between(t,6,10)'",
   ].join(",");
   const rendered = spawnSync(
     FFMPEG,
-    ["-y", "-i", input, "-vf", filters, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "copy", output],
+    ["-y", "-i", input, "-t", "12", "-an", "-vf", filters, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-pix_fmt", "yuv420p", output],
     { encoding: "utf8", maxBuffer: 1 << 26 },
   );
   assert.equal(rendered.status, 0, rendered.stderr?.slice(-1200));
@@ -661,7 +665,7 @@ async function main(): Promise<void> {
         },
       ],
     };
-    const failed = await reviewRender(badComic, 18, flawedIntent, {
+    const failed = await reviewRender(badComic, 12, flawedIntent, {
       runId: "visual-review-fixture",
       reviewer,
       persistEvidence: false,
