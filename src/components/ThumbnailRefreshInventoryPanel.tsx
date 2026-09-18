@@ -265,6 +265,7 @@ export function ThumbnailRefreshInventoryPanel({
   const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
   const [featuredPreviewUrls, setFeaturedPreviewUrls] = useState<Record<string, string>>({});
   const [featuredPreviewBatchId, setFeaturedPreviewBatchId] = useState<string | null>(null);
+  const [featuredPreviewBatchFailureId, setFeaturedPreviewBatchFailureId] = useState<string | null>(null);
   const featuredRailRef = useRef<HTMLDivElement>(null);
   const [featuredRailCanScroll, setFeaturedRailCanScroll] = useState({ previous: false, next: false });
 
@@ -483,9 +484,11 @@ export function ThumbnailRefreshInventoryPanel({
       .then((urls) => {
         if (current) setFeaturedPreviewUrls(urls);
       })
-      // A batch failure is non-fatal: each card resumes the existing one-at-a-
-      // time recovery path after this batch settles.
-      .catch(() => undefined)
+      // The per-card recovery path is intentional, but never silent: a viewer
+      // can see why compact previews arrive individually rather than in one read.
+      .catch(() => {
+        if (current) setFeaturedPreviewBatchFailureId(featuredPreviewRunIds);
+      })
       .finally(() => {
         if (current) setFeaturedPreviewBatchId(featuredPreviewRunIds);
       });
@@ -604,6 +607,9 @@ export function ThumbnailRefreshInventoryPanel({
             <div>
               <strong>New thumbnails</strong>
               <span>{featured.length} ready to inspect</span>
+              {featuredPreviewBatchFailureId === featuredPreviewRunIds ? (
+                <span className={styles.featuredFallback} role="status">Preview batch unavailable · loading cards individually</span>
+              ) : null}
             </div>
             <div className={styles.featuredControls} aria-label="New thumbnail controls">
               <button

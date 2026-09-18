@@ -16,6 +16,8 @@ assert.match(panel, /candidatePreviewRunIds=/);
 assert.match(panel, /previewUrl=\{row\.candidate\?\.runId/);
 assert.match(panel, /deferFetch=\{featuredPreviewBatchId !== featuredPreviewRunIds\}/);
 assert.match(panel, /The image endpoint retries R2 once itself/);
+assert.match(panel, /featuredPreviewBatchFailureId/);
+assert.match(panel, /Preview batch unavailable · loading cards individually/);
 
 const ids = ["candidate-0001", "candidate-0002", "candidate-0003"];
 assert.deepEqual(candidatePreviewIds(ids.join(",")), ids);
