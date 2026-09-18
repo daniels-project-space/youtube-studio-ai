@@ -14,7 +14,7 @@ assert.doesNotMatch(page, /Watch progress, inspect failures, and open saved outp
   "the compact run workspace must not repeat the shell's route description above its actionable controls");
 assert.match(page, /className=\{styles\.runDiagnosis\}/);
 assert.match(page, /Failure domain: \$\{failure\.faultDomain\}/);
-assert.match(page, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} compact/);
+assert.match(page, /ReleaseEvidenceBadge[\s\S]*status=\{run\.releaseEvidenceStatus\}[\s\S]*completedWithoutEvidence=\{run\.status === "ok"\}/);
 assert.doesNotMatch(page, /className=\{styles\.runFailure\}/);
 assert.match(styles, /\.runDiagnosis \{/);
 assert.doesNotMatch(styles, /\.runFailure \{/);

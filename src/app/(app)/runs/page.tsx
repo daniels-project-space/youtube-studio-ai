@@ -192,7 +192,13 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
       <span className={styles.runStatus}><StageBadge status={run.status} /></span>
       <span className={styles.runDatum}><small>Elapsed</small><strong className={live ? styles.liveValue : undefined}><Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} /></strong></span>
       <span className={styles.runDatum}><small>Cost</small><strong>{fmtUsd(run.costTotal)}</strong></span>
-      <span className={styles.runEvidence}><ReleaseEvidenceBadge status={run.releaseEvidenceStatus} compact /></span>
+      <span className={styles.runEvidence}>
+        <ReleaseEvidenceBadge
+          status={run.releaseEvidenceStatus}
+          compact
+          completedWithoutEvidence={run.status === "ok"}
+        />
+      </span>
       <span className={styles.runOpen}>{destination}<b aria-hidden="true">→</b></span>
     </Link>
   );

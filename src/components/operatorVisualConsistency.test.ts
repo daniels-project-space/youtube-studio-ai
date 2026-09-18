@@ -49,7 +49,7 @@ assert.match(runsModel, /export const INITIAL_VISIBLE_RUNS = 12/);
 assert.match(runsModel, /export function diagnoseRunFailure/);
 assert.match(runs, /className=\{styles\.runDiagnosis\}/);
 assert.match(runs, /Failure domain: \$\{failure\.faultDomain\}/);
-assert.match(runs, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} compact/);
+assert.match(runs, /ReleaseEvidenceBadge[\s\S]*status=\{run\.releaseEvidenceStatus\}[\s\S]*completedWithoutEvidence=\{run\.status === "ok"\}/);
 assert.match(runsCss, /\.runDiagnosis \{/);
 assert.doesNotMatch(runsCss, /\.runFailure \{/);
 assert.match(runsModel, /matching\.slice\(0, safeLimit\)/);

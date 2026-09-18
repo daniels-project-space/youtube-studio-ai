@@ -22,6 +22,7 @@ export function ReleaseEvidenceBadge({
   compact = false,
   wrap = false,
   labelContext = "run",
+  completedWithoutEvidence = false,
 }: {
   status?: string;
   size?: "sm" | "md";
@@ -30,12 +31,18 @@ export function ReleaseEvidenceBadge({
   /** Optional surface context; compact Library cards need to distinguish
    * master-release evidence from the adjacent thumbnail provenance label. */
   labelContext?: "run" | "master";
+  /** A finished run with no certificate is historical/unverified, not actively
+   * waiting for release evidence. This keeps dense run history truthful. */
+  completedWithoutEvidence?: boolean;
 }) {
   const normalized = normalizeReleaseEvidenceStatus(status);
   const color = COLOR[normalized];
   const pad = size === "sm" ? "0.14rem 0.48rem" : "0.24rem 0.64rem";
   const fontSize = size === "sm" ? "0.68rem" : "0.76rem";
-  const label = compact
+  const completedUnverified = normalized === "not_ready" && completedWithoutEvidence && labelContext === "run";
+  const label = completedUnverified
+    ? "Completed · unverified"
+    : compact
     ? labelContext === "master"
       ? {
           not_ready: "Master evidence pending",
@@ -50,10 +57,13 @@ export function ReleaseEvidenceBadge({
         release_evidence_recorded: "Evidence recorded",
       }[normalized]
     : releaseEvidenceStatusLabel(normalized);
+  const description = completedUnverified
+    ? "This completed run has no retained final-master release evidence."
+    : releaseEvidenceStatusDescription(normalized);
 
   return (
     <span
-      title={releaseEvidenceStatusDescription(normalized)}
+      title={description}
       style={{
         display: "inline-flex",
         alignItems: "center",
