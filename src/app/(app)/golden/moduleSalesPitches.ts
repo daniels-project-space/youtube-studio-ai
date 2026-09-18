@@ -124,7 +124,7 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
   loreshort: {
     title: "Lore Short",
     promise: "Make lore feel cinematic in under a minute.",
-    bullets: ["First-person story momentum", "World continuity preserved"],
+    bullets: ["First-person story momentum", "Sealed H3 motion route"],
   },
   "novita-render-farm": {
     title: "Novita Render Farm",
@@ -137,14 +137,14 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
     bullets: ["Direct Novita route", "Pixel and receipt checks"],
   },
   "videocraft-novita": {
-    title: "Videocraft",
-    promise: "Turn approved keyframes into cinematic motion.",
-    bullets: ["Shot identity preserved", "Temporal defects rejected"],
+    title: "Videocraft Archive",
+    promise: "Inspect retired route evidence without reopening it.",
+    bullets: ["Historical receipts stay read-only", "Fresh footage uses the H3 route"],
   },
   lofi: {
     title: "Lofi Loop",
     promise: "Turn one beautiful scene into hours of atmosphere.",
-    bullets: ["Seamless 30-second source", "Original long-form music"],
+    bullets: ["H3-backed 30-second source", "Original long-form music"],
   },
   quiz: {
     title: "Quizcraft Concept",
@@ -199,7 +199,7 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
   script: {
     title: "Script & Hook",
     promise: "Turn a topic into an irresistible story.",
-    bullets: ["Payoff starts immediately", "Every section moves forward"],
+    bullets: ["OpenRouter creative route", "Every section moves forward"],
   },
   guard: {
     title: "Guard Gates",

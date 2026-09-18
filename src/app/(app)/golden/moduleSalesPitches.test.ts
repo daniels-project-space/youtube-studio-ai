@@ -12,6 +12,13 @@ assert.deepEqual(
   "every current Golden module needs intentionally authored operator-facing sales copy",
 );
 
+assert.match(moduleSalesPitch(GOLDEN_MODULES.find((module) => module.key === "loreshort")!).bullets.join(" "), /H3/);
+assert.match(moduleSalesPitch(GOLDEN_MODULES.find((module) => module.key === "lofi")!).bullets.join(" "), /H3/);
+const retiredVideocraft = moduleSalesPitch(GOLDEN_MODULES.find((module) => module.key === "videocraft-novita")!);
+assert.match(retiredVideocraft.title, /Archive/);
+assert.match(`${retiredVideocraft.promise} ${retiredVideocraft.bullets.join(" ")}`, /retired|read-only/i);
+assert.match(moduleSalesPitch(GOLDEN_MODULES.find((module) => module.key === "script")!).bullets.join(" "), /OpenRouter/);
+
 for (const goldenModule of GOLDEN_MODULES) {
   const pitch = moduleSalesPitch(goldenModule);
   assert.ok(pitch.title.length > 2 && pitch.title.length <= 42, `${goldenModule.key} title must stay compact`);
