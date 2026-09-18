@@ -90,6 +90,11 @@ export function admitTitleObservation(
 export interface TitleCandidateStats {
   videoId: string;
   title: string;
+  /** Fresh, exact Studio-eligibility evidence; absent evidence is a hold. */
+  nativeTestEligibility?: {
+    eligible: boolean;
+    reason: string;
+  };
   /**
    * YouTube Studio does not offer native title/thumbnail tests for made-for-
    * kids videos. Keep this in the proposal input so automated operations never
@@ -197,6 +202,20 @@ export function planNativeTitleTestProposals(
         ...base,
         action: "hold",
         reason: "YouTube native title tests are unavailable for made-for-kids videos",
+      };
+    }
+    if (!video.nativeTestEligibility) {
+      return {
+        ...base,
+        action: "hold",
+        reason: "YouTube native title-test eligibility has not been verified for this exact video",
+      };
+    }
+    if (!video.nativeTestEligibility.eligible) {
+      return {
+        ...base,
+        action: "hold",
+        reason: `YouTube native title tests are unavailable: ${video.nativeTestEligibility.reason}`,
       };
     }
     if (video.swappedAt) {

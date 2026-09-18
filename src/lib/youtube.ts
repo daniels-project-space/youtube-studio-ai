@@ -253,6 +253,105 @@ export type YouTubeVideoIdentity = Readonly<{
   privacyStatus?: string;
 }>;
 
+/**
+ * The narrow Data API facts needed before proposing YouTube Studio's native
+ * title experiment. This is deliberately a read-only preflight: native title
+ * testing has no public write API, and a proposal must not promise a test the
+ * Studio UI will reject (private, made-for-kids, live/upcoming, or explicitly
+ * #Shorts-marked uploads).
+ */
+export type YouTubeNativeTitleTestEligibility = Readonly<{
+  videoId: string;
+  eligible: boolean;
+  reason: string;
+}>;
+
+/**
+ * Inspect up to 50 exact, channel-bound videos in one quota-efficient Data API
+ * request. Every requested id receives a result: a missing, malformed, or
+ * cross-channel item is a hold, never an optimistic experiment proposal.
+ *
+ * A completed Premiere becomes an ordinary long-form video and is eligible
+ * according to Studio; only live or upcoming broadcasts are held here. The
+ * Data API does not expose a universal Short boolean, so this only holds
+ * explicit #Shorts markers rather than guessing from duration or title text.
+ */
+export async function getNativeTitleTestEligibility(
+  accessToken: string,
+  videoIds: readonly string[],
+  expectedChannelId: string,
+): Promise<Map<string, YouTubeNativeTitleTestEligibility>> {
+  const ids = [...new Set(videoIds.map((value) => value.trim()).filter(Boolean))].slice(0, 50);
+  const result = new Map<string, YouTubeNativeTitleTestEligibility>();
+  if (!ids.length) return result;
+  if (!expectedChannelId.trim()) {
+    for (const videoId of ids) {
+      result.set(videoId, { videoId, eligible: false, reason: "the connected YouTube channel identity is unavailable" });
+    }
+    return result;
+  }
+
+  const params = new URLSearchParams({
+    part: "snippet,status",
+    fields: "items(id,snippet(channelId,liveBroadcastContent,tags),status(madeForKids,privacyStatus))",
+    id: ids.join(","),
+  });
+  const response = await fetch(
+    `https://www.googleapis.com/youtube/v3/videos?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const json = (await response.json()) as {
+    items?: Array<{
+      id?: string;
+      snippet?: { channelId?: string; liveBroadcastContent?: string; tags?: string[] };
+      status?: { madeForKids?: boolean; privacyStatus?: string };
+    }>;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new YouTubeError(`native title-test eligibility lookup failed: ${json.error?.message ?? response.status}`);
+  }
+
+  const byId = new Map((json.items ?? []).flatMap((item) => item.id ? [[item.id, item] as const] : []));
+  for (const videoId of ids) {
+    const item = byId.get(videoId);
+    if (!item?.snippet?.channelId) {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube did not return this video with a channel identity" });
+      continue;
+    }
+    if (item.snippet.channelId !== expectedChannelId) {
+      result.set(videoId, { videoId, eligible: false, reason: "the returned YouTube video belongs to a different channel" });
+      continue;
+    }
+    if (typeof item.status?.madeForKids !== "boolean") {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube omitted the made-for-kids state" });
+      continue;
+    }
+    if (!item.status.privacyStatus) {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube omitted the video privacy state" });
+      continue;
+    }
+    if (item.status?.madeForKids === true) {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube marks this video made for kids" });
+      continue;
+    }
+    if (item.status?.privacyStatus === "private") {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube reports this video is private" });
+      continue;
+    }
+    if (item.snippet.liveBroadcastContent === "live" || item.snippet.liveBroadcastContent === "upcoming") {
+      result.set(videoId, { videoId, eligible: false, reason: "YouTube reports this video as live or upcoming" });
+      continue;
+    }
+    if ((item.snippet.tags ?? []).some((tag) => tag.trim().toLocaleLowerCase() === "#shorts")) {
+      result.set(videoId, { videoId, eligible: false, reason: "the video is explicitly marked #Shorts" });
+      continue;
+    }
+    result.set(videoId, { videoId, eligible: true, reason: "YouTube confirms a non-private, non-kids, non-live standard video" });
+  }
+  return result;
+}
+
 /** Resolve one exact video before a destructive channel-bound action. */
 export async function getVideoIdentity(
   accessToken: string,

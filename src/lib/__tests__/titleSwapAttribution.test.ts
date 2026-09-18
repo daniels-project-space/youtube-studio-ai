@@ -21,6 +21,7 @@ function stats(over: Partial<TitleCandidateStats> = {}): TitleCandidateStats {
   return {
     videoId: "v1",
     title: "A Live Title",
+    nativeTestEligibility: { eligible: true, reason: "verified fixture" },
     titleAlternate: "The Other One",
     thumbnailImpressions: 10_000,
     ctr: 3,

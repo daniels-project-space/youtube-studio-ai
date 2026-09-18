@@ -22,6 +22,7 @@ function video(over: Partial<TitleCandidateStats> = {}): TitleCandidateStats {
   return {
     videoId: over.videoId ?? "v1",
     title: "The Original Title That Went Out",
+    nativeTestEligibility: { eligible: true, reason: "verified fixture" },
     titleAlternate: "The Runner Up Nobody Ever Used",
     thumbnailImpressions: 10_000,
     ctr: 2.0,
@@ -65,6 +66,23 @@ function main(): void {
   );
   assert.equal(madeForKids.action, "hold");
   assert.match(madeForKids.reason, /made-for-kids/i);
+
+  const notVerified = decision(
+    [...healthyChannel(), video({ videoId: "unverified", ctr: 2.0, nativeTestEligibility: undefined })],
+    "unverified",
+  );
+  assert.equal(notVerified.action, "hold");
+  assert.match(notVerified.reason, /eligibility has not been verified/i);
+  const privateVideo = decision(
+    [...healthyChannel(), video({
+      videoId: "private",
+      ctr: 2.0,
+      nativeTestEligibility: { eligible: false, reason: "YouTube reports this video is private" },
+    })],
+    "private",
+  );
+  assert.equal(privateVideo.action, "hold");
+  assert.match(privateVideo.reason, /private/i);
 
   // Noise floor: the same weak CTR on a handful of impressions is not evidence.
   assert.equal(

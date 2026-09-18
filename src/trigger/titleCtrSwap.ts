@@ -29,6 +29,9 @@ import { STUDIO_AUTOMATION_GATES, studioAutomationGate } from "@/lib/automationG
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
+import { getAccessToken, getNativeTitleTestEligibility } from "@/lib/youtube";
+import { requireYouTubeConnector } from "@/lib/youtubeConnector";
+import { YOUTUBE_FULL_SCOPE, YOUTUBE_READONLY_SCOPE } from "@/lib/publishingPolicy";
 import {
   planNativeTitleTestProposals,
   rejectSequentialTitleSwap,
@@ -41,11 +44,16 @@ type Logger = (m: string) => void;
 /** Bound owner-facing native-test proposals per channel in one run. */
 const MAX_PROPOSALS_PER_CHANNEL = 2;
 
-function candidate(entry: PerfEntry, madeForKids: boolean): TitleCandidateStats {
+function candidate(
+  entry: PerfEntry,
+  madeForKids: boolean,
+  nativeTestEligibility?: TitleCandidateStats["nativeTestEligibility"],
+): TitleCandidateStats {
   return {
     videoId: entry.videoId,
     title: entry.title,
     madeForKids,
+    ...(nativeTestEligibility ? { nativeTestEligibility } : {}),
     titleAlternate: entry.titleAlternate,
     titleAlternates: entry.titleAlternates,
     thumbnailImpressions: entry.thumbnailImpressions,
@@ -54,6 +62,39 @@ function candidate(entry: PerfEntry, madeForKids: boolean): TitleCandidateStats 
     titleSetAt: entry.titleSetAt ?? entry.publishedAt,
     swappedAt: entry.titleSwap?.swappedAt,
   };
+}
+
+const provisionallyEligible: NonNullable<TitleCandidateStats["nativeTestEligibility"]> = {
+  eligible: true,
+  reason: "internal triage only; a live YouTube eligibility preflight is still required",
+};
+
+async function loadNativeTestEligibility(args: {
+  convex: ConvexHttpClient;
+  ownerId: string;
+  channelId: Id<"channels">;
+  videoIds: readonly string[];
+  log: Logger;
+}): Promise<Map<string, NonNullable<TitleCandidateStats["nativeTestEligibility"]>>> {
+  const ids = [...new Set(args.videoIds.map((videoId) => videoId.trim()).filter(Boolean))];
+  const holds = (reason: string) => new Map(ids.map((videoId) => [videoId, { eligible: false, reason }] as const));
+  if (!ids.length) return new Map();
+  try {
+    const connector = await requireYouTubeConnector(args.convex, {
+      ownerId: args.ownerId,
+      channelId: args.channelId,
+      requiredScopes: [YOUTUBE_READONLY_SCOPE, YOUTUBE_FULL_SCOPE],
+    });
+    if (!connector.ytChannelId?.trim()) {
+      return holds("the connected YouTube channel identity is unavailable");
+    }
+    const accessToken = await getAccessToken(connector.refreshToken);
+    return await getNativeTitleTestEligibility(accessToken, ids, connector.ytChannelId);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    args.log(`title-native-test: eligibility preflight held ${ids.length} candidate(s): ${reason}`);
+    return holds(`the live YouTube eligibility preflight could not be completed (${reason.slice(0, 180)})`);
+  }
 }
 
 /**
@@ -109,8 +150,30 @@ export async function runTitleCtrSwap(
     const dirty = judgePriorSwaps(ledger, log) > 0;
     judged += dirty ? 1 : 0;
 
+    // This first pass is private triage only: it selects at most two candidates
+    // worth a single batched Data API read. Nothing is surfaced as a proposal
+    // until the exact live-video eligibility evidence below re-runs the rule.
+    const potentialDecisions = planNativeTitleTestProposals(
+      ledger.map((entry) => candidate(entry, channel.schedule?.madeForKids === true, provisionallyEligible)),
+      now,
+    );
+    const potentialIds = potentialDecisions
+      .filter((decision) => decision.action === "propose_native_test")
+      .slice(0, MAX_PROPOSALS_PER_CHANNEL)
+      .map((decision) => decision.videoId);
+    const eligibility = await loadNativeTestEligibility({
+      convex,
+      ownerId,
+      channelId: channel._id,
+      videoIds: potentialIds,
+      log,
+    });
     const decisions = planNativeTitleTestProposals(
-      ledger.map((entry) => candidate(entry, channel.schedule?.madeForKids === true)),
+      ledger.map((entry) => candidate(
+        entry,
+        channel.schedule?.madeForKids === true,
+        eligibility.get(entry.videoId),
+      )),
       now,
     );
     const proposals = decisions
