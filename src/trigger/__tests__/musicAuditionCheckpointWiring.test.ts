@@ -7,6 +7,7 @@ const pipeline = readFileSync(join(root, "src/trigger/runPipeline.ts"), "utf8");
 const checkpoint = readFileSync(join(root, "convex/musicAuditionCheckpoints.ts"), "utf8");
 const dispatcher = readFileSync(join(root, "src/trigger/musicAuditionContinuationDispatcher.ts"), "utf8");
 const approvalRoute = readFileSync(join(root, "src/app/api/music-audition-checkpoints/route.ts"), "utf8");
+const auditionPanel = readFileSync(join(root, "src/components/MusicAuditionPanel.tsx"), "utf8");
 
 assert.match(pipeline, /entry\.block === "music" && entry\.params\?\.provider === "minimax_music3"/u);
 assert.match(pipeline, /stopAfterBlockId: "music"/u);
@@ -28,5 +29,18 @@ assert.match(
   /assertPinnedMiniMaxMusic3Receipt\(runtime, program\)[\s\S]*?assertMusicAuditionNativeBytes\([\s\S]*?nativeWavBytes/u,
   "approval must bind both the current qualified worker receipt and the actual retained WAV bytes before an owner decision becomes durable",
 );
+assert.match(
+  approvalRoute,
+  /assertMusicAuditionNativeBytes\([\s\S]*?measureNativeMusicQuality\([\s\S]*?measurements: nativeQuality\.measurements/u,
+  "approval must derive technical QC from the exact retained native WAV, never a browser measurement payload",
+);
+assert.doesNotMatch(
+  approvalRoute,
+  /submission\.measurements/u,
+  "an owner cannot type technical QC values for a different take",
+);
+assert.match(auditionPanel, /Native WAV QC \(measured from this take\)/u);
+assert.match(auditionPanel, /nativeQuality\?\.measurements/u);
+assert.doesNotMatch(auditionPanel, /setMeasurements/u, "the audition UI must not offer editable technical measurements");
 
 console.log("MUSIC AUDITION CHECKPOINT WIRING PASS — MiniMax stops after music and persists a lease-fenced native-WAV receipt");

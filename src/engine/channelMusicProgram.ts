@@ -4,6 +4,8 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 export const CHANNEL_MUSIC_PROGRAM_VERSION = "channel-music-program/v1" as const;
+/** Exact maximum tolerated early high-band collapse in a retained Music3 WAV. */
+export const MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB = 18;
 
 export const ChannelMusicRoleSchema = z.enum([
   "primary_music",
@@ -369,6 +371,10 @@ export const MusicProgramQualityReceiptBodySchema = z.object({
     dcOffsetAbsolute: z.number().min(0).max(1),
     silenceFraction: z.number().min(0).max(1),
     mechanicalArtifactScore: z.number().min(0).max(1),
+    // Derived from the native retained WAV, not a form field. It catches the
+    // known Music3/ComfyUI failure mode where high-frequency information
+    // collapses a few seconds after a normal-sounding opening.
+    openingHighBandDropDb: z.number().min(0).max(100),
   }).strict(),
   sectionReviews: z.array(z.object({
     sectionId: boundedText(80),
@@ -442,6 +448,9 @@ export function createMusicProgramQualityReceipt(input: {
     measurements.dcOffsetAbsolute > 0.02 ? "DC offset is above the release ceiling" : "",
     measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
     measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
+    measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
+      ? "opening-to-post-opening high-band energy collapsed (known Music3 degradation signature)"
+      : "",
     sectionReviews.some((section) => section.score < 0.75) ? "at least one musical section failed review" : "",
     audition.emotionalDepthScore < program.quality.minimumEmotionalDepthScore
       ? "human audition found insufficient emotional depth"

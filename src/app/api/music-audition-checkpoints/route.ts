@@ -9,6 +9,7 @@ import { sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { ChannelMusicProgramSchema, createMusicProgramQualityReceipt } from "@/engine/channelMusicProgram";
+import { measureNativeMusicQuality } from "@/lib/nativeMusicQuality";
 import {
   assertMusicAuditionNativeBytes,
   createMusicAuditionApproval,
@@ -26,12 +27,6 @@ const QualitySubmissionSchema = z.object({
   action: z.literal("approve"),
   checkpointId: z.string().trim().min(1).max(500),
   runId: z.string().trim().min(1).max(500),
-  measurements: z.object({
-    integratedLufs: z.number().finite(), truePeakDbtp: z.number().finite(), lraLu: z.number().finite(),
-    crestDb: z.number().finite(), clippedSamples: z.number().int().nonnegative(),
-    maximumConsecutiveCeilingSamples: z.number().int().nonnegative(), dcOffsetAbsolute: z.number().finite(),
-    silenceFraction: z.number().finite(), mechanicalArtifactScore: z.number().finite(),
-  }).strict(),
   sectionReviews: z.array(z.object({
     sectionId: z.string().trim().min(1).max(80), score: z.number().finite(), evidence: z.string().trim().min(1).max(600),
   }).strict()).min(4).max(8),
@@ -96,8 +91,21 @@ export async function GET(request: Request) {
     if (!result) return NextResponse.json({ ok: true, checkpoint: null }, { headers: { "Cache-Control": "no-store" } });
     assertOwnedKey(actor.ownerId, result.review.nativeWavKey, "music audition native WAV");
     assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
-    const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(await getObjectBytes(result.review.channelMusicProgramKey)).toString("utf8")));
+    const [programBytes, nativeWavBytes] = await Promise.all([
+      getObjectBytes(result.review.channelMusicProgramKey),
+      getObjectBytes(result.review.nativeWavKey),
+    ]);
+    const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
     if (program.fingerprint !== result.review.programFingerprint) throw new Error("music audition program fingerprint validation failed");
+    const checkpoint = MusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
+    if (checkpoint.ownerId !== actor.ownerId || checkpoint.programFingerprint !== program.fingerprint) {
+      throw new Error("music audition native WAV checkpoint identity mismatch");
+    }
+    assertMusicAuditionNativeBytes({ expected: checkpoint.nativeOutput, bytes: nativeWavBytes });
+    const nativeQuality = await measureNativeMusicQuality({
+      audio: nativeWavBytes,
+      durationSec: checkpoint.nativeOutput.durationSec,
+    });
     const nativeWavUrl = await presignDownload(result.review.nativeWavKey, { expiresIn: 600 });
     return NextResponse.json({
       ok: true,
@@ -107,6 +115,7 @@ export async function GET(request: Request) {
         checkpointFingerprint: undefined, immutableCheckpoint: undefined, nativeWavUrl,
         durationSec: result.review.durationSec, sampleRateHz: result.review.sampleRateHz, channels: result.review.channels,
         programFingerprint: result.review.programFingerprint,
+        nativeQuality,
         sections: program.generation.sections.map((section) => ({ id: section.id, label: section.label, instruction: section.instruction })),
       },
     }, { headers: { "Cache-Control": "no-store" } });
@@ -160,9 +169,16 @@ export async function POST(request: Request) {
       // Never let an owner review approve a missing, overwritten, or different
       // object merely because its R2 key and worker metadata look plausible.
       assertMusicAuditionNativeBytes({ expected: checkpoint.nativeOutput, bytes: nativeWavBytes });
+      // Technical measurements come from these exact retained bytes. The
+      // browser only supplies human judgement for arrangement and emotional
+      // quality; it cannot type metrics for a more convenient take.
+      const nativeQuality = await measureNativeMusicQuality({
+        audio: nativeWavBytes,
+        durationSec: checkpoint.nativeOutput.durationSec,
+      });
       const reviewReceiptFingerprint = sha256Hex(canonicalJson({
         version: "music-audition-human-review/v1", checkpointFingerprint: checkpoint.checkpointFingerprint,
-        reviewerId: actor.ownerId, measurements: submission.measurements, sectionReviews: submission.sectionReviews,
+        reviewerId: actor.ownerId, measurements: nativeQuality.measurements, sectionReviews: submission.sectionReviews,
         audition: submission.audition,
       }));
       const qualityReceipt = createMusicProgramQualityReceipt({
@@ -172,7 +188,7 @@ export async function POST(request: Request) {
           durationSec: checkpoint.nativeOutput.durationSec, sampleRate: checkpoint.nativeOutput.sampleRateHz,
           channels: checkpoint.nativeOutput.channels, codec: checkpoint.nativeOutput.codec,
         },
-        measurements: submission.measurements,
+        measurements: nativeQuality.measurements,
         sectionReviews: submission.sectionReviews,
         audition: { ...submission.audition, reviewerId: actor.ownerId, reviewReceiptFingerprint },
       });

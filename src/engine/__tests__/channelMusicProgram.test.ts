@@ -83,6 +83,7 @@ const receiptInput = {
     dcOffsetAbsolute: 0.0002,
     silenceFraction: 0.002,
     mechanicalArtifactScore: 0.04,
+    openingHighBandDropDb: 1.2,
   },
   sectionReviews: lofi.generation.sections.map((section) => ({
     sectionId: section.id,
@@ -124,6 +125,16 @@ assert.throws(
   }),
   /loudness range.*crest factor.*hollow or generic/iu,
   "a technically decodable but flat/hollow song must not qualify",
+);
+
+assert.throws(
+  () => createMusicProgramQualityReceipt({
+    program: lofi,
+    ...receiptInput,
+    measurements: { ...receiptInput.measurements, openingHighBandDropDb: 26, mechanicalArtifactScore: 0.4 },
+  }),
+  /opening-to-post-opening high-band energy collapsed/u,
+  "a take with the known post-opening Music3 spectral collapse must never qualify",
 );
 
 const tampered = structuredClone(history);

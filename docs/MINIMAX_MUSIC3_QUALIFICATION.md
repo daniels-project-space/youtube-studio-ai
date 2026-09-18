@@ -43,6 +43,16 @@ The global worker benchmark is not permission to declare every new score good. E
 
 This addresses an active ComfyUI MiniMax Music 3 report of audio that degrades a few seconds into a nominally successful render. Qualification must include targeted listening at the affected early window and at every sealed section boundary; a green worker job or a global qualification hash is never treated as evidence that a specific take is release-ready. The official Comfy workflow also notes that tiled VAE decode can introduce seams. The v2 contract therefore rejects a worker receipt unless it proves the non-tiled full-VAE decode graph; it cannot silently use a low-VRAM/tiling workaround and still call the take qualified.
 
+At each owner audition, `native-music-quality/v1` now measures the exact
+retained WAV after its byte-identity check. It derives loudness, true peak,
+crest, DC, silence, ceiling evidence, and the 5 kHz+ change from an early
+window to the first post-opening window. A drop above 18 dB is a blocking
+signature for the reported early bandwidth collapse. Those technical values
+are shown read-only in the desk and recomputed on approval; a browser cannot
+supply measurements from another take. The owner still evaluates the things a
+meter cannot prove: every sealed arrangement section, emotional depth,
+originality, and whether the take is hollow or generic.
+
 Production mastering applies one measured constant gain. It does not compress, limit, normalize sections independently, or hide a source whose peak headroom cannot reach the sealed LUFS target.
 
 ## License and production admission
