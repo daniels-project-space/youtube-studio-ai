@@ -94,11 +94,11 @@ def _load_model():
     _runtime_attestation()
     from qwen_tts import Qwen3TTSModel
 
+    model_path = Path(os.environ.get("QWEN3_TTS_MODEL_PATH", ""))
+    if not model_path.is_dir():
+        raise RuntimeError("Qwen3 TTS must start through the persistent-cache entrypoint")
     _model = Qwen3TTSModel.from_pretrained(
-        MODEL,
-        revision=REVISION,
-        cache_dir=str(HF_CACHE),
-        local_files_only=True,
+        str(model_path),
         device_map="cuda",
         dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
