@@ -99,7 +99,6 @@ const OTHERS: [string, string][] = [
   ["scene_planner", "channelProgramRoute"],
   ["story_spine", "channelProgramRoute"],
   ["studio_ltx_adapter_resolve", "narrativeSeriesRunSelector"],
-  ["timeline_assemble", "ltxStyleId"],
   ["topic_select", "narrativeSeriesRunSelector"],
   ["upload_draft", "finalMasterReleaseCertificate"],
   ["cleanup", "finalMasterReleaseCertificate"],

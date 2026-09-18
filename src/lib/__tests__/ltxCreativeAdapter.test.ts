@@ -291,9 +291,9 @@ assert.deepEqual(resolveLtxCreativeAdapters({
 }), new Map());
 
 async function main(): Promise<void> {
-  // The adapter contract is only useful if every remaining direct LTX caller
-  // can carry the exact typed selection to the sealed worker. Lo-Fi motion is
-  // intentionally H3-native now and must not retain an LTX adapter seam.
+  // Retained adapter metadata remains inspectable for historical Library
+  // evidence, but no current video caller may route it into a new worker.
+  // Lo-Fi and I2V are intentionally H3-native.
   const root = process.cwd();
   const [media, i2v, lofi, storySpineRenderer, directRenderer] = await Promise.all([
     readFile(join(root, "src/lib/novitaMedia.ts"), "utf8"),
@@ -302,10 +302,10 @@ async function main(): Promise<void> {
     readFile(join(root, "src/trigger/blocks/novitaRenderBlocks.ts"), "utf8"),
     readFile(join(root, "src/lib/novitaDirectRender.ts"), "utf8"),
   ]);
-  assert.match(media, /creativeAdapter\?: LtxCreativeAdapterInput/);
-  assert.match(media, /creativeAdapter: args\.creativeAdapter/);
-  assert.match(i2v, /creativeAdapter\?: LtxCreativeAdapterInput/);
-  assert.match(i2v, /creativeAdapter: req\.creativeAdapter/);
+  assert.match(media, /renderNovitaGeneratedScenes is retired for new work/);
+  assert.doesNotMatch(i2v, /LtxCreativeAdapterInput/);
+  assert.match(i2v, /creativeAdapter\?: unknown/);
+  assert.doesNotMatch(i2v, /creativeAdapter: req\.creativeAdapter/);
   assert.match(lofi, /minimaxH3Readiness\("novita"\)/);
   assert.doesNotMatch(lofi, /renderNovitaI2V/);
   assert.match(storySpineRenderer, /renderMiniMaxH3/);

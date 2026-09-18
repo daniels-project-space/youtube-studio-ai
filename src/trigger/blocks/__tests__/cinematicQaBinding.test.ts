@@ -62,10 +62,10 @@ assert.match(
   /ctx\.store\["footageRenderer"\][\s\S]*renderer\.provider === "salad"\)[\s\S]*MINIMAX_H3_MANIFEST_SHA256/,
   "timeline assembly must validate the explicit renderer identity when a generated footage handoff provides one",
 );
-assert.match(
+assert.doesNotMatch(
   timelineSource,
-  /cinematicFootageManifest && footageRenderer\?\.kind !== "minimax-h3"/,
-  "native MiniMax H3 footage must not receive the legacy LTX film finish",
+  /cinematicFilmLook|filmGrain: cinematicFilmLook|LTX film finish/,
+  "the active cinematic assembler must not retain an LTX-specific visual finish",
 );
 assert.match(
   timelineSource,

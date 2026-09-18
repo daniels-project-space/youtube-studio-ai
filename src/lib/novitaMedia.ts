@@ -283,50 +283,6 @@ function asLtxDistilledVideoShot(
   };
 }
 
-/**
- * Prepare a standalone direct I2V take with the exact same LTX continuity
- * contract as the multi-shot production path.  In particular, distilled LTX
- * has no negative-prompt argument, so exclusions are embedded in the sealed
- * positive/motion contract rather than being silently dropped or rejected only
- * after a caller has already prepared the worker request.
- */
-export function prepareDirectLtxI2vShot(input: {
-  id: string;
-  prompt: string;
-  diegeticSoundscape?: string;
-  durationSec: number;
-  negativePrompt?: string;
-  seed?: number;
-  motionPrompt?: string;
-  cameraMove?: Shot["cameraMove"];
-  cameraInstruction?: string;
-  shotScale?: Shot["shotScale"];
-  lens?: string;
-  creativeAdapter?: LtxCreativeAdapterInput;
-  profileId: NovitaProfileId;
-  stillKey: string;
-  endStillKey?: string;
-  styleId?: string;
-}): Shot {
-  return applyLtxI2vPromptContract(
-    asLtxDistilledVideoShot({
-      id: input.id,
-      imagePrompt: input.prompt,
-      motionPrompt: input.motionPrompt ?? input.prompt,
-      diegeticSoundscape: input.diegeticSoundscape,
-      durationSec: input.durationSec,
-      negativePrompt: input.negativePrompt,
-      seed: input.seed,
-      cameraMove: input.cameraMove,
-      cameraInstruction: input.cameraInstruction,
-      shotScale: input.shotScale,
-      lens: input.lens,
-      creativeAdapter: input.creativeAdapter,
-    }, input.profileId, input.stillKey, input.endStillKey),
-    input.styleId,
-  );
-}
-
 function keyframeRetrySeed(seed: number | undefined, attempt: number): number {
   const base = Number.isFinite(seed) ? Math.floor(seed!) : 4_242;
   return Math.abs((base + attempt * 104_729) % 2_147_483_647);
@@ -562,7 +518,7 @@ function exactCandidateByShot(result: NovitaRenderResult, ids: readonly string[]
   return byShot;
 }
 
-export async function renderNovitaGeneratedScenes(args: {
+type RetiredNovitaGeneratedScenesArgs = {
   prefix: string;
   scenes: readonly NovitaGeneratedScene[];
   profileId?: NovitaProfileId;
@@ -580,7 +536,9 @@ export async function renderNovitaGeneratedScenes(args: {
   keyframeGate?: NovitaKeyframeGate;
   /** Runs after each LTX take and before any clip can reach the editor. */
   clipGate?: NovitaClipGate;
-}): Promise<{
+};
+
+type RetiredNovitaGeneratedScenesResult = {
   scenes: NovitaRenderedScene[];
   costUsd: number;
   imageReceipt: NovitaBillingReceipt;
@@ -589,7 +547,27 @@ export async function renderNovitaGeneratedScenes(args: {
   videoReceipt: NovitaBillingReceipt;
   /** Every paid video receipt, including bounded motion replacements. */
   videoReceipts: NovitaBillingReceipt[];
-}> {
+};
+
+/**
+ * Compatibility-only admission surface for historical callers. Fresh generated
+ * footage is structurally H3-only; this fails before image or video spend.
+ */
+export async function renderNovitaGeneratedScenes(
+  _args: RetiredNovitaGeneratedScenesArgs,
+): Promise<RetiredNovitaGeneratedScenesResult> {
+  throw new Error(
+    "renderNovitaGeneratedScenes is retired for new work; dispatch through the MiniMax H3 footage adapter instead",
+  );
+}
+
+/**
+ * Isolated legacy implementation retained temporarily for durable record
+ * inspection only. It is private and has no executable caller.
+ */
+async function renderRetiredNovitaGeneratedScenes(
+  args: RetiredNovitaGeneratedScenesArgs,
+): Promise<RetiredNovitaGeneratedScenesResult> {
   if (!args.scenes.length || args.scenes.length > 24) {
     throw new Error("novita media sequence must contain between 1 and 24 scenes");
   }
@@ -1130,121 +1108,5 @@ export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRe
     });
     args.onReceipt?.(rendered);
     return rendered.bytes;
-  };
-}
-
-async function persistRemoteStill(args: { imageUrl: string; prefix: string; id: string }): Promise<string> {
-  const url = new URL(args.imageUrl);
-  if (url.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
-    throw new Error("novita media input image must be a public HTTPS URL");
-  }
-  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`novita media input download failed ${response.status}`);
-  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-  if (!contentType.startsWith("image/")) throw new Error("novita media input URL did not return an image");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
-    throw new Error("novita media input image size is outside the 1B..30MiB contract");
-  }
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  const key = `${cleanPrefix(args.prefix)}/inputs/${safeId(args.id)}-${digest.slice(0, 20)}`;
-  await putObject(key, bytes, { contentType });
-  return key;
-}
-
-export async function renderNovitaI2V(args: {
-  prefix: string;
-  id: string;
-  prompt: string;
-  /** Diegetic-only sound direction for this direct I2V take. */
-  diegeticSoundscape?: string;
-  imageKey?: string;
-  imageUrl?: string;
-  /** Optional reviewed/intentional LTX final-frame image. */
-  endImageKey?: string;
-  endImageUrl?: string;
-  durationSec?: number;
-  negativePrompt?: string;
-  /** Independent in-frame action/particle direction; defaults to `prompt`. */
-  motionPrompt?: string;
-  cameraMove?: Shot["cameraMove"];
-  /** Concrete source-grounded camera path, included in the sealed LTX prompt. */
-  cameraInstruction?: string;
-  shotScale?: Shot["shotScale"];
-  lens?: string;
-  seed?: number;
-  profileId?: NovitaProfileId;
-  /** Optional sealed LTX visual-treatment preset for the direct I2V contract. */
-  styleId?: string;
-  /** Optional sealed LTX creative adapter; runtime/benchmark admission happens in the direct worker path. */
-  creativeAdapter?: LtxCreativeAdapterInput;
-  /** Signed envelope for this one direct video worker. */
-  maxCostUsd: number;
-  lifecycle?: NovitaRenderLifecycle;
-}): Promise<{ url: string; key: string; jobId: string; model: string; costUsd: number; billingReceipt: NovitaBillingReceipt }> {
-  if (Boolean(args.imageKey) === Boolean(args.imageUrl)) {
-    throw new Error("novita i2v requires exactly one of imageKey or imageUrl");
-  }
-  if (args.endImageKey && args.endImageUrl) {
-    throw new Error("novita i2v accepts at most one of endImageKey or endImageUrl");
-  }
-  const profile = generationProfile(args.profileId ?? "production");
-  // Do not persist/download a still or create any direct worker while the
-  // exact pinned video profile lacks a benchmarked hardware admission.
-  assertNovitaVideoProfileRuntime(profile);
-  if (profile.video.candidates !== 1) {
-    throw new Error(
-      `novita i2v cannot attest ${profile.video.candidates} video candidates; explicit multi-candidate manifests are required`,
-    );
-  }
-  const envelope = novitaCostEnvelope({
-    label: "novita i2v",
-    videoJobs: 1,
-    maxCostUsd: args.maxCostUsd,
-  });
-  const prefix = cleanPrefix(args.prefix);
-  const id = safeId(args.id);
-  const stillKey = args.imageKey ?? await persistRemoteStill({ imageUrl: args.imageUrl!, prefix, id });
-  const endStillKey = args.endImageKey
-    ?? (args.endImageUrl
-      ? await persistRemoteStill({ imageUrl: args.endImageUrl, prefix, id: `${id}-terminal` })
-      : undefined);
-  const shot = prepareDirectLtxI2vShot({
-    id,
-    prompt: args.prompt,
-    diegeticSoundscape: args.diegeticSoundscape,
-    durationSec: args.durationSec ?? 5,
-    negativePrompt: args.negativePrompt,
-    motionPrompt: args.motionPrompt,
-    seed: args.seed,
-    cameraMove: args.cameraMove,
-    cameraInstruction: args.cameraInstruction,
-    shotScale: args.shotScale,
-    lens: args.lens,
-    creativeAdapter: args.creativeAdapter,
-    profileId: profile.id,
-    stillKey,
-    endStillKey,
-    styleId: args.styleId,
-  });
-  const result = await renderVideo({
-    prefix: `${prefix}/video`,
-    shots: [shot],
-    profile: toNovitaPhaseProfile(profile, "video"),
-    nshard: 1,
-    maxConcurrent: 1,
-    jobs: "full",
-    maxCostUsd: envelope.videoMaxCostUsd,
-    lifecycle: args.lifecycle,
-    styleId: args.styleId,
-  });
-  const key = exactCandidateByShot(result, [id]).get(id)!;
-  return {
-    url: await presignDownload(key),
-    key,
-    jobId: result.raw.jobId,
-    model: `${profile.video.model}@${profile.video.revision}`,
-    costUsd: result.costUsd,
-    billingReceipt: result.billingReceipt,
   };
 }

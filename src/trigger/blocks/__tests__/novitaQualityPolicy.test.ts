@@ -174,7 +174,7 @@ assert.equal(videoRepair.shot.stillKey, "owner/demo/runs/run/novita/image/select
 assert.equal(
   videoRepair.shot.endStillKey,
   "owner/demo/runs/run/novita/image/selected-next.png",
-  "a repaired continuous shot must retain its reviewed LTX endpoint rather than silently dropping the handoff",
+  "a repaired continuous shot must retain its reviewed endpoint QA anchor rather than silently dropping the handoff",
 );
 assert.match(videoRepair.shot.prompt, /First-frame constraint/);
 assert.match(videoRepair.shot.prompt, /middle frame freezes/);
@@ -194,8 +194,8 @@ const adapterBoundVideoRepair = planCinematicQualityRepair({
 });
 assert.deepEqual(
   adapterBoundVideoRepair.shot.creativeAdapter,
-  { id: "ltx-creative-archival-noir", strength: 0.42 },
-  "a QA-repaired clip must preserve the benchmarked creative adapter rather than silently falling back to the base model",
+  undefined,
+  "a retired adapter payload must not enter an H3 repair request",
 );
 assert.deepEqual(
   planCinematicQualityRepair({
@@ -209,7 +209,7 @@ assert.deepEqual(
     creativeAdapter: { id: "ltx-creative-archival-noir", strength: 0.42 },
   }).shot.creativeAdapter,
   adapterBoundVideoRepair.shot.creativeAdapter,
-  "a retry must retain the same adapter selection as the original targeted repair",
+  "a retry must continue to omit the retired adapter selection",
 );
 assert.throws(
   () => planCinematicQualityRepair({

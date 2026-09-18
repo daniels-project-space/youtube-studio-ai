@@ -10,12 +10,7 @@ import { join } from "node:path";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
 import { register as registerBlock, get as getRegistered } from "@/engine/registry";
-import {
-  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-  makeRunTempDir,
-  downloadTo,
-  readBytes,
-} from "@/lib/files";
+import { makeRunTempDir, readBytes, writeBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { parseJsonLoose } from "@/lib/gemini";
 import { creativeTextJson } from "@/lib/creativeText";
@@ -183,31 +178,25 @@ async function runStep(
     return rendered;
   }
   if (step.op === "i2v") {
-    guardCost(CLIP_COST);
     const img = resolveRef(step.imageFrom, scope) as { url?: string; key?: string } | string | undefined;
-    const imageUrl = typeof img === "string" ? img : img?.url;
     const imageKey = typeof img === "string" ? undefined : img?.key;
-    if (!imageUrl && !imageKey) throw new Error(`forged i2v: imageFrom "${step.imageFrom}" resolved to nothing`);
+    if (!imageKey) {
+      throw new Error(
+        `forged i2v: imageFrom "${step.imageFrom}" must resolve to an immutable R2 image key for MiniMax H3`,
+      );
+    }
+    guardCost(CLIP_COST);
     const clip = await generateI2V({
       prompt: interp(step.prompt, scope),
-      imageUrl,
       imageKey,
       durationSec: step.durationSec ?? 5,
       aspectRatio: "16:9",
       maxCostUsd: CLIP_COST,
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
-      lifecycle: {
-        ownerId: ctx.ownerId,
-        channelId: ctx.channelId,
-        runId: ctx.runId,
-        blockId: state.blockId,
-      },
     });
     reconcileProviderCost(CLIP_COST, clip.costUsd, "forged Novita i2v");
-    const path = await downloadTo(clip.url, join(state.tmp, `forge_${state.n++}.mp4`), {
-      timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-    });
+    const path = await writeBytes(join(state.tmp, `forge_${state.n++}.mp4`), clip.outputBytes);
     return { path, url: clip.url };
   }
   if (step.op === "remotion") {

@@ -17,16 +17,15 @@ assert.ok(footage.includes('footageRenderer: {\n            kind: "minimax-h3"')
 assert.ok(visionGate > prepared, "verified prepared footage must be reusable before a new vision/provider route is required");
 for (const required of [
   "preparedManifest.source !== plan.source",
-  "preparedFootage.ltxStyleId !== ltxStyleSelection.styleId",
-  "timing does not match the frozen scene plan",
   "getObjectBytes(clip.r2Key)",
   "sha256BytesHex(bytes) !== clip.sha256",
   "!measured.hasVideo",
-  "prepared weekly clip ${index + 1} video duration",
+  "prepared H3 clip ${index + 1} failed native duration verification",
   "generatedFootageSceneManifest: preparedManifest",
-  "no Novita spend",
+  "no provider spend",
   "native 5.17s scene plan",
   "prepared MiniMax H3 clip(s)",
+  "retained legacy LTX receipt and cannot enter a new run",
 ] as const) {
   assert.ok(footage.includes(required), `prepared footage must retain ${required}`);
 }

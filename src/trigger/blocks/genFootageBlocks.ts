@@ -22,11 +22,13 @@ import {
 } from "@/lib/files";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import {
-  renderNovitaGeneratedScenes,
   renderNovitaImage,
+  type NovitaClipGate,
   type NovitaClipReviewCheckpoint,
   type NovitaGeneratedScene,
   type NovitaKeyframeReviewCheckpoint,
+  type NovitaKeyframeGate,
+  type NovitaRenderLifecycle,
   type NovitaRenderedScene,
 } from "@/lib/novitaMedia";
 import { applyNameCardOverlay } from "@/lib/ffmpeg";
@@ -40,10 +42,9 @@ import { requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
 import { reviewCinematicClip } from "@/lib/cinematicClipGate";
 import { reviewCinematicTransition } from "@/lib/cinematicTransitionGate";
-import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
 import { resolveApprovedSourceProofMedia } from "@/lib/sourceProofMedia";
 import { FAMILIES } from "@/engine/families";
-import { selectLtxStyleForChannel } from "@/engine/ltxStylePresets";
+import { getLtxStyle, selectLtxStyleForChannel } from "@/engine/ltxStylePresets";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
 import { CinematicGeneratedScenePlanSchema } from "@/engine/cinematicCaseSequence";
@@ -268,10 +269,14 @@ export interface ResolvedGeneratedFootageScenePlan {
   sequenceFingerprint?: string;
 }
 
-/** Explicit renderer identity for consumers during the H3/LTX migration. */
+/**
+ * Explicit body provenance for downstream assembly. New generated footage is
+ * always H3. A source-proof-only Casefile body is deliberately distinguished
+ * from H3 instead of being mislabeled as generated footage.
+ */
 export type GeneratedFootageRenderer =
   | { kind: "minimax-h3"; provider: MiniMaxH3Provider; execution: MiniMaxH3Execution; runtimeId: typeof MINIMAX_H3_RUNTIME_ID; profileId: typeof MINIMAX_H3_PROFILE.id; modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256 }
-  | { kind: "novita-ltx"; styleId: string };
+  | { kind: "source-proof" };
 
 /** Prompts that ask for baked-in lettering fight the engine's own no-text clause. */
 const TEXT_IN_IMAGE =
@@ -565,58 +570,6 @@ function cinematicSceneLimit(value: unknown): number {
   return Math.max(2, Math.min(240, Math.floor(parsed)));
 }
 
-type NovitaGeneratedSceneInput = Parameters<typeof renderNovitaGeneratedScenes>[0]["scenes"][number];
-type NovitaRenderLifecycle = Parameters<typeof renderNovitaGeneratedScenes>[0]["lifecycle"];
-
-/**
- * The central Novita media primitive intentionally has a 24-scene transaction
- * cap.  A reviewed long-form cinematic sequence must not be silently sliced
- * to fit it, so we render ordered batches with a proportional, caller-owned
- * budget allocation and retain exact input order across batch boundaries.
- */
-async function renderGeneratedScenePlanInBatches(args: {
-  prefix: string;
-  scenes: readonly NovitaGeneratedSceneInput[];
-  maxCostUsd: number;
-  maxConcurrent: number;
-  lifecycle: NovitaRenderLifecycle;
-  keyframeGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"];
-  clipGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"];
-  styleId?: Parameters<typeof renderNovitaGeneratedScenes>[0]["styleId"];
-}): Promise<{ scenes: Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"]; costUsd: number }> {
-  const batches: NovitaGeneratedSceneInput[][] = [];
-  for (let start = 0; start < args.scenes.length; start += 24) {
-    batches.push([...args.scenes.slice(start, start + 24)]);
-  }
-  let assignedBudgetUsd = 0;
-  let observedCostUsd = 0;
-  const renderedScenes: Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"] = [];
-  try {
-    for (const [index, batch] of batches.entries()) {
-      const maxCostUsd = index === batches.length - 1
-        ? args.maxCostUsd - assignedBudgetUsd
-        : args.maxCostUsd * (batch.length / args.scenes.length);
-      assignedBudgetUsd += maxCostUsd;
-      const rendered = await renderNovitaGeneratedScenes({
-        prefix: `${args.prefix}/batch-${String(index + 1).padStart(3, "0")}`,
-        profileId: "production",
-        styleId: args.styleId,
-        maxCostUsd,
-        maxConcurrent: args.maxConcurrent,
-        lifecycle: args.lifecycle,
-        keyframeGate: args.keyframeGate,
-        clipGate: args.clipGate,
-        scenes: batch,
-      });
-      observedCostUsd += rendered.costUsd;
-      renderedScenes.push(...rendered.scenes);
-    }
-  } catch (error) {
-    throw withAdditionalObservedCost(error, observedCostUsd);
-  }
-  return { scenes: renderedScenes, costUsd: observedCostUsd };
-}
-
 /**
  * Native H3 adapter for the non-Casefile generated-footage lanes. H3 consumes
  * an actual R2 still rather than a prompt-only image-to-video request, so the
@@ -627,6 +580,7 @@ async function renderGeneratedScenePlanInBatches(args: {
 async function renderGeneratedScenePlanWithH3(args: {
   prefix: string;
   scenes: readonly PlannedScene[];
+  visualTreatment: string;
   maxCostUsd: number;
   lifecycle: NonNullable<NovitaRenderLifecycle>;
 }): Promise<{
@@ -677,7 +631,7 @@ async function renderGeneratedScenePlanWithH3(args: {
       const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
         provider: "novita",
         execution: "on-demand",
-        prompt: `${scene.still}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity.`,
+        prompt: `${scene.still}. Channel visual treatment: ${args.visualTreatment}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity.`,
         motionPrompt: scene.motion,
         cameraInstruction: `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; keep the action physically coherent and avoid a scene change.`,
         ...(scene.negative ? { negativePrompt: scene.negative } : {}),
@@ -706,7 +660,7 @@ async function renderGeneratedScenePlanWithH3(args: {
           provider: "novita",
           execution: "on-demand",
           prompt:
-            `${scene.still}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity. ` +
+            `${scene.still}. Channel visual treatment: ${args.visualTreatment}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity. ` +
             "Do not hold the conditioning image: begin the authored action in the first decoded frame.",
           motionPrompt:
             `${scene.motion} Start visible subject or camera motion immediately; no static opening hold.`,
@@ -766,10 +720,11 @@ async function renderGeneratedScenePlanWithH3(args: {
 async function renderCinematicScenePlanWithH3(args: {
   prefix: string;
   scenes: readonly PlannedScene[];
+  visualTreatment: string;
   maxCostUsd: number;
   lifecycle: NonNullable<NovitaRenderLifecycle>;
-  keyframeGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"];
-  clipGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"];
+  keyframeGate?: NovitaKeyframeGate;
+  clipGate?: NovitaClipGate;
 }): Promise<{
   scenes: NovitaRenderedScene[];
   costUsd: number;
@@ -827,7 +782,7 @@ async function renderCinematicScenePlanWithH3(args: {
     scene: NovitaGeneratedScene;
     result: Awaited<ReturnType<typeof renderNovitaImage>>;
     attempt: number;
-  }): Promise<{ review?: Awaited<ReturnType<NonNullable<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>>>; result: Awaited<ReturnType<typeof renderNovitaImage>> }> => {
+  }): Promise<{ review?: Awaited<ReturnType<NovitaKeyframeGate["review"]>>; result: Awaited<ReturnType<typeof renderNovitaImage>> }> => {
     if (!args.keyframeGate) return { result: input.result };
     try {
       const review = await args.keyframeGate.review({
@@ -891,7 +846,7 @@ async function renderCinematicScenePlanWithH3(args: {
         ? { ...scene, id: `${scene.id}-terminal`, still: scene.terminalStill, terminalStill: undefined }
         : undefined;
       let terminal: Awaited<ReturnType<typeof renderNovitaImage>> | undefined;
-      let terminalReview: Awaited<ReturnType<NonNullable<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>>> | undefined;
+      let terminalReview: Awaited<ReturnType<NovitaKeyframeGate["review"]>> | undefined;
       if (terminalScene) {
         terminal = await renderStill(terminalScene, terminalScene.id, terminalScene.still, seed, "terminal");
         const reviewedTerminal = await reviewStill({ scene: gateScene(terminalScene), result: terminal, attempt: 1 });
@@ -906,7 +861,7 @@ async function renderCinematicScenePlanWithH3(args: {
         provider: "novita",
         execution: "on-demand",
         prompt: [
-          `${scene.still}. Preserve the exact accepted first frame, sealed faceless cast, setting, wardrobe, props, lighting, evidence treatment, and channel identity.`,
+          `${scene.still}. Channel visual treatment: ${args.visualTreatment}. Preserve the exact accepted first frame, sealed faceless cast, setting, wardrobe, props, lighting, evidence treatment, and channel identity.`,
           scene.terminalStill ? `Finish on the reviewed endpoint described here: ${scene.terminalStill}.` : undefined,
         ].filter(Boolean).join(" "),
         motionPrompt: scene.motion,
@@ -924,7 +879,7 @@ async function renderCinematicScenePlanWithH3(args: {
       if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
         throw new Error(`gen_footage: H3 Casefile scene ${scene.id} failed native video/duration verification`);
       }
-      let clipReview: Awaited<ReturnType<NonNullable<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>>> | undefined;
+      let clipReview: Awaited<ReturnType<NovitaClipGate["review"]>> | undefined;
       let acceptedClipKey = clip.receipt.output.r2Key;
       if (args.clipGate) {
         try {
@@ -952,7 +907,7 @@ async function renderCinematicScenePlanWithH3(args: {
           const retry = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
             provider: "novita",
             execution: "on-demand",
-            prompt: `${scene.still}. Preserve the accepted first frame and finish on the reviewed endpoint: ${scene.terminalStill ?? scene.still}. Resolve this independent motion finding: ${error instanceof Error ? error.message.slice(0, 420) : String(error).slice(0, 420)}`,
+            prompt: `${scene.still}. Channel visual treatment: ${args.visualTreatment}. Preserve the accepted first frame and finish on the reviewed endpoint: ${scene.terminalStill ?? scene.still}. Resolve this independent motion finding: ${error instanceof Error ? error.message.slice(0, 420) : String(error).slice(0, 420)}`,
             motionPrompt: scene.motion,
             cameraInstruction: `Correct the rejected take while preserving ${scene.cameraMove}, ${scene.shotScale}, ${scene.lens}, cast, props, setting, and evidence treatment.`,
             ...(scene.negative ? { negativePrompt: scene.negative } : {}),
@@ -1004,7 +959,7 @@ async function renderCinematicScenePlanWithH3(args: {
 }
 
 export function assertCentralNovitaSelection(value: unknown, label: string): void {
-  if (value === undefined || value === "novita" || value === "novita-ltx") return;
+  if (value === undefined || value === "novita") return;
   throw new Error(
     `${label}: model-specific i2vModel ${JSON.stringify(value)} is retired; ` +
     "omit it and use the centrally attested Novita production profile.",
@@ -1185,6 +1140,12 @@ export const genFootage: Block = {
         world?: string;
       } | null | undefined,
     });
+    const selectedVisualTreatment = getLtxStyle(ltxStyleSelection.styleId).promptGuidance;
+    const h3VisualTreatment = [
+      selectedVisualTreatment.appearance,
+      selectedVisualTreatment.lightingColor,
+      selectedVisualTreatment.cameraDoctrine,
+    ].join(" ");
     ctx.log(
       `gen_footage: visual treatment ${ltxStyleSelection.styleId} (${ltxStyleSelection.source})` +
       (ltxStyleSelection.matchedSignals.length
@@ -1292,85 +1253,13 @@ export const genFootage: Block = {
           [COST_PATCH_KEY]: 0,
         };
       }
-      const expectedDurationSec = plan.source === "cinematic_case_sequence"
-        ? (scenes.at(-1)?.t1 ?? 0)
-        : scenes.reduce((total, scene) => total + scene.durationSec, 0);
-      if (
-        preparedFootage.ltxStyleId !== ltxStyleSelection.styleId ||
-        preparedManifest.source !== plan.source ||
-        preparedManifest.sequenceFingerprint !== plan.sequenceFingerprint ||
-        preparedManifest.items.length !== scenes.length ||
-        Math.abs(preparedManifest.durationSec - expectedDurationSec) > 0.05 ||
-        preparedManifest.items.some((item, index) => {
-          const scene = scenes[index];
-          return !scene || item.sceneId !== scene.id ||
-            (scene.t0 !== undefined && item.t0 !== scene.t0) ||
-            (scene.t1 !== undefined && item.t1 !== scene.t1) ||
-            (scene.continuitySeed !== undefined && item.continuitySeed !== scene.continuitySeed);
-        })
-      ) {
-        throw new Error("gen_footage: prepared weekly footage does not match the frozen scene plan or renderer");
-      }
-      const preparedTmp = await makeRunTempDir(`${ctx.runId}-prepared-footage`);
-      const footageClips = await pool(preparedFootage.clips, 4, async (clip, index) => {
-        const scene = scenes[index];
-        const expectedSceneDurationSec = plan.source === "cinematic_case_sequence"
-          ? ((scene?.t1 ?? 0) - (scene?.t0 ?? 0))
-          : scene?.durationSec;
-        if (
-          typeof expectedSceneDurationSec !== "number" ||
-          !Number.isFinite(expectedSceneDurationSec) ||
-          expectedSceneDurationSec <= 0 ||
-          Math.abs(clip.durationSec - expectedSceneDurationSec) > 0.08
-        ) {
-          throw new Error(`gen_footage: prepared weekly clip ${index + 1} timing does not match the frozen scene plan`);
-        }
-        const bytes = await getObjectBytes(clip.r2Key);
-        if (bytes.byteLength !== clip.byteLength || sha256BytesHex(bytes) !== clip.sha256) {
-          throw new Error(`gen_footage: prepared weekly clip ${index + 1} bytes do not match its immutable receipt`);
-        }
-        const local = await writeBytes(join(preparedTmp, `clip_${index + 1}.mp4`), bytes);
-        const measured = await probe(local);
-        const measuredDurationSec = measured.durationSec;
-        if (
-          !Number.isFinite(measuredDurationSec) ||
-          measuredDurationSec <= 0 ||
-          !measured.hasVideo ||
-          Math.abs(measuredDurationSec - clip.durationSec) > 0.08
-        ) {
-          throw new Error(`gen_footage: prepared weekly clip ${index + 1} video duration does not match its immutable receipt`);
-        }
-        return local;
-      });
-      const preparedFootageTextCues = footageOnScreenTextCues(
-        scenes.map((scene) => ({
-          sceneId: scene.id,
-          durationSec: scene.durationSec,
-          ...(scene.nameCardText ? { nameCardText: scene.nameCardText } : {}),
-          ...(scene.evidenceOverlay
-            ? {
-                evidenceOverlay: {
-                  text: [scene.evidenceOverlay.primary, scene.evidenceOverlay.secondary].filter(Boolean).join(" "),
-                  durationSec: Math.max(1.2, Math.min(2.2, scene.durationSec - 0.3)),
-                },
-              }
-            : {}),
-        })),
+      // The v1 receipt parser intentionally remains able to read this shape so
+      // the Library can inspect historical evidence. It is not executable:
+      // replaying it here would put an old LTX body into a new H3 pipeline and
+      // silently bypass the active model, motion, and quality contracts.
+      throw new Error(
+        "gen_footage: prepared weekly footage is a retained legacy LTX receipt and cannot enter a new run; reprepare this item through the MiniMax H3 batch route",
       );
-      ctx.log(
-        `gen_footage: consumed ${footageClips.length} prepared weekly clips ` +
-        "after scene-manifest, hash, and duration verification (no Novita spend)",
-      );
-      return {
-        footageClips,
-        footageKeys: preparedFootage.clips.map((clip) => clip.r2Key),
-        generatedFootageSceneManifest: preparedManifest,
-        footageOnScreenTextCues: preparedFootageTextCues,
-        footageRenderer: { kind: "novita-ltx", styleId: ltxStyleSelection.styleId },
-        ltxStyleId: ltxStyleSelection.styleId,
-        ltxStyleSelection,
-        [COST_PATCH_KEY]: 0,
-      };
     }
     // Cinematic keyframe, take, and cut gates are independent visual evidence,
     // not an optional after-spend review. The prepared branch above carries
@@ -1463,9 +1352,6 @@ export const genFootage: Block = {
         });
       }
     };
-    const creativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
-      ctx.params["ltxCreativeAdapter"],
-    );
     ctx.log(`gen_footage: using ${plan.source} (${scenes.length} validated scene(s))`);
 
     // Source-proof scenes are not generated visual prompts. Resolve their
@@ -1501,11 +1387,10 @@ export const genFootage: Block = {
       );
     }
     const generatedScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
-    // Every fresh generated scene now uses the native H3 adapter. Casefile's
+    // Every fresh generated scene uses the native H3 adapter. Casefile's
     // source-bound terminal-frame and transition evidence is carried by the
-    // dedicated H3 cinematic adapter below; no active scene silently falls
-    // back to the retired LTX motion route.
-    const useH3ForFreshGeneratedScenes = generatedScenes.length > 0;
+    // dedicated H3 cinematic adapter below; no active scene can select an
+    // alternate motion route.
     const h3LocalClipPaths = new Map<string, string>();
     if (plan.source === "cinematic_case_sequence") {
       for (const scene of generatedScenes) {
@@ -1517,8 +1402,6 @@ export const genFootage: Block = {
       }
     }
 
-    const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
-    const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
     const stageBudgetUsd = generatedScenes.length > 0
       ? requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage")
       : 0;
@@ -1562,7 +1445,7 @@ export const genFootage: Block = {
           // One replacement is the only automatic recovery. More retries hide
           // a broken prompt behind unbounded spend instead of surfacing it.
           maxImageAttempts: 2 as const,
-          review: async ({ scene, stillKey, stillUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>[0]) => {
+          review: async ({ scene, stillKey, stillUrl }: Parameters<NovitaKeyframeGate["review"]>[0]) => {
           const candidatePath = await downloadTo(
             stillUrl,
             join(cinematicKeyframeTmp!, `${scene.id.replace(/[^a-z0-9_-]/gi, "_")}.png`),
@@ -1615,7 +1498,7 @@ export const genFootage: Block = {
           // One replacement take is the only automatic motion recovery. It
           // preserves the accepted keyframe; a bad second take stays blocked.
           maxVideoAttempts: 2 as const,
-          review: async ({ scene, stillUrl, terminalStillKey, terminalStillUrl, clipUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>[0]) => {
+          review: async ({ scene, stillUrl, terminalStillKey, terminalStillUrl, clipUrl }: Parameters<NovitaClipGate["review"]>[0]) => {
             const safeSceneId = scene.id.replace(/[^a-z0-9_-]/gi, "_");
             const stillPath = await downloadTo(stillUrl, join(cinematicClipTmp!, `${safeSceneId}-source.png`), {
               timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
@@ -1650,10 +1533,10 @@ export const genFootage: Block = {
         }
       : undefined;
     const rendered = generatedScenes.length > 0
-      ? useH3ForFreshGeneratedScenes
-        ? plan.source === "cinematic_case_sequence"
-          ? await renderCinematicScenePlanWithH3({
+      ? plan.source === "cinematic_case_sequence"
+        ? await renderCinematicScenePlanWithH3({
             prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
+            visualTreatment: h3VisualTreatment,
             maxCostUsd: stageBudgetUsd,
             lifecycle: {
               ownerId: ctx.ownerId,
@@ -1668,8 +1551,9 @@ export const genFootage: Block = {
             for (const [sceneId, localPath] of result.localClipPaths) h3LocalClipPaths.set(sceneId, localPath);
             return result;
           })
-          : await renderGeneratedScenePlanWithH3({
+        : await renderGeneratedScenePlanWithH3({
           prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
+          visualTreatment: h3VisualTreatment,
           maxCostUsd: stageBudgetUsd,
           lifecycle: {
             ownerId: ctx.ownerId,
@@ -1682,53 +1566,7 @@ export const genFootage: Block = {
           for (const [sceneId, localPath] of result.localClipPaths) h3LocalClipPaths.set(sceneId, localPath);
           return result;
         })
-        : await renderGeneratedScenePlanInBatches({
-      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
-      maxCostUsd: stageBudgetUsd,
-      maxConcurrent,
-      lifecycle: {
-        ownerId: ctx.ownerId,
-        channelId: ctx.channelId,
-        runId: ctx.runId,
-        blockId: "gen_footage",
-      },
-      keyframeGate,
-      clipGate,
-      // A persisted selection wins on retry; otherwise a unique sealed
-      // Style-DNA/Visual-Brief treatment is used. Ambiguous DNA stays on the
-      // family's proven default rather than guessing an aesthetic mid-run.
-      styleId: ltxStyleSelection.styleId,
-      scenes: generatedScenes.map((scene) => ({
-        // Preserve the admitted id: timeline_assemble later verifies that the
-        // R2 clip order still matches this exact cinematic cut plan.
-        id: scene.id,
-        imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
-        ...(scene.terminalStill
-          ? {
-              terminalImagePrompt:
-                `${scene.terminalStill}. Absolutely NO text, NO words, NO letters, NO watermark.`,
-              terminalKeyframeRequirements: [
-                ...(scene.keyframeRequirements ?? []),
-                "terminal frame must fulfill the reviewed reveal/consequence endpoint without changing mannequin identity, wardrobe, props, era, or evidence treatment",
-              ],
-            }
-          : {}),
-        motionPrompt: scene.motion,
-        ...(scene.diegeticSoundscape ? { diegeticSoundscape: scene.diegeticSoundscape } : {}),
-        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
-        durationSec: scene.durationSec,
-        cameraMove: scene.cameraMove,
-        shotScale: scene.shotScale,
-        lens: scene.lens,
-        ...(scene.continuityIds?.length ? { continuityIds: scene.continuityIds } : {}),
-        ...(scene.expectedCastIds ? { expectedCastIds: scene.expectedCastIds } : {}),
-        ...(scene.forbidAdditionalPeople ? { forbidAdditionalPeople: true as const } : {}),
-        ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : {}),
-        ...(scene.keyframeRequirements?.length ? { keyframeRequirements: scene.keyframeRequirements } : {}),
-        ...(creativeAdapter ? { creativeAdapter } : {}),
-      })),
-      })
-      : { scenes: [] as Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"], costUsd: 0 };
+      : { scenes: [] as NovitaRenderedScene[], costUsd: 0 };
     if (
       rendered.scenes.length !== generatedScenes.length ||
       rendered.scenes.some((scene, index) => scene.id !== generatedScenes[index]?.id)
@@ -1970,7 +1808,7 @@ export const genFootage: Block = {
         `gen_footage: ${generatedScenes.length} MiniMax H3 clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
         `provider receipt $${rendered.costUsd.toFixed(4)}`,
       );
-      const renderer: GeneratedFootageRenderer = useH3ForFreshGeneratedScenes
+      const renderer: GeneratedFootageRenderer = generatedScenes.length > 0
         ? {
             kind: "minimax-h3",
             provider: "novita",
@@ -1979,7 +1817,7 @@ export const genFootage: Block = {
             profileId: MINIMAX_H3_PROFILE.id,
             modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
           }
-        : { kind: "novita-ltx", styleId: ltxStyleSelection.styleId };
+        : { kind: "source-proof" };
       return {
         footageClips: clips,
         footageKeys,

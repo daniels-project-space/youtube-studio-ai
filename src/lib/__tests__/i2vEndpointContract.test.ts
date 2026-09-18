@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { generateI2V } from "@/lib/i2v";
-import { renderNovitaI2V } from "@/lib/novitaMedia";
 
 async function main(): Promise<void> {
   await assert.rejects(
@@ -16,17 +15,24 @@ async function main(): Promise<void> {
   );
 
   await assert.rejects(
-    renderNovitaI2V({
-      prefix: "owners/o/channels/c",
-      id: "endpoint-contract",
+    generateI2V({
       prompt: "A restrained cinematic motion study.",
-      imageKey: "owners/o/channels/c/start.png",
-      endImageKey: "owners/o/channels/c/end.png",
-      endImageUrl: "https://example.test/end.png",
+      imageUrl: "https://example.test/start.png",
       maxCostUsd: 1,
     }),
-    /at most one of endImageKey or endImageUrl/,
-    "the Novita boundary must fail before a direct GPU job when endpoint identity is ambiguous",
+    /requires an immutable R2 imageKey/i,
+    "the H3 route must reject an unbound remote image before any worker admission",
+  );
+
+  await assert.rejects(
+    generateI2V({
+      prompt: "A restrained cinematic motion study.",
+      imageKey: "owners/o/channels/c/start.png",
+      provider: "novita-ltx",
+      maxCostUsd: 1,
+    }),
+    /Novita MiniMax H3 is mandatory/i,
+    "the retired provider alias must fail before any R2 or GPU work",
   );
 
   console.log("I2V endpoint contract tests passed");

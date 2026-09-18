@@ -79,7 +79,6 @@ import {
   dataStorySourceLedgerPrompt,
 } from "@/engine/dataStorySourceLedger";
 import { casefileNarrativeGroundingPrompt } from "@/engine/casefileNarrativeGrounding";
-import { getLtxStyle } from "@/engine/ltxStylePresets";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
@@ -3274,9 +3273,9 @@ export const timelineAssemble: Block = {
     const cinematicEditRaw = ctx.store["cinematicEditDecisionList"];
     const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
     // Renderer identity is an explicit ABI from gen_footage. Keep it optional
-    // for historical runs, but never infer H3/LTX from a generic scene
-    // manifest: doing so would apply the old LTX film finish to native H3
-    // footage and make renderer migrations visually inconsistent.
+    // for historical runs, but never infer a renderer from a generic scene
+    // manifest: an H3 body and an approved source-proof body have different
+    // assembly affordances and must not be confused.
     const footageRendererRaw = ctx.store["footageRenderer"];
     const footageRenderer = footageRendererRaw === undefined
       ? undefined
@@ -3298,8 +3297,8 @@ export const timelineAssemble: Block = {
             }
             return { kind: "minimax-h3" as const };
           }
-          if (renderer.kind === "novita-ltx" && typeof renderer.styleId === "string" && renderer.styleId.trim()) {
-            return { kind: "novita-ltx" as const };
+          if (renderer.kind === "source-proof") {
+            return { kind: "source-proof" as const };
           }
           throw new Error("timeline_assemble: unknown footageRenderer identity");
         })();
@@ -3326,16 +3325,18 @@ export const timelineAssemble: Block = {
     const cinematicFootageManifest = cinematicAssemblyHandoff?.manifest;
     // The generated-footage manifest is the only reliable signal that this
     // body came from a generated visual route rather than ordinary
-    // stock/entity sources. Native H3 clips may be video-only, so the
-    // cinematic H3 lane preserves available audio without inventing a hard
-    // LTX-only requirement; the legacy adapter keeps its stricter contract.
+    // stock/entity sources. Native H3 clips and approved source-proof clips
+    // may be video-only, so the cinematic lane preserves available audio
+    // without inventing an unsupported audio requirement.
     const generatedFootageBodyAudio = Boolean(
       generatedFootageRaw &&
       typeof generatedFootageRaw === "object" &&
       typeof (generatedFootageRaw as Record<string, unknown>)["source"] === "string",
     );
     const bodyAudioMode: "off" | "available" | "required" = cinematicFootageManifest
-      ? footageRenderer?.kind === "minimax-h3" ? "available" : "required"
+      ? (footageRenderer?.kind === "minimax-h3" || footageRenderer?.kind === "source-proof"
+        ? "available"
+        : "required")
       : generatedFootageBodyAudio
         ? "available"
         : "off";
@@ -3832,21 +3833,6 @@ export const timelineAssemble: Block = {
     ctx.log(
       `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail → ${videoSec}s…`,
     );
-    // LTX cinematic body only: source-bound Novita/LTX clips get the
-    // per-style film-grain + vignette finish so they read consistently with
-    // that style's world (docuStyles-scale doctrine lives on LtxStyleDef,
-    // see src/engine/ltxStylePresets.ts). Non-cinematic bodies (stock,
-    // entity, chapter, authored) are untouched — this never forces a look
-    // onto footage that wasn't part of the cinematic render.
-    const cinematicFilmLook = cinematicFootageManifest && footageRenderer?.kind !== "minimax-h3"
-      ? (() => {
-          const ltxStyle = getLtxStyle(ctx.store["ltxStyleId"] as string | undefined);
-          return { grain: ltxStyle.grain, vignette: ltxStyle.vignette };
-        })()
-      : undefined;
-    if (cinematicFootageManifest && footageRenderer?.kind === "minimax-h3") {
-      ctx.log("timeline_assemble: native MiniMax H3 renderer identity preserved; LTX film finish skipped");
-    }
     const out = join(tmp, "video.mp4");
     await composeWithIntro({
       introCardPath: introCardPath || undefined,
@@ -3861,7 +3847,6 @@ export const timelineAssemble: Block = {
       audioFadeOutSec,
       width: W,
       height: H,
-      filmGrain: cinematicFilmLook,
       // music bed a further 5% quieter (intro 0.54→0.513, under-voice 0.108→0.1026)
       introMusicVol: Number(ctx.params["introMusicVol"] ?? 0.513),
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),

@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   assertBefore(
     qaAssets,
     "await checkpointStandardVisualAttempt(ctx, record)",
-    "rendered = await renderImages(qualityRecoveryRenderCfg",
+    "rendered = await renderImages(qualityRecoveryImageRenderCfg",
     "qa_assets persists its reviewed candidates before repair image rendering",
   );
   const qaShots = between(
@@ -120,8 +120,8 @@ async function main(): Promise<void> {
   assertBefore(
     qaShots,
     "await checkpointStandardVisualAttempt(ctx, visualAttempt)",
-    "rendered = await renderVideo(qualityRecoveryRenderCfg",
-    "qa_shots persists its reviewed candidate before repair video rendering",
+    "const repaired = await renderStandardH3Take",
+    "qa_shots persists its reviewed candidate before H3 repair rendering",
   );
 
   console.log("visual artifact attempt adapter wiring tests passed");

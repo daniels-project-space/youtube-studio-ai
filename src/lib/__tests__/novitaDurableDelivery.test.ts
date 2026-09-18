@@ -135,7 +135,6 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
   for (const relative of [
     "src/lib/novitaMedia.ts",
     "src/trigger/blocks/genFootageBlocks.ts",
-    "src/engine/forge/runtime.ts",
   ]) {
     const source = await readFile(join(process.cwd(), relative), "utf8");
     assert.match(
@@ -144,6 +143,12 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
       `${relative} bounds only its direct Novita delivery after durable output`,
     );
   }
+  const forge = await readFile(join(process.cwd(), "src/engine/forge/runtime.ts"), "utf8");
+  assert.match(
+    forge,
+    /writeBytes\(join\(state\.tmp, `forge_\$\{state\.n\+\+\}\.mp4`\), clip\.outputBytes\)/,
+    "the Forge H3 path receives verified output bytes directly and does not add a second durable URL transfer",
+  );
   const channelArt = await readFile(join(process.cwd(), "src/lib/channelArt.ts"), "utf8");
   assert.doesNotMatch(channelArt, /renderNovitaImage|downloadTo\(|DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS/,
     "channel art now uses the receipt-bound Fal route and must not be classified as a direct Novita delivery");

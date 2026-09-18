@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 
 import { planStorySpine } from "@/engine/storySpine";
+import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+} from "@/lib/minimaxH3";
 import { sha256BytesHex } from "@/lib/sha256";
 
 const objectBytes = new Map<string, Uint8Array>();
@@ -49,15 +54,6 @@ loader._load = function preparedFootageRuntimeLoad(request, ...args) {
           hasVideo: true,
           hasAudio: false,
         };
-      },
-    };
-  }
-  if (request.endsWith("/novitaMedia")) {
-    return {
-      ...resolved,
-      renderNovitaGeneratedScenes: async () => {
-        providerCalls++;
-        throw new Error("prepared footage must never dispatch Novita");
       },
     };
   }
@@ -109,7 +105,8 @@ async function main(): Promise<void> {
     defaultDurationSec: 6,
     avoid: "logos",
   });
-  clipDurations.splice(0, clipDurations.length, ...plan.scenes.map((scene) => scene.durationSec));
+  const nativeDurationSec = 124 / 24;
+  clipDurations.splice(0, clipDurations.length, ...plan.scenes.map(() => nativeDurationSec));
   const clipKeys = plan.scenes.map((_, index) => `owner/fixture/prepared/footage/clip-${String(index + 1).padStart(4, "0")}.mp4`);
   const clips = clipKeys.map((r2Key, index) => {
     const bytes = Buffer.from(`prepared-video-${index + 1}`.repeat(100));
@@ -118,7 +115,7 @@ async function main(): Promise<void> {
       r2Key,
       sha256: sha256BytesHex(bytes),
       byteLength: bytes.byteLength,
-      durationSec: plan.scenes[index]!.durationSec,
+      durationSec: nativeDurationSec,
     };
   });
   const preparedFootage = {
@@ -138,7 +135,14 @@ async function main(): Promise<void> {
       items: plan.scenes.map((scene, index) => ({ sceneId: scene.id, clipKey: clipKeys[index]! })),
     },
     clips,
-    ltxStyleId: "cinematic_heist_noir",
+    renderer: {
+      kind: "minimax-h3" as const,
+      provider: "novita" as const,
+      execution: "on-demand" as const,
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      profileId: MINIMAX_H3_PROFILE.id,
+      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+    },
     createdAt: Date.now(),
   };
   const context = {
@@ -158,12 +162,30 @@ async function main(): Promise<void> {
   assert.deepEqual(result.footageKeys, clipKeys, "the actual block must preserve the immutable prepared clip order");
   assert.equal(result.__costUsd, 0, "a fully verified prepared footage result must not report a Novita charge");
   assert.deepEqual(result.footageRenderer, {
-    kind: "novita-ltx",
-    styleId: "cinematic_heist_noir",
-  }, "legacy prepared footage must retain its explicit renderer identity");
+    kind: "minimax-h3",
+    provider: "novita",
+    execution: "on-demand",
+    runtimeId: MINIMAX_H3_RUNTIME_ID,
+    profileId: MINIMAX_H3_PROFILE.id,
+    modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+  }, "prepared footage must preserve its explicit MiniMax H3 renderer identity");
   assert.equal(providerCalls, 0, "the success path must not invoke the paid renderer");
   assert.equal(storageReads, 4, "the actual block must re-read every retained clip before reuse");
   assert.equal(written.length, 4, "every verified retained clip must be rehydrated for assembly");
+
+  storageReads = 0;
+  written.length = 0;
+  const retainedLegacy = structuredClone(preparedFootage) as Record<string, unknown>;
+  delete retainedLegacy.renderer;
+  retainedLegacy.ltxStyleId = "cinematic_heist_noir";
+  await assert.rejects(
+    () => genFootage.run({ ...context, store: { ...context.store, preparedFootage: retainedLegacy } } as never),
+    /retained legacy LTX receipt.*cannot enter a new run/i,
+    "historical LTX receipts may remain inspectable but must not re-enter an active pipeline",
+  );
+  assert.equal(providerCalls, 0, "legacy receipt rejection must happen before any paid render");
+  assert.equal(storageReads, 0, "legacy receipt rejection must happen before any R2 download");
+  assert.equal(written.length, 0, "legacy receipt rejection must not materialize a local clip");
 
   storageReads = 0;
   written.length = 0;

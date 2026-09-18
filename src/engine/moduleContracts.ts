@@ -401,7 +401,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "channelProgramRoute", "musicProgramPlan", "visualBrief","topic", "musicKey", "scenes", "motionPrompt", "musicProgramMotionIntent", "styleGrammar", "visualStyle"],
-    providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "minimax-h3-novita-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 5,
     // The sealed 30-second source unit is two independently attested 15-second
     // FLF2V workers. Reserve both before either worker can start.
@@ -687,9 +687,6 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     resumeInputProjections: { healHints: "own_block_entry", healClasses: "own_block_entry" },
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "ltxStyleId",
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",

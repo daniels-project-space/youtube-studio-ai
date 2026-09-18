@@ -156,7 +156,7 @@ assert.equal(
 assert.equal(
   cinematicPlan.scenes[0]!.terminalStill,
   cinematicStore.cinematicGeneratedScenePlan.scenes[0]!.terminalStill,
-  "the reviewed terminal keyframe target must survive to the LTX handoff",
+  "the reviewed terminal keyframe target must survive as the H3 cinematic QA anchor",
 );
 assert.equal(
   cinematicPlan.scenes[0]!.continuitySeed,
@@ -175,7 +175,12 @@ assert.throws(
   "reviewed cinematic coverage must fail rather than truncate to a renderer transaction cap",
 );
 
-assert.doesNotThrow(() => assertCentralNovitaSelection("novita-ltx", "gen_footage"));
+assert.doesNotThrow(() => assertCentralNovitaSelection("novita", "gen_footage"));
+assert.throws(
+  () => assertCentralNovitaSelection("novita-ltx", "gen_footage"),
+  /centrally attested Novita production profile/,
+  "the active selector must not admit a legacy LTX alias",
+);
 assert.throws(
   () => assertCentralNovitaSelection("Lightricks/LTX-2.5", "gen_footage"),
   /centrally attested Novita production profile/,
@@ -189,12 +194,11 @@ assert.match(
   "an admitted cinematic sequence must fail before paid Novita work without an eligible independent reviewer",
 );
 assert.doesNotMatch(source, /Lightricks\/LTX-2\.5/);
-assert.match(source, /imagePrompt: `\$\{scene\.still\}\. Absolutely NO text/);
+assert.match(source, /prompt: `\$\{scene\.still\}\. Absolutely NO text/);
 assert.match(source, /terminalImagePrompt/);
 assert.match(source, /motionPrompt: scene\.motion/);
 assert.match(source, /seed: scene\.continuitySeed/);
-assert.match(source, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse/);
-assert.match(source, /creativeAdapter \? \{ creativeAdapter \} : \{\}/);
+assert.doesNotMatch(source, /LtxCreativeAdapterInputSchema|ltxCreativeAdapter|creativeAdapter/);
 assert.match(
   source,
   /signature_clips: MiniMax H3 Novita route is not admitted/,
@@ -271,7 +275,7 @@ assert.match(
 assert.doesNotMatch(
   source,
   /plan\.source !== "cinematic_case_sequence" && generatedScenes\.length > 0/,
-  "the active generated-footage selector must not leave Casefile on the legacy LTX path",
+  "the active generated-footage selector must not leave Casefile on a legacy motion path",
 );
 
 for (const gate of ["cinematicKeyframeGate.ts", "cinematicClipGate.ts", "cinematicTransitionGate.ts"]) {
@@ -443,16 +447,16 @@ assert.match(
 assert.match(
   phase18Source,
   /const generatedScenes = scenes\.filter\(\(scene\) => scene\.sourceProofMedia === undefined\);/,
-  "approved cinematic source-proof scenes must be removed from the LTX render wave",
+  "approved cinematic source-proof scenes must be removed from the H3 render wave",
 );
 assert.match(
   phase18Source,
-  /scenes: generatedScenes\.map\(\(scene\) => \(/,
-  "the Novita handoff must receive only non-source-proof scenes",
+  /scenes: generatedScenes,/,
+  "the H3 handoff must receive only non-source-proof scenes",
 );
 assert.ok(
   phase18Source.indexOf("const sourceProofBySceneId") < phase18Source.indexOf("const rendered = generatedScenes.length > 0"),
-  "approved source media must be resolved and hash-gated before any cinematic LTX render starts",
+  "approved source media must be resolved and hash-gated before any cinematic H3 render starts",
 );
 assert.match(
   phase18Source,
@@ -476,8 +480,13 @@ assert.match(
 );
 assert.match(
   phase18Source,
-  /styleId: ltxStyleSelection\.styleId/,
-  "the selected treatment must reach the Novita LTX render handoff",
+  /const h3VisualTreatment = \[/,
+  "the selected treatment must be compiled into an H3-safe visual directive",
+);
+assert.match(
+  phase18Source,
+  /visualTreatment: h3VisualTreatment/,
+  "the selected treatment must reach each H3 render handoff",
 );
 assert.match(
   phase18Source,
