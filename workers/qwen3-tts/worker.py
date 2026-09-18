@@ -152,14 +152,19 @@ def health() -> dict[str, Any]:
 def synthesize(
     payload: dict[str, Any],
     authorization: str = Header(default=""),
+    worker_authorization: str = Header(default="", alias="X-Worker-Authorization"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
     global _last_used
     expected = os.environ.get("QWEN3_TTS_WORKER_TOKEN", "")
     trust_openrelay_gateway = os.environ.get("QWEN3_TTS_TRUST_OPENRELAY_GATEWAY") == "1"
-    if expected and authorization != f"Bearer {expected}":
+    # OpenRelay consumes Authorization as its own organization credential. The
+    # private gateway forwards X-Worker-Authorization unchanged, while Novita
+    # continues to use normal Authorization for its direct worker endpoint.
+    provided_authorization = worker_authorization or authorization
+    if expected and provided_authorization != f"Bearer {expected}":
         raise HTTPException(status_code=401, detail="unauthorized")
-    if not expected and (not trust_openrelay_gateway or not authorization.startswith("Bearer ")):
+    if not expected and (not trust_openrelay_gateway or not provided_authorization.startswith("Bearer ")):
         raise HTTPException(status_code=401, detail="unauthorized")
     try:
         request = parse_request(payload, idempotency_key)
