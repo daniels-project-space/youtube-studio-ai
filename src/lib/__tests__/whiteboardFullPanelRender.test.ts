@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -18,14 +18,34 @@ type ScheduledLayer = {
   handSampleMs: number;
 };
 
+async function writeTransparentLineArt(path: string, index: number): Promise<void> {
+  // The real image worker returns isolated line art. Do not use the green-screen
+  // hand sprite as a pretend art layer here: it can make a timing proof pass
+  // while hiding an obviously invalid composite.
+  await execFileAsync("python3", [
+    "-c",
+    [
+      "from PIL import Image, ImageDraw; import sys",
+      "i=int(sys.argv[2]); im=Image.new('RGBA',(512,512),(255,255,255,0)); d=ImageDraw.Draw(im)",
+      "ink=(30,32,38,255); accent=(192,57,43,255); p=52",
+      "d.rounded_rectangle((p,p,512-p,512-p), radius=42, outline=ink, width=18)",
+      "d.ellipse((150,130,362,342), outline=ink, width=16)",
+      "d.line((100,410,412,100), fill=accent if i%2 else ink, width=18)",
+      "d.line((100,100,412,410), fill=ink, width=12)",
+      "im.save(sys.argv[1])",
+    ].join("\n"),
+    path,
+    String(index),
+  ]);
+}
+
 async function main(): Promise<void> {
   const work = await mkdtemp(join(tmpdir(), "ysa-whiteboard-full-panel-"));
   try {
-    // Use isolated copies so this is a genuine five-layer renderer proof, not
-    // a schedule-only fixture or a cache hit. The hand sprite is valid opaque
-    // line art with enough ink for production's 3.0–4.5 second trace window.
+    // Use isolated, transparent line-art layers so this is a genuine five-layer
+    // renderer proof, not a schedule-only fixture or a cache hit.
     await Promise.all(Array.from({ length: 4 }, async (_, index) => {
-      await copyFile(join(ROOT, "src/assets/whiteboard/hand.png"), join(work, `art-${index}.png`));
+      await writeTransparentLineArt(join(work, `art-${index}.png`), index);
     }));
     await execFileAsync("ffmpeg", [
       "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "28.0",
@@ -135,15 +155,34 @@ async function main(): Promise<void> {
         "def red(path):",
         " im=Image.open(path).convert('RGB')",
         " return sum(1 for r,g,b in im.getdata() if r > 120 and g < 105 and b < 105)",
-        "print(count(sys.argv[1]), red(sys.argv[2]))",
+        "def green(path):",
+        " im=Image.open(path).convert('RGB')",
+        " return sum(1 for r,g,b in im.getdata() if g > 150 and r < 100 and b < 100)",
+        "print(count(sys.argv[1]), red(sys.argv[2]), green(sys.argv[2]))",
       ].join("\n"),
       `${out}_frames/${String(lateFrame).padStart(5, "0")}.png`,
       `${out}_frames/${String(completionFrame).padStart(5, "0")}.png`,
     ]);
-    const [latePixels, completedLabelPixels] = inspection.stdout.trim().split(/\s+/).map(Number);
+    const [latePixels, completedLabelPixels, completedGreenPixels] = inspection.stdout.trim().split(/\s+/).map(Number);
     assert.ok(latePixels > 6_000, "a later fourth drawing must visibly render, not be absent after early layers");
     assert.ok(completedLabelPixels > 100, "the finished panel must retain its native handwritten label cumulatively");
+    assert.ok(completedGreenPixels < 50, "transparent line art must not leave chroma-key green artifacts on the completed board");
     assert.ok((await readFile(out)).byteLength > 30_000, "the full production-timing MP4 must exist");
+    // Normal CI stays self-cleaning. A reviewer can opt in to retain the exact
+    // MP4, renderer receipt, in-progress hand frame, and completed-board frame
+    // that this proof actually inspected—without turning the test into a
+    // source-only assertion or leaving artifacts behind by default.
+    const evidenceDir = process.env.WHITEBOARD_RENDER_EVIDENCE_DIR?.trim();
+    if (evidenceDir) {
+      await mkdir(evidenceDir, { recursive: true });
+      await Promise.all([
+        copyFile(out, join(evidenceDir, "whiteboard-full-panel-proof.mp4")),
+        copyFile(`${out}.draw-receipt.json`, join(evidenceDir, "whiteboard-full-panel-receipt.json")),
+        copyFile(`${out}_frames/${String(lateFrame).padStart(5, "0")}.png`, join(evidenceDir, "whiteboard-late-hand-trace.png")),
+        copyFile(`${out}_frames/${String(completionFrame).padStart(5, "0")}.png`, join(evidenceDir, "whiteboard-completed-board.png")),
+      ]);
+      console.log(`whiteboard review evidence retained: ${evidenceDir}`);
+    }
     console.log("whiteboard full-panel production render: PASS");
   } finally {
     await rm(work, { recursive: true, force: true });
