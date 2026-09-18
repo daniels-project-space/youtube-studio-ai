@@ -19,6 +19,24 @@ import { normalizeTtsProvider } from "@/lib/tts";
 const savedFetch = globalThis.fetch;
 const savedEnv = { ...process.env };
 
+function workerRuntimeEnv(): NodeJS.ProcessEnv {
+  const profile = process.env.QWEN3_TTS_RUNTIME_PROFILE ?? "novita-4090-serverless";
+  if (profile === "openrelay-3090-persistent") {
+    return {
+      ...process.env,
+      QWEN3_TTS_RUNTIME_PROVIDER: "openrelay",
+      QWEN3_TTS_RUNTIME_GPU: "RTX 3090",
+      QWEN3_TTS_RUNTIME_CAPACITY_MODE: "persistent-disk-auto-stop",
+    };
+  }
+  return {
+    ...process.env,
+    QWEN3_TTS_RUNTIME_PROVIDER: "novita",
+    QWEN3_TTS_RUNTIME_GPU: "RTX 4090",
+    QWEN3_TTS_RUNTIME_CAPACITY_MODE: "serverless-scale-to-zero",
+  };
+}
+
 function actualPythonWorkerResponse(request: Record<string, unknown>, audio: Uint8Array): unknown {
   const output = execFileSync(
     "python3",
@@ -33,6 +51,7 @@ function actualPythonWorkerResponse(request: Record<string, unknown>, audio: Uin
         gpuRateUsdPerSecond: 0.00005,
       }),
       encoding: "utf8",
+      env: workerRuntimeEnv(),
     },
   );
   return JSON.parse(output) as unknown;
@@ -44,6 +63,7 @@ async function main(): Promise<void> {
   assert.equal(qwenTtsReadiness().configured, false);
   process.env.QWEN3_TTS_WORKER_URL = "https://qwen-worker.example/v1/synthesize";
   process.env.QWEN3_TTS_WORKER_TOKEN = "qwen-test-token-that-is-longer-than-thirty-two-characters";
+  process.env.OPENRELAY_API_KEY = "openrelay-test-token-that-is-longer-than-thirty-two-characters";
   process.env.QWEN3_TTS_QUALITY_QUALIFIED = "1";
   process.env.QWEN3_TTS_QUALITY_RECEIPT_SHA256 = "a".repeat(64);
   assert.equal(hasQualifiedQwenTts(), true);
@@ -62,7 +82,15 @@ async function main(): Promise<void> {
   let acceptedReceipt: QwenTtsReceipt | undefined;
   globalThis.fetch = async (_input, init) => {
     requests += 1;
-    assert.equal(new Headers(init?.headers).get("Authorization")?.startsWith("Bearer "), true);
+    const headers = new Headers(init?.headers);
+    if (process.env.QWEN3_TTS_RUNTIME_PROFILE === "openrelay-3090-persistent") {
+      assert.equal(headers.get("Authorization"), null);
+      assert.equal(headers.get("x-worker-authorization")?.startsWith("Bearer "), true);
+      assert.equal(headers.get("x-api-key")?.startsWith("openrelay-test-token"), true);
+    } else {
+      assert.equal(headers.get("Authorization")?.startsWith("Bearer "), true);
+      assert.equal(headers.get("x-worker-authorization"), null);
+    }
     const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(request.model, QWEN3_TTS_MODEL);
     assert.equal(request.revision, QWEN3_TTS_MODEL_REVISION);

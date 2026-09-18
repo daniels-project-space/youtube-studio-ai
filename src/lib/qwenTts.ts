@@ -10,6 +10,32 @@ export const QWEN3_TTS_TRANSFORMERS_VERSION = "4.57.3" as const;
 export const QWEN3_TTS_SAMPLE_RATE_HZ = 24_000 as const;
 export const QWEN3_TTS_IDLE_SHUTDOWN_SECONDS = 300 as const;
 
+export type QwenTtsRuntimeProvider = "novita" | "openrelay";
+export type QwenTtsRuntimeGpu = "RTX 4090" | "RTX 3090";
+export type QwenTtsCapacityMode = "serverless-scale-to-zero" | "persistent-disk-auto-stop";
+
+export interface QwenTtsRuntimeProfile {
+  provider: QwenTtsRuntimeProvider;
+  gpu: QwenTtsRuntimeGpu;
+  capacityMode: QwenTtsCapacityMode;
+}
+
+/**
+ * The exact execution profile is part of every sealed request and receipt.
+ * OpenRelay uses a persistent local disk with an external idle-stop controller;
+ * the legacy Novita profile remains available for retained qualified takes.
+ */
+export function qwenTtsRuntimeProfile(): QwenTtsRuntimeProfile {
+  const profile = (process.env.QWEN3_TTS_RUNTIME_PROFILE ?? "novita-4090-serverless").trim();
+  if (profile === "novita-4090-serverless") {
+    return { provider: "novita", gpu: "RTX 4090", capacityMode: "serverless-scale-to-zero" };
+  }
+  if (profile === "openrelay-3090-persistent") {
+    return { provider: "openrelay", gpu: "RTX 3090", capacityMode: "persistent-disk-auto-stop" };
+  }
+  throw new QwenTtsError("QWEN3_TTS_RUNTIME_PROFILE must select an admitted exact worker profile");
+}
+
 export const QWEN3_TTS_SPEAKERS = [
   "Vivian",
   "Serena",
@@ -59,9 +85,9 @@ export type QwenTtsSpeaker = (typeof QWEN3_TTS_SPEAKERS)[number];
 export type QwenTtsLanguage = (typeof QWEN3_TTS_LANGUAGES)[number];
 
 export interface QwenTtsRuntimeReceipt {
-  provider: "novita";
-  gpu: "RTX 4090";
-  capacityMode: "serverless-scale-to-zero";
+  provider: QwenTtsRuntimeProvider;
+  gpu: QwenTtsRuntimeGpu;
+  capacityMode: QwenTtsCapacityMode;
   persistentCache: true;
   idleShutdownSeconds: number;
   accounting: "conservative-upper-bound";
@@ -109,6 +135,12 @@ export function isPinnedQwenTtsReceipt(value: unknown): value is QwenTtsReceipt 
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const receipt = value as Partial<QwenTtsReceipt>;
   const runtime = receipt.runtime as Partial<QwenTtsRuntimeReceipt> | undefined;
+  let expectedRuntime: QwenTtsRuntimeProfile;
+  try {
+    expectedRuntime = qwenTtsRuntimeProfile();
+  } catch {
+    return false;
+  }
   if (
     receipt.schema !== QWEN3_TTS_WORKER_CONTRACT ||
     receipt.model !== QWEN3_TTS_MODEL ||
@@ -126,8 +158,8 @@ export function isPinnedQwenTtsReceipt(value: unknown): value is QwenTtsReceipt 
       .every((digest) => typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest)) ||
     typeof receipt.durationSec !== "number" || !Number.isFinite(receipt.durationSec) ||
     receipt.durationSec < 0.25 || receipt.durationSec > 3_600 ||
-    !runtime || runtime.provider !== "novita" || runtime.gpu !== "RTX 4090" ||
-    runtime.capacityMode !== "serverless-scale-to-zero" || runtime.persistentCache !== true ||
+    !runtime || runtime.provider !== expectedRuntime.provider || runtime.gpu !== expectedRuntime.gpu ||
+    runtime.capacityMode !== expectedRuntime.capacityMode || runtime.persistentCache !== true ||
     runtime.idleShutdownSeconds !== QWEN3_TTS_IDLE_SHUTDOWN_SECONDS ||
     runtime.accounting !== "conservative-upper-bound" ||
     typeof runtime.requestGpuSeconds !== "number" || runtime.requestGpuSeconds <= 0 || runtime.requestGpuSeconds > 3_600 ||
@@ -196,10 +228,21 @@ function workerToken(): string {
   return token;
 }
 
+/** Consumed by the private OpenRelay gateway and stripped before proxying. */
+function openRelayGatewayToken(): string {
+  const token = process.env.OPENRELAY_API_KEY?.trim() ?? "";
+  if (token.length < 32) {
+    throw new QwenTtsError("OPENRELAY_API_KEY is missing or too short for the private Qwen endpoint");
+  }
+  return token;
+}
+
 export function qwenTtsReadiness(): QwenTtsReadiness {
   const blockers: string[] = [];
   let urlConfigured = true;
   let tokenConfigured = true;
+  let runtimeProfile: QwenTtsRuntimeProfile | undefined;
+  let gatewayConfigured = true;
   try { workerUrl(); } catch (error) {
     urlConfigured = false;
     blockers.push(error instanceof Error ? error.message : String(error));
@@ -208,6 +251,15 @@ export function qwenTtsReadiness(): QwenTtsReadiness {
     tokenConfigured = false;
     blockers.push(error instanceof Error ? error.message : String(error));
   }
+  try { runtimeProfile = qwenTtsRuntimeProfile(); } catch (error) {
+    blockers.push(error instanceof Error ? error.message : String(error));
+  }
+  if (runtimeProfile?.provider === "openrelay") {
+    try { openRelayGatewayToken(); } catch (error) {
+      gatewayConfigured = false;
+      blockers.push(error instanceof Error ? error.message : String(error));
+    }
+  }
   const qualityReceipt = process.env.QWEN3_TTS_QUALITY_RECEIPT_SHA256?.trim() ?? "";
   if (process.env.QWEN3_TTS_QUALITY_QUALIFIED !== "1") {
     blockers.push("QWEN3_TTS_QUALITY_QUALIFIED is not enabled");
@@ -215,7 +267,7 @@ export function qwenTtsReadiness(): QwenTtsReadiness {
   if (!/^[a-f0-9]{64}$/.test(qualityReceipt)) {
     blockers.push("QWEN3_TTS_QUALITY_RECEIPT_SHA256 is missing or invalid");
   }
-  const configured = urlConfigured && tokenConfigured;
+  const configured = urlConfigured && tokenConfigured && Boolean(runtimeProfile) && gatewayConfigured;
   return { configured, qualified: configured && blockers.length === 0, blockers };
 }
 
@@ -333,9 +385,10 @@ function validateReceipt(args: {
     throw new Error("Qwen3 TTS runtime receipt is missing");
   }
   const runtime = value.runtime as Record<string, unknown>;
-  exactString(runtime.provider, "novita", "runtime provider");
-  exactString(runtime.gpu, "RTX 4090", "GPU");
-  exactString(runtime.capacityMode, "serverless-scale-to-zero", "capacity mode");
+  const expectedRuntime = qwenTtsRuntimeProfile();
+  exactString(runtime.provider, expectedRuntime.provider, "runtime provider");
+  exactString(runtime.gpu, expectedRuntime.gpu, "GPU");
+  exactString(runtime.capacityMode, expectedRuntime.capacityMode, "capacity mode");
   if (runtime.persistentCache !== true) throw new Error("Qwen3 TTS worker did not attest persistent model caching");
   if (runtime.idleShutdownSeconds !== args.idleShutdownSeconds) {
     throw new Error("Qwen3 TTS receipt idle shutdown does not match the request");
@@ -358,7 +411,7 @@ function validateReceipt(args: {
   return value as unknown as QwenTtsReceipt;
 }
 
-export async function synthQwenNarration(args: {
+export interface QwenTtsRequestArgs {
   text: string;
   speaker: string;
   language?: string;
@@ -366,8 +419,10 @@ export async function synthQwenNarration(args: {
   speed?: number;
   seed?: number;
   maxCostUsd?: number;
-  onReceipt?: (receipt: QwenTtsReceipt) => void;
-}): Promise<Uint8Array> {
+}
+
+/** Pure request identity, shared by live submission and offline qualification. */
+export function prepareQwenTtsRequest(args: QwenTtsRequestArgs) {
   const text = args.text.replace(/\s+/g, " ").trim();
   if (!text || text.length > 8_000) throw new QwenTtsError("Qwen3 TTS text must contain 1–8000 characters");
   if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(args.speaker)) {
@@ -391,6 +446,7 @@ export async function synthQwenNarration(args: {
     throw new QwenTtsError("Qwen3 TTS requires a positive per-request cost ceiling");
   }
   const maxCostUsd = Math.min(1, requestedMaxCostUsd);
+  const runtimeProfile = qwenTtsRuntimeProfile();
   const payload = {
     schema: QWEN3_TTS_WORKER_CONTRACT,
     model: QWEN3_TTS_MODEL,
@@ -410,24 +466,57 @@ export async function synthQwenNarration(args: {
     sampleRateHz: QWEN3_TTS_SAMPLE_RATE_HZ,
     maxCostUsd,
     runtime: {
-      provider: "novita",
-      gpu: "RTX 4090",
-      capacityMode: "serverless-scale-to-zero",
+      provider: runtimeProfile.provider,
+      gpu: runtimeProfile.gpu,
+      capacityMode: runtimeProfile.capacityMode,
       persistentCache: true,
       idleShutdownMaxSeconds: QWEN3_TTS_IDLE_SHUTDOWN_SECONDS,
       accounting: "conservative-upper-bound",
     },
   } as const;
   const requestKey = sha256(canonicalJson(payload));
+  return { payload, requestKey };
+}
+
+/** Validate retained bytes against the CURRENT request, not a receipt's own claim.
+ * Integrity linkage only: this neither authorizes spend nor proves worker identity. */
+export function validateRetainedQwenTtsAudio(args: QwenTtsRequestArgs, audio: Uint8Array, receipt: unknown): QwenTtsReceipt {
+  const { payload, requestKey } = prepareQwenTtsRequest(args);
+  // Reuse the live size/header checks as well as its complete attestation checks.
+  if (!(audio instanceof Uint8Array) || audio.byteLength < 1_000 || audio.byteLength > 36_000_000) {
+    throw new Error("Qwen3 TTS retained audio is outside the bounded size");
+  }
+  strictBase64(Buffer.from(audio).toString("base64"));
+  return validateReceipt({
+    value: receipt, requestKey, textSha256: payload.textSha256,
+    instructionSha256: payload.instructionSha256, speaker: payload.speaker,
+    language: payload.language, seed: payload.seed, audio, maxCostUsd: payload.maxCostUsd,
+    idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
+  });
+}
+
+export async function synthQwenNarration(args: QwenTtsRequestArgs & {
+  onReceipt?: (receipt: QwenTtsReceipt) => void;
+}): Promise<Uint8Array> {
+  const { payload, requestKey } = prepareQwenTtsRequest(args);
+  const runtimeProfile = qwenTtsRuntimeProfile();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": requestKey,
+  };
+  if (runtimeProfile.provider === "openrelay") {
+    // OpenRelay consumes Authorization for its organization credential, so
+    // retain the worker's second auth layer in a header it forwards intact.
+    headers["x-worker-authorization"] = `Bearer ${workerToken()}`;
+    headers["x-api-key"] = openRelayGatewayToken();
+  } else {
+    headers.Authorization = `Bearer ${workerToken()}`;
+  }
   let response: Response;
   try {
     response = await fetch(workerUrl(), {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${workerToken()}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": requestKey,
-      },
+      headers,
       body: JSON.stringify({ ...payload, requestKey }),
       signal: AbortSignal.timeout(180_000),
     });
@@ -464,11 +553,11 @@ export async function synthQwenNarration(args: {
       requestKey,
       textSha256: payload.textSha256,
       instructionSha256: payload.instructionSha256,
-      speaker,
-      language: typedLanguage,
-      seed,
+      speaker: payload.speaker,
+      language: payload.language,
+      seed: payload.seed,
       audio,
-      maxCostUsd,
+      maxCostUsd: payload.maxCostUsd,
       idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
     });
     args.onReceipt?.(receipt);
