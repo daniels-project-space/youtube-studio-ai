@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
 import {
   selectMediaPreview,
@@ -82,6 +82,13 @@ export function MediaPreview({
   const [imageProbe, setImageProbe] = useState<{ src: string; state: "ready" } | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  // A retained Lo-Fi master is potentially hours long.  Metadata-only loading
+  // is cheap, but it may never fetch the frame at 15 seconds; decode only
+  // when the card is near view (or explicitly above the fold) instead of
+  // preloading every master in a carousel.
+  const [videoFrameRequested, setVideoFrameRequested] = useState(priority);
+  const shouldBufferVideoFrame = priority || videoFrameRequested;
   // useSyncExternalStore gives the server a stable false snapshot and flips to
   // true only after hydration, without a synchronous setState-in-effect.
   const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
@@ -114,6 +121,22 @@ export function MediaPreview({
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
   const showingVideoStill = !showingReviewed && !assetKey && Boolean(sourceVideoStillKey) && selection.source === "r2";
+  useEffect(() => {
+    if (!showingVideoStill || shouldBufferVideoFrame) return;
+    if (typeof IntersectionObserver === "undefined") {
+      const timer = window.setTimeout(() => setVideoFrameRequested(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    const node = previewRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      setVideoFrameRequested(true);
+    }, { rootMargin: "240px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [showingVideoStill, shouldBufferVideoFrame]);
   // The same-origin delivery route verifies both the initial native-player
   // range and a later seek in one server-side proof wave. Keep the browser
   // to one request per card: the old client cascade was five sequential
@@ -191,6 +214,7 @@ export function MediaPreview({
   return (
     <>
     <div
+      ref={previewRef}
       className={joinClassNames(styles.preview, className)}
       style={{ aspectRatio, ...style }}
       data-preview-source={selection.source}
@@ -230,7 +254,7 @@ export function MediaPreview({
           src={videoSourceReady ? selection.src : undefined}
           muted
           playsInline
-          preload="metadata"
+          preload={shouldBufferVideoFrame ? "auto" : "metadata"}
           aria-label={alt}
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;

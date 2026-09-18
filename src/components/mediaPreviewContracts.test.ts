@@ -26,6 +26,10 @@ assert.match(preview, /one server-side proof wave/,
 assert.doesNotMatch(preview, /warmupRange|stableProbe/,
   "compact cards must not repeat range probes that the server already verifies");
 assert.match(preview, /videoSourceReady/);
+assert.match(preview, /IntersectionObserver/,
+  "a Lo-Fi card must request a decode only when it is near view");
+assert.match(preview, /preload=\{shouldBufferVideoFrame \? "auto" : "metadata"\}/,
+  "the exact Lo-Fi source frame may buffer near view without preloading every retained master");
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
 assert.match(preview, /reviewedSrc/);
