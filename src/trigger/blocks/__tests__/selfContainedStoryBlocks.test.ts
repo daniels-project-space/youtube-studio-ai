@@ -4,11 +4,17 @@ import { join } from "node:path";
 
 import { artifactContract, validateArtifact } from "@/engine/artifactSchemas";
 import { registerAllBlocks } from "@/engine/blocks";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import {
+  channelProgramRouteRunSeed,
+  resolveChannelProgramRoute,
+} from "@/engine/channelProgramRoute";
 import {
   resolveSelfContainedStoryPlan,
   selfContainedStoryReceiptBindingFromRoute,
   type SelfContainedStoryFamily,
 } from "@/engine/selfContainedStoryReceipt";
+import { assertSelfContainedStoryPlanningRoute } from "@/engine/selfContainedStoryPlanning";
 import { getManifest } from "@/engine/registry";
 import type { StageContext } from "@/engine/types";
 import {
@@ -17,40 +23,25 @@ import {
   selfContainedStoryPlan,
 } from "@/trigger/blocks/selfContainedStoryBlocks";
 
-const HASH_A = "a".repeat(64);
-const HASH_B = "b".repeat(64);
-
 /**
- * ABI-only future-route fixture. The current route catalog deliberately has no
- * whiteboard/comic/lore route key, so this shape-valid seed is never selected
- * by production route admission. It proves only that a future admitted route
- * can carry the shared handoff without the block inventing one.
+ * Use the actual certified route and the exact frozen runtime seed each
+ * renderer receives. A synthetic shape-only seed would conceal a drift
+ * between route admission and this shared handoff.
  */
-function futureRoute(family: SelfContainedStoryFamily) {
-  const contract = family === "whiteboard"
-    ? { lane: "whiteboard_explainer", renderer: "whiteboard_scribe" }
-    : family === "comic"
-      ? { lane: "motion_comic", renderer: "motion_comic" }
-      : { lane: "lore_micro_doc", renderer: "lore_short" };
-  return {
-    version: "channel-program-route-seed/v1" as const,
-    // The parser intentionally validates a run seed's frozen shape; actual
-    // route admission occurs upstream and is not replicated in this module.
-    routeKey: "illustrated-explainer/foundation/v1" as const,
-    routeFingerprint: HASH_A,
+function admittedRoute(family: SelfContainedStoryFamily) {
+  const brief = createChannelProgramBrief({
     family,
-    contentLaneKey: contract.lane,
-    programBriefFingerprint: HASH_B,
-    directives: {
-      viewerJob: "Understand one coherent visual story.",
-      claimMode: "editorial_lane_policy" as const,
-      topicRules: ["Use the frozen topic."],
-      scriptRules: ["Use the sealed approved story."],
-      criticFocus: ["Do not replace the approved plan."],
-    },
-    requiredBlocks: [contract.renderer],
-    context: { locale: "en-US", nicheKey: "future-shared-story-fixture" },
-  };
+    nicheKey: "educational",
+    locale: "en",
+    concept: `An original ${family} visual story channel for curious adult learners.`,
+    audience: "Curious adult learners",
+    sampleTopics: ["A clear visual explanation of one useful idea"],
+  });
+  const route = resolveChannelProgramRoute(brief);
+  const seed = channelProgramRouteRunSeed({ route, programBrief: brief });
+  assert.deepEqual(seed.requiredBlockOrder, route.requiredBlockOrder);
+  assertSelfContainedStoryPlanningRoute(seed);
+  return seed;
 }
 
 function stage(store: Record<string, unknown>): StageContext {
@@ -152,7 +143,7 @@ async function main() {
   await assert.rejects(
     () => selfContainedStoryPlan.run(stage({
       topic: "unreserved planning fixture",
-      channelProgramRoute: futureRoute("whiteboard"),
+      channelProgramRoute: admittedRoute("whiteboard"),
       contentLane: { key: "whiteboard_explainer" },
     })),
     /compiler-signed.*reservation/i,
@@ -162,7 +153,7 @@ async function main() {
     () => selfContainedStoryPlan.run({
       ...stage({
         topic: "mismatched lane planning fixture",
-        channelProgramRoute: futureRoute("whiteboard"),
+        channelProgramRoute: admittedRoute("whiteboard"),
         contentLane: { key: "motion_comic" },
       }),
       stageBudgetUsd: SELF_CONTAINED_STORY_PLAN_MAX_TEXT_COST_USD,
@@ -172,8 +163,8 @@ async function main() {
   );
 
   for (const family of ["whiteboard", "comic", "loreshort"] as const) {
-    const topic = `${family} future sealed-story fixture`;
-    const route = futureRoute(family);
+    const topic = `${family} sealed-story fixture`;
+    const route = admittedRoute(family);
     const plan = planFor(family);
     assert.deepEqual(validateArtifact(planArtifact, plan), plan);
 
@@ -200,7 +191,7 @@ async function main() {
     );
   }
 
-  const missingRendererRoute = { ...futureRoute("whiteboard"), requiredBlocks: ["qa_visual"] };
+  const missingRendererRoute = { ...admittedRoute("whiteboard"), requiredBlocks: ["qa_visual"] };
   await assert.rejects(
     () => selfContainedStory.run(stage({
       topic: "missing renderer route fixture",
@@ -214,7 +205,7 @@ async function main() {
   await assert.rejects(
     () => selfContainedStory.run(stage({
       topic: "unapproved plan fixture",
-      channelProgramRoute: futureRoute("whiteboard"),
+      channelProgramRoute: admittedRoute("whiteboard"),
       selfContainedStoryPlan: {
         ...planFor("whiteboard"),
         critique: { accepted: false, score: 0.1, iterations: 1, issues: ["rejected"] },

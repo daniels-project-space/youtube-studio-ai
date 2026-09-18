@@ -105,6 +105,12 @@ export interface ChannelProgramRouteRunSeed {
   readonly programBriefFingerprint: string;
   readonly directives: ChannelProgramRouteDirectives;
   readonly requiredBlocks: readonly string[];
+  /**
+   * Current seeds retain the route's causal ordering for native planning
+   * handoffs. Optional only so historical frozen seeds remain readable; a
+   * planner that needs the order fails before a provider call when it is absent.
+   */
+  readonly requiredBlockOrder?: readonly (readonly [string, string])[];
   readonly quizProfile?: CertifiedQuizProfileKey;
   readonly syntheticScenarioProfile?: SyntheticScenarioProfile;
   readonly serializedProgram?: SerializedProgram;
@@ -567,6 +573,9 @@ export const ChannelProgramRouteRunSeedSchema = z.object({
   programBriefFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   directives: RouteDirectivesSchema,
   requiredBlocks: z.array(z.string().min(1).max(120)).min(1).max(CHANNEL_PROGRAM_ROUTE_MAX_REQUIRED_BLOCKS),
+  requiredBlockOrder: z.array(z.tuple([z.string().min(1).max(120), z.string().min(1).max(120)]))
+    .max(CHANNEL_PROGRAM_ROUTE_MAX_REQUIRED_BLOCK_ORDER)
+    .optional(),
   quizProfile: z.enum(CERTIFIED_QUIZ_PROFILE_KEYS).optional(),
   syntheticScenarioProfile: z.enum(SYNTHETIC_SCENARIO_PROFILES).optional(),
   serializedProgram: SerializedProgramSchema.optional(),
@@ -919,6 +928,7 @@ export function channelProgramRouteRunSeed(input: {
     programBriefFingerprint: route.programBriefFingerprint,
     directives: route.directives,
     requiredBlocks: route.requiredBlocks,
+    requiredBlockOrder: route.requiredBlockOrder,
     ...(route.quizProfile ? { quizProfile: route.quizProfile } : {}),
     ...(route.syntheticScenarioProfile ? { syntheticScenarioProfile: route.syntheticScenarioProfile } : {}),
     ...(route.serializedProgram ? { serializedProgram: route.serializedProgram } : {}),
