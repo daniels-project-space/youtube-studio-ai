@@ -169,6 +169,7 @@ import {
   hasQwenTtsConfig,
   hasQualifiedQwenTts,
   assertQwenNarrationSourceBinding,
+  composeQwenNarrationInstruction,
   createQwenNarrationSourceEvidence,
   qwenTtsReadiness,
   QWEN3_TTS_SPEAKERS,
@@ -180,6 +181,7 @@ import {
 } from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
+  assertNarrationDeliveryRate,
   assertNarrationPerformanceEvidence,
   assertNarrationSpeed,
   assertNarrationTimingMeasurementIntegrity,
@@ -1329,9 +1331,13 @@ export const narrationTts: Block = {
     // supplies a more specific instruction. This keeps the batch packet from
     // becoming documentation-only while preserving the explicit channel knob.
     const qwenInstruction = ttsProvider === "qwen3"
-      ? String(ctx.params["qwenInstruction"] ?? [weeklyNarrationBrief, dnaPacing?.delivery, dnaPacing?.pacing, physics.archetype]
-          .filter(Boolean)
-          .join(". "))
+      ? composeQwenNarrationInstruction({
+          explicit: ctx.params["qwenInstruction"],
+          editorialBrief: weeklyNarrationBrief,
+          delivery: dnaPacing?.delivery,
+          pacing: dnaPacing?.pacing,
+          archetype: physics.archetype,
+        })
       : undefined;
     if (ttsProvider === "qwen3" && weeklyNarrationBrief) {
       ctx.log("narration_tts: applied frozen weekly narration brief to the Qwen request");
@@ -1459,7 +1465,7 @@ export const narrationTts: Block = {
       const rate = evaluateNarrationRate({ wordCount: evidence.wordCount, durationSec: evidence.durationSec, speed });
       ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
       if (quality === "production" && !rate.ok) {
-        throw new Error(`narration_tts: final delivery rate failed the channel pace contract — ${rate.detail}`);
+        assertNarrationDeliveryRate({ ...evidence, speed, label: "narration_tts" });
       }
       return rate;
     };

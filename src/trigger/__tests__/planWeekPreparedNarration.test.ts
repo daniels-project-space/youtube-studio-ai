@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { assertPlanWeekPreparedNarrationArgs, buildPreparedImageShots } from "@/trigger/planWeekPreparedNarration";
 import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
 import type { PlanWeekPreparationManifest, PlanWeekPreparedNarration } from "@/lib/planWeekPreparation";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const base = {
   ownerId: "owner-1",
@@ -81,5 +83,12 @@ assert.equal(imagePacket.shots.length, 2);
 assert.equal(imagePacket.generationProfile, "production");
 assert.match(imagePacket.shots[0]!.prompt, /Keep the lock readable/);
 assert.equal(imagePacket.shots[0]!.candidateCount, 2);
+
+const source = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPreparedNarration.ts"), "utf8");
+const rateGateAt = source.indexOf("assertNarrationDeliveryRate({");
+const persistAt = source.indexOf("const audioCreated = await persistCreateOnly(audioKey");
+assert.ok(rateGateAt >= 0 && persistAt > rateGateAt, "prepared narration must clear the measured pace gate before retained audio is written");
+assert.match(source, /composeQwenNarrationInstruction\([\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
+  "weekly Qwen direction must include frozen Style DNA when no explicit module instruction exists");
 
 console.log("weekly prepared narration producer contract passed");

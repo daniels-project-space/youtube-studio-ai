@@ -8,7 +8,7 @@ assert.ok(start >= 0 && end > start, "narration_tts source boundary must remain 
 const route = source.slice(start, end);
 
 assert.match(route, /assertNarrationSpeed\([\s\S]*explicitSpeed === undefined/u);
-assert.match(route, /quality === "production" && !rate\.ok[\s\S]*final delivery rate failed the channel pace contract/u);
+assert.match(route, /quality === "production" && !rate\.ok[\s\S]*assertNarrationDeliveryRate\(\{ \.\.\.evidence, speed, label: "narration_tts" \}\)/u);
 
 const chapter = route.slice(route.indexOf("if (chapterMode"), route.indexOf("// Synth PER SENTENCE"));
 const sentence = route.slice(route.indexOf("// Synth PER SENTENCE"));

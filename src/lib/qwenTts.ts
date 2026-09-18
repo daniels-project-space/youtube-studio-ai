@@ -465,6 +465,35 @@ export function qwenTtsInstruction(instruction: string | undefined, speed: numbe
   return [explicit, speedDirective].filter(Boolean).join(" ").slice(0, 600);
 }
 
+/**
+ * Resolve the editorial direction before it reaches the pinned CustomVoice
+ * worker.  Both the scheduled path and the week-ahead preparation path use
+ * this function, so a prepared take cannot silently lose its channel voice
+ * merely because it was rendered earlier in the week.
+ *
+ * A deliberately supplied module instruction wins.  Otherwise the frozen
+ * editorial brief, Style DNA delivery/pacing, and route archetype form one
+ * bounded provider instruction.  These are direction inputs, not a claim
+ * that the model will comply; retained audio still has to clear the measured
+ * delivery-rate and loudness gates.
+ */
+export function composeQwenNarrationInstruction(args: {
+  explicit?: unknown;
+  editorialBrief?: unknown;
+  delivery?: unknown;
+  pacing?: unknown;
+  archetype?: unknown;
+}): string {
+  const text = (value: unknown): string => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const explicit = text(args.explicit);
+  if (explicit) return explicit.slice(0, 520);
+  return [args.editorialBrief, args.delivery, args.pacing, args.archetype]
+    .map(text)
+    .filter(Boolean)
+    .join(". ")
+    .slice(0, 520);
+}
+
 export function resolveQwenTtsLanguage(value: unknown): QwenTtsLanguage {
   const normalized = typeof value === "string" ? value.trim().toLowerCase().replaceAll("_", "-") : "";
   const prefix = normalized.split("-")[0];

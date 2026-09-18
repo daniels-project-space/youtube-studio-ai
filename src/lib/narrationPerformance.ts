@@ -181,6 +181,24 @@ export function evaluateNarrationRate(args: {
   };
 }
 
+/**
+ * Enforce, rather than merely report, the measured channel delivery contract.
+ * This is shared by live and week-ahead narration so an early rendered take
+ * cannot bypass the same pace requirement that protects an on-demand take.
+ */
+export function assertNarrationDeliveryRate(args: {
+  wordCount: number;
+  durationSec: number;
+  speed?: number;
+  label: string;
+}): NarrationRateVerdict {
+  const verdict = evaluateNarrationRate(args);
+  if (!verdict.ok) {
+    throw new Error(`${args.label}: final delivery rate failed the channel pace contract — ${verdict.detail}`);
+  }
+  return verdict;
+}
+
 export interface NarrationCadencePlan {
   version: typeof NARRATION_CADENCE_EVIDENCE_VERSION;
   gapsSec: number[];

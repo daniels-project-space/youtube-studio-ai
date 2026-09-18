@@ -33,6 +33,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { concatAudioWithGaps, probe } from "@/lib/ffmpeg";
 import { writeBytes } from "@/lib/files";
 import {
+  assertNarrationDeliveryRate,
   assertNarrationSpeed,
   planNarrationCadence,
   preflightNarrationPerformance,
@@ -43,6 +44,7 @@ import { planStorySpine } from "@/engine/storySpine";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   createQwenNarrationSourceEvidence,
+  composeQwenNarrationInstruction,
   QWEN3_TTS_SPEAKERS,
   qwenTtsInstruction,
   resolveQwenTtsLanguage,
@@ -51,6 +53,7 @@ import {
   type QwenTtsSpeaker,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
+import { narrationPhysics } from "@/lib/voicecraft";
 import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
 
 export interface PlanWeekPreparedNarrationArgs {
@@ -393,10 +396,17 @@ export const planWeekPreparedNarrationTask = task({
     const cadence = planNarrationCadence({ sentences, baseGapSec, jitterSec });
     const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
     const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
-    const instruction = qwenTtsInstruction(
-      typeof config.qwenInstruction === "string" ? config.qwenInstruction : manifest.prompts.narration,
-      speed,
-    );
+    const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
+      ? (seed.styleDNA as { narrative?: { pacing?: unknown; delivery?: unknown } }).narrative
+      : undefined;
+    const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
+    const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
+      explicit: config.qwenInstruction,
+      editorialBrief: manifest.prompts.narration,
+      delivery: dnaNarrative?.delivery,
+      pacing: dnaNarrative?.pacing,
+      archetype: physics.archetype,
+    }), speed);
     if (provider === "qwen3" && !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(String(speakerValue))) {
       throw new Error(`weekly prepared narration Qwen3 requires one pinned speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
     }
@@ -456,6 +466,12 @@ export const planWeekPreparedNarrationTask = task({
         return { text: sentence, start, end: start + partDurations[index]! };
       });
       const baseEvidence = await preflightNarrationPerformance({ audioPath: finalPath, text, speed });
+      assertNarrationDeliveryRate({
+        wordCount: baseEvidence.wordCount,
+        durationSec: baseEvidence.durationSec,
+        speed,
+        label: "weekly prepared narration",
+      });
       let narrationPerformanceEvidence: NarrationPerformanceEvidence = baseEvidence;
       if (provider === "qwen3") {
         if (qwenReceipts.length !== sentences.length) throw new Error("weekly prepared narration Qwen3 receipt count does not cover every sentence");

@@ -15,6 +15,7 @@ import {
   NARRATION_RATE_TOLERANCE,
   NARRATION_SPEED_MAX,
   NARRATION_SPEED_MIN,
+  assertNarrationDeliveryRate,
   assertNarrationSpeed,
   evaluateNarrationRate,
 } from "@/lib/narrationPerformance";
@@ -61,6 +62,11 @@ function main(): void {
   assert.equal(evaluateNarrationRate({ wordCount: 0, durationSec: 30 }).ok, false);
   assert.equal(evaluateNarrationRate({ wordCount: 100, durationSec: 0 }).ok, false);
   assert.equal(evaluateNarrationRate({ wordCount: 100, durationSec: Number.NaN }).ok, false);
+  assert.throws(
+    () => assertNarrationDeliveryRate({ ...atWpm(98), speed: 1, label: "weekly prepared narration" }),
+    /weekly prepared narration: final delivery rate failed/u,
+    "week-ahead rendered takes must reject the same off-pace delivery as a live run",
+  );
 
   // ---- the band itself stays honest -------------------------------------
   // If someone widens the tolerance far enough, the gate stops discriminating

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import {
   hasQualifiedQwenTts,
+  composeQwenNarrationInstruction,
   isPinnedQwenTtsReceipt,
   qwenTtsReadiness,
   qwenTtsInstruction,
@@ -55,6 +56,24 @@ async function main(): Promise<void> {
     "Qwen runtime accounting must use the attested GPU receipt, not fictional character billing",
   );
   assert.match(qwenTtsInstruction("Calm documentary delivery.", 0.9), /unhurried/);
+  assert.equal(
+    composeQwenNarrationInstruction({
+      explicit: "Use a close, intimate delivery.",
+      editorialBrief: "This must not replace the channel's explicit direction.",
+    }),
+    "Use a close, intimate delivery.",
+    "an explicit module instruction must remain the authoritative direction",
+  );
+  assert.equal(
+    composeQwenNarrationInstruction({
+      editorialBrief: "Open with quiet urgency",
+      delivery: "restrained but intimate",
+      pacing: "measured documentary",
+      archetype: "documentary",
+    }),
+    "Open with quiet urgency. restrained but intimate. measured documentary. documentary",
+    "weekly narration must retain both its frozen brief and the channel Style DNA",
+  );
 
   const audio = new Uint8Array(2_048).fill(23);
   audio.set([0x49, 0x44, 0x33], 0);
