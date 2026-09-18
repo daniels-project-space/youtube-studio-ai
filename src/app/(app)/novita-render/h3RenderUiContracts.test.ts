@@ -27,6 +27,8 @@ assert.match(page, /Runtime admission/);
 assert.match(page, /Refresh runtime/);
 assert.match(page, /repeated vault\/R2 reads would add cost without changing work/,
   "runtime readiness must be an explicit, bounded read rather than another busy poll");
+assert.match(page, /window\.setTimeout\(\(\) => \{ void checkRuntimeReadiness\(\); \}, 0\)/,
+  "the initial owner-scoped read must not synchronously cascade state from an effect");
 assert.match(page, /const checkCapacity = useCallback\(async \(\) =>/,
   "capacity probing must be stable so the auto-probe cannot loop on every render");
 assert.match(page, /if \(access !== "owner" \|\| mode !== "weekly" \|\| !parsedPreview\.valid\) return;/,

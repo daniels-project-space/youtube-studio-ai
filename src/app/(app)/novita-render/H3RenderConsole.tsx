@@ -220,7 +220,8 @@ export function H3RenderConsole() {
   // signal and repeated vault/R2 reads would add cost without changing work.
   useEffect(() => {
     if (access !== "owner") return;
-    void checkRuntimeReadiness();
+    const timer = window.setTimeout(() => { void checkRuntimeReadiness(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [access, checkRuntimeReadiness]);
 
   const dispatchDisabledReason = useMemo(() => {
