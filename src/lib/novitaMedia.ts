@@ -12,11 +12,10 @@ import {
 } from "@/lib/novitaRenderFarm";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS } from "@/lib/files";
-import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
+import { getObjectBytes, presignDownload } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { assertNovitaVideoProfileRuntime } from "@/engine/runtimeCapability";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
-import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
 import {
   CINEMATIC_KEYFRAME_REVIEW_VERSION,
   type CinematicKeyframeReview,
@@ -556,6 +555,11 @@ type RetiredNovitaGeneratedScenesResult = {
 export async function renderNovitaGeneratedScenes(
   _args: RetiredNovitaGeneratedScenesArgs,
 ): Promise<RetiredNovitaGeneratedScenesResult> {
+  void _args;
+  // Keep the quarantined parser type-checked while retained receipts can still
+  // be inspected. No caller reaches it and this public boundary never invokes
+  // it, so it cannot dispatch work.
+  void renderRetiredNovitaGeneratedScenes;
   throw new Error(
     "renderNovitaGeneratedScenes is retired for new work; dispatch through the MiniMax H3 footage adapter instead",
   );

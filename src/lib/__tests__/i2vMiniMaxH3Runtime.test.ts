@@ -4,7 +4,7 @@ import Module from "node:module";
 import { sha256BytesHex } from "@/lib/sha256";
 
 const firstFrame = Buffer.from("immutable-first-frame-bytes");
-let h3Calls: Array<Record<string, unknown>> = [];
+const h3Calls: Array<Record<string, unknown>> = [];
 
 const loader = Module as unknown as { _load: (request: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;

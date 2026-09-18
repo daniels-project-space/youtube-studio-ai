@@ -13,7 +13,7 @@ const objectBytes = new Map<string, Uint8Array>();
 const written: Array<{ path: string; bytes: Uint8Array }> = [];
 const clipDurations: number[] = [];
 let storageReads = 0;
-let providerCalls = 0;
+const providerCalls = 0;
 
 // The actual block, scene-plan resolver, style selector, and text-cue helper
 // remain live. Only external storage, local media I/O/probing, and the paid
