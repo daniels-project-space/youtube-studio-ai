@@ -48,6 +48,7 @@ app = FastAPI()
 _lock = threading.Lock()
 _model: Any | None = None
 _last_used = time.monotonic()
+_draining = False
 
 
 def _persistent_cache_ready() -> bool:
@@ -144,6 +145,7 @@ def health() -> dict[str, Any]:
         "persistentCacheReady": _persistent_cache_ready(),
         "modelLoaded": _model is not None,
         "busy": _lock.locked(),
+        "draining": _draining,
         "idleSeconds": round(time.monotonic() - _last_used, 1),
     }
 
@@ -166,6 +168,8 @@ def synthesize(
         raise HTTPException(status_code=401, detail="unauthorized")
     if not expected and (not trust_openrelay_gateway or not provided_authorization.startswith("Bearer ")):
         raise HTTPException(status_code=401, detail="unauthorized")
+    if _draining:
+        raise HTTPException(status_code=503, detail="worker is draining for safe idle shutdown")
     try:
         request = parse_request(payload, idempotency_key)
         gpu_rate = _runtime_number("QWEN3_TTS_GPU_RATE_USD_PER_SECOND", 0.000001, 1)
@@ -190,6 +194,8 @@ def synthesize(
     started = time.monotonic()
     try:
         with _lock:
+            if _draining:
+                raise HTTPException(status_code=503, detail="worker is draining for safe idle shutdown")
             _last_used = started
             torch.manual_seed(request.seed)
             model = _load_model()
@@ -219,3 +225,24 @@ def synthesize(
         gc.collect()
         torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=f"pinned synthesis failed: {type(error).__name__}") from error
+
+
+@app.post("/control/drain")
+def drain(
+    authorization: str = Header(default=""),
+    worker_authorization: str = Header(default="", alias="X-Worker-Authorization"),
+) -> dict[str, bool]:
+    """Reject new work before the external reaper stops a verified-idle VM."""
+    global _draining
+    expected = os.environ.get("QWEN3_TTS_WORKER_TOKEN", "")
+    trust_openrelay_gateway = os.environ.get("QWEN3_TTS_TRUST_OPENRELAY_GATEWAY") == "1"
+    provided_authorization = worker_authorization or authorization
+    if expected and provided_authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not expected and (not trust_openrelay_gateway or not provided_authorization.startswith("Bearer ")):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if _lock.locked():
+        raise HTTPException(status_code=409, detail="worker is busy")
+    with _lock:
+        _draining = True
+    return {"draining": True}
