@@ -1,4 +1,11 @@
-FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+# FlashAttention is compiled against the exact PyTorch/CUDA ABI below, so this
+# must be the matching development base (the runtime tag has no nvcc).
+FROM docker.io/pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
+
+# Link this secret-free worker image to the public source repository so the
+# registry can inherit its public pull visibility; model bytes are never baked
+# into the image and provider credentials are never included.
+LABEL org.opencontainers.image.source="https://github.com/daniels-project-space/youtube-studio-ai"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
@@ -18,7 +25,7 @@ RUN python -m pip install \
     && python -m pip install "flash-attn==2.8.3" --no-build-isolation
 
 WORKDIR /app
-COPY contract.py worker.py ./
+COPY contract.py worker.py entrypoint.py ./
 
 EXPOSE 8790
-CMD ["uvicorn", "worker:app", "--host", "0.0.0.0", "--port", "8790", "--workers", "1"]
+ENTRYPOINT ["python", "/app/entrypoint.py"]
