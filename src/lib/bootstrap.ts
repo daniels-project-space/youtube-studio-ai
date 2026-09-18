@@ -11,6 +11,7 @@ import { hydrateEnv } from "@/lib/vault";
 const SERVICES = [
   "cloudflare", // R2_*
   "novita", // Novita render bridge + local persistent-disk Z-Image/LTX fleet
+  "openrelay", // private GPU endpoint gateway + VM lifecycle controller
   "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN (+ YOUTUBE_DATA_API_KEY)
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY

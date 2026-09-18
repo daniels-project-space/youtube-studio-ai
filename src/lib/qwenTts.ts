@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { ensureOpenRelayQwenReady } from "@/lib/openRelayQwen";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
@@ -773,6 +774,8 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
 }): Promise<Uint8Array> {
   const { payload, requestKey } = prepareQwenTtsRequest(args);
   const runtimeProfile = qwenTtsRuntimeProfile();
+  const managedOpenRelay = runtimeProfile.provider === "openrelay" && Boolean(process.env.OPENRELAY_QWEN_VM_ID?.trim());
+  if (managedOpenRelay) await ensureOpenRelayQwenReady();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Idempotency-Key": requestKey,
@@ -785,21 +788,34 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   } else {
     headers.Authorization = `Bearer ${workerToken()}`;
   }
-  let response: Response;
-  try {
-    response = await fetch(workerUrl(), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ ...payload, requestKey }),
-      signal: AbortSignal.timeout(180_000),
-    });
-  } catch (error) {
-    throw new QwenTtsError(
-      `Qwen3 TTS outcome is unknown after submission; request ${requestKey} must be reconciled, not retried`,
-      requestKey,
-      undefined,
-      { cause: error },
-    );
+  const submit = async (): Promise<Response> => {
+    try {
+      return await fetch(workerUrl(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ...payload, requestKey }),
+        signal: AbortSignal.timeout(runtimeProfile.provider === "openrelay" ? 8 * 60_000 : 180_000),
+      });
+    } catch (error) {
+      throw new QwenTtsError(
+        `Qwen3 TTS outcome is unknown after submission; request ${requestKey} must be reconciled, not retried`,
+        requestKey,
+        undefined,
+        { cause: error },
+      );
+    }
+  };
+  let response = await submit();
+  // The reaper's drain endpoint rejects before taking the inference lock. It
+  // is therefore the one response that is safe to re-start and re-submit with
+  // the same idempotency key; network failures and every other result retain
+  // the normal no-automatic-retry rule.
+  if (managedOpenRelay && response.status === 503) {
+    const detail = await response.text().catch(() => "");
+    if (/draining for safe idle shutdown/i.test(detail)) {
+      await ensureOpenRelayQwenReady();
+      response = await submit();
+    }
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
