@@ -47,6 +47,8 @@ assert.match(videos, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", run\._i
 assert.match(library, /type CollectionMode = "current" \| "legacy" \| "archived"/);
 assert.match(library, /Legacy review/);
 assert.match(library, /isCurrentLibraryMaster/);
+assert.match(library, /legacyCount = summary\?\.legacyCount \?\? summary\?\.activeCount \?\? 0/,
+  "the web release must preserve a truthful legacy view while a matching Convex function rollout is in flight");
 assert.match(library, /Moved to archive/);
 assert.match(library, />\s*Undo\s*</);
 assert.match(card, /<article className="glass video-card"/);

@@ -31,8 +31,10 @@ type LightboxTarget = { index: number };
 type CollectionMode = "current" | "legacy" | "archived";
 type LibraryState = "active" | "archived";
 type LibrarySummary = {
-  currentCount: number;
-  legacyCount: number;
+  currentCount?: number;
+  legacyCount?: number;
+  /** Pre-split backend shape; preserves a truthful legacy view during rollout. */
+  activeCount?: number;
   archivedCount: number;
   totalCount: number;
 };
@@ -136,7 +138,7 @@ export default function LibraryPage() {
     return () => window.clearTimeout(timer);
   }, [loading]);
   const currentCount = summary?.currentCount ?? 0;
-  const legacyCount = summary?.legacyCount ?? 0;
+  const legacyCount = summary?.legacyCount ?? summary?.activeCount ?? 0;
   const archivedCount = summary?.archivedCount ?? 0;
 
   const changeLibraryState = async (video: VideoRow, state: LibraryState) => {
