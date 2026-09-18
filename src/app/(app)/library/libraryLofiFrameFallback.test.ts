@@ -24,6 +24,8 @@ for (const source of [card, rail]) {
 }
 assert.match(preview, /<video[\s\S]*preload="metadata"[\s\S]*onLoadedMetadata/,
   "the final-master fallback stays paused instead of autoplaying in the Library");
+assert.doesNotMatch(preview, /<video[\s\S]*autoPlay/,
+  "a retained-master fallback never declares video autoplay");
 assert.match(preview, /Math\.min\(15, Math\.max\(0, duration - 0\.05\)\)/,
   "the fallback seeks to the 15-second source frame whenever the master is long enough");
 
