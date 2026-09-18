@@ -115,10 +115,16 @@ function ThumbnailRefreshPreview({
   row,
   candidate = false,
   priority = false,
+  previewUrl,
+  deferFetch = false,
 }: {
   row: ThumbnailInventoryRow;
   candidate?: boolean;
   priority?: boolean;
+  /** A batched server-resolved preview for the featured candidate rail. */
+  previewUrl?: string;
+  /** Avoid duplicating a per-card inventory read while that bounded batch resolves. */
+  deferFetch?: boolean;
 }) {
   const [storedUrl, setStoredUrl] = useState<string | null>(null);
   const [storedPreviewIdentity, setStoredPreviewIdentity] = useState<string | null>(null);
@@ -133,6 +139,11 @@ function ThumbnailRefreshPreview({
     if (!previewPresent || !previewRunId) {
       return () => { current = false; };
     }
+    // The batch already resolved this opaque candidate ID in one inventory
+    // read. The image endpoint retries R2 once itself, so a separate probe
+    // would only double the requests and delay first paint.
+    if (previewUrl) return () => { current = false; };
+    if (deferFetch) return () => { current = false; };
     const previewHref = candidate
       ? `/api/thumbnail-refresh?candidatePreviewRunId=${encodeURIComponent(previewRunId)}`
       : `/api/thumbnail-refresh?previewRunId=${encodeURIComponent(previewRunId)}`;
@@ -174,15 +185,18 @@ function ThumbnailRefreshPreview({
         if (current) setStoredPreviewFailed(previewIdentity);
       });
     return () => { current = false; };
-  }, [candidate, previewIdentity, previewPresent, previewRunId]);
+  }, [candidate, deferFetch, previewIdentity, previewPresent, previewRunId, previewUrl]);
 
   // The queue is a retained-artifact review surface. Never request public
   // YouTube artwork here: it can be stale, dead, or a different thumbnail
   // generation while the owner-bound candidate is still being evaluated.
   const previewReadyForRow = storedPreviewIdentity === previewIdentity;
   const previewFailedForRow = storedPreviewFailed === previewIdentity;
-  const src = storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow ? storedUrl : null;
-  const source = storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow
+  const hasBatchedPreview = Boolean(previewUrl) && !previewFailedForRow;
+  const src = hasBatchedPreview
+    ? previewUrl!
+    : storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow ? storedUrl : null;
+  const source = hasBatchedPreview || (storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow)
       ? candidate ? "new Library thumbnail" : "previous thumbnail"
     : previewPresent && !previewFailedForRow
       ? "loading retained preview"
@@ -239,6 +253,8 @@ export function ThumbnailRefreshInventoryPanel({
   const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
   const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
+  const [featuredPreviewUrls, setFeaturedPreviewUrls] = useState<Record<string, string>>({});
+  const [featuredPreviewBatchId, setFeaturedPreviewBatchId] = useState<string | null>(null);
   const featuredRailRef = useRef<HTMLDivElement>(null);
   const [featuredRailCanScroll, setFeaturedRailCanScroll] = useState({ previous: false, next: false });
 
@@ -428,6 +444,10 @@ export function ThumbnailRefreshInventoryPanel({
   const featured = rows.filter((row) =>
     row.candidate?.thumbnailPresent && row.candidate.status !== "failed",
   ).slice(0, 6);
+  const featuredPreviewRunIds = featured
+    .map((row) => row.candidate?.runId)
+    .filter((runId): runId is string => Boolean(runId))
+    .join(",");
   const lofiFrameCandidates = rows.filter((row) =>
     isLofiChannel(row) &&
     row.legacyCleanupAction !== "retire" &&
@@ -435,6 +455,32 @@ export function ThumbnailRefreshInventoryPanel({
     row.thumbnailReplayStatus !== "private_successor_unavailable" &&
     !row.candidate,
   );
+
+  useEffect(() => {
+    let current = true;
+    if (!featuredPreviewRunIds) return () => { current = false; };
+    void fetch(`/api/thumbnail-refresh?candidatePreviewRunIds=${encodeURIComponent(featuredPreviewRunIds)}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const payload = await response.json() as { ok?: boolean; previews?: Record<string, string | null> };
+        if (!response.ok || !payload.ok || !payload.previews) throw new Error("candidate preview batch unavailable");
+        return Object.entries(payload.previews).reduce<Record<string, string>>((urls, [runId, url]) => {
+          if (typeof url === "string") urls[runId] = url;
+          return urls;
+        }, {});
+      })
+      .then((urls) => {
+        if (current) setFeaturedPreviewUrls(urls);
+      })
+      // A batch failure is non-fatal: each card resumes the existing one-at-a-
+      // time recovery path after this batch settles.
+      .catch(() => undefined)
+      .finally(() => {
+        if (current) setFeaturedPreviewBatchId(featuredPreviewRunIds);
+      });
+    return () => { current = false; };
+  }, [featuredPreviewRunIds]);
 
   // A cropped final card is not a useful affordance. Measure the actual
   // scroll box rather than guessing from the viewport, so the navigation is
@@ -566,7 +612,13 @@ export function ThumbnailRefreshInventoryPanel({
             {featured.map((row, index) => (
               <article className={styles.featuredCard} key={`featured-${row.runId}`}>
                 <Link href={`/runs/${row.candidate?.runId ?? row.runId}`} className={styles.featuredPreview}>
-                  <ThumbnailRefreshPreview row={row} candidate priority={index < 4} />
+                  <ThumbnailRefreshPreview
+                    row={row}
+                    candidate
+                    priority={index < 4}
+                    previewUrl={row.candidate?.runId ? featuredPreviewUrls[row.candidate.runId] : undefined}
+                    deferFetch={featuredPreviewBatchId !== featuredPreviewRunIds}
+                  />
                 </Link>
                 <div>
                   <span data-tone={STATUS_COPY[row.thumbnailEvidenceStatus].tone}>New candidate</span>

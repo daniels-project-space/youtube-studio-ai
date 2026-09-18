@@ -29,6 +29,9 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 
 export const runtime = "nodejs";
 
+const PREVIEW_RUN_ID = /^[A-Za-z0-9_-]{8,256}$/;
+const MAX_BATCHED_CANDIDATE_PREVIEWS = 6;
+
 /**
  * Candidate refresh is intentionally usable from the Library without an
  * OAuth ceremony. It is still not an open cross-site write: browser calls
@@ -77,6 +80,21 @@ async function thumbnailPreviewUrl(key: string): Promise<string> {
   return await presignDownload(key, { expiresIn: 300 });
 }
 
+/**
+ * The featured Library rail needs several reviewed candidates at once. Keep
+ * the input bounded and opaque: the browser submits only run identities that
+ * it already received from the public inventory, while this route keeps the
+ * corresponding storage keys server-side.
+ */
+export function candidatePreviewIds(value: string | null): string[] | null {
+  if (value === null) return null;
+  const ids = value.split(",").filter(Boolean);
+  if (!ids.length || ids.length > MAX_BATCHED_CANDIDATE_PREVIEWS || ids.some((id) => !PREVIEW_RUN_ID.test(id))) {
+    throw new Error("invalid candidate thumbnail preview batch");
+  }
+  return [...new Set(ids)];
+}
+
 async function reviewedErnieBatchPreview(input: {
   ownerId: string;
   inventory: Awaited<ReturnType<typeof listThumbnailRefreshInventory>>;
@@ -119,12 +137,27 @@ export async function GET(request: Request) {
     const searchParams = new URL(request.url).searchParams;
     const previewRunId = searchParams.get("previewRunId");
     const candidatePreviewRunId = searchParams.get("candidatePreviewRunId");
+    const candidatePreviewRunIds = candidatePreviewIds(searchParams.get("candidatePreviewRunIds"));
+    if (candidatePreviewRunIds) {
+      // One inventory read serves the entire compact rail. Previously each of
+      // six cards performed this same Convex-backed lookup independently,
+      // leaving a visible loading state long after the rail itself was ready.
+      const previews = Object.fromEntries(await Promise.all(candidatePreviewRunIds.map(async (runId) => {
+        const key = inventory.find((item) => item.candidateRunId === runId)?.candidateThumbnailKey;
+        if (!key || key.includes("..")) return [runId, null] as const;
+        return [runId, await thumbnailPreviewUrl(key)] as const;
+      })));
+      return NextResponse.json(
+        { ok: true, previews },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     if (previewRunId !== null || candidatePreviewRunId !== null) {
       // The browser may ask only for an opaque run identity present in this
       // owner-scoped inventory. Resolve the R2 key server-side; never let a
       // client supply or receive a storage locator.
       const requestedRunId = previewRunId ?? candidatePreviewRunId!;
-      if (!/^[A-Za-z0-9_-]{8,256}$/.test(requestedRunId)) {
+      if (!PREVIEW_RUN_ID.test(requestedRunId)) {
         return NextResponse.json({ ok: false, error: "invalid thumbnail preview request" }, { status: 400 });
       }
       const item = candidatePreviewRunId
