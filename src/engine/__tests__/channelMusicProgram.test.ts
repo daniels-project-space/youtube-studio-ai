@@ -73,7 +73,7 @@ const lofi = createChannelMusicProgram({
 });
 assert.equal(lofi.role, "primary_music");
 assert.equal(lofi.mix.bodyMusicVol, 1, "music-first channels cannot be accidentally ducked by a narrated preset");
-assert.equal(lofi.generation.sections.length, 6);
+assert.equal(lofi.generation.sections.length, 8, "a long Music3 form must map every extended passage to a reviewable arrangement job");
 assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
 assert.equal(
@@ -93,13 +93,41 @@ assert.match(
 );
 assert.match(
   lofi.generation.structuredCaption,
-  /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*opening harmony/u,
-  "the primary-music prompt must describe a real arrangement progression, not a stack of generic depth adjectives",
+  /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*genuine contrast passage[\s\S]*Reintroduce the groove[\s\S]*opening harmony/u,
+  "the long primary-music prompt must attach its extra Music3 form to distinct arrangement functions, not a stack of generic depth adjectives",
 );
 assert.match(
   history.generation.structuredCaption,
   /two-note pulse[\s\S]*low answer[\s\S]*withdraw one layer[\s\S]*opening texture/u,
   "a narration bed must retain narrative musical causality while protecting speech",
+);
+
+const longMeditation = createChannelMusicProgram({
+  channelId: "channel-calm-water",
+  channelIdentityFingerprint: sha("e"),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  topic: "Still water at midnight",
+  durationSec: 300,
+});
+assert.deepEqual(
+  longMeditation.generation.sections.map((section) => section.id),
+  ["arrival", "settle", "open", "drift", "return", "release"],
+  "long meditation programs must keep calm variation distinct from an unstructured repeated pad",
+);
+
+const longNarration = createChannelMusicProgram({
+  channelId: "channel-long-history",
+  channelIdentityFingerprint: sha("f"),
+  family: "narrated",
+  contentLaneKey: "documentary",
+  topic: "The bridge that changed the campaign",
+  durationSec: 300,
+});
+assert.deepEqual(
+  longNarration.generation.sections.map((section) => section.id),
+  ["cold-open", "exposition", "complication", "reveal", "recovery", "resolution", "tail"],
+  "long narration beds must preserve speech space through a distinct reveal-and-recovery passage",
 );
 
 const receiptInput = {
