@@ -192,4 +192,12 @@ for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   assert.match(source, /providerRenderReceipt:\s*v\.optional\(qwenTtsReceiptValidator\)/);
 }
 
+const qwenValidatorSource = readFileSync(join(process.cwd(), "convex/voiceCastingValidators.ts"), "utf8");
+assert.match(qwenValidatorSource, /runtime:\s*v\.union\(/,
+  "the durable receipt must keep each admitted Qwen runtime as a paired variant");
+assert.match(qwenValidatorSource, /provider:\s*v\.literal\("novita"\)[\s\S]{0,180}gpu:\s*v\.literal\("RTX 4090"\)[\s\S]{0,180}capacityMode:\s*v\.literal\("serverless-scale-to-zero"\)/,
+  "the retained Novita receipt shape must remain exact");
+assert.match(qwenValidatorSource, /provider:\s*v\.literal\("openrelay"\)[\s\S]{0,180}gpu:\s*v\.literal\("RTX 3090"\)[\s\S]{0,180}capacityMode:\s*v\.literal\("persistent-disk-auto-stop"\)/,
+  "the OpenRelay receipt must be admitted only with its exact persistent 3090 profile");
+
 console.log("voice casting receipt tests passed");

@@ -14,11 +14,17 @@ export type QwenTtsRuntimeProvider = "novita" | "openrelay";
 export type QwenTtsRuntimeGpu = "RTX 4090" | "RTX 3090";
 export type QwenTtsCapacityMode = "serverless-scale-to-zero" | "persistent-disk-auto-stop";
 
-export interface QwenTtsRuntimeProfile {
-  provider: QwenTtsRuntimeProvider;
-  gpu: QwenTtsRuntimeGpu;
-  capacityMode: QwenTtsCapacityMode;
-}
+export type QwenTtsRuntimeProfile =
+  | {
+      provider: "novita";
+      gpu: "RTX 4090";
+      capacityMode: "serverless-scale-to-zero";
+    }
+  | {
+      provider: "openrelay";
+      gpu: "RTX 3090";
+      capacityMode: "persistent-disk-auto-stop";
+    };
 
 /**
  * The exact execution profile is part of every sealed request and receipt.
@@ -84,10 +90,7 @@ export const QWEN3_TTS_LANGUAGES = [
 export type QwenTtsSpeaker = (typeof QWEN3_TTS_SPEAKERS)[number];
 export type QwenTtsLanguage = (typeof QWEN3_TTS_LANGUAGES)[number];
 
-export interface QwenTtsRuntimeReceipt {
-  provider: QwenTtsRuntimeProvider;
-  gpu: QwenTtsRuntimeGpu;
-  capacityMode: QwenTtsCapacityMode;
+interface QwenTtsRuntimeReceiptEvidence {
   persistentCache: true;
   idleShutdownSeconds: number;
   accounting: "conservative-upper-bound";
@@ -98,6 +101,24 @@ export interface QwenTtsRuntimeReceipt {
   storageUsd: number;
   costUsd: number;
 }
+
+/**
+ * A receipt cannot mix provider capacity properties. Keeping this as a
+ * discriminated union makes the TypeScript contract match the durable Convex
+ * validator and prevents a forged OpenRelay/4090 or Novita/3090 receipt.
+ */
+export type QwenTtsRuntimeReceipt = QwenTtsRuntimeReceiptEvidence & (
+  | {
+      provider: "novita";
+      gpu: "RTX 4090";
+      capacityMode: "serverless-scale-to-zero";
+    }
+  | {
+      provider: "openrelay";
+      gpu: "RTX 3090";
+      capacityMode: "persistent-disk-auto-stop";
+    }
+);
 
 export interface QwenTtsReceipt {
   schema: typeof QWEN3_TTS_WORKER_CONTRACT;
