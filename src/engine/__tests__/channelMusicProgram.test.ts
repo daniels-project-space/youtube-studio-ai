@@ -6,7 +6,9 @@ import {
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
   instrumentalLyricsControl,
+  MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS,
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
+  music3StructuredCaptionWordCount,
   musicRoleForRoute,
 } from "@/engine/channelMusicProgram";
 
@@ -109,7 +111,8 @@ assert.match(
   "the long primary-music prompt must attach its extra Music3 form to distinct arrangement functions, not a stack of generic depth adjectives",
 );
 assert.ok(
-  lofi.generation.structuredCaption.trim().split(/\s+/u).length <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
+  music3StructuredCaptionWordCount(lofi.generation.structuredCaption) >= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS
+    && music3StructuredCaptionWordCount(lofi.generation.structuredCaption) <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
   "a long Music3 program must stay within the official concise structured-caption guidance instead of repeating channel identity in every section",
 );
 assert.match(
@@ -225,6 +228,14 @@ assert.throws(
   () => ChannelMusicProgramSchema.parse(tampered),
   /fingerprint is invalid/i,
   "channel sound identity is fingerprint-bound",
+);
+
+const tooShortCaption = structuredClone(history);
+tooShortCaption.generation.structuredCaption = "A generic ambient track.";
+assert.throws(
+  () => ChannelMusicProgramSchema.parse(tooShortCaption),
+  /structured caption must contain 250–450 words; received 4/u,
+  "a MiniMax program cannot silently replace its creative brief with a weak one-line prompt",
 );
 
 console.log("CHANNEL MUSIC PROGRAM PASS: role-specific structure, mix, licensing, and listened quality gate");

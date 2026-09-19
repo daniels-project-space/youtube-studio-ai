@@ -13,6 +13,16 @@ export const MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB = 18;
  * turns a long form into a generic adjective stack instead of musical control.
  */
 export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS = 450;
+export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS = 250;
+
+/**
+ * Music3's caption guidance is a quality boundary, not presentation copy.
+ * Count normalized whitespace so it matches the worker's actual prompt body.
+ */
+export function music3StructuredCaptionWordCount(caption: string): number {
+  const normalized = caption.trim();
+  return normalized ? normalized.split(/\s+/u).length : 0;
+}
 
 export const ChannelMusicRoleSchema = z.enum([
   "primary_music",
@@ -122,6 +132,15 @@ function validateChannelMusicProgramBody(
   }
   if (program.role !== "primary_music" && !program.mix.narrationPriority && program.role !== "meditation_bed") {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "narrated/short music beds must preserve narration priority" });
+  }
+  if (program.generation.providerPreference === "minimax_music3") {
+    const words = music3StructuredCaptionWordCount(program.generation.structuredCaption);
+    if (words < MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS || words > MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS) {
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `MiniMax-Music3 structured caption must contain ${MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS}–${MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS} words; received ${words}`,
+      });
+    }
   }
 }
 
