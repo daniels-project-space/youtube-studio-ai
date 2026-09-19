@@ -498,7 +498,28 @@ export function assertRequiredDownstreamHandoffs(
       if (reference.producerModule !== producer.id) {
         throw new Error(
           `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
-          `before execution; received artifact lineage from "${reference.producerModule}"`,
+            `before execution; received artifact lineage from "${reference.producerModule}"`,
+        );
+      }
+      if (reference.producerVersion !== producer.version) {
+        throw new Error(
+          `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
+            `at version "${producer.version}"; received producer version "${reference.producerVersion}"`,
+        );
+      }
+      const producerContract = producer.produces[artifact] ?? producer.optionalProduces[artifact];
+      if (!producerContract) {
+        // assertExecutableManifest catches this at registration, but keep the
+        // runtime boundary defensive for hand-authored/native manifests.
+        throw new Error(
+          `module "${producer.id}" required downstream handoff "${artifact}" has no output contract`,
+        );
+      }
+      if (reference.key !== artifact || reference.type !== producerContract.type || reference.schemaVersion !== producerContract.version) {
+        throw new Error(
+          `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
+            `with ${producerContract.type}@${producerContract.version}; received ` +
+            `${reference.key} ${reference.type}@${reference.schemaVersion}`,
         );
       }
     }

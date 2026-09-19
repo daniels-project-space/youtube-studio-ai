@@ -118,6 +118,26 @@ try {
     /received artifact lineage from "\$seed"/,
     "a seeded same-shaped artifact must not satisfy a producer-bound handoff",
   );
+  assert.throws(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+      { handoffArtifact: { ...validRef, producerVersion: "0.9.0" } },
+    ),
+    /received producer version "0\.9\.0"/,
+    "a stale producer version must not satisfy a required handoff",
+  );
+  assert.throws(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+      { handoffArtifact: { ...validRef, type: "WrongArtifact", schemaVersion: "9.9.9" } },
+    ),
+    /with LegacyArtifact<handoffArtifact>@1\.0\.0-migration; received handoffArtifact WrongArtifact@9\.9\.9/,
+    "a mismatched artifact contract must not satisfy a required handoff",
+  );
   assert.doesNotThrow(
     () => assertRequiredDownstreamHandoffs(
       [producerManifest, optionalConsumerManifest],
