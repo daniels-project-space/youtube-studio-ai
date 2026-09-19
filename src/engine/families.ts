@@ -52,7 +52,7 @@ export interface Family {
   /**
    * Default LTX 2.5 visual-style preset id for families whose visual engine
    * renders through the shared LTX I2V prompt contract (see
-   * src/engine/ltxStylePresets.ts, src/lib/ltxI2vPrompt.ts). Omitted for
+   * src/engine/ltxStylePresets.ts). Omitted for
    * families that don't render through that contract; consumers that do
    * should fall back to DEFAULT_LTX_STYLE_ID (mirrors the `defaultRunBudgetUsd
    * ?? <fallback>` pattern used elsewhere against this catalog).

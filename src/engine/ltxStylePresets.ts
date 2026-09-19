@@ -3,7 +3,9 @@
  * can speak, plus the prompt-guidance intelligence for each.
  *
  * One pure-data module (no node deps) shared by whatever later wave wires it
- * into the model-agnostic I2V prompt contract (see src/lib/ltxI2vPrompt.ts).
+ * into the direct MiniMax H3 request assembled by the cinematic footage
+ * block. This registry owns visual treatment only; it is not a second video
+ * renderer or a prompt-level provider contract.
  * That contract assembles a shot's Source-frame anchor / Continuous
  * development / Diegetic soundscape clauses from per-shot data; this
  * registry supplies the per-STYLE defaults those clauses fall back to so a
