@@ -14,6 +14,7 @@ export type LivePipelinePhase =
   | "release";
 
 export type LivePipelinePhaseState = "complete" | "active" | "blocked" | "waiting";
+export type LivePipelineOverallState = "unavailable" | "queued" | "active" | "blocked" | "complete";
 
 export type LivePipelineStageSnapshot = {
   status?: string;
@@ -151,6 +152,24 @@ export function livePipelinePhaseForBlock(block: string): LivePipelinePhase {
   if (NARRATIVE_BLOCKS.has(block)) return "narrative";
   if (DIRECTION_BLOCKS.has(block)) return "direction";
   return "foundation";
+}
+
+/**
+ * An empty node list means that there is no durable plan to report against.
+ * It is not an empty, successfully completed pipeline. Keeping this pure
+ * makes every progress surface share the same non-inferential meaning.
+ */
+export function livePipelineOverallState(
+  nodes: readonly LivePipelineNodeSnapshot[],
+): LivePipelineOverallState {
+  if (nodes.length === 0) return "unavailable";
+  const statuses = nodes.map((node) => node.stage?.status ?? "queued");
+  if (statuses.some((status) => status === "failed" || status === "canceled" || status === "factual_review_blocked")) {
+    return "blocked";
+  }
+  if (statuses.some((status) => status === "running")) return "active";
+  if (statuses.every((status) => status === "ok" || status === "skipped")) return "complete";
+  return "queued";
 }
 
 function stateForPhase(summary: Omit<LivePipelinePhaseSummary, "state">): LivePipelinePhaseState {

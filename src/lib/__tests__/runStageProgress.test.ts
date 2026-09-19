@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { summarizeRunStageProgress } from "../runStageProgress";
+import { livePipelineOverallState } from "../livePipelinePresentation";
 
 const pipeline = [
   { block: "topiccraft" },
@@ -30,6 +31,12 @@ assert.deepEqual(summarizeRunStageProgress({
   currentStatus: "running",
   currentPosition: 2,
 });
+
+assert.equal(livePipelineOverallState([]), "unavailable");
+assert.equal(livePipelineOverallState([{ block: "script_gen" }]), "queued");
+assert.equal(livePipelineOverallState([{ block: "script_gen", stage: { status: "running" } }]), "active");
+assert.equal(livePipelineOverallState([{ block: "script_gen", stage: { status: "failed" } }]), "blocked");
+assert.equal(livePipelineOverallState([{ block: "script_gen", stage: { status: "ok" } }]), "complete");
 
 assert.deepEqual(summarizeRunStageProgress({
   pipeline,

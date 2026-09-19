@@ -10,6 +10,7 @@ import {
   describeLivePipelinePhase,
   LIVE_PIPELINE_PHASE_LABEL,
   livePipelinePhaseForBlock,
+  livePipelineOverallState,
   summarizeLivePipelinePhases,
   type LivePipelinePhase,
 } from "@/lib/livePipelinePresentation";
@@ -63,7 +64,8 @@ export function LivePipeline({
   const active = nodes.find((node) => nodeStatus(node) === "running");
   const activeStartedAt = active?.stage?.startedAt;
   const phaseSummaries = summarizeLivePipelinePhases(nodes);
-  const overallState = failed > 0 ? "blocked" : active ? "active" : complete === nodes.length ? "complete" : "queued";
+  const overallState = livePipelineOverallState(nodes);
+  const hasPlan = nodes.length > 0;
   const recordedCost = nodes.reduce((sum, node) => sum + (node.stage?.cost ?? 0), 0);
   const blockedNode = nodes.find((node) => nodeStatus(node) === "failed");
   // A current stage is already visible in the live strip. Opening its whole
@@ -86,6 +88,8 @@ export function LivePipeline({
             <small>
               {active
                 ? `${blockLabel(active.block)} · ${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} active`
+                : !hasPlan
+                  ? "No frozen pipeline receipt is available for this run"
                 : failed
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
@@ -103,12 +107,12 @@ export function LivePipeline({
         </div>
         <div className={styles.summaryMetrics} aria-label="Production progress">
           <span>
-            <strong>{complete}/{nodes.length}</strong>
-            <small>complete</small>
+            <strong>{hasPlan ? `${complete}/${nodes.length}` : "—"}</strong>
+            <small>{hasPlan ? "complete" : "plan unavailable"}</small>
           </span>
           <span>
-            <strong>{phaseSummaries.filter((phase) => phase.state === "complete").length}/{phaseSummaries.length}</strong>
-            <small>phases</small>
+            <strong>{hasPlan ? `${phaseSummaries.filter((phase) => phase.state === "complete").length}/${phaseSummaries.length}` : "—"}</strong>
+            <small>{hasPlan ? "phases" : "no phase receipts"}</small>
           </span>
           <span>
             <strong>{fmtUsd(recordedCost)}</strong>
