@@ -13,7 +13,6 @@ import {
   MINIMAX_H3_OPENRELAY_GPU_MODEL,
   MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
-  MINIMAX_H3_RUNTIME_ID,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderedVideo,

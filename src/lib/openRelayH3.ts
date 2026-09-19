@@ -1,11 +1,9 @@
 import { OpenRelayVmClient, type OpenRelayVm } from "@/lib/openRelay";
 
-/** Exact persistent-disk VM identity for the terminal weekly H3 fallback. */
-export const OPENRELAY_H3_VM_NAME = "yt-minimax-h3-a100-fallback" as const;
-// H3's immutable pack is 44.4 GB. The proven native route requires 100 GB to
-// hold its pinned image, bounded input cache, and one active native render;
-// this is the minimum verified route volume, not a generic 320 GB allocation.
-export const OPENRELAY_H3_DISK_SIZE_GB = 100 as const;
+/** Exact qualified persistent-disk VM identity for the terminal weekly H3 fallback. */
+export const OPENRELAY_H3_VM_NAME = "yt-minimax-h3-a100-persistent" as const;
+export const OPENRELAY_H3_DISK_SIZE_GB = 150 as const;
+export const OPENRELAY_H3_WORKER_HOST = "yt-minimax-h3-a100-persistent-mu7qosm1.run.openrelay.inc" as const;
 export const OPENRELAY_H3_IDLE_SECONDS = 300 as const;
 
 export interface OpenRelayH3Health {
@@ -18,6 +16,7 @@ export interface OpenRelayH3Health {
 }
 
 type FetchLike = typeof fetch;
+const SHA256 = /^[a-f0-9]{64}$/u;
 
 function required(name: string, minimumLength = 1): string {
   const value = process.env[name]?.trim() ?? "";
@@ -29,13 +28,25 @@ function providerKey(): string { return required("OPENRELAY_API_KEY", 32); }
 function workerToken(): string { return required("MINIMAX_H3_OPENRELAY_WORKER_TOKEN", 32); }
 function vmId(): string { return required("MINIMAX_H3_OPENRELAY_VM_ID", 36); }
 
+function requireQualification(): void {
+  if (
+    required("MINIMAX_H3_OPENRELAY_QUALIFIED") !== "1" ||
+    !SHA256.test(required("MINIMAX_H3_OPENRELAY_QUALIFICATION_RECEIPT_SHA256"))
+  ) {
+    throw new Error("OpenRelay H3 is not qualified for paid work; a sealed native-output receipt is required");
+  }
+}
+
 function videoUrl(): URL {
   let url: URL;
   try { url = new URL(required("MINIMAX_H3_OPENRELAY_WORKER_URL")); } catch {
     throw new Error("MINIMAX_H3_OPENRELAY_WORKER_URL is missing or invalid");
   }
-  if (url.protocol !== "https:" || url.pathname !== "/v1/videos" || url.username || url.password || url.hash) {
-    throw new Error("MINIMAX_H3_OPENRELAY_WORKER_URL must be the private HTTPS /v1/videos endpoint");
+  if (
+    url.protocol !== "https:" || url.hostname !== OPENRELAY_H3_WORKER_HOST ||
+    url.pathname !== "/v1/videos" || url.search || url.username || url.password || url.hash
+  ) {
+    throw new Error("MINIMAX_H3_OPENRELAY_WORKER_URL must be the pinned private HTTPS H3 /v1/videos endpoint");
   }
   return url;
 }
@@ -97,11 +108,14 @@ export async function drainOpenRelayH3Worker(fetchImpl: FetchLike = fetch): Prom
 export async function ensureOpenRelayH3Ready(args?: {
   fetchImpl?: FetchLike; wait?: (milliseconds: number) => Promise<void>; timeoutMs?: number;
 }): Promise<OpenRelayH3Health> {
+  // Refuse before a provider restart. A cache-only health response cannot
+  // authorize customer work against a VM without the native qualification.
+  requireQualification();
   const fetchImpl = args?.fetchImpl ?? fetch;
   const wait = args?.wait ?? sleep;
   const client = new OpenRelayVmClient({ apiKey: providerKey(), fetchImpl });
   const id = vmId();
-  const deadline = Date.now() + (args?.timeoutMs ?? 8 * 60_000);
+  const deadline = Date.now() + (args?.timeoutMs ?? 6 * 60_000);
   let drainStopRequested = false;
   for (;;) {
     const vm = await client.getVm(id);

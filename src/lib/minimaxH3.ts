@@ -959,7 +959,7 @@ export async function renderMiniMaxH3(
   }
 }
 
-/** One weekly owner/order may use up to three Salad H3 jobs in parallel. */
+/** Salad can run three admitted jobs in parallel; the one persistent A100 is serial. */
 export async function renderMiniMaxH3WeeklyBatch(
   jobs: readonly Omit<MiniMaxH3RenderRequest, "provider" | "execution">[],
   options: MiniMaxH3WeeklyBatchOptions = {},
@@ -995,7 +995,10 @@ export async function renderMiniMaxH3WeeklyBatch(
   };
   const result: MiniMaxH3RenderedVideo[] = new Array(jobs.length);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
+  const parallelism = provider === "salad"
+    ? Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length)
+    : 1;
+  await Promise.all(Array.from({ length: parallelism }, async () => {
     for (;;) {
       const index = next++;
       if (index >= jobs.length) return;

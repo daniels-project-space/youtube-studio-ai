@@ -3,7 +3,9 @@
  *
  * This task never calls a paid worker. It either re-admits the original
  * Salad order, schedules the next bounded check, or hands the frozen packet
- * to the agreed Novita fallback after the 24-hour wait window.
+ * to the qualified persistent-disk OpenRelay fallback after the 24-hour wait
+ * window. The terminal handoff must not depend on Salad credentials still
+ * being healthy a day later.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -66,12 +68,12 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) {
       throw new Error("weekly MiniMax H3 capacity retry requires the signed owner and hold start");
     }
+    // R2 is needed to prove the frozen request and an existing completion.
+    // Do not require Salad here: after the hold deadline, an unavailable
+    // Salad credential must not strand a verified OpenRelay terminal retry.
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "salad"],
-      required: [
-        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-        "MINIMAX_H3_SALAD_WORKER_URL", "MINIMAX_H3_SALAD_WORKER_TOKEN",
-      ],
+      services: ["cloudflare"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     if (await objectExists(payload.receiptKey)) {
       return { state: "reconciled" as const, receiptKey: payload.receiptKey };
@@ -81,21 +83,25 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
     const deadline = payload.capacityHoldStartedAt + MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS;
     if (now >= deadline) {
       const idempotencyKey = await idempotencyKeys.create(
-        `minimax-h3-weekly-novita-fallback:${payload.ownerId}:${payload.orderKey}`,
+        `minimax-h3-weekly-openrelay-fallback:${payload.ownerId}:${payload.orderKey}`,
         { scope: "global" },
       );
-      const handle = await tasks.trigger("minimax-h3-weekly-novita-fallback", payload, {
+      const handle = await tasks.trigger("minimax-h3-weekly-openrelay-fallback", payload, {
         concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
         idempotencyKey,
       });
       return {
         state: "fallback_queued" as const,
-        provider: "novita" as const,
+        provider: "openrelay" as const,
         waitedMs: now - payload.capacityHoldStartedAt,
         triggerRunId: handle.id,
       };
     }
     try {
+      await bootstrapSecrets(() => undefined, {
+        services: ["salad"],
+        required: ["MINIMAX_H3_SALAD_WORKER_URL", "MINIMAX_H3_SALAD_WORKER_TOKEN"],
+      });
       const policy = saladPriorityPolicyFromEnv();
       await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
         mediumPriorityEnabled: policy.mediumEnabled,

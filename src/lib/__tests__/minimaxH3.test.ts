@@ -7,7 +7,6 @@ import {
   MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
   MINIMAX_H3_SALAD_CAPACITY_MODE,
   MINIMAX_H3_PROFILE,
-  MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
   MiniMaxH3OpeningMotionRejectedRenderError,
   minimaxH3Readiness,
@@ -543,6 +542,33 @@ async function test() {
   assert.equal(batchModelManifestChecks, 1, "weekly H3 jobs must share one immutable model-manifest verification");
   assert.equal(sharedOpeningMotionChecks, 9, "the shared gate must inspect every default H3 result, including both terminal fallback routes");
   assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
+
+  let fallbackActive = 0;
+  let fallbackPeak = 0;
+  const fallbackBatch = await renderMiniMaxH3WeeklyBatch(jobs.slice(0, 3), {
+    provider: "openrelay",
+    execution: "weekly-fallback",
+    presignRead: async () => "https://r2.example/read",
+    presignWrite: async () => "https://r2.example/write",
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
+    assertModelManifest: async () => {},
+    verifyOpeningMotion: passingOpeningMotion,
+    fetch: async (_url, init) => {
+      fallbackActive += 1;
+      fallbackPeak = Math.max(fallbackPeak, fallbackActive);
+      await Promise.resolve();
+      const body = JSON.parse(String(init?.body)) as { request_key: string; output_key: string };
+      const input = request("openrelay", "weekly-fallback", body.output_key);
+      const reply = responseFor(input);
+      const parsed = await reply.json() as { receipt: Record<string, unknown> };
+      parsed.receipt.requestKey = body.request_key;
+      parsed.receipt.promptSha256 = sha256Hex(input.prompt);
+      fallbackActive -= 1;
+      return new Response(JSON.stringify(parsed), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(fallbackBatch.length, 3);
+  assert.equal(fallbackPeak, 1, "one persistent OpenRelay A100 worker must serialize fallback shots");
 
   let failedBatchModelManifestChecks = 0;
   await assert.rejects(
