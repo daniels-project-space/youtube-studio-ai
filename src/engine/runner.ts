@@ -483,8 +483,19 @@ export function assertRequiredDownstreamHandoffs(
           `before execution; the required downstream artifact is absent`,
         );
       }
+      // A value alone is not enough: a seeded or substituted object can have
+      // the same shape while bypassing the producer's policy. Required
+      // handoffs therefore need a durable artifact reference as well as the
+      // payload, even when the consumer declares the input as optional for
+      // reuse in unrelated pipelines.
       const reference = artifactRefs?.[artifact];
-      if (reference && reference.producerModule !== producer.id) {
+      if (!reference) {
+        throw new Error(
+          `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
+          `before execution; the required artifact has no producer lineage`,
+        );
+      }
+      if (reference.producerModule !== producer.id) {
         throw new Error(
           `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
           `before execution; received artifact lineage from "${reference.producerModule}"`,

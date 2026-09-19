@@ -81,14 +81,6 @@ try {
     /requires handoff "handoffArtifact" from "handoff_binding_producer".*absent/,
     "an optional declaration must not bypass a required upstream handoff",
   );
-  assert.doesNotThrow(
-    () => assertRequiredDownstreamHandoffs(
-      [producerManifest, optionalConsumerManifest],
-      1,
-      { handoffArtifact: { ok: true } },
-    ),
-    "a present handoff may cross the reusable optional input boundary",
-  );
   const validRef: ArtifactRef = {
     artifactId: "run:handoff_binding_producer:handoffArtifact:hash",
     key: "handoffArtifact",
@@ -98,6 +90,24 @@ try {
     producerVersion: "1.0.0-migration",
     payloadHash: "hash",
   };
+  assert.throws(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+    ),
+    /requires handoff "handoffArtifact" from "handoff_binding_producer".*no producer lineage/,
+    "a shaped payload without an artifact reference must not satisfy a required handoff",
+  );
+  assert.doesNotThrow(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+      { handoffArtifact: validRef },
+    ),
+    "a present, producer-bound handoff may cross the reusable optional input boundary",
+  );
   assert.throws(
     () => assertRequiredDownstreamHandoffs(
       [producerManifest, optionalConsumerManifest],
