@@ -384,10 +384,30 @@ export function buildMiniMaxH3SceneRequest(input: {
   output: MiniMaxH3RenderRequest["output"];
   maxCostUsd: number;
 }): MiniMaxH3RenderRequest {
+  const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+  const developmentEndSec = Math.max(1, nativeDurationSec - 0.9).toFixed(2);
+  const action = input.motionPrompt?.trim() || "Continue with a visible, physically coherent subject action.";
+  const camera = input.cameraInstruction?.trim()
+    ? `Camera execution: ${input.cameraInstruction.trim()}.`
+    : "Camera execution: carry the same continuous shot forward without a static establish.";
+  /**
+   * MiniMax H3's first-frame condition is the literal t=0 composition. A
+   * generic "add motion" suffix is therefore weaker than describing what
+   * changes immediately, how it develops, and where the short take lands.
+   * Keep this timeline in the single canonical request builder so the weekly
+   * Salad, on-demand Novita, and recovery routes cannot drift back to vague
+   * static-shot prompts.
+   */
+  const motionTimeline = [
+    `First-frame continuity: the supplied image is the exact 0.00-second composition; preserve its subjects, setting, wardrobe, lighting, and spatial relationships.`,
+    `Motion timeline (${nativeDurationSec.toFixed(2)}s native take):`,
+    `[0.00-0.75s] Action onset: ${action} ${camera}`,
+    `[0.75-${developmentEndSec}s] Continuous development: sustain the same causal action and camera path with visible progression; do not reset, pause, or cut to a new scene.`,
+    `[${developmentEndSec}-${nativeDurationSec.toFixed(2)}s] End beat: resolve the same action naturally while retaining the established subject and setting.`,
+  ].join("\n");
   const prompt = [
     input.prompt,
-    input.motionPrompt ? `Motion: ${input.motionPrompt}` : undefined,
-    input.cameraInstruction ? `Camera: ${input.cameraInstruction}` : undefined,
+    motionTimeline,
     MINIMAX_H3_IMMEDIATE_MOTION_PROMPT,
     input.negativePrompt ? `Avoid: ${input.negativePrompt}` : undefined,
   ]

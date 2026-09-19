@@ -72,8 +72,8 @@ const builtSceneRequest = buildMiniMaxH3SceneRequest({
 });
 assert.equal(
   builtSceneRequest.prompt,
-  `A rainy station at night.\n\nMotion: A figure turns toward the platform lights.\n\nCamera: slow lateral track\n\n${MINIMAX_H3_IMMEDIATE_MOTION_PROMPT}\n\nAvoid: text, logos`,
-  "scene request builder must preserve canonical prompt section order",
+  `A rainy station at night.\n\nFirst-frame continuity: the supplied image is the exact 0.00-second composition; preserve its subjects, setting, wardrobe, lighting, and spatial relationships.\nMotion timeline (5.17s native take):\n[0.00-0.75s] Action onset: A figure turns toward the platform lights. Camera execution: slow lateral track.\n[0.75-4.27s] Continuous development: sustain the same causal action and camera path with visible progression; do not reset, pause, or cut to a new scene.\n[4.27-5.17s] End beat: resolve the same action naturally while retaining the established subject and setting.\n\n${MINIMAX_H3_IMMEDIATE_MOTION_PROMPT}\n\nAvoid: text, logos`,
+  "scene request builder must give the literal conditioned first frame a timed onset-to-resolution motion contract",
 );
 assert.deepEqual(builtSceneRequest.firstFrame, { r2Key: "owner/test/scene/frame.png", sha256: "a".repeat(64) });
 assert.deepEqual(builtSceneRequest.output, { r2Key: "owner/test/scene/clip.mp4" });
