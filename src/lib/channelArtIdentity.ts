@@ -9,6 +9,8 @@ import { sha256Hex } from "@/lib/sha256";
 
 export const CHANNEL_ART_PROMPT_VERSION = "channel-art-prompt/v1" as const;
 export const CHANNEL_ART_PROVENANCE_VERSION = "channel-art-provenance/v1" as const;
+/** Only thumbnail generation may use Nano Banana; channel identity art is Novita-only. */
+export const CHANNEL_ART_REQUIRED_PROVIDER_ROUTE = "novita-z-image-turbo-channel-art" as const;
 
 export type ChannelArtKind = "avatar" | "banner";
 
@@ -33,7 +35,7 @@ export type ChannelArtFreshness =
   | { current: true; reason: "current"; directionFingerprint: string }
   | {
       current: false;
-      reason: "missing-asset" | "legacy-unverified" | "asset-mismatch" | "proof-invalid" | "direction-changed";
+      reason: "missing-asset" | "legacy-unverified" | "asset-mismatch" | "proof-invalid" | "provider-retired" | "direction-changed";
       directionFingerprint: string;
     };
 
@@ -294,6 +296,9 @@ export function assessChannelArtFreshness(args: {
     !/^[a-f0-9]{64}$/u.test(proof.directionFingerprint)
   ) {
     return { current: false, reason: "proof-invalid", directionFingerprint };
+  }
+  if (proof.providerRoute !== CHANNEL_ART_REQUIRED_PROVIDER_ROUTE) {
+    return { current: false, reason: "provider-retired", directionFingerprint };
   }
   if (proof.directionFingerprint !== directionFingerprint) {
     return { current: false, reason: "direction-changed", directionFingerprint };

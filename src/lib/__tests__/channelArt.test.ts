@@ -9,16 +9,10 @@ import {
   generateChannelArtAsset,
   generateChannelArtAssetWithProvenance,
   generateFlagBanner,
+  CHANNEL_ART_NOVITA_PROFILE,
+  type ChannelArtProviderReceipt,
   type ChannelArtRuntime,
 } from "@/lib/channelArt";
-import {
-  NANO_BANANA_AVATAR_PROFILE,
-  type NanoBananaAvatarReceipt,
-} from "@/lib/nanoBananaAvatarContract";
-import {
-  FAL_NANO_BANANA_BANNER_PROFILE,
-  type FalNanoBananaBannerReceipt,
-} from "@/lib/falNanoBananaBannerContract";
 
 type Kind = "avatar" | "banner";
 
@@ -65,43 +59,23 @@ function fakeRuntime(config: {
     judgements: [],
     persisted: new Map(),
   };
-  const avatarReceipt = (ordinal: number): NanoBananaAvatarReceipt => ({
-    provider: NANO_BANANA_AVATAR_PROFILE.provider,
-    model: NANO_BANANA_AVATAR_PROFILE.model,
-    apiVersion: NANO_BANANA_AVATAR_PROFILE.apiVersion,
-    providerRequestId: `fixture-avatar-${ordinal}`,
-    route: NANO_BANANA_AVATAR_PROFILE.route,
-    width: NANO_BANANA_AVATAR_PROFILE.providerOutputWidth,
-    height: NANO_BANANA_AVATAR_PROFILE.providerOutputHeight,
-    promptUtf8Bytes: 400,
-    outputCostUsd: NANO_BANANA_AVATAR_PROFILE.outputImageUsd,
-    costUsd: NANO_BANANA_AVATAR_PROFILE.outputImageUsd,
+  const receipt = (kind: Kind, ordinal: number): ChannelArtProviderReceipt => ({
+    contractVersion: CHANNEL_ART_NOVITA_PROFILE.contractVersion,
+    provider: CHANNEL_ART_NOVITA_PROFILE.provider,
+    route: CHANNEL_ART_NOVITA_PROFILE.route,
+    model: "Tongyi-MAI/Z-Image-Turbo@fixture",
+    profileId: CHANNEL_ART_NOVITA_PROFILE.profileId,
+    width: 2048,
+    height: 1152,
+    costUsd: 0.02,
     sourceContentType: "image/png",
-    providerRequestCanonicalJson: "{}",
-    providerRequestSha256: `request-${ordinal}`,
-    providerResponseMetadataCanonicalJson: "{}",
-    providerResponseMetadataSha256: `metadata-${ordinal}`,
-    responseSha256: `response-${ordinal}`,
-    createdAt: ordinal,
-  });
-  const bannerReceipt = (ordinal: number): FalNanoBananaBannerReceipt => ({
-    provider: FAL_NANO_BANANA_BANNER_PROFILE.provider,
-    model: FAL_NANO_BANANA_BANNER_PROFILE.model,
-    apiVersion: FAL_NANO_BANANA_BANNER_PROFILE.apiVersion,
-    providerRequestId: `fixture-banner-${ordinal}`,
-    route: FAL_NANO_BANANA_BANNER_PROFILE.route,
-    width: FAL_NANO_BANANA_BANNER_PROFILE.accountingWidth,
-    height: FAL_NANO_BANANA_BANNER_PROFILE.accountingHeight,
-    promptUtf8Bytes: 400,
-    outputCostUsd: FAL_NANO_BANANA_BANNER_PROFILE.outputImageUsd,
-    costUsd: FAL_NANO_BANANA_BANNER_PROFILE.outputImageUsd,
-    sourceContentType: "image/png",
-    providerRequestCanonicalJson: "{}",
-    providerRequestSha256: `banner-request-${ordinal}`,
-    providerResponseMetadataCanonicalJson: "{}",
-    providerResponseMetadataSha256: `banner-metadata-${ordinal}`,
-    responseSha256: `banner-response-${ordinal}`,
-    createdAt: ordinal,
+    responseSha256: `${kind}-response-${ordinal}`,
+    providerKey: `owners/fixture/art/${kind}-${ordinal}.png`,
+    providerJobId: `fixture-${kind}-${ordinal}`,
+    providerRequestSha256: "a".repeat(64),
+    providerProfileSha256: "b".repeat(64),
+    providerManifestSha256: "c".repeat(64),
+    providerBillingReceiptSha256: "d".repeat(64),
   });
   const verdicts: Record<Kind, unknown[]> = {
     avatar: [...(config.verdicts?.avatar ?? [accepted("avatar")])],
@@ -115,7 +89,7 @@ function fakeRuntime(config: {
       const ordinal = state.bannerRenders.length;
       return {
         bytes: new TextEncoder().encode(`fake-banner-${ordinal}`),
-        receipt: bannerReceipt(ordinal),
+        receipt: receipt("banner", ordinal),
       };
     },
     renderAvatar: async (request) => {
@@ -123,7 +97,7 @@ function fakeRuntime(config: {
       const ordinal = state.avatarRenders.length;
       return {
         bytes: new TextEncoder().encode(`fake-avatar-${ordinal}`),
-        receipt: avatarReceipt(ordinal),
+        receipt: receipt("avatar", ordinal),
       };
     },
     makeTempDir: async (prefix) => `/tmp/${prefix}`,
@@ -349,11 +323,12 @@ async function assertApprovedIndependentOutputs(): Promise<void> {
   assert.match(result.bannerKey, /art\/banner\/banner-v9\/approved\.jpg$/);
   assert.notEqual(result.imageKey, result.bannerKey);
 
-  assert(state.conversions.some(({ width, height }) => width === 1024 && height === 1024));
   assert(state.conversions.some(({ width, height }) => width === 48 && height === 48));
   assert(state.conversions.some(({ width, height }) => width === 256 && height === 256));
   assert(state.conversions.some(({ width, height }) => width === 1280 && height === 720));
   assert.deepEqual(state.crops.map(({ input, width, height }) => ({ input, width, height })), [
+    { input: "/tmp/channel-art-quiet-stoic-avatar/avatar-candidate-01.png", width: 1024, height: 1024 },
+    { input: "/tmp/channel-art-quiet-stoic-avatar/avatar-candidate-02.png", width: 1024, height: 1024 },
     { input: "/tmp/channel-art-quiet-stoic-banner/banner-candidate-01-full.jpg", width: 773, height: 212 },
   ]);
   assert.deepEqual(state.judgements.map(({ imagePaths }) => imagePaths.length), [2, 2, 2]);
@@ -602,12 +577,10 @@ async function assertFlagBannerUsesSameGate(): Promise<void> {
 
 async function assertDefaultProviderHasNoFallback(): Promise<void> {
   const source = await readFile(new URL("../channelArt.ts", import.meta.url), "utf8");
-  assert.match(source, /generateFalNanoBananaBannerWithReceipt/);
-  assert.match(source, /generateFalNanoBananaAvatarImageWithReceipt/);
-  assert.match(source, /NANO_BANANA_AVATAR_PROFILE/);
-  assert.match(source, /FAL_NANO_BANANA_BANNER_PROFILE/);
+  assert.match(source, /renderAttestedNovitaImageBytes/);
+  assert.match(source, /CHANNEL_ART_NOVITA_PROFILE/);
   assert.match(source, /maxProviderSpendUsd/);
-  assert.doesNotMatch(source, /renderNovitaImage|novitaCostEnvelope|generateFalImage|replicate|generateFluxImage/);
+  assert.doesNotMatch(source, /generateFalNanoBanana|generateNanoBanana|fal\.run|replicate|generateFluxImage/);
   assert.match(source, /ifNoneMatch: "\*"/);
   assert.match(source, /hasJudge: hasVisionKey/);
   assert.doesNotMatch(source, /hasJudge: hasGeminiKey/);

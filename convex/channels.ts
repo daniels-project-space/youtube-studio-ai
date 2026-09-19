@@ -1149,9 +1149,7 @@ export const applyChannelArtAsset = mutation({
         `channel ${args.kind} changed while its reviewed replacement was rendering; inspect the current artwork and try again`,
       );
     }
-    const expectedRoute = args.kind === "avatar"
-      ? "fal-nano-banana-avatar"
-      : "fal-nano-banana-channel-banner-edit";
+    const expectedRoute = "novita-z-image-turbo-channel-art";
     if (args.provenance.providerRoute !== expectedRoute) {
       throw new Error(`channel ${args.kind} approval used an unrecognized provider route`);
     }

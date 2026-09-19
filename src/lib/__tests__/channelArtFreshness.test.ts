@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CHANNEL_ART_PROMPT_VERSION,
   CHANNEL_ART_PROVENANCE_VERSION,
+  CHANNEL_ART_REQUIRED_PROVIDER_ROUTE,
   assessChannelArtFreshness,
   channelArtApprovalKey,
   channelArtDirectionFingerprint,
@@ -35,7 +36,7 @@ const bannerProof: ChannelArtAssetProvenance = {
   outputKey,
   outputSha256: "a".repeat(64),
   approvalKey: channelArtApprovalKey(outputKey),
-  providerRoute: "fal-nano-banana-channel-banner-edit",
+  providerRoute: CHANNEL_ART_REQUIRED_PROVIDER_ROUTE,
   acceptedAt: 1_788_800_000_000,
 };
 
@@ -62,6 +63,19 @@ const provenance = mergeChannelArtProvenance(undefined, "banner", bannerProof);
 assert.equal(
   assessChannelArtFreshness({ kind: "banner", identity, assetKey: outputKey, provenance }).current,
   true,
+);
+assert.equal(
+  assessChannelArtFreshness({
+    kind: "banner",
+    identity,
+    assetKey: outputKey,
+    provenance: mergeChannelArtProvenance(undefined, "banner", {
+      ...bannerProof,
+      providerRoute: "fal-nano-banana-channel-banner-edit",
+    }),
+  }).reason,
+  "provider-retired",
+  "old Nano Banana channel art must be refreshed rather than treated as current",
 );
 assert.equal(
   assessChannelArtFreshness({

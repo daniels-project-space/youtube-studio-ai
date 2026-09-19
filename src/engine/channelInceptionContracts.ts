@@ -43,8 +43,8 @@ export const CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD: Readonly<
   "channel-inception-positioning": 0.6,
   "channel-inception-seo": 0.45,
   "channel-inception-voice": 0.75,
-  // Three judged square Nano Banana candidates at the fail-closed $0.04 cap.
-  "channel-inception-avatar": 0.12,
+  // Three judged Novita hero-image candidates at the attested $0.35 ceiling.
+  "channel-inception-avatar": 1.05,
   "channel-inception-banner": 1.05,
   "channel-inception-thumbnails": 1.4,
   "channel-inception-pipeline": 0.6,
