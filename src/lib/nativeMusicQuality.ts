@@ -49,6 +49,20 @@ export interface NativeMusicQualityAnalysis {
   };
 }
 
+/**
+ * The reported Music3/ComfyUI defect has an objective audio signature: an
+ * otherwise healthy opening loses a large amount of high-band energy a few
+ * seconds later. This is deliberately narrower than a creative judgement;
+ * it only decides whether an automated retry is justified before an owner
+ * wastes time auditioning a mechanically damaged take.
+ */
+export function hasKnownMiniMaxMusic3OpeningDegradation(
+  analysis: Pick<NativeMusicQualityAnalysis, "measurements">,
+): boolean {
+  return analysis.measurements.openingHighBandDropDb > MAX_OPENING_HIGH_BAND_DROP_DB
+    || analysis.measurements.mechanicalArtifactScore > 0.15;
+}
+
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 
 function runFfmpeg(args: readonly string[]): Promise<string> {

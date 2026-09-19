@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  hasKnownMiniMaxMusic3OpeningDegradation,
   MAX_OPENING_HIGH_BAND_DROP_DB,
   measureNativeMusicQuality,
 } from "@/lib/nativeMusicQuality";
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
     ]);
     assert(stableAnalysis.measurements.openingHighBandDropDb < 2, "stable high-band material must not resemble the Music3 degradation");
     assert.equal(stableAnalysis.measurements.mechanicalArtifactScore, 0);
+    assert.equal(hasKnownMiniMaxMusic3OpeningDegradation(stableAnalysis), false);
     assert(
       collapsedAnalysis.measurements.openingHighBandDropDb > MAX_OPENING_HIGH_BAND_DROP_DB,
       "a post-opening high-band collapse must be caught from the native WAV",
@@ -57,6 +59,11 @@ async function main(): Promise<void> {
     assert(
       collapsedAnalysis.measurements.mechanicalArtifactScore > 0.15,
       "the measured collapse must independently fail the artifact threshold",
+    );
+    assert.equal(
+      hasKnownMiniMaxMusic3OpeningDegradation(collapsedAnalysis),
+      true,
+      "the known defect classifier must admit an automatic bounded retry before human audition",
     );
     assert(collapsedAnalysis.postOpeningHighBand.startSec >= 3.75, "the defect probe must inspect after the known opening window");
     assert(

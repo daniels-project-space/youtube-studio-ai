@@ -122,6 +122,11 @@ import {
   hasQualifiedMiniMaxMusic3,
   type MiniMaxMusic3Receipt,
 } from "@/lib/minimaxMusic3";
+import {
+  hasKnownMiniMaxMusic3OpeningDegradation,
+  measureNativeMusicQuality,
+  type NativeMusicQualityAnalysis,
+} from "@/lib/nativeMusicQuality";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, composeLoopSourceUnit, composeVideoSequenceUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureVideoBoundaryDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
@@ -2125,18 +2130,68 @@ export const music: Block = {
           "music: MiniMax-Music3 — two-GPU spot worker, pinned ComfyUI/model revisions, " +
           "prominent attribution/disclosure, durable WAV integrity, and listened-quality admission required…",
         );
-        const result = await generateMiniMaxMusic3({
-          program: channelMusicProgram,
-          seed: Number(ctx.params.seed ?? 4_242),
-          // The worker accepts only the benchmarked full-precision profile.
-          // Preserve an explicit override as an intentional, fail-closed
-          // benchmark request instead of silently clamping it into a release.
-          cfgScale: ctx.params.cfgScale === undefined ? undefined : Number(ctx.params.cfgScale),
-          topK: ctx.params.topK === undefined ? undefined : Number(ctx.params.topK),
-          maxCostUsd: Number(ctx.params.maxCostUsd ?? 5),
-        });
+        const configuredBudgetUsd = Number(ctx.params.maxCostUsd ?? 5);
+        if (!Number.isFinite(configuredBudgetUsd) || configuredBudgetUsd <= 0) {
+          throw new Error("music: MiniMax-Music3 requires a positive total generation budget");
+        }
+        const configuredSeed = Number(ctx.params.seed ?? 4_242);
+        const baseSeed = Number.isSafeInteger(configuredSeed) && configuredSeed >= 0 ? configuredSeed : 4_242;
+        let result: Awaited<ReturnType<typeof generateMiniMaxMusic3>> | undefined;
+        let nativeTechnicalQuality: NativeMusicQualityAnalysis | undefined;
+        // The upstream stock-graph defect can produce a healthy opening then
+        // collapse spectrally around the first few seconds. Retry exactly once
+        // with a deterministic different seed, only while the original stage
+        // reservation still covers the observed first attempt. This is a
+        // mechanical repair, not a substitute for the later human audition.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const remainingBudgetUsd = configuredBudgetUsd - billedAttestedCostUsd;
+          if (remainingBudgetUsd <= 0) {
+            throw new Error("music: MiniMax-Music3 known-defect retry would exceed the sealed stage budget");
+          }
+          const attemptSeed = attempt === 0
+            ? baseSeed
+            : (baseSeed + 104_729) % 2_147_483_647;
+          const candidate = await generateMiniMaxMusic3({
+            program: channelMusicProgram,
+            seed: attemptSeed,
+            // The worker accepts only the benchmarked full-precision profile.
+            // Preserve an explicit override as an intentional, fail-closed
+            // benchmark request instead of silently clamping it into a release.
+            cfgScale: ctx.params.cfgScale === undefined ? undefined : Number(ctx.params.cfgScale),
+            topK: ctx.params.topK === undefined ? undefined : Number(ctx.params.topK),
+            maxCostUsd: Math.min(10, remainingBudgetUsd),
+          });
+          billedAttestedCostUsd += candidate.receipt.runtime.costUsd;
+          const technicalQuality = await measureNativeMusicQuality({
+            audio: candidate.audio,
+            durationSec: candidate.receipt.durationSec,
+          });
+          if (!hasKnownMiniMaxMusic3OpeningDegradation(technicalQuality)) {
+            result = candidate;
+            nativeTechnicalQuality = technicalQuality;
+            break;
+          }
+          const rejectedKey =
+            `${ctx.keyPrefix}runs/${ctx.runId}/audio/rejected/minimax-music3-native-${candidate.receipt.output.contentSha256}.wav`;
+          await putObject(rejectedKey, candidate.audio, { contentType: "audio/wav" });
+          await recordAsset(ctx, "minimax_music3_rejected_native_wav", rejectedKey, {
+            requestKey: candidate.receipt.requestKey,
+            jobId: candidate.receipt.jobId,
+            contentSha256: candidate.receipt.output.contentSha256,
+            durationSec: candidate.receipt.durationSec,
+            openingHighBandDropDb: technicalQuality.measurements.openingHighBandDropDb,
+            mechanicalArtifactScore: technicalQuality.measurements.mechanicalArtifactScore,
+            rejection: "known-music3-opening-degradation",
+          });
+          ctx.log(
+            `music: rejected MiniMax-Music3 attempt ${attempt + 1}/2 for known opening degradation ` +
+            `(high-band drop ${technicalQuality.measurements.openingHighBandDropDb} dB); retained evidence before bounded retry`,
+          );
+        }
+        if (!result || !nativeTechnicalQuality) {
+          throw new Error("music: MiniMax-Music3 exhausted its bounded retry after known opening degradation");
+        }
         minimaxReceipt = result.receipt;
-        billedAttestedCostUsd = result.receipt.runtime.costUsd;
         minimaxLocalPath = await writeBytes(join(tmp, "minimax-music3.wav"), result.audio);
         musicNativeWavKey =
           `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
@@ -2151,6 +2206,8 @@ export const music: Block = {
           channels: result.receipt.output.channels,
           codec: result.receipt.output.codec,
           programFingerprint: channelMusicProgram.fingerprint,
+          openingHighBandDropDb: nativeTechnicalQuality.measurements.openingHighBandDropDb,
+          mechanicalArtifactScore: nativeTechnicalQuality.measurements.mechanicalArtifactScore,
           // This is a retained review artifact. It is deliberately distinct
           // from the mastered MP3, which has its own asset row below.
           reviewBinding: "native-worker-wav",
