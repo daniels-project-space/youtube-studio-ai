@@ -717,6 +717,7 @@ function ModuleContract({ contract }: { contract: ModuleContractSurface }) {
   const optionalInputs = contract.optionalInputs.map((key) => `optional · ${key}`);
   const outputs = [...contract.outputs, ...contract.optionalOutputs.map((key) => `optional · ${key}`)];
   const handoffs = contract.requiredDownstreamCapabilities;
+  const handoffArtifacts = contract.requiredDownstreamConsumes;
   const missing = contract.missingExecutableIds;
   return (
     <section className={styles.moduleContract} aria-label="Executable module contract">
@@ -727,7 +728,14 @@ function ModuleContract({ contract }: { contract: ModuleContractSurface }) {
       <div className={styles.contractGrid}>
         <ContractLane label="Takes" values={[...requiredInputs, ...optionalInputs]} tone="input" empty="No declared artifact inputs" />
         <ContractLane label="Returns" values={[...outputs, ...contract.capabilities]} tone="output" empty="No declared output" />
-        <ContractLane label="Hands off" values={handoffs} tone="handoff" empty="No specialist handoff required" />
+        <ContractLane
+          label="Hands off"
+          values={handoffs.map((capability) =>
+            handoffArtifacts[capability] ? `${capability} ← ${handoffArtifacts[capability]}` : capability,
+          )}
+          tone="handoff"
+          empty="No specialist handoff required"
+        />
       </div>
       {contract.requiredCapabilities.length ? (
         <p className={styles.contractRequirement}>Requires upstream: {contract.requiredCapabilities.join(" · ")}</p>

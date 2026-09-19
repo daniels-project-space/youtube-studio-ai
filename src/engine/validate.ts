@@ -134,10 +134,19 @@ export function validatePipeline(
   // consumer capability must appear after it in the same compiled graph.
   for (const [index, manifest] of manifests.entries()) {
     for (const capability of manifest.requiredDownstreamCapabilities) {
-      const consumerIndex = capabilityProducedAt.get(capability);
-      if (consumerIndex === undefined || consumerIndex <= index) {
+      const handoffArtifact = manifest.requiredDownstreamConsumes[capability];
+      const consumerIndex = manifests.findIndex((candidate, candidateIndex) =>
+        candidateIndex > index &&
+        candidate.capabilities.includes(capability) &&
+        (handoffArtifact in candidate.consumes || handoffArtifact in candidate.optionalConsumes),
+      );
+      if (consumerIndex < 0) {
+        const capabilityIndex = capabilityProducedAt.get(capability);
+        const detail = capabilityIndex === undefined || capabilityIndex <= index
+          ? `downstream capability "${capability}"`
+          : `downstream capability "${capability}" consuming "${handoffArtifact}"`;
         throw new PipelineValidationError(
-          `block "${manifest.id}" (step ${index}) requires downstream capability "${capability}"`,
+          `block "${manifest.id}" (step ${index}) requires ${detail}`,
         );
       }
     }

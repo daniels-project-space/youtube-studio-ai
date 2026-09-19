@@ -40,6 +40,8 @@ export interface ModuleContractOverride {
   requiredCapabilities?: string[];
   /** Capabilities a later specialist module must provide to complete this module's handoff. */
   requiredDownstreamCapabilities?: string[];
+  /** Exact artifact each required downstream capability must consume. */
+  requiredDownstreamConsumes?: Record<string, string>;
   capabilities: string[];
   requiredConsumes?: string[];
   optionalConsumes?: string[];
@@ -67,6 +69,8 @@ export interface ModuleManifest {
   requiredCapabilities: readonly string[];
   /** Required specialist consumers; prevents an emitted handoff becoming dead configuration. */
   requiredDownstreamCapabilities: readonly string[];
+  /** Capability-to-artifact bindings for required downstream consumers. */
+  requiredDownstreamConsumes: Readonly<Record<string, string>>;
   capabilities: readonly string[];
   consumes: Readonly<Record<string, ArtifactContract>>;
   optionalConsumes: Readonly<Record<string, ArtifactContract>>;
@@ -139,6 +143,7 @@ export function manifestFromBlock(
     version: override?.version ?? "1.0.0-migration",
     requiredCapabilities: override?.requiredCapabilities ?? [],
     requiredDownstreamCapabilities: override?.requiredDownstreamCapabilities ?? [],
+    requiredDownstreamConsumes: override?.requiredDownstreamConsumes ?? {},
     capabilities: override?.capabilities ?? [],
     consumes: keyedContracts(requiredKeys),
     optionalConsumes: keyedContracts(optionalConsumes),
@@ -232,6 +237,31 @@ export function assertExecutableManifest(manifest: ModuleManifest): void {
   }
   if (new Set(manifest.requiredDownstreamCapabilities).size !== manifest.requiredDownstreamCapabilities.length) {
     throw new Error(`manifest ${manifest.id} declares duplicate downstream capabilities`);
+  }
+  const downstreamCapabilities = new Set(manifest.requiredDownstreamCapabilities);
+  const downstreamBindings = Object.entries(manifest.requiredDownstreamConsumes);
+  const unboundDownstream = manifest.requiredDownstreamCapabilities.filter(
+    (capability) => !Object.prototype.hasOwnProperty.call(manifest.requiredDownstreamConsumes, capability),
+  );
+  if (unboundDownstream.length) {
+    throw new Error(
+      `manifest ${manifest.id} must bind downstream capability artifacts: ${unboundDownstream.join(", ")}`,
+    );
+  }
+  const extraDownstreamBindings = downstreamBindings
+    .filter(([capability]) => !downstreamCapabilities.has(capability))
+    .map(([capability]) => capability);
+  if (extraDownstreamBindings.length) {
+    throw new Error(
+      `manifest ${manifest.id} binds artifacts for undeclared downstream capabilities: ${extraDownstreamBindings.join(", ")}`,
+    );
+  }
+  for (const [capability, artifact] of downstreamBindings) {
+    if (!(artifact in manifest.produces) && !(artifact in manifest.optionalProduces)) {
+      throw new Error(
+        `manifest ${manifest.id} downstream capability "${capability}" binds undeclared output "${artifact}"`,
+      );
+    }
   }
   if (new Set(manifest.capabilities).size !== manifest.capabilities.length) {
     throw new Error(`manifest ${manifest.id} declares duplicate capabilities`);

@@ -15,6 +15,7 @@ SPEC FORMAT (JSON):
  "consumes": [<store keys you read: "topic"|"script"|"narrationText"|"sentenceTimings"|"styleDNA"|"visualBrief"|"structure"|"introSec"|"narrationDurationSec"|"title">],
  "requiredCapabilities": [<upstream capabilities, if any>],
  "requiredDownstreamCapabilities": [<later specialist capabilities that must consume this handoff>],
+ "requiredDownstreamConsumes": {<each downstream capability>: "<exact produced artifact key>"},
  "capabilities": [<capabilities this module provides>],
  "produces": "extraOverlays",
  "anchorAfter": ["visual_inserts","quote_overlays","intro_card","narration_tts"],

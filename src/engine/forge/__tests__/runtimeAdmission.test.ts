@@ -11,6 +11,7 @@ const nestedI2vSpec = {
   whenToUse: "Only when a motion overlay is explicitly required.",
   consumes: ["topic"],
   requiredDownstreamCapabilities: ["master.assembled"],
+  requiredDownstreamConsumes: { "master.assembled": "extraOverlays" },
   produces: "extraOverlays",
   anchorAfter: ["visual_inserts"],
   params: [],
@@ -82,11 +83,13 @@ async function assertions(): Promise<void> {
     ...imageOnlySpec,
     capabilities: ["visuals.forged_overlay"],
     requiredDownstreamCapabilities: ["master.assembled"],
+    requiredDownstreamConsumes: { "master.assembled": "extraOverlays" },
   }]);
   const manifest = getManifest("forged_image_only");
   assert(manifest);
   assert.deepEqual(manifest.capabilities, ["visuals.forged_overlay"]);
   assert.deepEqual(manifest.requiredDownstreamCapabilities, ["master.assembled"]);
+  assert.deepEqual(manifest.requiredDownstreamConsumes, { "master.assembled": "extraOverlays" });
   assert.equal(manifest.certification.status, "contract");
 }
 

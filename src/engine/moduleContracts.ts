@@ -938,6 +938,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
     requiredConsumes: ["episodeGraph", "lessonContract", "childrenShowBible", "contentLane"],
     requiredDownstreamCapabilities: ["visuals.scene_compiled", "package.thumbnail"],
+    requiredDownstreamConsumes: {
+      "visuals.scene_compiled": "childrenVideoTreatment",
+      "package.thumbnail": "childrenVideoTreatment",
+    },
     providerProfiles: [local],
     maxCostUsd: 0,
     qualityRequired: true,

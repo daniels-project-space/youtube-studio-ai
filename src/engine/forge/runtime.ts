@@ -258,6 +258,7 @@ export function registerForgedSpecs(specs: ForgedModuleSpec[]): void {
       capabilities: [...(spec.capabilities ?? [])],
       requiredCapabilities: [...(spec.requiredCapabilities ?? [])],
       requiredDownstreamCapabilities: [...(spec.requiredDownstreamCapabilities ?? [])],
+      requiredDownstreamConsumes: { ...spec.requiredDownstreamConsumes },
       providerProfiles: [{
         id: "novita-forged-primitives",
         provider: "novita",

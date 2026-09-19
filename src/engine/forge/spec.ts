@@ -89,6 +89,11 @@ export const forgedModuleSchema = z.object({
   requiredCapabilities: z.array(z.string().min(1).max(120)).max(8).optional(),
   /** A forged handoff must name the specialist that will consume it. */
   requiredDownstreamCapabilities: z.array(z.string().min(1).max(120)).min(1).max(8),
+  /** Each required specialist must be bound to the exact artifact this module emits. */
+  requiredDownstreamConsumes: z.record(
+    z.string().min(1).max(120),
+    z.string().min(1).max(160),
+  ),
   /** Capabilities this module provides to later modules. */
   capabilities: z.array(z.string().min(1).max(120)).max(8).optional(),
   /**

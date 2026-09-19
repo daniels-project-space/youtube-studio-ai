@@ -8,6 +8,7 @@ assert.ok(children.optionalInputs.includes("childrenVideoTreatment"));
 assert.ok(children.optionalOutputs.includes("thumbnailScenarioVisualTreatmentProvenance"));
 assert.ok(children.capabilities.includes("package.thumbnail"));
 assert.ok(children.requiredDownstreamCapabilities.includes("package.thumbnail"));
+assert.equal(children.requiredDownstreamConsumes["package.thumbnail"], "childrenVideoTreatment");
 
 const thumbnail = moduleContractSurface(["thumbnail_gen"]);
 assert.ok(thumbnail);
@@ -23,6 +24,7 @@ assert.deepEqual(moduleContractSurface(["missing-module"]), {
   optionalOutputs: [],
   capabilities: [],
   requiredDownstreamCapabilities: [],
+  requiredDownstreamConsumes: {},
 });
 
 console.log("module contract surface tests passed");

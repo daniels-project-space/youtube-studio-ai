@@ -19,6 +19,7 @@ export interface ModuleContractSurface {
   optionalOutputs: readonly string[];
   capabilities: readonly string[];
   requiredDownstreamCapabilities: readonly string[];
+  requiredDownstreamConsumes: Readonly<Record<string, string>>;
 }
 
 function unique(values: readonly string[]): string[] {
@@ -49,6 +50,7 @@ export function moduleContractSurface(
       optionalOutputs: [],
       capabilities: [],
       requiredDownstreamCapabilities: [],
+      requiredDownstreamConsumes: {},
     };
   }
   const requiredInputs = unique(contracts.flatMap((contract) => contract.requiredConsumes ?? []));
@@ -69,6 +71,9 @@ export function moduleContractSurface(
     capabilities: unique(contracts.flatMap((contract) => contract.capabilities)),
     requiredDownstreamCapabilities: unique(
       contracts.flatMap((contract) => contract.requiredDownstreamCapabilities ?? []),
+    ),
+    requiredDownstreamConsumes: Object.fromEntries(
+      contracts.flatMap((contract) => Object.entries(contract.requiredDownstreamConsumes ?? {})),
     ),
   };
 }
