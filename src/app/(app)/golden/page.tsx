@@ -20,6 +20,7 @@ import {
 } from "@/engine/goldenProofMedia";
 import { ProductionRouteQualificationCard } from "@/components/ProductionRouteQualificationCard";
 import { NicheMotionGlyph, type ChannelMotionMotif } from "@/components/NicheMotionGlyph";
+import { moduleContractSurface, type ModuleContractSurface } from "@/engine/moduleContractSurface";
 import { GoldenImages } from "./GoldenImages";
 import { moduleSalesPitch } from "./moduleSalesPitches";
 import styles from "./golden.module.css";
@@ -630,6 +631,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const bindingDetail = execution.kind === "catalog-only"
     ? "No compiler binding"
     : execution.executableIds.join(" · ");
+  const contract = moduleContractSurface(execution.executableIds);
   return (
     <details
       className={styles.moduleCard}
@@ -698,6 +700,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             <strong>{promotionProof ? `Recorded ${promotionProof.verifiedAt}` : "Not promoted"}</strong>
           </div>
         </div>
+        {contract ? <ModuleContract contract={contract} /> : null}
         {MODULES_WITH_PROOF.has(m.key) ? (
           <section className={styles.moduleEvidence} aria-label={`${m.title} evidence`}>
             <header><span>Evidence</span><small>{moduleEvidenceLabel(m.key)}</small></header>
@@ -706,6 +709,57 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
         ) : null}
       </div>
     </details>
+  );
+}
+
+function ModuleContract({ contract }: { contract: ModuleContractSurface }) {
+  const requiredInputs = contract.requiredInputs.map((key) => `required · ${key}`);
+  const optionalInputs = contract.optionalInputs.map((key) => `optional · ${key}`);
+  const outputs = [...contract.outputs, ...contract.optionalOutputs.map((key) => `optional · ${key}`)];
+  const handoffs = contract.requiredDownstreamCapabilities;
+  const missing = contract.missingExecutableIds;
+  return (
+    <section className={styles.moduleContract} aria-label="Executable module contract">
+      <header>
+        <span>Module ABI</span>
+        <small>{contract.executableIds.join(" · ")}</small>
+      </header>
+      <div className={styles.contractGrid}>
+        <ContractLane label="Takes" values={[...requiredInputs, ...optionalInputs]} tone="input" empty="No declared artifact inputs" />
+        <ContractLane label="Returns" values={[...outputs, ...contract.capabilities]} tone="output" empty="No declared output" />
+        <ContractLane label="Hands off" values={handoffs} tone="handoff" empty="No specialist handoff required" />
+      </div>
+      {contract.requiredCapabilities.length ? (
+        <p className={styles.contractRequirement}>Requires upstream: {contract.requiredCapabilities.join(" · ")}</p>
+      ) : null}
+      {missing.length ? (
+        <p className={styles.contractWarning}>Unregistered executable: {missing.join(" · ")}</p>
+      ) : null}
+    </section>
+  );
+}
+
+function ContractLane({
+  label,
+  values,
+  tone,
+  empty,
+}: {
+  label: string;
+  values: readonly string[];
+  tone: "input" | "output" | "handoff";
+  empty: string;
+}) {
+  const deduped = [...new Set(values)];
+  return (
+    <div className={styles.contractLane}>
+      <small>{label}</small>
+      <div className={styles.contractChips} data-tone={tone}>
+        {deduped.length
+          ? deduped.map((value) => <span key={value}>{value}</span>)
+          : <em>{empty}</em>}
+      </div>
+    </div>
   );
 }
 

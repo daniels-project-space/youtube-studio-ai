@@ -309,6 +309,21 @@
 .moduleFacts [data-state="blocked"] strong { color: var(--gold-red); }
 .moduleFacts [data-state="private-review-only"] strong,
 .moduleFacts [data-proof="true"] strong { color: var(--gold-bright); }
+.moduleContract { display: grid; gap: 7px; padding-top: 8px; border-top: 1px solid #342c22; }
+.moduleContract > header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; }
+.moduleContract > header span { color: var(--gold-warm); font: 700 .54rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .1em; text-transform: uppercase; }
+.moduleContract > header small { min-width: 0; overflow: hidden; color: #756a59; font: .51rem/1.2 var(--font-mono,ui-monospace,monospace); text-overflow: ellipsis; white-space: nowrap; }
+.contractGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+.contractLane { display: grid; min-width: 0; align-content: start; gap: 5px; padding: 7px; border: 1px solid #393128; border-radius: 8px; background: #0b0907; }
+.contractLane > small { color: #8d806d; font: 700 .5rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .08em; text-transform: uppercase; }
+.contractChips { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.contractChips span, .contractChips em { min-width: 0; max-width: 100%; overflow-wrap: anywhere; padding: 3px 5px; border: 1px solid #4a4033; border-radius: 5px; color: #c4b9a7; font: .51rem/1.2 var(--font-mono,ui-monospace,monospace); font-style: normal; }
+.contractChips[data-tone="input"] span { border-color: #3b5260; color: #a8d8e8; }
+.contractChips[data-tone="output"] span { border-color: #4b5b3d; color: #b8d99a; }
+.contractChips[data-tone="handoff"] span { border-color: #6b5228; color: var(--gold-bright); }
+.contractChips em { border-style: dashed; color: #6f6557; }
+.contractRequirement, .contractWarning { margin: 0; color: #8e806e; font: .52rem/1.35 var(--font-mono,ui-monospace,monospace); overflow-wrap: anywhere; }
+.contractWarning { color: var(--gold-red); }
 .moduleEvidence { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid #342c22; }
 .moduleEvidence > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .moduleEvidence > header span { color: var(--gold-warm); font: 700 .54rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .1em; text-transform: uppercase; }
@@ -363,6 +378,7 @@
   .chapterBody { padding: 10px; }
   .moduleFacts { grid-template-columns: 1fr; }
   .moduleFacts > div + div { border-top: 1px solid #3a3127; border-left: 0; }
+  .contractGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 540px) {
@@ -453,6 +469,7 @@
   .moduleFacts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .moduleFacts > div + div { border-top: 0; border-left: 1px solid #3a3127; }
   .moduleFacts > div { padding: 7px 6px; gap: 3px; }
+  .contractGrid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .foundationBody { max-height: 240px; padding: 4px 12px 12px; }
   .successorBody { max-height: 170px; padding: 0 12px 12px; }
   .admissionBody { max-height: 140px; padding: 3px 10px 6px; }
