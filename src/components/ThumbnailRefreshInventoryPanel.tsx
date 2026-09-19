@@ -12,6 +12,7 @@ import type { LegacyVideoRetirementReason } from "@/lib/legacyVideoCleanup";
 
 type InventoryStatus =
   | "current_golden_candidate"
+  | "historical_ernie_candidate"
   | "legacy_unverified"
   | "evidence_invalid"
   | "missing_thumbnail";
@@ -61,6 +62,8 @@ type ThumbnailInventoryRow = Readonly<{
     error?: string;
     costTotal: number;
     thumbnailPresent: boolean;
+    evidenceStatus?: InventoryStatus;
+    evidenceReason?: string;
   };
   replacement?: {
     id: string;
@@ -73,6 +76,7 @@ type ThumbnailInventoryRow = Readonly<{
 
 const STATUS_COPY: Record<InventoryStatus, { label: string; tone: string }> = {
   current_golden_candidate: { label: "Current candidate recorded", tone: "ready" },
+  historical_ernie_candidate: { label: "Imported ERNIE reference", tone: "review" },
   legacy_unverified: { label: "Legacy review needed", tone: "review" },
   evidence_invalid: { label: "Evidence needs repair", tone: "warning" },
   missing_thumbnail: { label: "No thumbnail recorded", tone: "warning" },
@@ -86,6 +90,7 @@ function inventoryCounts(rows: readonly ThumbnailInventoryRow[]) {
     },
     {
       current_golden_candidate: 0,
+      historical_ernie_candidate: 0,
       legacy_unverified: 0,
       evidence_invalid: 0,
       missing_thumbnail: 0,
@@ -372,7 +377,8 @@ export function ThumbnailRefreshInventoryPanel({
   const createCandidate = async (row: ThumbnailInventoryRow) => {
     const canResumeDispatch = row.candidate &&
       ["awaiting_approval", "pending"].includes(row.candidate.dispatchState ?? "");
-    if (busyRunIds.has(row.runId) || (row.candidate && !canResumeDispatch)) return;
+    const needsCurrentNanoCandidate = row.candidate?.evidenceStatus === "historical_ernie_candidate";
+    if (busyRunIds.has(row.runId) || (row.candidate && !canResumeDispatch && !needsCurrentNanoCandidate)) return;
     setBusyRunIds((current) => new Set(current).add(row.runId));
     setActionMessage(null);
     try {
@@ -386,7 +392,7 @@ export function ThumbnailRefreshInventoryPanel({
         throw new Error(payload.error || "Could not queue thumbnail candidate");
       }
       setActionMessage(
-        `${row.candidate ? "Candidate delivery resumed" : "Candidate queued"} for “${row.title}”. ` +
+        `${needsCurrentNanoCandidate ? "Current Nano candidate queued" : row.candidate ? "Candidate delivery resumed" : "Candidate queued"} for “${row.title}”. ` +
         "It will become the Library image after production QA and sync to its bound YouTube video automatically.",
       );
       await loadInventory();
@@ -447,13 +453,15 @@ export function ThumbnailRefreshInventoryPanel({
     [inventory, selectedChannelSlug],
   );
   const counts = inventoryCounts(rows);
-  const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
+  const reviewCount = counts.historical_ernie_candidate + counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
   const retirementCount = rows.filter((row) => row.legacyCleanupAction === "retire" && row.retirement?.status !== "deleted").length;
   const visible = showAll ? rows : rows.slice(0, 6);
   // The gallery is deliberately candidate-only: it lets the Library lead with
   // actual new artwork instead of stale YouTube stills or an empty vault.
   const featured = rows.filter((row) =>
-    row.candidate?.thumbnailPresent && row.candidate.status !== "failed",
+    row.candidate?.thumbnailPresent &&
+    row.candidate.status !== "failed" &&
+    row.candidate.evidenceStatus === "current_golden_candidate",
   ).slice(0, 6);
   const featuredPreviewRunIds = featured
     .map((row) => row.candidate?.runId)
@@ -464,7 +472,7 @@ export function ThumbnailRefreshInventoryPanel({
     row.legacyCleanupAction !== "retire" &&
     row.refreshAction === "owner_review_required" &&
     row.thumbnailReplayStatus !== "private_successor_unavailable" &&
-    !row.candidate,
+    (!row.candidate || row.candidate.evidenceStatus === "historical_ernie_candidate"),
   );
 
   useEffect(() => {
@@ -701,6 +709,7 @@ export function ThumbnailRefreshInventoryPanel({
             // two 16:9 plates and turning the Library into a vertical audit
             // transcript.
             const visiblePreviewIsCandidate = Boolean(row.candidate);
+            const needsCurrentNanoCandidate = row.candidate?.evidenceStatus === "historical_ernie_candidate";
             return (
               <article className={styles.row} key={row.runId}>
                 <div className={styles.rowVisual}>
@@ -754,7 +763,7 @@ export function ThumbnailRefreshInventoryPanel({
                           ? "Exact thumbnail replay eligible"
                           : "Channel setup required"}
                     >
-                      {row.candidate ? "candidate active" : "awaiting candidate"}
+                      {needsCurrentNanoCandidate ? "Nano refresh available" : row.candidate ? "candidate active" : "awaiting candidate"}
                     </span>
                     {row.candidate ? (
                       <span>candidate: {row.candidate.status.replaceAll("_", " ")} · ${row.candidate.costTotal.toFixed(2)}</span>
@@ -763,7 +772,7 @@ export function ThumbnailRefreshInventoryPanel({
                   </div>
                 </div>
                 <div className={styles.actions}>
-                  {canQueueCandidates && row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
+                  {canQueueCandidates && row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && (!row.candidate || needsCurrentNanoCandidate) ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -775,7 +784,7 @@ export function ThumbnailRefreshInventoryPanel({
                         : `${lofiSourceFrame
                           ? "Render exact video frame"
                           : row.thumbnailReplayStatus === "ready_for_private_successor"
-                            ? "Render Nano candidate"
+                            ? needsCurrentNanoCandidate ? "Replace with Nano candidate" : "Render Nano candidate"
                             : "Render Nano candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}

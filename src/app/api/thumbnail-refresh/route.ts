@@ -223,6 +223,8 @@ export async function GET(request: Request) {
               error: item.candidateError ?? item.candidateDispatchLastError,
               costTotal: item.candidateCostTotal ?? 0,
               thumbnailPresent: Boolean(item.candidateThumbnailKey),
+              evidenceStatus: item.candidateEvidenceStatus,
+              evidenceReason: item.candidateEvidenceReason,
             },
           } : {}),
           ...(item.replacementId ? {

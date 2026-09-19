@@ -15,6 +15,7 @@ const successor = read("src/lib/thumbnailRefreshSuccessor.ts");
 const moduleContracts = read("src/engine/moduleContracts.ts");
 
 assert.match(schema, /thumbnailRefreshSourceRunId: v\.optional\(v\.id\("runs"\)\)/);
+assert.match(schema, /thumbnailRefreshGenerationProfile: v\.optional\(v\.literal\("nano-banana-current\/v1"\)\)/);
 assert.match(schema, /by_owner_thumbnail_refresh_source/);
 assert.match(schema, /by_owner_thumbnail_refresh_dispatch/);
 assert.match(schema, /by_channel_thumbnail_refresh_source/);
@@ -39,6 +40,9 @@ assert.match(
 assert.match(convex, /await requireStudioServiceIdentity\(ctx, args\.ownerId, "thumbnail refresh candidate shell"\)/);
 assert.match(convex, /thumbnailRefreshSourceRunId: source\._id/);
 assert.match(convex, /thumbnailRefreshDispatchState: "awaiting_approval"/);
+assert.match(convex, /NANO_BANANA_CURRENT_REFRESH_PROFILE/);
+assert.match(convex, /historical_ernie_candidate/);
+assert.match(convex, /thumbnailRefreshCandidateFingerprint/);
 assert.match(convex, /material: replay\.material/);
 assert.match(convex, /refreshMaterial\.material\.replayFingerprint/);
 assert.match(convex, /assessThumbnailRefreshSuccessor/);

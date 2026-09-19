@@ -51,6 +51,8 @@ assert.match(panel, /stale\/dead public YouTube artwork/);
 assert.match(panel, /method:\s*["']POST/);
 assert.match(panel, /confirmCandidateSpend:\s*true/);
 assert.match(panel, /Render Nano candidate/);
+assert.match(panel, /Replace with Nano candidate/);
+assert.match(panel, /historical_ernie_candidate/);
 assert.match(panel, /Resume candidate delivery/);
 assert.match(panel, /Candidate authorization interrupted/);
 assert.match(panel, /row\.candidate\.error/);

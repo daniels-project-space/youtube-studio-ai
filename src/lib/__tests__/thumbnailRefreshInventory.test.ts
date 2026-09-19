@@ -35,7 +35,7 @@ assert.deepEqual(
   {
     status: "current_golden_candidate",
     action: "no_refresh_action",
-    reason: "Current Golden generator provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
+    reason: "Current Golden Nano Banana provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
   },
   "only an exact owner/run/key-bound current marker is recognised as a current candidate",
 );
@@ -230,8 +230,28 @@ assert.equal(
     r2Key,
     meta: { thumbnailCurrentCandidateEvidence: ernieEvidence },
   }).status,
-  "current_golden_candidate",
-  "a fully native ERNIE thumbnail may enter the same replacement gate only with exact receipt evidence",
+  "historical_ernie_candidate",
+  "a fully native ERNIE thumbnail remains auditable but cannot satisfy the current Nano Banana replacement policy",
+);
+assert.equal(
+  selectLatestCurrentGoldenThumbnail({
+    ownerId,
+    channelId,
+    candidates: [{
+      status: "ok",
+      finishedAt: 999,
+      thumbnail: {
+        ownerId,
+        channelId,
+        runId,
+        kind: "thumbnail",
+        r2Key,
+        meta: { thumbnailCurrentCandidateEvidence: ernieEvidence },
+      },
+    }],
+  }),
+  null,
+  "an imported ERNIE candidate must never replace the Library image under the current Nano Banana policy",
 );
 assert.throws(
   () => createErnieNovitaThumbnailCurrentCandidateEvidence({

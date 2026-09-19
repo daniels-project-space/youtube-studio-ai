@@ -769,6 +769,9 @@ export default defineSchema({
     // outbox so a lost Trigger acknowledgement cannot purchase twice.
     thumbnailRefreshSourceRunId: v.optional(v.id("runs")),
     thumbnailRefreshReplayFingerprint: v.optional(v.string()),
+    // Undefined identifies a pre-profile, immutable historical candidate.
+    // New Nano successors bind this value into their replay fingerprint.
+    thumbnailRefreshGenerationProfile: v.optional(v.literal("nano-banana-current/v1")),
     thumbnailRefreshDispatchKey: v.optional(v.string()),
     thumbnailRefreshMaximumCostUsd: v.optional(v.number()),
     thumbnailRefreshApproval: v.optional(v.any()),

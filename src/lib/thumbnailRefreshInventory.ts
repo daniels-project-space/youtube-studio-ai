@@ -89,6 +89,7 @@ export type ErnieNovitaThumbnailCurrentCandidateEvidence = {
 
 export type ThumbnailRefreshEvidenceStatus =
   | "current_golden_candidate"
+  | "historical_ernie_candidate"
   | "legacy_unverified"
   | "evidence_invalid"
   | "missing_thumbnail";
@@ -367,14 +368,19 @@ export function assessThumbnailRefreshEvidence(
       reason: "The current-candidate marker does not match this asset's owner, run, channel, or R2 key.",
     };
   }
+  if (evidence.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION) {
+    return {
+      status: "historical_ernie_candidate",
+      action: "owner_review_required",
+      reason: "A reviewed ERNIE-Novita import is retained as historical evidence; it does not satisfy the active Nano Banana thumbnail policy.",
+    };
+  }
   return {
     status: "current_golden_candidate",
     action: "no_refresh_action",
     reason: evidence.version === LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
       ? "Current Lo-Fi 15-second-frame Nano Banana provenance is recorded and eligible for automatic presentation and bound YouTube sync."
-      : evidence.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
-        ? "Current ERNIE-Novita native-image and native-typography provenance is recorded and eligible for automatic presentation and bound YouTube sync."
-        : "Current Golden generator provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
+      : "Current Golden Nano Banana provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
   };
 }
 

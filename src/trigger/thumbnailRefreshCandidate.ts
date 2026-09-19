@@ -15,6 +15,10 @@ import {
   thumbnailRefreshTriggerRequest,
   type ThumbnailRefreshCandidateDispatch,
 } from "@/lib/thumbnailRefreshCandidate";
+import {
+  thumbnailRefreshCandidateFingerprint,
+  type ThumbnailRefreshGenerationProfile,
+} from "@/lib/thumbnailRefreshGeneration";
 import type { ThumbnailRefreshReplayMaterial } from "@/lib/thumbnailRefreshReplay";
 import {
   studioActionApprovalFingerprint,
@@ -54,6 +58,7 @@ type CandidateExecution = Readonly<{
     costTotal: number;
     thumbnailRefreshSourceRunId?: Id<"runs">;
     thumbnailRefreshReplayFingerprint?: string;
+    thumbnailRefreshGenerationProfile?: ThumbnailRefreshGenerationProfile;
   };
   source: { _id: Id<"runs">; youtubeVideoId?: string };
   channelSlug: string;
@@ -121,7 +126,10 @@ export async function executeThumbnailRefreshCandidate(
     String(execution.candidate._id) !== payload.candidateRunId ||
     String(execution.candidate.channelId) !== payload.channelId ||
     String(execution.source._id) !== payload.sourceRunId ||
-    execution.material.replayFingerprint !== payload.replayFingerprint
+    thumbnailRefreshCandidateFingerprint({
+      replayFingerprint: execution.material.replayFingerprint,
+      generationProfile: execution.candidate.thumbnailRefreshGenerationProfile,
+    }) !== payload.replayFingerprint
   ) throw new Error("thumbnail refresh replay material does not match its candidate shell");
 
   registerAllBlocks();

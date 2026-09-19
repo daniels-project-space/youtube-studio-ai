@@ -18,6 +18,11 @@ import {
   thumbnailErnieBatchImportApprovalSubject,
   thumbnailRefreshDispatchKey,
 } from "../src/lib/thumbnailRefreshCandidate";
+import {
+  NANO_BANANA_CURRENT_REFRESH_PROFILE,
+  thumbnailRefreshCandidateFingerprint,
+  type ThumbnailRefreshGenerationProfile,
+} from "../src/lib/thumbnailRefreshGeneration";
 import type { StudioActionApprovalReceipt } from "../src/lib/studioActionApprovalContract";
 import { automaticThumbnailPolicyClaimIsValid } from "../src/lib/studioActionApprovalContract";
 import {
@@ -321,7 +326,14 @@ export const listInventory = query({
       // then keep it out of the finished-video inventory itself.
       if (run.thumbnailRefreshSourceRunId) {
         const sourceId = String(run.thumbnailRefreshSourceRunId);
-        if (!candidates.has(sourceId)) candidates.set(sourceId, run as unknown as Record<string, unknown>);
+        const prior = candidates.get(sourceId);
+        const candidateTime = run.finishedAt ?? run.startedAt ?? run._creationTime;
+        const priorTime = prior
+          ? Number(prior.finishedAt ?? prior.startedAt ?? prior._creationTime ?? 0)
+          : -1;
+        if (!prior || candidateTime > priorTime) {
+          candidates.set(sourceId, run as unknown as Record<string, unknown>);
+        }
         continue;
       }
 
@@ -402,7 +414,8 @@ export const listInventory = query({
             meta: candidateThumbnail.meta,
           } satisfies ThumbnailRefreshAsset)
         : null;
-      const presentedAssessment = candidateAssessment?.status === "current_golden_candidate"
+      const presentedAssessment = candidateAssessment?.status === "current_golden_candidate" ||
+        candidateAssessment?.status === "historical_ernie_candidate"
         ? candidateAssessment
         : assessment;
       rows.push({
@@ -444,6 +457,8 @@ export const listInventory = query({
           candidateError: candidate.error,
           candidateCostTotal: candidate.costTotal,
           candidateThumbnailKey: candidateThumbnail?.r2Key ?? null,
+          candidateEvidenceStatus: candidateAssessment?.status,
+          candidateEvidenceReason: candidateAssessment?.reason,
         } : {}),
         ...(replacement ? {
           replacementId: String(replacement._id),
@@ -487,7 +502,41 @@ export const createCandidateShell = mutation({
       throw new Error("thumbnail refresh channel is unavailable");
     }
     assertThumbnailRefreshKeepSource(source, sourceChannel, refreshMaterial.title);
-    const replayFingerprint = refreshMaterial.material.replayFingerprint;
+    const baseReplayFingerprint = refreshMaterial.material.replayFingerprint;
+    // ERNIE batch imports remain readable historical evidence, but cannot
+    // satisfy the current Nano Banana policy. Allocate a separately signed
+    // Nano candidate instead of overwriting or silently reusing the import.
+    const historicalCandidate = await ctx.db
+      .query("runs")
+      .withIndex("by_owner_thumbnail_refresh_source", (q) => q
+        .eq("ownerId", args.ownerId)
+        .eq("thumbnailRefreshSourceRunId", source._id)
+        .eq("thumbnailRefreshReplayFingerprint", baseReplayFingerprint))
+      .unique();
+    let generationProfile: ThumbnailRefreshGenerationProfile | undefined;
+    if (historicalCandidate?.status === "ok") {
+      const historicalThumbnail = await ctx.db
+        .query("assets")
+        .withIndex("by_run_kind", (q) => q.eq("runId", historicalCandidate._id).eq("kind", "thumbnail"))
+        .first();
+      const historicalAssessment = historicalThumbnail
+        ? assessThumbnailRefreshEvidence({
+            ownerId: historicalThumbnail.ownerId,
+            channelId: String(historicalThumbnail.channelId),
+            runId: historicalThumbnail.runId ? String(historicalThumbnail.runId) : undefined,
+            kind: historicalThumbnail.kind,
+            r2Key: historicalThumbnail.r2Key,
+            meta: historicalThumbnail.meta,
+          } satisfies ThumbnailRefreshAsset)
+        : null;
+      if (historicalAssessment?.status === "historical_ernie_candidate") {
+        generationProfile = NANO_BANANA_CURRENT_REFRESH_PROFILE;
+      }
+    }
+    const replayFingerprint = thumbnailRefreshCandidateFingerprint({
+      replayFingerprint: baseReplayFingerprint,
+      generationProfile,
+    });
     const dispatchKey = thumbnailRefreshDispatchKey({
       ownerId: args.ownerId,
       sourceRunId: String(source._id),
@@ -528,6 +577,7 @@ export const createCandidateShell = mutation({
       leaseExpiresAt: args.now + RUN_QUEUE_LEASE_MS,
       thumbnailRefreshSourceRunId: source._id,
       thumbnailRefreshReplayFingerprint: replayFingerprint,
+      ...(generationProfile ? { thumbnailRefreshGenerationProfile: generationProfile } : {}),
       thumbnailRefreshDispatchKey: dispatchKey,
       thumbnailRefreshDispatchState: "awaiting_approval",
       thumbnailRefreshDispatchAttempts: 0,
@@ -629,7 +679,7 @@ export const importErnieBatchCandidate = mutation({
       ? proof.providerResponseSha256
       : "";
     if (
-      assessment.status !== "current_golden_candidate" ||
+      assessment.status !== "historical_ernie_candidate" ||
       proof?.providerRoute !== "ernie-image-novita-4090" ||
       !/^[a-f0-9]{64}$/.test(artifactSha256) ||
       !/^[a-f0-9]{64}$/.test(providerRequestSha256) ||
@@ -1019,7 +1069,10 @@ export const getCandidateExecution = query({
     const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, source, { channel });
     if (
       !refreshMaterial.material ||
-      refreshMaterial.material.replayFingerprint !== candidate.thumbnailRefreshReplayFingerprint
+      thumbnailRefreshCandidateFingerprint({
+        replayFingerprint: refreshMaterial.material.replayFingerprint,
+        generationProfile: candidate.thumbnailRefreshGenerationProfile,
+      }) !== candidate.thumbnailRefreshReplayFingerprint
     ) {
       throw new Error("thumbnail refresh source or snapshotted successor changed from the candidate claim");
     }

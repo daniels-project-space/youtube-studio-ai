@@ -18,6 +18,7 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   thumbnailKey?: string | null;
   thumbnailEvidenceStatus:
     | "current_golden_candidate"
+    | "historical_ernie_candidate"
     | "legacy_unverified"
     | "evidence_invalid"
     | "missing_thumbnail";
@@ -44,6 +45,8 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   candidateError?: string;
   candidateCostTotal?: number;
   candidateThumbnailKey?: string | null;
+  candidateEvidenceStatus?: ThumbnailRefreshInventoryItem["thumbnailEvidenceStatus"];
+  candidateEvidenceReason?: string;
   replacementId?: string;
   replacementStatus?: "awaiting_approval" | "pending" | "queued" | "applied" | "blocked";
   replacementError?: string;
