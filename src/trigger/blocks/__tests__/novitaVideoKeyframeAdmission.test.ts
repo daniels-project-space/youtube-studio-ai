@@ -2,24 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { registerAllBlocks } from "@/engine/blocks";
-import { generationProfile } from "@/engine/generationProfiles";
 import { getManifest } from "@/engine/registry";
-import {
-  toNovitaPhaseProfile,
-  type NovitaPhaseProfile,
-  type NovitaRenderResult,
-} from "@/lib/novitaRenderFarm";
-import {
-  assertAcceptedKeyframeSelection,
-  assertNovitaRenderVideoOutputProofs,
-} from "@/trigger/blocks/novitaRenderBlocks";
+import { assertAcceptedKeyframeSelection } from "@/trigger/blocks/novitaRenderBlocks";
 
 const generation = {
   contractVersion: "1.0.0" as const,
   profileId: "production" as const,
-  model: "Lightricks/LTX-2.5",
-  revision: "ce298b6b078f52562e928b55a62d6f34cbe58c2b",
-  checkpoint: "ltx-2.5-distilled-fp8.safetensors",
+  model: "Tongyi-MAI/Z-Image-Turbo",
+  revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+  checkpoint: "Z-Image-Turbo",
   precision: "bf16" as const,
   width: 1280,
   height: 704,
@@ -86,7 +77,7 @@ assert.throws(
       },
     }),
   /keyframe QA selection mismatch for shot-a/,
-  "a selected still from a different candidate cannot authorize LTX",
+  "a selected still from a different candidate cannot authorize H3",
 );
 
 assert.throws(
@@ -100,56 +91,7 @@ assert.throws(
       },
     }),
   /does not meet its accepted QA threshold/,
-  "a report that claims pass below its own threshold cannot authorize LTX",
-);
-
-const native720VideoProfile: NovitaPhaseProfile = {
-  ...toNovitaPhaseProfile(generationProfile("production"), "video"),
-  width: 2560,
-  height: 1408,
-  stageOneWidth: 1280,
-  stageOneHeight: 704,
-};
-const nativeInitialSha256 = "e".repeat(64);
-const nativeEndSha256 = "f".repeat(64);
-const native720Result: Pick<NovitaRenderResult, "videoOutputProofs" | "nativeInputGeometrySources"> = {
-  videoOutputProofs: {
-    "shot-a": {
-      outputWidth: 2560,
-      outputHeight: 1408,
-      hasAudio: true,
-      stageOneWidth: 1280,
-      stageOneHeight: 704,
-      spatialUpscaleFactor: 2 as const,
-      pipeline: "distilled" as const,
-      quantization: "fp8-cast" as const,
-      offload: "cpu" as const,
-      inputGeometry: {
-        initial: { sha256: nativeInitialSha256, width: 1280, height: 704 },
-        end: { sha256: nativeEndSha256, width: 1280, height: 704 },
-      },
-    },
-  },
-  nativeInputGeometrySources: {
-    "shot-a": { initialSha256: nativeInitialSha256, endSha256: nativeEndSha256 },
-  },
-};
-assert.doesNotThrow(
-  () => assertNovitaRenderVideoOutputProofs({
-    profile: native720VideoProfile,
-    shotIds: ["shot-a"],
-    result: native720Result,
-  }),
-  "novita_render_video must retain controller-sealed native input hashes through its final output-proof check",
-);
-assert.throws(
-  () => assertNovitaRenderVideoOutputProofs({
-    profile: native720VideoProfile,
-    shotIds: ["shot-a"],
-    result: { videoOutputProofs: native720Result.videoOutputProofs },
-  }),
-  /missing sealed input geometry sources/,
-  "novita_render_video must fail closed if a native render result loses controller-sealed input bindings",
+  "a report that claims pass below its own threshold cannot authorize H3",
 );
 
 registerAllBlocks();

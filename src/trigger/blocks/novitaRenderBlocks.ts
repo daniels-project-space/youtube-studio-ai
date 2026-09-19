@@ -82,12 +82,10 @@ import {
   assertMiniMaxH3OpeningMotionQa,
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
-import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
   renderImages,
   toNovitaPhaseProfile,
   type NovitaRenderCfg,
-  type NovitaPhaseProfile,
   type NovitaRenderResult,
   type Shot,
 } from "@/lib/novitaRenderFarm";
@@ -448,7 +446,7 @@ function sameStrings(a: readonly string[], b: readonly string[]): boolean {
 
 
 /**
- * Reuse the next shot's independently selected keyframe as an LTX endpoint
+ * Reuse the next shot's independently selected keyframe as an H3 end anchor
  * only for adjacent chunks of the exact same narrated beat and visual state.
  * This is deliberately stricter than a same-location match: a cut to a new
  * beat must not be accidentally transformed into a morphing transition.
@@ -919,7 +917,7 @@ function requireStoryInputs(store: Readonly<Record<string, unknown>>): {
 
 /**
  * A structurally valid still manifest is not itself permission to start a
- * paid LTX worker. Bind it to the required non-Google keyframe QA receipt so
+ * paid H3 worker. Bind it to the required non-Google keyframe QA receipt so
  * an interrupted/manual invocation cannot skip the accepted-still gate.
  */
 export function assertAcceptedKeyframeSelection(args: {
@@ -993,7 +991,7 @@ function profileForShots(shots: ShotPlan[], requested: unknown): GenerationProfi
  */
 function cinematicProviderEnvelope(
   ctx: StageContext,
-  blockId: "visual_matter_references" | "novita_render_images" | "novita_render_video",
+  blockId: "visual_matter_references" | "novita_render_images",
   profile: GenerationProfile,
   shots: readonly Shot[],
 ): NovitaCostEnvelope {
@@ -1004,22 +1002,9 @@ function cinematicProviderEnvelope(
     );
   }
 
-  if (blockId === "novita_render_images" || blockId === "visual_matter_references") {
-    return novitaCostEnvelope({
-      label: blockId,
-      imageJobs: shots.reduce((total, shot) => total + (shot.candidateCount ?? profile.image.candidates), 0),
-      maxCostUsd: stageBudgetUsd,
-    });
-  }
-
-  if (profile.video.candidates !== 1) {
-    throw new Error(
-      `${blockId} cannot attest ${profile.video.candidates} video candidates per shot; explicit multi-candidate manifests are required`,
-    );
-  }
   return novitaCostEnvelope({
     label: blockId,
-    videoJobs: shots.length,
+    imageJobs: shots.reduce((total, shot) => total + (shot.candidateCount ?? profile.image.candidates), 0),
     maxCostUsd: stageBudgetUsd,
   });
 }
@@ -1669,24 +1654,6 @@ export const qaAssets: Block = {
   },
 };
 
-/**
- * The direct controller supplies native source hashes only after extracting
- * them from sealed manifests. Keep those bindings attached to the final
- * proof-set check so a valid native-720p completion is not self-rejected.
- */
-export function assertNovitaRenderVideoOutputProofs(args: {
-  profile: NovitaPhaseProfile;
-  shotIds: readonly string[];
-  result: Pick<NovitaRenderResult, "videoOutputProofs" | "nativeInputGeometrySources">;
-}) {
-  return assertLtxVideoOutputProofSet({
-    profile: args.profile,
-    shotIds: args.shotIds,
-    proofs: args.result.videoOutputProofs,
-    nativeInputGeometrySources: args.result.nativeInputGeometrySources,
-  });
-}
-
 export const novitaRenderVideo: Block = {
   id: "novita_render_video",
   consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
@@ -1713,7 +1680,7 @@ export const novitaRenderVideo: Block = {
     }
     // This pre-spend check proves both providers would use the same immutable
     // R2 model pack; a missing H3 pack must never leave accepted keyframes
-    // stranded behind a paid legacy LTX fallback.
+    // stranded while a discontinued renderer fallback is reconsidered.
     await assertMiniMaxH3R2ModelManifest();
     const stageBudgetUsd = requireH3StageBudget(ctx, "novita_render_video");
     const tmp = await makeRunTempDir(`${ctx.runId}-standard-h3`);
