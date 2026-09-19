@@ -124,6 +124,8 @@ export type QwenTtsRuntimeReceipt = QwenTtsRuntimeReceiptEvidence & (
 export interface QwenTtsReceipt {
   schema: typeof QWEN3_TTS_WORKER_CONTRACT;
   requestKey: string;
+  /** Immutable OCI image identity reported by the worker itself. */
+  workerImageDigest: string;
   model: typeof QWEN3_TTS_MODEL;
   revision: typeof QWEN3_TTS_MODEL_REVISION;
   qwenTtsPackageVersion: typeof QWEN3_TTS_PACKAGE_VERSION;
@@ -210,6 +212,7 @@ export function isPinnedQwenTtsReceipt(value: unknown): value is QwenTtsReceipt 
   }
   if (
     receipt.schema !== QWEN3_TTS_WORKER_CONTRACT ||
+    !isPinnedWorkerImageDigest(receipt.workerImageDigest) ||
     receipt.model !== QWEN3_TTS_MODEL ||
     receipt.revision !== QWEN3_TTS_MODEL_REVISION ||
     receipt.qwenTtsPackageVersion !== QWEN3_TTS_PACKAGE_VERSION ||
@@ -473,6 +476,19 @@ function workerToken(): string {
   return token;
 }
 
+/** A mutable tag cannot identify the worker code that created an audio take. */
+function isPinnedWorkerImageDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/.test(value);
+}
+
+function workerImageDigest(): string {
+  const digest = process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST?.trim() ?? "";
+  if (!isPinnedWorkerImageDigest(digest)) {
+    throw new QwenTtsError("QWEN3_TTS_WORKER_IMAGE_DIGEST must be a full immutable OCI @sha256 reference");
+  }
+  return digest;
+}
+
 /** Consumed by the private OpenRelay gateway and stripped before proxying. */
 function openRelayGatewayToken(): string {
   const token = process.env.OPENRELAY_API_KEY?.trim() ?? "";
@@ -486,6 +502,7 @@ export function qwenTtsReadiness(): QwenTtsReadiness {
   const blockers: string[] = [];
   let urlConfigured = true;
   let tokenConfigured = true;
+  let imageConfigured = true;
   let runtimeProfile: QwenTtsRuntimeProfile | undefined;
   let gatewayConfigured = true;
   try { workerUrl(); } catch (error) {
@@ -494,6 +511,10 @@ export function qwenTtsReadiness(): QwenTtsReadiness {
   }
   try { workerToken(); } catch (error) {
     tokenConfigured = false;
+    blockers.push(error instanceof Error ? error.message : String(error));
+  }
+  try { workerImageDigest(); } catch (error) {
+    imageConfigured = false;
     blockers.push(error instanceof Error ? error.message : String(error));
   }
   try { runtimeProfile = qwenTtsRuntimeProfile(); } catch (error) {
@@ -512,7 +533,7 @@ export function qwenTtsReadiness(): QwenTtsReadiness {
   if (!/^[a-f0-9]{64}$/.test(qualityReceipt)) {
     blockers.push("QWEN3_TTS_QUALITY_RECEIPT_SHA256 is missing or invalid");
   }
-  const configured = urlConfigured && tokenConfigured && Boolean(runtimeProfile) && gatewayConfigured;
+  const configured = urlConfigured && tokenConfigured && imageConfigured && Boolean(runtimeProfile) && gatewayConfigured;
   return { configured, qualified: configured && blockers.length === 0, blockers };
 }
 
@@ -640,6 +661,8 @@ function validateReceipt(args: {
   audio: Uint8Array;
   maxCostUsd: number;
   idleShutdownSeconds: number;
+  /** Present for live submission; omitted for offline retained-audio verification. */
+  expectedWorkerImageDigest?: string;
 }): QwenTtsReceipt {
   if (!args.value || typeof args.value !== "object" || Array.isArray(args.value)) {
     throw new Error("Qwen3 TTS worker receipt is missing");
@@ -647,6 +670,11 @@ function validateReceipt(args: {
   const value = args.value as Record<string, unknown>;
   exactString(value.schema, QWEN3_TTS_WORKER_CONTRACT, "schema");
   exactString(value.requestKey, args.requestKey, "request key");
+  if (args.expectedWorkerImageDigest) {
+    exactString(value.workerImageDigest, args.expectedWorkerImageDigest, "worker image digest");
+  } else if (!isPinnedWorkerImageDigest(value.workerImageDigest)) {
+    throw new Error("Qwen3 TTS receipt worker image digest is not immutable");
+  }
   exactString(value.model, QWEN3_TTS_MODEL, "model");
   exactString(value.revision, QWEN3_TTS_MODEL_REVISION, "revision");
   exactString(value.qwenTtsPackageVersion, QWEN3_TTS_PACKAGE_VERSION, "package version");
@@ -783,6 +811,9 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   onReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
   const { payload, requestKey } = prepareQwenTtsRequest(args);
+  // Resolve the deployment allow-list before submitting a paid request.  A
+  // missing or mutable image identity must not spend first and fail later.
+  const expectedWorkerImageDigest = workerImageDigest();
   const runtimeProfile = qwenTtsRuntimeProfile();
   const managedOpenRelay = runtimeProfile.provider === "openrelay" && Boolean(process.env.OPENRELAY_QWEN_VM_ID?.trim());
   if (managedOpenRelay) await ensureOpenRelayQwenReady();
@@ -858,6 +889,7 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
       audio,
       maxCostUsd: payload.maxCostUsd,
       idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
+      expectedWorkerImageDigest,
     });
     args.onReceipt?.(receipt);
     return audio;

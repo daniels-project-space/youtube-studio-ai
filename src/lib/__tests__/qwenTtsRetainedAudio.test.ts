@@ -28,6 +28,7 @@ let posts = 0, receipt: QwenTtsReceipt | undefined;
 const transportHashes: string[] = [];
 process.env.QWEN3_TTS_WORKER_URL = "https://guarded.invalid/synthesize";
 process.env.QWEN3_TTS_WORKER_TOKEN = "local-synthetic-token-no-real-credential-0000";
+process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
 globalThis.fetch = async (_url, init) => {
   const index = posts++; const body = String(init?.body), request = JSON.parse(body);
   const actual = createHash("sha256").update(body).digest("hex"); transportHashes.push(actual);

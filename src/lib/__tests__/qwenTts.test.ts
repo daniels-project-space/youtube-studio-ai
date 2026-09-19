@@ -61,9 +61,11 @@ function actualPythonWorkerResponse(request: Record<string, unknown>, audio: Uin
 async function main(): Promise<void> {
   delete process.env.QWEN3_TTS_WORKER_URL;
   delete process.env.QWEN3_TTS_WORKER_TOKEN;
+  delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST;
   assert.equal(qwenTtsReadiness().configured, false);
   process.env.QWEN3_TTS_WORKER_URL = "https://qwen-worker.example/v1/synthesize";
   process.env.QWEN3_TTS_WORKER_TOKEN = "qwen-test-token-that-is-longer-than-thirty-two-characters";
+  process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
   process.env.OPENRELAY_API_KEY = "openrelay-test-token-that-is-longer-than-thirty-two-characters";
   process.env.QWEN3_TTS_QUALITY_QUALIFIED = "1";
   process.env.QWEN3_TTS_QUALITY_RECEIPT_SHA256 = "a".repeat(64);
@@ -145,7 +147,19 @@ async function main(): Promise<void> {
   assert.equal(acceptedReceipt?.runtime.requestGpuSeconds, 10);
   assert.equal(acceptedReceipt?.runtime.gpuSeconds, 310);
   assert.equal(acceptedReceipt?.runtime.costUsd, 0.0155);
+  assert.equal(acceptedReceipt?.workerImageDigest, process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST);
   assert.equal(isPinnedQwenTtsReceipt(acceptedReceipt), true);
+
+  globalThis.fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    const response = actualPythonWorkerResponse(request, audio) as { receipt: { workerImageDigest: string } };
+    response.receipt.workerImageDigest = "registry.example/ysa/qwen3-tts@sha256:" + "c".repeat(64);
+    return Response.json(response);
+  };
+  await assert.rejects(
+    () => synthQwenNarration({ text: "Reject a worker image that changed after qualification.", speaker: "Aiden" }),
+    /worker image digest is not the pinned value/,
+  );
 
   globalThis.fetch = async (_input, init) => {
     requests += 1;
@@ -154,6 +168,7 @@ async function main(): Promise<void> {
       receipt: {
         schema: QWEN3_TTS_WORKER_CONTRACT,
         requestKey: request.requestKey,
+        workerImageDigest: process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST,
         model: QWEN3_TTS_MODEL,
         revision: "unpinned",
       },

@@ -26,7 +26,7 @@ Official references:
 
 `src/lib/qwenTts.ts` posts an idempotency-keyed `qwen3-tts-worker/v2` request to `QWEN3_TTS_WORKER_URL`. A response is accepted only when it returns:
 
-- the exact model, revision, package versions, BF16 precision, and FlashAttention 2 implementation;
+- the exact immutable worker OCI image digest, model revision, package versions, BF16 precision, and FlashAttention 2 implementation;
 - matching text, instruction, speaker, language, seed, request, and audio SHA-256 digests;
 - 24 kHz MP3 bytes inside a bounded response;
 - a Novita RTX 4090 serverless/persistent-cache/scale-to-zero runtime attestation;
@@ -51,16 +51,17 @@ An existing ElevenLabs receipt cannot authorize Qwen, and mixed Qwen narration p
 
 ## Production admission
 
-Configuration alone is insufficient. Production requires all four values in the Trigger production runtime:
+Configuration alone is insufficient. Production requires all five values in the Trigger production runtime:
 
 1. `QWEN3_TTS_WORKER_URL`
 2. `QWEN3_TTS_WORKER_TOKEN`
-3. `QWEN3_TTS_QUALITY_QUALIFIED=1`
-4. `QWEN3_TTS_QUALITY_RECEIPT_SHA256=<64 lowercase hex>`
+3. `QWEN3_TTS_WORKER_IMAGE_DIGEST=<registry/repository@sha256:...>`
+4. `QWEN3_TTS_QUALITY_QUALIFIED=1`
+5. `QWEN3_TTS_QUALITY_RECEIPT_SHA256=<64 lowercase hex>`
 
 The quality receipt must come from a reviewed benchmark of the exact immutable container/model revision. The deployment helper refuses mutable image tags and configures `minNum=0`, `maxNum=1`, `freeTimeout=300`, and `maxConcurrent=1`; verify those values in the returned Novita endpoint before qualification. That benchmark is `scripts/qwen-tts-qualify.ts`: its first pass runs the matrix below against a live worker in an empty output directory and measures every take with `scripts/qwen_take_measure.py` (ASR word-error rate, integrated loudness, true peak, duration and pace). It refuses to emit a receipt if any axis fails or is UNMEASURED, and requires an explicit human accept/reject verdict bound to each reviewed MP3's SHA-256. The later `--verdicts` pass validates and remeasures those retained recordings offline; it never regenerates them. Missing or ambiguous evidence cannot trigger automatic rebuy. See [reuse workflow and exact verdict format](QWEN_QUALIFICATION_REUSE_REVIEW_2026-09.md).
 
-The benchmark digest covers measurements and verdicts: editing either changes that digest. The current runtime readiness check validates only the enabled flag and digest format, not the report's contents or authenticated provenance. Immutable container identity is not included in the current audio receipt. Those admission limitations remain open; do not treat a well-formed hash as verified qualification. Instruction following is judged as the pace separation between a calm and an energetic take. At minimum, retain:
+The benchmark digest covers measurements and verdicts: editing either changes that digest. The worker's immutable container identity is emitted in every audio receipt and must exactly match `QWEN3_TTS_WORKER_IMAGE_DIGEST`; any image change fails closed until a newly reviewed benchmark is installed. The runtime readiness check still validates only the enabled flag and digest format, not the report's contents or authenticated provenance. Instruction following is judged as the pace separation between a calm and an energetic take. At minimum, retain:
 
 - one English documentary passage for Aiden and Ryan;
 - one calm/slow passage and one energetic passage to verify instruction following;

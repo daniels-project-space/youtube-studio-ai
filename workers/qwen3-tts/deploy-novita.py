@@ -91,6 +91,7 @@ def endpoint_body() -> dict[str, Any]:
             "clusterID": cluster_id,
             "envs": [
                 {"key": "QWEN3_TTS_WORKER_TOKEN", "value": token},
+                {"key": "QWEN3_TTS_WORKER_IMAGE_DIGEST", "value": image},
                 {"key": "QWEN3_TTS_VOLUME", "value": "/network/qwen3-tts"},
                 {"key": "QWEN3_TTS_IDLE_SHUTDOWN_SECONDS", "value": str(IDLE_SECONDS)},
                 {"key": "QWEN3_TTS_GPU_RATE_USD_PER_SECOND", "value": f"{hourly_rate / 3600:.12f}"},

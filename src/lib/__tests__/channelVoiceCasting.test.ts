@@ -60,6 +60,7 @@ const audioSha256 = "b".repeat(64);
 const providerRenderReceipt = {
   schema: "qwen3-tts-worker/v2",
   requestKey: "a".repeat(64),
+  workerImageDigest: "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64),
   model: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
   revision: "0c0e3051f131929182e2c023b9537f8b1c68adfe",
   qwenTtsPackageVersion: "0.1.1",

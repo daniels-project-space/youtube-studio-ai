@@ -9,6 +9,7 @@ export const voiceCastingProviderValidator = v.union(
 export const qwenTtsReceiptValidator = v.object({
   schema: v.literal("qwen3-tts-worker/v2"),
   requestKey: v.string(),
+  workerImageDigest: v.string(),
   model: v.literal("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"),
   revision: v.literal("0c0e3051f131929182e2c023b9537f8b1c68adfe"),
   qwenTtsPackageVersion: v.literal("0.1.1"),

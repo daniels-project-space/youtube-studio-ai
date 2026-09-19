@@ -48,6 +48,15 @@ def runtime_profile() -> tuple[str, str, str]:
         raise ContractError("Qwen3 TTS runtime profile is not an admitted exact provider/GPU configuration")
     return provider, gpu, capacity_mode
 
+
+def worker_image_digest() -> str:
+    """Return deployment identity from the worker environment, never the request."""
+    value = os.environ.get("QWEN3_TTS_WORKER_IMAGE_DIGEST", "").strip()
+    import re
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}", value):
+        raise ContractError("QWEN3_TTS_WORKER_IMAGE_DIGEST must be a full immutable OCI @sha256 reference")
+    return value
+
 SPEAKERS = {
     "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden",
     "Ono_Anna", "Sohee",
@@ -211,10 +220,12 @@ def make_response(
         )
 
     provider, gpu, capacity_mode = runtime_profile()
+    image_digest = worker_image_digest()
     return {
         "receipt": {
             "schema": CONTRACT,
             "requestKey": request.request_key,
+            "workerImageDigest": image_digest,
             "model": MODEL,
             "revision": REVISION,
             "qwenTtsPackageVersion": QWEN_TTS_VERSION,

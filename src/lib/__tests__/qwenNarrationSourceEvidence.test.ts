@@ -19,6 +19,7 @@ const audio = Buffer.alloc(2_048, 23);
 audio.set([0x49, 0x44, 0x33]);
 process.env.QWEN3_TTS_WORKER_URL = "https://guarded.invalid/synthesize";
 process.env.QWEN3_TTS_WORKER_TOKEN = "local-synthetic-token-no-real-credential-0000";
+process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
 
 function fixture(request: Record<string, unknown>): unknown {
   return JSON.parse(execFileSync(

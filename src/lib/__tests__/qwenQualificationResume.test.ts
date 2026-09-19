@@ -48,10 +48,11 @@ function cloneEvidence(from: string, name: string): string {
 
 async function run(out: string, options: { verdicts?: string; offline?: boolean; measurementFailure?: number; measurementShape?: string; matrixMutation?: (source: string) => string; qualityFailure?: string; failPost?: number; beforePost?: () => void; beforeMeasure?: (path: string) => void } = {}) {
   requests = []; offline = options.offline ?? false; failPost = options.failPost ?? -1;
-  if (offline) { delete process.env.QWEN3_TTS_WORKER_URL; delete process.env.QWEN3_TTS_WORKER_TOKEN; }
+  if (offline) { delete process.env.QWEN3_TTS_WORKER_URL; delete process.env.QWEN3_TTS_WORKER_TOKEN; delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST; }
   else {
     process.env.QWEN3_TTS_WORKER_URL = "https://guarded.invalid/synthesize";
     process.env.QWEN3_TTS_WORKER_TOKEN = "local-synthetic-token-no-real-credential-0000";
+    process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
   }
   let measurements = 0, synthCalls = 0, readinessCalls = 0;
   const lines: string[] = [], exits: number[] = [];
