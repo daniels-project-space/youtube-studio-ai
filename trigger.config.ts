@@ -175,6 +175,9 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
  *    by bootstrapSecrets (src/lib/vault.ts). Its partner VAULT_ACCESS_TOKEN was
  *    already forwarded; without VAULT_URL a relocated vault silently keeps
  *    resolving to the hardcoded default inside workers.
+ *  - MINIMAX_H3_OPENRELAY_* — narrowly scoped credentials and qualification
+ *    receipt for the persistent A100 H3 route. These stay inside Trigger so
+ *    neither the OpenRelay key nor worker token reaches the web app.
  */
 const FORWARDED_ENV = [
   "INTERNAL_QUERY_SECRET",
@@ -209,6 +212,12 @@ const FORWARDED_ENV = [
   "VAULT_URL",
   "STUDIO_AUTOPILOT",
   "STUDIO_INSIGHTS_AUTOMATION",
+  "OPENRELAY_API_KEY",
+  "MINIMAX_H3_OPENRELAY_VM_ID",
+  "MINIMAX_H3_OPENRELAY_WORKER_URL",
+  "MINIMAX_H3_OPENRELAY_WORKER_TOKEN",
+  "MINIMAX_H3_OPENRELAY_QUALIFIED",
+  "MINIMAX_H3_OPENRELAY_QUALIFICATION_RECEIPT_SHA256",
 ];
 
 const SECRET_FORWARDED_ENV = new Set([
@@ -225,6 +234,8 @@ const SECRET_FORWARDED_ENV = new Set([
   "FAL_KEY",
   "GROQ_API_KEY",
   "VAULT_ACCESS_TOKEN",
+  "OPENRELAY_API_KEY",
+  "MINIMAX_H3_OPENRELAY_WORKER_TOKEN",
 ]);
 
 /**
