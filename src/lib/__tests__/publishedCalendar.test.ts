@@ -13,6 +13,7 @@ const base = {
 assert.deepEqual(
   publishedCalendarItem({
     ...base,
+    runId: "run-a",
     privacyStatus: "private",
     publishAt: 2_000,
     completedAt: 1_000,
@@ -20,6 +21,7 @@ assert.deepEqual(
   {
     _id: "intent-a",
     channelId: "channel-a",
+    runId: "run-a",
     title: "A real upload",
     youtubeVideoId: "yt-a",
     thumbnailKey: "thumbs/a.jpg",

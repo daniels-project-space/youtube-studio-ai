@@ -43,6 +43,7 @@ export type ChannelRow = {
 
 export type PublishedVideo = {
   _id: string;
+  runId?: string;
   title: string;
   channelId: string;
   youtubeVideoId: string;
@@ -64,6 +65,7 @@ export type CalendarEvent = {
   timestamp?: number;
   timeZone: string;
   youtubeVideoId?: string;
+  runId?: string;
   thumbnailKey?: string | null;
   thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   status?: string;
@@ -252,6 +254,7 @@ export function buildCalendarModel({
       type: "published",
       title: video.title,
       channelId: video.channelId,
+      ...(video.runId ? { runId: video.runId } : {}),
       channel: channel?.name ?? "(unknown)",
       slug: channel?.slug,
       color: channelColors.get(video.channelId) ?? "var(--color-ok)",

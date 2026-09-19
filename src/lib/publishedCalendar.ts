@@ -3,6 +3,8 @@ export type CalendarPublicationKind = "scheduled" | "public" | "unlisted";
 export type PublishedCalendarItem = {
   _id: string;
   channelId: string;
+  /** The retained production record behind the upload, when available. */
+  runId?: string;
   title: string;
   youtubeVideoId: string;
   thumbnailKey: string | null;
@@ -13,6 +15,7 @@ export type PublishedCalendarItem = {
 export type PublishLedgerCalendarRow = {
   _id: string;
   channelId: string;
+  runId?: string;
   title: string;
   status: string;
   privacyStatus: "private" | "public" | "unlisted";
@@ -50,6 +53,7 @@ export function publishedCalendarItem(
   return {
     _id: row._id,
     channelId: row.channelId,
+    ...(row.runId?.trim() ? { runId: row.runId.trim() } : {}),
     title: row.title.trim() || "Untitled video",
     youtubeVideoId,
     thumbnailKey: row.thumbnailArtifactKey?.trim() || null,

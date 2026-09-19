@@ -84,6 +84,7 @@ const plan: PlanItem[] = [
 const publishedVideos: PublishedVideo[] = [
   {
     _id: "video-a",
+    runId: "run-video-a",
     title: "Already published",
     channelId: "channel-a",
     youtubeVideoId: "youtube-a",
@@ -149,6 +150,7 @@ assert.equal(
 const publishedEvent = all.flat.find((event) => event.key === "video:video-a");
 assert.equal(publishedEvent?.timestamp, Date.parse("2026-08-07T01:00:00.000Z"));
 assert.equal(publishedEvent?.timeZone, "Asia/Tokyo");
+assert.equal(publishedEvent?.runId, "run-video-a", "published calendar rows retain the internal run binding");
 
 const selected = buildCalendarModel({
   plan,

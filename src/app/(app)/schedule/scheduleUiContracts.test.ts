@@ -34,7 +34,7 @@ assert.match(board, /aspectRatio="16 \/ 9"/,
   "the operational week board must show packaging artwork at a legible video ratio");
 assert.match(board, /prioritizedPreviews < 3/,
   "the first scheduled artwork cards must load promptly without eager-loading the whole calendar");
-assert.match(board, /event\.type === "planned" \? event\.id : undefined/,
+assert.match(board, /event\.type === "planned"[\s\S]*channelHref\(event\.slug, "week-ahead", event\.id\)/,
   "planned calendar cards must carry the exact plan item into the channel workspace");
 assert.match(board, /event\.thumbnailSource === "rendered_video_frame" && !event\.thumbnailKey/,
   "Lo-Fi scheduled cards must show their final-frame state instead of requesting a generic planner image");
@@ -76,5 +76,13 @@ assert.match(publishedCalendar, /withIndex\("by_run_kind", \(q\) => q\.eq\("runI
   "published calendar rows should read only the source thumbnail asset");
 assert.match(publishedCalendar, /thumbnailKey: current\.key/,
   "calendar cards must expose the accepted candidate key rather than the upload-time legacy key");
+const publishedCalendarModel = readFileSync(`${process.cwd()}/src/lib/publishedCalendar.ts`, "utf8");
+assert.match(publishedCalendarModel, /runId\?: string/,
+  "published calendar rows retain their internal run binding");
+const calendarPanel = readFileSync(`${here}/CalendarPanel.tsx`, "utf8");
+assert.match(calendarPanel, /event\.type === "published" && event\.runId/,
+  "published calendar chips prefer the retained internal run");
+assert.match(calendarPanel, /href=\{`\/runs\/\$\{encodeURIComponent\(event\.runId\)\}`\}/,
+  "published calendar chips open the run detail record");
 
 console.log("schedule UI contracts passed");

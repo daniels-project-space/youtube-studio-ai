@@ -147,6 +147,18 @@ function CalendarChip({ event }: { event: CalendarEvent }) {
   );
   const chipStyle = { borderLeftColor: event.color, background: `${event.color}16` };
 
+  if (event.type === "published" && event.runId) {
+    return (
+      <Link
+        className={`${styles.calendarChip} ${styles.publishedChip}`}
+        style={chipStyle}
+        href={`/runs/${encodeURIComponent(event.runId)}`}
+        title={`${event.title} — open retained run evidence`}
+      >
+        {content}
+      </Link>
+    );
+  }
   if (event.type === "published" && event.youtubeVideoId) {
     return (
       <a

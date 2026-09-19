@@ -89,14 +89,15 @@ export function DayByDaySchedule({
  * operational board, rather than making an operator open the hidden queue just
  * to see what is actually scheduled. */
 function DayEventCard({ event, priority = false }: { event: CalendarEvent; priority?: boolean }) {
+  const href = event.type === "planned"
+    ? channelHref(event.slug, "week-ahead", event.id)
+    : event.runId
+      ? `/runs/${encodeURIComponent(event.runId)}`
+      : channelHref(event.slug);
   return (
     <Link
       className={styles.dayEvent}
-      href={channelHref(
-        event.slug,
-        event.type === "planned" ? "week-ahead" : undefined,
-        event.type === "planned" ? event.id : undefined,
-      )}
+      href={href}
       style={{ borderLeftColor: event.color }}
     >
       {event.thumbnailSource === "rendered_video_frame" && !event.thumbnailKey ? (
