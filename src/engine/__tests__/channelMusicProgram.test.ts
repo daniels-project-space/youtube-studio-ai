@@ -52,6 +52,8 @@ assert.match(
   "the creative foundation must hold the featured palette to a listenable three-instrument focus",
 );
 assert.match(history.generation.structuredCaption, /^### Global Metadata/mu);
+assert.match(history.generation.structuredCaption, /Key\/scale: [A-G](?:-flat)? (?:minor|major);/u);
+assert.match(history.generation.structuredCaption, /scenario: a paced narrated story/u);
 assert.match(history.generation.structuredCaption, /### Vocal Details/mu);
 assert.match(history.generation.structuredCaption, /### Arrangement/mu);
 assert.match(history.generation.structuredCaption, /Never sentimentalize the loss/u);

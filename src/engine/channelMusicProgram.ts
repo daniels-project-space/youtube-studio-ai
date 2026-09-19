@@ -301,6 +301,24 @@ function structuredCaption(input: {
   // memorable musical reason for the later section map without replacing the
   // channel-owned identity or adding an unbounded list of instruments.
   const tempo = Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2);
+  // Music3's Global Metadata explicitly calls for a key and scale. Keep that
+  // control stable for a channel sound rather than choosing it per episode:
+  // changing the tonal centre just because a title changes is one easy way to
+  // make a playlist feel like unrelated stock cues. This is prompt guidance,
+  // not a claim that the generator can guarantee symbolic harmony.
+  const tonalPalette = [
+    "D minor", "E minor", "A minor", "C minor", "G minor", "B minor",
+    "C major", "D major", "E-flat major", "F major", "G major", "A-flat major",
+  ] as const;
+  const tonalSource = `${input.genre}|${input.instrumentation.join("|")}|${input.moodArc}`;
+  const tonalIndex = Number.parseInt(sha256Hex(tonalSource).slice(0, 8), 16) % tonalPalette.length;
+  const tonalCenter = tonalPalette[tonalIndex]!;
+  const listeningScenario: Record<ChannelMusicRole, string> = {
+    primary_music: "sustained focused work or relaxed repeat listening",
+    narration_bed: "a paced narrated story where words remain the foreground",
+    meditation_bed: "quiet reflection, breathwork, or a gradual sleep wind-down",
+    short_form_bed: "a quick editorial insight with a single clear reveal",
+  };
   const featuredInstruments = input.instrumentation.slice(0, 3);
   const featuredPalette = featuredInstruments.length === 1
     ? featuredInstruments[0]!
@@ -317,8 +335,9 @@ function structuredCaption(input: {
     "",
     "### Global Metadata",
     `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
-      `The episode subject is “${input.topic}”. Emotional progression: ${input.moodArc}. ` +
-      `Production is dimensional, warm, dynamically alive, and spatially coherent—not a flat preset stack. ` +
+      `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
+      `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
+      `Production: dimensional and spatially coherent—not a flat preset stack. ` +
       `Additional composer direction: ${input.composerDirection}`,
     "",
     "### Vocal Details",
