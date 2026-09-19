@@ -101,6 +101,48 @@ qualification. This batch has not been activated in production.
 
 ## Still required before activation
 
+### First real opt-in revision
+
+`timeline_assemble@2.0.0-composer-mix` now declares and validates the optional
+`musicBrief` artifact. Its mix precedence is explicit assembly numeric settings,
+then an explicit assembly duck profile, then composer directives, then existing
+assembly defaults. Explicit zero is preserved. It delegates to the existing
+assembly paths without changing their source, enabling EDL, or processing
+narration effects. Default discovery and unversioned selection remain unchanged.
+
+`composerAwareAssembly.test.ts` exercises the real deterministic directive
+producer, registry selection, legacy assembly, EDL adapter, planner and backend,
+with storage and FFmpeg intercepted. This is contract evidence, not a rendered
+audio-quality qualification. No channel has been opted in.
+
+For this revision, all 832 direct readiness tests, the production build including
+TypeScript, and scoped ESLint passed. A separate 14-invocation compiled-runner
+probe confirmed absent settings stay absent and explicit presets remain
+authoritative. The code graph was refreshed. No deployment was performed.
+
+### Worker isolation audit
+
+Installed Trigger SDK 4.5.9 supports `tasks.trigger` options `version`, serialized
+as `lockToVersion`. Plain triggers do not automatically inherit their parent
+worker; `triggerAndWait` does inherit `taskContext.worker.version`. Local source
+inspection does not establish remote retention or unavailable-version behavior.
+
+The immutable invocation currently lacks worker deployment identity. Same-run
+serialized-episode retries, publish resumes, factual-review and music-audition
+continuations, automatic doctor resumes, and scheduler reattachments need a
+verified frozen binding and exact dispatch pin. Receiver admission must reject
+a mismatched worker before provider work. Preserve existing global idempotency
+keys; never stamp historical snapshots with the current worker retrospectively.
+
+The actual worker identity is `taskContext.worker.version`; optional
+`ctx.run.version` and `ctx.deployment.version` must agree when present. An
+environment variable is not proof of the executing deployment. Older deployed
+code also contains an unpinned retry path, so merely retaining that deployment
+does not yet establish legacy isolation. Convex and mutable external settings
+remain separate boundaries even when a worker is pinned.
+
+### Activation gates
+
 1. Preserve actual legacy implementations and affected transitive helpers at a
    known source/dependency revision. A changed function re-registered under an
    old version is not isolation, and these tests do not prove otherwise.
@@ -109,8 +151,8 @@ qualification. This batch has not been activated in production.
    implementations must refuse execution, never choose the newest available.
 3. Verify direct and weekly-prepared paths use the same accepted planning
    artifact and revision. A version field does not qualify a separate planner.
-4. Implement the shared ownership repairs in the module audit: preserve
-   composer mix directives, consume rather than reinvent accepted arrangement,
+4. Qualify the opt-in composer mix revision with real rendered evidence;
+   implement the remaining ownership repairs: consume accepted arrangement,
    and remove score generation from comic rendering for opted-in pipelines.
 5. Complete real YuE RTX 3090/instrumental/audio-quality qualification and the
    actual production provider integration. The current evaluation worker does

@@ -3,7 +3,8 @@
  * block exactly once into the engine registry. Both the Trigger task and the
  * local test harness import this so they share one source of truth.
  */
-import { register, _clear } from "./registry";
+import { register, registerManifestVersion, getManifest, _clear } from "./registry";
+import { createComposerAwareAssemblyManifest } from "@/trigger/blocks/composerAwareAssembly";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
@@ -63,6 +64,7 @@ export function registerAllBlocks(): void {
   for (const b of intelligenceBlocks) register(b);
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
+  registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
   // Compliance gates (Phase 4): originality_gate + compliance_check.
   for (const b of complianceBlocks) register(b);
   // Growth blocks (Phase 8, opt-in): crosspost.
