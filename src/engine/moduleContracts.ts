@@ -1158,13 +1158,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // its route/run/topic binding before it can influence a native comic
       // storyboard; ordinary self-contained stories remain independent.
                 ],
-    providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
+    // New footage always pairs Novita Z-Image keyframes with MiniMax H3
+    // motion. The profile identity is part of the compiled route, so it must
+    // not carry a retired renderer name into fresh run receipts.
+    providerProfiles: [{ id: "novita-zimage-minimax-h3-production", provider: "novita", quality: "production", allowFallback: false }],
     // A cinematic sequence can deliberately contain up to 240 short,
     // source-bound coverage shots. It must name maxCinematicClips explicitly
     // so reservation and actual batch count cannot drift.
     // A source-bound cinematic shot reserves one initial still plus exactly
-    // one independently reviewed replacement before its LTX render, followed
-    // by one independently reviewed replacement LTX take. Generic generated
+    // one independently reviewed replacement before its H3 render, followed
+    // by one independently reviewed replacement H3 take. Generic generated
     // footage retains the one-still/one-video envelope.
     maxCostUsd: 1_980,
     maxCostUsdFor: (params, context) => {
@@ -1196,7 +1199,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "storyCoverage",
       "sceneManifest",
                                   ],
-    providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "novita-zimage-minimax-h3-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 33,
     maxCostUsdFor: (params) => {
       const count = Math.ceil(
