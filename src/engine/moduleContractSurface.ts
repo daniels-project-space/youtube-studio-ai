@@ -51,11 +51,18 @@ export function moduleContractSurface(
       requiredDownstreamCapabilities: [],
     };
   }
+  const requiredInputs = unique(contracts.flatMap((contract) => contract.requiredConsumes ?? []));
+  const requiredInputSet = new Set(requiredInputs);
+  const optionalInputs = unique(
+    contracts
+      .flatMap((contract) => contract.optionalConsumes ?? [])
+      .filter((key) => !requiredInputSet.has(key)),
+  );
   return {
     executableIds: executableIds.filter((id) => Boolean(MODULE_CONTRACTS[id])),
     missingExecutableIds: [...missingExecutableIds],
-    requiredInputs: unique(contracts.flatMap((contract) => contract.requiredConsumes ?? [])),
-    optionalInputs: unique(contracts.flatMap((contract) => contract.optionalConsumes ?? [])),
+    requiredInputs,
+    optionalInputs,
     requiredCapabilities: unique(contracts.flatMap((contract) => contract.requiredCapabilities ?? [])),
     outputs: [],
     optionalOutputs: unique(contracts.flatMap((contract) => contract.optionalProduces ?? [])),

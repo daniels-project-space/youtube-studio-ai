@@ -8,6 +8,11 @@ assert.ok(children.optionalInputs.includes("childrenVideoTreatment"));
 assert.ok(children.optionalOutputs.includes("thumbnailScenarioVisualTreatmentProvenance"));
 assert.ok(children.capabilities.includes("package.thumbnail"));
 assert.ok(children.requiredDownstreamCapabilities.includes("package.thumbnail"));
+
+const thumbnail = moduleContractSurface(["thumbnail_gen"]);
+assert.ok(thumbnail);
+assert.ok(thumbnail.requiredInputs.includes("topic"));
+assert.ok(!thumbnail.optionalInputs.includes("topic"), "required artifacts must not be presented as optional");
 assert.deepEqual(moduleContractSurface(["missing-module"]), {
   executableIds: ["missing-module"],
   missingExecutableIds: ["missing-module"],
