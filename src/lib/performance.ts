@@ -130,6 +130,33 @@ export function titlePerformanceEntries(
 }
 
 /**
+ * Select only evidence relevant to the decision being made. A title's
+ * discovery performance is measured from its own CTR/impression pair; an
+ * unavailable retention report must not erase that independent evidence.
+ * Conversely, whole-video creative learning still needs retention because it
+ * evaluates the complete programme rather than just the package.
+ */
+export function performanceEntriesForLens(
+  entries: readonly PerfEntry[],
+  opts: {
+    minViews?: number;
+    connectorId?: string;
+    connectorVersion?: number;
+    lens?: PerformanceLens;
+  } = {},
+): PerfEntry[] {
+  const lens = opts.lens ?? "blended";
+  return entries.filter((entry) =>
+    entry.views >= (opts.minViews ?? 50) &&
+    (opts.connectorId === undefined || entry.connectorId === opts.connectorId) &&
+    (opts.connectorVersion === undefined || entry.connectorVersion === opts.connectorVersion) &&
+    // Retention is essential for a whole-video outcome, but is not an
+    // eligibility condition for a title-only learning example.
+    (lens === "ctr" || entry.avgViewPct > 0),
+  );
+}
+
+/**
  * Compact winners/losers prompt. Returns "" until there's enough signal
  * (≥4 measured videos) so we never bias on noise.
  */
@@ -143,14 +170,7 @@ export async function loadPerformanceContext(
   } = {},
 ): Promise<string> {
   const lens = opts.lens ?? "blended";
-  const ledger = (await loadLedger(keyPrefix)).filter(
-    (e) =>
-      e.views >= (opts.minViews ?? 50) &&
-      e.avgViewPct > 0 &&
-      (opts.connectorId === undefined || e.connectorId === opts.connectorId) &&
-      (opts.connectorVersion === undefined ||
-        e.connectorVersion === opts.connectorVersion),
-  );
+  const ledger = performanceEntriesForLens(await loadLedger(keyPrefix), opts);
 
   if (lens === "ctr") {
     // A missing CTR is unknown, not zero. More importantly, a CTR with no raw
