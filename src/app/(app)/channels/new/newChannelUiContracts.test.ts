@@ -21,5 +21,11 @@ assert.match(page, /function creatorReadinessSummary\(/u,
 assert.match(page, /H3 visual worker needs activation\./u);
 assert.doesNotMatch(page, /nicheBlocker\}>Held: \{defaultFamilyReadiness\.blockers\[0\]\}/u,
   "the initial territory grid must not expose raw worker/environment variable names");
+assert.match(page, /const attentionStages = stageRows\.filter/u,
+  "live channel creation must foreground only active or actionable stages");
+assert.match(page, /<details className=\{styles\.stageDetails\}>/u,
+  "settled channel-creation receipts must remain available without permanently consuming the workspace");
+assert.match(css, /\.buildHero \{ min-height: 132px;/u,
+  "the build view must reserve its space for live work, not a decorative hero");
 
 console.log("CHANNEL WIZARD UI PASS: mobile territory choices are visible without a hidden carousel");

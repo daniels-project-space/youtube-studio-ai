@@ -1258,6 +1258,13 @@ export default function NewChannelWizard() {
     const completedStages = stageRows.filter((stage) => stage.status === "complete" || stage.status === "accepted").length;
     const progressPercent = stageRows.length ? Math.round((completedStages / stageRows.length) * 100) : 0;
     const activeStage = stageRows.find((stage) => stage.status === "running");
+    // Finished receipts remain inspectable, but they should not crowd out the
+    // one thing an operator needs while a channel is being made: what is
+    // running now, and whether anything needs attention.
+    const attentionStages = stageRows.filter((stage) =>
+      stage.status === "running" || stage.status === "blocked" || stage.status === "failed",
+    );
+    const settledStages = stageRows.filter((stage) => !attentionStages.includes(stage));
     const proofRunning = activeStage?.moduleKey === "channel-inception-probe";
     return (
       <main className={styles.buildPage} aria-live="polite">
@@ -1272,13 +1279,7 @@ export default function NewChannelWizard() {
                   ? `${STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey} is running.`
                   : "Starting the build…"}
             </p>
-            <div className={styles.heroFacts}>
-              <span><i />Safe to resume</span>
-              <span><i />Private by default</span>
-              <span><i />Root-stage repair</span>
-            </div>
           </div>
-          <div className={styles.buildSignal} aria-label="Channel build active"><span><i /><i /><i /></span></div>
         </header>
 
         <section className={styles.buildWorkspace}>
@@ -1325,12 +1326,13 @@ export default function NewChannelWizard() {
               </div>
             </section>}
 
-            {stageRows.length ? <div className={styles.stageList}>
-              {stageRows.map((stage, index) => {
+            {stageRows.length ? <>
+              {attentionStages.length > 0 && <div className={styles.stageList}>
+              {attentionStages.map((stage) => {
                 const stageFailure = stage.error ? failureReason(stage.error) : null;
                 return (
                   <div className={styles.stageRow} data-state={stage.status} key={stage.moduleKey}>
-                    <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.stageIndex}>{String(stageRows.indexOf(stage) + 1).padStart(2, "0")}</span>
                     <span className={styles.stageCopy}>
                       <strong>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</strong>
                       <span>{STAGE_DESCRIPTIONS[stage.moduleKey] ?? stage.executionPhase ?? "Durable channel-inception stage"}</span>
@@ -1345,13 +1347,21 @@ export default function NewChannelWizard() {
                   </div>
                 );
               })}
-            </div> : <div className={styles.stageList} aria-busy="true">
-              {Object.keys(STAGE_LABELS).map((key, index) => <div className={styles.stageRow} data-state="queued" key={key}>
-                <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
-                <span className={styles.stageCopy}><strong>{STAGE_LABELS[key]}</strong><span>{STAGE_DESCRIPTIONS[key]}</span></span>
-                <span className={styles.stageState}><strong>queued</strong><small>awaiting ledger</small></span>
-              </div>)}
-            </div>}
+              </div>}
+              {settledStages.length > 0 && <details className={styles.stageDetails}>
+                <summary><span>Completed receipts</span><strong>{settledStages.length} recorded</strong></summary>
+                <div className={styles.stageList}>
+                  {settledStages.map((stage) => <div className={styles.stageRow} data-state={stage.status} key={stage.moduleKey}>
+                    <span className={styles.stageIndex}>{String(stageRows.indexOf(stage) + 1).padStart(2, "0")}</span>
+                    <span className={styles.stageCopy}>
+                      <strong>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</strong>
+                      <span>{STAGE_DESCRIPTIONS[stage.moduleKey] ?? stage.executionPhase ?? "Durable channel-inception stage"}</span>
+                    </span>
+                    <span className={styles.stageState}><strong>{stage.status}</strong><small>{stage.executionPhase ?? "receipt state"}</small></span>
+                  </div>)}
+                </div>
+              </details>}
+            </> : <div className={styles.buildQueue} aria-busy="true">Connecting to the channel ledger…</div>}
           </div>
         </section>
       </main>
