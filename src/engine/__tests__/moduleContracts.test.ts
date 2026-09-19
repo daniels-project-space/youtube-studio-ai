@@ -6,6 +6,7 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests, getManifest } from "@/engine/registry";
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { designPipeline } from "@/engine/designer";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { validatePipeline } from "@/engine/validate";
 import {
   compilePipeline,
@@ -339,6 +340,64 @@ function crewRemovalAndOrderFail(): void {
     () => compilePipeline(validatePipeline(reordered)),
     (error) => error instanceof PipelinePolicyError && /visualBrief.*before/.test(error.message),
   );
+}
+
+/**
+ * Every required artifact edge in every authored family is a real dependency,
+ * not a best-effort ordering hint. Remove its producer or move that producer
+ * behind the consumer and validation must fail before any module can execute.
+ * Optional inputs are intentionally excluded: an optional handoff is allowed
+ * to use the consumer's documented fallback path.
+ */
+function pairwiseRequiredArtifactEdgesFailClosed(): void {
+  let edges = 0;
+  for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+    const design = designPipeline({
+      family,
+      nicheKey: "history",
+      lengthMinutes: familyDurationContract(family).defaultSeconds / 60,
+      publishMode: "draft",
+    });
+    if (!design.available) continue;
+    const resolved = validatePipeline(
+      design.pipeline,
+      channelPipelineValidationSeedKeys(design.contentLane),
+    );
+    const producers = new Map<string, { index: number; block: string }>();
+    resolved.manifests.forEach((manifest, index) => {
+      for (const artifact of [
+        ...Object.keys(manifest.produces),
+        ...Object.keys(manifest.optionalProduces),
+      ]) {
+        if (!producers.has(artifact)) producers.set(artifact, { index, block: manifest.id });
+      }
+    });
+    resolved.manifests.forEach((consumer, consumerIndex) => {
+      for (const artifact of Object.keys(consumer.consumes)) {
+        const producer = producers.get(artifact);
+        if (!producer || producer.index >= consumerIndex) continue;
+        edges++;
+        const withoutProducer = design.pipeline.filter((_, index) => index !== producer.index);
+        assert.throws(
+          () => validatePipeline(withoutProducer),
+          /consumes .*not produced|requires upstream capability|requires downstream capability/,
+          `${family}: removing ${producer.block} must break ${consumer.id}.${artifact}`,
+        );
+
+        const reordered = [...design.pipeline];
+        const [entry] = reordered.splice(producer.index, 1);
+        const adjustedConsumerIndex = consumerIndex - (producer.index < consumerIndex ? 1 : 0);
+        reordered.splice(adjustedConsumerIndex + 1, 0, entry);
+        assert.throws(
+          () => validatePipeline(reordered),
+          /consumes .*not produced|requires upstream capability|requires downstream capability/,
+          `${family}: moving ${producer.block} behind ${consumer.id} must break ${artifact}`,
+        );
+      }
+    });
+  }
+  assert.ok(edges > 100, `pairwise corpus unexpectedly small: ${edges} required edges`);
+  console.log(`pairwise required-artifact corpus passed: ${edges} edges × removal/reorder`);
 }
 
 function publicationNeedsApproval(): void {
@@ -768,6 +827,7 @@ function main(): void {
   runtimeConfigurationIsCompiledBeforeSpendReservation();
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();
+  pairwiseRequiredArtifactEdgesFailClosed();
   publicationNeedsApproval();
   declaredStoreBoundary();
   goldenPromotionGuards(manifests);
