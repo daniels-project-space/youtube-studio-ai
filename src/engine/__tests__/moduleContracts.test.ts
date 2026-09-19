@@ -400,6 +400,89 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
   console.log(`pairwise required-artifact corpus passed: ${edges} edges × removal/reorder`);
 }
 
+/**
+ * Exercise whole-graph mutations in addition to individual edge mutations.
+ * The automatic composer must reject an unknown module and duplicate producer,
+ * and a real family graph must reject removal of one required producer. These
+ * are structural checks only; no provider or paid stage is executed.
+ */
+function wholePipelineMutationGuards(): void {
+  let coveredFamilies = 0;
+  for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+    const design = designPipeline({
+      family,
+      nicheKey: "history",
+      lengthMinutes: familyDurationContract(family).defaultSeconds / 60,
+      publishMode: "draft",
+    });
+    if (!design.available || design.pipeline.length < 3) continue;
+    coveredFamilies++;
+    const seeds = channelPipelineValidationSeedKeys(design.contentLane);
+    const valid = validatePipeline(design.pipeline, seeds);
+
+    assert.throws(
+      () => validatePipeline([...design.pipeline, { block: "__missing_module__" }], seeds),
+      /unknown block "__missing_module__"/,
+      `${family}: unknown module must be rejected`,
+    );
+
+    const duplicateIndex = valid.manifests.findIndex((manifest) =>
+      Object.keys(manifest.produces).length > 0 && manifest.id !== "assemble",
+    );
+    assert.ok(duplicateIndex >= 0, `${family}: mutation fixture needs a producer`);
+    const duplicate = design.pipeline[duplicateIndex];
+    assert.throws(
+      () => validatePipeline([
+        ...design.pipeline.slice(0, duplicateIndex + 1),
+        duplicate,
+        ...design.pipeline.slice(duplicateIndex + 1),
+      ], seeds),
+      /produced by both/,
+      `${family}: duplicate producer ${duplicate.block} must be rejected`,
+    );
+
+    const consumerIndex = valid.manifests.findIndex((manifest, index) =>
+      Object.keys(manifest.consumes).some((artifact) =>
+        valid.manifests.slice(0, index).some((producer) =>
+          artifact in producer.produces || artifact in producer.optionalProduces,
+        ),
+      ),
+    );
+    assert.ok(consumerIndex > 0, `${family}: mutation fixture needs a required consumer`);
+    const consumer = valid.manifests[consumerIndex];
+    const requiredArtifact = Object.keys(consumer.consumes).find((artifact) =>
+      valid.manifests.slice(0, consumerIndex).some((producer) =>
+        artifact in producer.produces || artifact in producer.optionalProduces,
+      ),
+    );
+    assert.ok(requiredArtifact, `${family}: consumer must have a produced required artifact`);
+    const producerIndex = valid.manifests.findIndex((producer) =>
+      producerIndexBefore(producer, valid.manifests, consumerIndex, requiredArtifact!),
+    );
+    assert.ok(producerIndex >= 0, `${family}: producer must be locatable`);
+    assert.throws(
+      () => validatePipeline(
+        design.pipeline.filter((_, index) => index !== producerIndex),
+        seeds,
+      ),
+      /consumes .*not produced|requires upstream capability|requires downstream capability/,
+      `${family}: removing ${requiredArtifact} producer must be rejected`,
+    );
+  }
+  assert.ok(coveredFamilies >= 8, `whole-pipeline corpus unexpectedly small: ${coveredFamilies} families`);
+  console.log(`whole-pipeline mutation corpus passed: ${coveredFamilies} families`);
+}
+
+function producerIndexBefore(
+  producer: ModuleManifest,
+  manifests: readonly ModuleManifest[],
+  consumerIndex: number,
+  artifact: string,
+): boolean {
+  const index = manifests.indexOf(producer);
+  return index < consumerIndex && (artifact in producer.produces || artifact in producer.optionalProduces);
+}
+
 function publicationNeedsApproval(): void {
   assert.throws(
     () => designPipeline({
@@ -828,6 +911,7 @@ function main(): void {
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();
   pairwiseRequiredArtifactEdgesFailClosed();
+  wholePipelineMutationGuards();
   publicationNeedsApproval();
   declaredStoreBoundary();
   goldenPromotionGuards(manifests);
