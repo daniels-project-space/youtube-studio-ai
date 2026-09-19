@@ -32,6 +32,38 @@ import { dispatchPendingFactualReviewContinuations } from "@/trigger/factualRevi
 import { dispatchPendingMusicAuditionContinuations } from "@/trigger/musicAuditionContinuationDispatcher";
 
 const DAY = 86_400_000;
+const DOCTOR_STAGE_SUMMARY_BATCH_SIZE = 100;
+
+type DoctorStage = {
+  block: string;
+  status: string;
+  outputs?: Record<string, unknown>;
+};
+
+/**
+ * One bounded projection replaces N full stage-ledger requests. The summary
+ * endpoint is deliberately doctor-specific: it excludes prompts and artifact
+ * handoffs, so the recovery sweep does not turn ordinary diagnostics into a
+ * high-egress Convex workload.
+ */
+async function doctorStagesForRuns(
+  convex: ConvexHttpClient,
+  ownerId: string,
+  runs: readonly { _id: Id<"runs"> }[],
+): Promise<Map<string, DoctorStage[]>> {
+  const byRun = new Map<string, DoctorStage[]>();
+  for (let offset = 0; offset < runs.length; offset += DOCTOR_STAGE_SUMMARY_BATCH_SIZE) {
+    const runIds = runs.slice(offset, offset + DOCTOR_STAGE_SUMMARY_BATCH_SIZE).map((run) => run._id);
+    const summaries = await convex.query(api.runStages.listDoctorStageSummariesForRuns, {
+      ownerId,
+      runIds,
+    });
+    for (const summary of summaries) {
+      byRun.set(String(summary.runId), summary.stages as DoctorStage[]);
+    }
+  }
+  return byRun;
+}
 
 async function recoverPendingPublishContinuations(
   convex: ConvexHttpClient,
@@ -229,6 +261,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     // channels paginate without ever asking Convex for an unbounded collect.
     const runs = await listRunHistorySince(convex, ch._id, Date.now() - 60 * DAY);
     const recent = runs.filter((r) => (r._creationTime ?? 0) > Date.now() - 3 * DAY);
+    const stagesByRun = await doctorStagesForRuns(convex, ownerId, recent);
     for (const r of recent) {
       if (r.status === "failed") {
         failures.push({
@@ -241,7 +274,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       // Heal activity: superseded stages mark an in-run self-heal. Same pass
       // collects publish candidates for the engagement sweep below.
       try {
-        const stages = await convex.query(api.runStages.listRunStages, { runId: r._id as Id<"runs"> });
+        const stages = stagesByRun.get(String(r._id)) ?? [];
         const sup = stages.filter((s: { status: string }) => s.status === "superseded").map((s: { block: string }) => s.block);
         if (sup.length) healed.push({ channel: ch.name, runId: r._id, superseded: [...new Set(sup)] as string[] });
         if (r.status === "ok") {

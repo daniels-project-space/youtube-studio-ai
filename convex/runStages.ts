@@ -228,3 +228,109 @@ export const listRunStages = query({
     });
   },
 });
+
+/**
+ * Bounded diagnostic projection for Pipeline Doctor.
+ *
+ * The nightly sweep only needs stage state plus six specific output fields. It
+ * used to make one HTTP query per recent run and transfer every stage's full
+ * input/output envelope. Keep that forensic surface deliberately small here:
+ * the doctor can identify a failed/superseded step, a published video, and
+ * advisory QA defects without pulling prompts, artifact references, or other
+ * potentially large handoff data back through Convex.
+ */
+export const listDoctorStageSummariesForRuns = query({
+  args: {
+    ownerId: v.string(),
+    runIds: v.array(v.id("runs")),
+  },
+  handler: async (ctx, args) => {
+    if (args.runIds.length > 100) {
+      throw new Error("doctor stage summary accepts at most 100 runs");
+    }
+    if (new Set(args.runIds.map(String)).size !== args.runIds.length) {
+      throw new Error("doctor stage summary run ids must be unique");
+    }
+
+    return await Promise.all(args.runIds.map(async (runId) => {
+      const rows = await ctx.db
+        .query("runStages")
+        .withIndex("by_run", (q) => q.eq("runId", runId))
+        .collect();
+      return {
+        runId,
+        stages: rows.map((row) => ({
+          block: row.block,
+          status: row.status,
+          outputs: doctorStageOutputs(row.block, row.outputs),
+        })),
+      };
+    }));
+  },
+});
+
+function doctorStageOutputs(block: string, value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const outputs = value as Record<string, unknown>;
+  switch (block) {
+    case "upload_draft":
+      return pickDoctorOutputs(outputs, ["youtubeVideoId"]);
+    case "metadata":
+      return pickDoctorOutputs(outputs, ["title"]);
+    case "topic_select":
+      return pickDoctorOutputs(outputs, ["topic"]);
+    case "qa_visual":
+      {
+        const qaReport = doctorQaReport(outputs.qaReport);
+        return qaReport ? { qaReport } : {};
+      }
+    case "timeline_assemble":
+      return pickDoctorOutputs(outputs, ["overlaysDropped"]);
+    default:
+      return {};
+  }
+}
+
+function doctorQaReport(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const report = value as Record<string, unknown>;
+  const score = (key: string) => {
+    const section = report[key];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
+    const candidate = (section as Record<string, unknown>).score;
+    return typeof candidate === "number" ? { score: candidate } : undefined;
+  };
+  const watchValue = report.watch;
+  const defects = watchValue && typeof watchValue === "object" && !Array.isArray(watchValue)
+    ? (watchValue as Record<string, unknown>).defects
+    : undefined;
+  const safeDefects = Array.isArray(defects)
+    ? defects.slice(0, 40).flatMap((defect) => {
+      if (!defect || typeof defect !== "object" || Array.isArray(defect)) return [];
+      const row = defect as Record<string, unknown>;
+      return [{
+        ...(typeof row.severity === "string" ? { severity: row.severity } : {}),
+        ...(typeof row.category === "string" ? { category: row.category } : {}),
+        ...(typeof row.issue === "string" ? { issue: row.issue.slice(0, 240) } : {}),
+      }];
+    })
+    : [];
+  const thumbnail = score("thumbnail");
+  const seo = score("seo");
+  const video = score("video");
+  return {
+    ...(thumbnail ? { thumbnail } : {}),
+    ...(seo ? { seo } : {}),
+    ...(video ? { video } : {}),
+    ...(safeDefects.length ? { watch: { defects: safeDefects } } : {}),
+  };
+}
+
+function pickDoctorOutputs(
+  outputs: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    keys.flatMap((key) => outputs[key] === undefined ? [] : [[key, outputs[key]]]),
+  );
+}
