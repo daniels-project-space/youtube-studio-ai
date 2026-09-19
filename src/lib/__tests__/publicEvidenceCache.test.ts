@@ -30,14 +30,24 @@ function response(body: unknown, status = 200): Response {
 
 async function main(): Promise<void> {
   assert.equal(normalizeEvidenceKey("  World   History "), "world history");
-  const tiny = createPublicEvidenceCache<string>(1, 1);
-  tiny.set("old", "value");
-  await new Promise((resolve) => setTimeout(resolve, 3));
-  assert.equal(tiny.get("old"), undefined, "expired evidence must not be served");
-  tiny.set("one", "1");
-  tiny.set("two", "2");
-  assert.equal(tiny.get("one"), undefined, "the bounded cache must evict its oldest entry");
-  assert.equal(tiny.get("two"), "2");
+  // This is a cache contract, not a timer-resolution test. A 1ms TTL plus a
+  // real sleep flakes under CI load when the scheduler and Date.now() land on
+  // the same coarse clock tick. Advance a scoped synthetic clock instead.
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    const tiny = createPublicEvidenceCache<string>(1, 1);
+    tiny.set("old", "value");
+    now += 2;
+    assert.equal(tiny.get("old"), undefined, "expired evidence must not be served");
+    tiny.set("one", "1");
+    tiny.set("two", "2");
+    assert.equal(tiny.get("one"), undefined, "the bounded cache must evict its oldest entry");
+    assert.equal(tiny.get("two"), "2");
+  } finally {
+    Date.now = originalNow;
+  }
 
   clearMetacraftEvidenceCache();
   clearOutlierEvidenceCache();

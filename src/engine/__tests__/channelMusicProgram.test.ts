@@ -38,6 +38,17 @@ const history = createChannelMusicProgram({
 assert.equal(history.role, "narration_bed");
 assert.equal(history.mix.narrationPriority, true);
 assert.equal(history.mix.bodyMusicVol, 0.08);
+assert.match(history.generation.structuredCaption, /^### Creative Foundation/mu);
+assert.match(
+  history.generation.structuredCaption,
+  /A quiet uncertainty, restrained danger, then sober resolution restrained chamber documentary score instrumental at 65 BPM: “The failed winter crossing”\./u,
+  "Music3 captions must begin with a scene-led creative brief instead of a metadata/tag pile",
+);
+assert.match(
+  history.generation.structuredCaption,
+  /Feature felt piano, low strings, and soft frame drum\./u,
+  "the creative foundation must hold the featured palette to a listenable three-instrument focus",
+);
 assert.match(history.generation.structuredCaption, /^### Global Metadata/mu);
 assert.match(history.generation.structuredCaption, /### Vocal Details/mu);
 assert.match(history.generation.structuredCaption, /### Arrangement/mu);

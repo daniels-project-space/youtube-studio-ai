@@ -177,12 +177,7 @@ export function musicRoleForRoute(family: string, contentLaneKey: string): Chann
   return "narration_bed";
 }
 
-function roleSections(role: ChannelMusicRole, identity: {
-  genre: string;
-  instrumentation: readonly string[];
-  moodArc: string;
-}, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
-  const instruments = identity.instrumentation.join(", ");
+function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
   // Global Metadata and Vocal Details already establish genre, instruments,
   // space and the instrumental constraint. Repeating all of that inside every
   // Arrangement entry pushed long-form captions beyond Music3's useful prompt
@@ -279,7 +274,28 @@ function structuredCaption(input: {
     meditation_bed: "stable meditative bed with organic micro-variation and no startling events",
     short_form_bed: "compact information-forward underscore with an immediate motif and clean final button",
   };
+  // Music3 still needs the explicit metadata/arrangement map below, but its
+  // official prompt guidance is equally clear that the conditioning itself
+  // should open like a musician's creative brief rather than a comma-separated
+  // tag pile.  Put the emotional point of view and a concrete scene first, then
+  // keep the audible palette deliberately small.  This gives the model a
+  // memorable musical reason for the later section map without replacing the
+  // channel-owned identity or adding an unbounded list of instruments.
+  const tempo = Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2);
+  const featuredInstruments = input.instrumentation.slice(0, 3);
+  const featuredPalette = featuredInstruments.length === 1
+    ? featuredInstruments[0]!
+    : featuredInstruments.length === 2
+      ? `${featuredInstruments[0]} and ${featuredInstruments[1]}`
+      : `${featuredInstruments[0]}, ${featuredInstruments[1]}, and ${featuredInstruments[2]}`;
+  // The focused opening must not erase a channel's complete declared sound
+  // identity. The detailed control section retains it for compatible routes.
+  const supportingTimbres = input.instrumentation.slice(1);
   return [
+    "### Creative Foundation",
+    `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. ` +
+      `Feature ${featuredPalette}.`,
+    "",
     "### Global Metadata",
     `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
       `The episode subject is “${input.topic}”. Emotional progression: ${input.moodArc}. ` +
@@ -288,7 +304,7 @@ function structuredCaption(input: {
     "",
     "### Vocal Details",
     `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
-      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${input.instrumentation.slice(1).join(", ") || "restrained harmonic texture"}.`,
+      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`,
     "",
     "### Arrangement",
     input.sections.map((section) =>
@@ -384,7 +400,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     "melody that masks narration",
   ];
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
-  const sections = roleSections(role, { genre, instrumentation, moodArc }, durationSec);
+  const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "primary_music" ? -16 : -18)));
   const bodyMusicVol = role === "primary_music"
     ? 1
