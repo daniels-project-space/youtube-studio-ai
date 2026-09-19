@@ -89,14 +89,17 @@ async function main(): Promise<void> {
     id: "scene-001",
     prompt: "A quiet blue geometric sculpture rotates in a dark studio.",
     imageKey: INPUT_KEY,
-    durationSec: 5,
+    durationSec: 10,
     aspectRatio: "16:9",
-    maxCostUsd: 0.98,
+    maxCostUsd: 0.5,
   } as const;
 
   const first = await renderOpenRelayH3I2V(args, dependencies);
   assert.equal(first.reused, false);
   assert.equal(first.costUsd, 0.42);
+  assert.equal(first.requestedDurationSec, 10);
+  assert.equal(first.nativeDurationSec, 10.125);
+  assert.equal(first.receipt.profile.frames, 243);
   assert.equal(ensureCalls, 1);
   assert.equal(reconcileCalls, 1);
   assert.equal(submitCalls, 1);

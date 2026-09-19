@@ -7,6 +7,9 @@ export const OPENRELAY_H3_ROUTE = "minimax-h3-turbo8-a100" as const;
 export const OPENRELAY_H3_RUNTIME_ID = "minimax-h3-turbo8-a100-v1" as const;
 export const OPENRELAY_H3_MANIFEST_SHA256 = "1e1b44f69249511e8e7308e5ceb9c9fa60efff4abde37f200dc33f28345b5ae3" as const;
 export const OPENRELAY_H3_CAPACITY_MODE = "persistent-disk-auto-stop" as const;
+/** Keep each accepted render below this ceiling so a malformed caller cannot
+ * turn the persistent A100 into an open-ended paid job. */
+export const OPENRELAY_H3_MAX_JOB_USD = 0.5 as const;
 
 export interface OpenRelayH3Health {
   schema: "minimax-h3-worker/v1";
@@ -20,13 +23,55 @@ export interface OpenRelayH3Health {
   idleSeconds: number;
 }
 
+export type OpenRelayH3FrameCount = 124 | 243 | 345;
+
 export interface OpenRelayH3Profile {
   id: "official-turbo8-native-768p";
   width: 1344;
   height: 768;
   fps: 24;
-  frames: 124;
+  /** Native H3 alignment is 17*n+5 frames: 5.167s, 10.125s, or 14.375s. */
+  frames: OpenRelayH3FrameCount;
   steps: 8;
+}
+
+export interface OpenRelayH3ProfileOption {
+  /** Human-facing requested duration. The 15-second option renders natively at 14.375 seconds. */
+  requestedDurationSec: 5 | 10 | 15;
+  nativeDurationSec: number;
+  profile: OpenRelayH3Profile;
+}
+
+export const OPENRELAY_H3_PROFILE_OPTIONS: readonly OpenRelayH3ProfileOption[] = [
+  {
+    requestedDurationSec: 5,
+    nativeDurationSec: 124 / 24,
+    profile: { id: "official-turbo8-native-768p", width: 1344, height: 768, fps: 24, frames: 124, steps: 8 },
+  },
+  {
+    requestedDurationSec: 10,
+    nativeDurationSec: 243 / 24,
+    profile: { id: "official-turbo8-native-768p", width: 1344, height: 768, fps: 24, frames: 243, steps: 8 },
+  },
+  {
+    requestedDurationSec: 15,
+    nativeDurationSec: 345 / 24,
+    profile: { id: "official-turbo8-native-768p", width: 1344, height: 768, fps: 24, frames: 345, steps: 8 },
+  },
+] as const;
+
+/**
+ * H3's native frame count must be 17*n+5. The nominal 15-second option is
+ * therefore 345 frames / 14.375 seconds at 24fps—not a stitched 15-second
+ * result and not a falsely labelled 15.000-second clip.
+ */
+export function openRelayH3ProfileForDuration(
+  durationSec: number | undefined,
+): OpenRelayH3ProfileOption {
+  const requested = durationSec ?? 5;
+  const exact = OPENRELAY_H3_PROFILE_OPTIONS.find((option) => option.requestedDurationSec === requested);
+  if (!exact) throw new Error("OpenRelay H3 supports only native 5, 10, or up-to-15 second profiles");
+  return exact;
 }
 
 export interface OpenRelayH3RenderRequest {
@@ -73,9 +118,7 @@ export type OpenRelayH3Reconciliation =
 type FetchLike = typeof fetch;
 
 const HEX_64 = /^[0-9a-f]{64}$/;
-const H3_PROFILE: OpenRelayH3Profile = {
-  id: "official-turbo8-native-768p", width: 1344, height: 768, fps: 24, frames: 124, steps: 8,
-};
+const H3_PROFILE_ID = "official-turbo8-native-768p" as const;
 
 function required(name: string, minimumLength = 1): string {
   const value = process.env[name]?.trim() ?? "";
@@ -135,14 +178,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isProfile(value: unknown): value is OpenRelayH3Profile {
-  return isRecord(value) && value.id === H3_PROFILE.id && value.width === H3_PROFILE.width &&
-    value.height === H3_PROFILE.height && value.fps === H3_PROFILE.fps &&
-    value.frames === H3_PROFILE.frames && value.steps === H3_PROFILE.steps;
+  return isRecord(value) && value.id === H3_PROFILE_ID && value.width === 1344 &&
+    value.height === 768 && value.fps === 24 &&
+    (value.frames === 124 || value.frames === 243 || value.frames === 345) && value.steps === 8;
+}
+
+function sameProfile(left: OpenRelayH3Profile, right: OpenRelayH3Profile): boolean {
+  return left.id === right.id && left.width === right.width && left.height === right.height &&
+    left.fps === right.fps && left.frames === right.frames && left.steps === right.steps;
 }
 
 function asHealth(value: unknown): OpenRelayH3Health {
   if (!isRecord(value) || value.schema !== "minimax-h3-worker/v1" || value.ready !== true ||
-    value.route !== OPENRELAY_H3_ROUTE || value.profile !== H3_PROFILE.id ||
+    value.route !== OPENRELAY_H3_ROUTE || value.profile !== H3_PROFILE_ID ||
     value.modelLoad !== "per-job-high-vram" || value.persistentCacheReady !== true ||
     typeof value.busy !== "boolean" || typeof value.draining !== "boolean" ||
     typeof value.idleSeconds !== "number" || !Number.isFinite(value.idleSeconds) || value.idleSeconds < 0
@@ -157,7 +205,8 @@ function validateRenderRequest(request: OpenRelayH3RenderRequest): void {
     !request.prompt.trim() || request.prompt.length > 12_000 || !Number.isInteger(request.seed) ||
     request.seed < 0 || request.seed > 2_147_483_647 || !request.first_frame_key || !request.output_key ||
     !HEX_64.test(request.first_frame_sha256) || request.capacity_mode !== OPENRELAY_H3_CAPACITY_MODE ||
-    !isProfile(request.profile) || !Number.isFinite(request.max_cost_usd) || request.max_cost_usd <= 0 || request.max_cost_usd > 100
+    !isProfile(request.profile) || !Number.isFinite(request.max_cost_usd) || request.max_cost_usd <= 0 ||
+    request.max_cost_usd > OPENRELAY_H3_MAX_JOB_USD
   ) {
     throw new Error("OpenRelay H3 request is outside the sealed worker contract");
   }
@@ -181,6 +230,7 @@ export function assertOpenRelayH3Receipt(
 ): OpenRelayH3Receipt {
   if (!isRecord(value) || value.schema !== "minimax-h3-worker/v1" || value.requestKey !== request.request_key ||
     typeof value.jobId !== "string" || !value.jobId || value.execution !== request.execution || !isProfile(value.profile) ||
+    !sameProfile(value.profile, request.profile) ||
     typeof value.promptSha256 !== "string" || !HEX_64.test(value.promptSha256) || value.seed !== request.seed ||
     !isRecord(value.firstFrame) || value.firstFrame.r2Key !== request.first_frame_key || value.firstFrame.sha256 !== request.first_frame_sha256 ||
     !isRecord(value.output) || value.output.r2Key !== request.output_key || typeof value.output.contentSha256 !== "string" ||

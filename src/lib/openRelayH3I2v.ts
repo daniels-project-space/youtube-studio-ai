@@ -12,6 +12,8 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertOpenRelayH3Receipt,
   ensureOpenRelayH3Ready,
+  OPENRELAY_H3_MAX_JOB_USD,
+  openRelayH3ProfileForDuration,
   reconcileOpenRelayH3Render,
   submitOpenRelayH3Render,
   type OpenRelayH3Receipt,
@@ -28,15 +30,6 @@ import {
 } from "@/lib/storage";
 
 const H3_I2V_RECEIPT_SCHEMA = "openrelay-h3-i2v-receipt/v1" as const;
-const H3_PROFILE = {
-  id: "official-turbo8-native-768p",
-  width: 1344,
-  height: 768,
-  fps: 24,
-  frames: 124,
-  steps: 8,
-} as const;
-const H3_NATIVE_DURATION_SECONDS = H3_PROFILE.frames / H3_PROFILE.fps;
 const MAX_RECEIPT_BYTES = 128 * 1024;
 
 export interface OpenRelayH3I2VArgs {
@@ -47,7 +40,7 @@ export interface OpenRelayH3I2VArgs {
   prompt: string;
   /** H3 only accepts a private, checksum-bound R2 first-frame object. */
   imageKey: string;
-  /** H3's qualified profile is fixed at ~5.17 seconds. */
+  /** Native 5, 10, or up-to-15-second H3 profile. 15 maps to 14.375s/345 frames. */
   durationSec?: number;
   /** Kept at the generic I2V boundary; only the native wide profile is admitted. */
   aspectRatio?: string;
@@ -60,6 +53,8 @@ export interface OpenRelayH3I2VResult {
   key: string;
   jobId: string;
   model: "MiniMax-H3@official-turbo8-native-768p";
+  requestedDurationSec: 5 | 10 | 15;
+  nativeDurationSec: number;
   costUsd: number;
   receipt: OpenRelayH3Receipt;
   reused: boolean;
@@ -112,30 +107,22 @@ function cleanId(value: string): string {
   return clean;
 }
 
-function assertArgs(args: OpenRelayH3I2VArgs): void {
+function profileForArgs(args: OpenRelayH3I2VArgs) {
   if (!args.prompt.trim() || args.prompt.length > 12_000) {
     throw new Error("OpenRelay H3 I2V prompt is invalid");
   }
   if (!args.imageKey.trim() || args.imageKey.includes("..")) {
     throw new Error("OpenRelay H3 I2V requires an owned R2 first-frame key");
   }
-  if (!Number.isFinite(args.maxCostUsd) || args.maxCostUsd <= 0 || args.maxCostUsd > 100) {
+  if (!Number.isFinite(args.maxCostUsd) || args.maxCostUsd <= 0 || args.maxCostUsd > OPENRELAY_H3_MAX_JOB_USD) {
     throw new Error("OpenRelay H3 I2V max cost is outside the qualified ceiling");
   }
   if (args.aspectRatio !== undefined && args.aspectRatio !== "16:9") {
     throw new Error("OpenRelay H3 I2V only supports the qualified native wide profile");
   }
-  if (
-    args.durationSec !== undefined &&
-    Math.abs(args.durationSec - 5) > 0.001 &&
-    Math.abs(args.durationSec - H3_NATIVE_DURATION_SECONDS) > 0.001
-  ) {
-    throw new Error(
-      `OpenRelay H3 I2V has a fixed ${H3_NATIVE_DURATION_SECONDS.toFixed(3)} second qualified profile`,
-    );
-  }
   cleanPrefix(args.prefix);
   cleanId(args.id);
+  return openRelayH3ProfileForDuration(args.durationSec);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,13 +146,14 @@ function requestIdentity(args: {
   firstFrameSha256: string;
   execution: OpenRelayH3RenderRequest["execution"];
   maxCostUsd: number;
+  profile: OpenRelayH3RenderRequest["profile"];
 }): string {
   return sha256Hex(canonicalJson({
     schema: "openrelay-h3-i2v-request/v1",
     prompt: args.prompt.trim(),
     firstFrameKey: args.firstFrameKey,
     firstFrameSha256: args.firstFrameSha256,
-    profile: H3_PROFILE,
+    profile: args.profile,
     execution: args.execution,
     maxCostUsd: args.maxCostUsd,
   }));
@@ -260,12 +248,16 @@ function asResult(args: {
   key: string;
   url: string;
   reused: boolean;
+  requestedDurationSec: 5 | 10 | 15;
+  nativeDurationSec: number;
 }): OpenRelayH3I2VResult {
   return {
     url: args.url,
     key: args.key,
     jobId: args.receipt.jobId,
     model: "MiniMax-H3@official-turbo8-native-768p",
+    requestedDurationSec: args.requestedDurationSec,
+    nativeDurationSec: args.nativeDurationSec,
     costUsd: args.receipt.runtime.costUsd,
     receipt: args.receipt,
     reused: args.reused,
@@ -281,7 +273,7 @@ export async function renderOpenRelayH3I2V(
   args: OpenRelayH3I2VArgs,
   overrides: Partial<OpenRelayH3I2VDependencies> = {},
 ): Promise<OpenRelayH3I2VResult> {
-  assertArgs(args);
+  const profileOption = profileForArgs(args);
   const deps = { ...liveDependencies, ...overrides };
   const prefix = cleanPrefix(args.prefix);
   const id = cleanId(args.id);
@@ -293,6 +285,7 @@ export async function renderOpenRelayH3I2V(
     firstFrameSha256: input.sha256,
     execution,
     maxCostUsd: args.maxCostUsd,
+    profile: profileOption.profile,
   });
   const outputKey = `${prefix}/openrelay-h3/${id}-${requestKey.slice(0, 20)}/output.mp4`;
   const receiptKey = receiptKeyFor(outputKey);
@@ -313,7 +306,7 @@ export async function renderOpenRelayH3I2V(
     output_put_url: outputPutUrl,
     execution,
     capacity_mode: "persistent-disk-auto-stop",
-    profile: H3_PROFILE,
+    profile: profileOption.profile,
     max_cost_usd: args.maxCostUsd,
   };
 
@@ -324,6 +317,8 @@ export async function renderOpenRelayH3I2V(
       key: outputKey,
       url: await deps.presignDownload(outputKey),
       reused: true,
+      requestedDurationSec: profileOption.requestedDurationSec,
+      nativeDurationSec: profileOption.nativeDurationSec,
     });
   }
 
@@ -352,6 +347,7 @@ export async function renderOpenRelayH3I2V(
     key: outputKey,
     url: await deps.presignDownload(outputKey),
     reused: reconciliation.status === "complete",
+    requestedDurationSec: profileOption.requestedDurationSec,
+    nativeDurationSec: profileOption.nativeDurationSec,
   });
 }
-

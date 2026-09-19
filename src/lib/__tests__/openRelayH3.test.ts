@@ -3,6 +3,7 @@ import {
   drainOpenRelayH3Worker,
   ensureOpenRelayH3Ready,
   fetchOpenRelayH3Health,
+  openRelayH3ProfileForDuration,
   reconcileOpenRelayH3Render,
   submitOpenRelayH3Render,
   type OpenRelayH3RenderRequest,
@@ -56,7 +57,7 @@ const request: OpenRelayH3RenderRequest = {
   execution: "on-demand",
   capacity_mode: "persistent-disk-auto-stop",
   profile: { id: "official-turbo8-native-768p", width: 1344, height: 768, fps: 24, frames: 124, steps: 8 },
-  max_cost_usd: 0.98,
+  max_cost_usd: 0.5,
 };
 
 const receipt = {
@@ -94,7 +95,10 @@ async function main() {
     if (url.endsWith("/healthz")) return Response.json(health);
     if (url.endsWith("/control/drain")) return Response.json({ draining: true });
     if (url.endsWith(`/v1/videos/${request.request_key}`)) return Response.json({ status: "complete", receipt });
-    if (url.endsWith("/v1/videos") && init?.method === "POST") return Response.json({ receipt });
+    if (url.endsWith("/v1/videos") && init?.method === "POST") {
+      const submitted = JSON.parse(String(init.body)) as OpenRelayH3RenderRequest;
+      return Response.json({ receipt: { ...receipt, profile: submitted.profile } });
+    }
     throw new Error(`unexpected request ${url}`);
   };
 
@@ -103,6 +107,17 @@ async function main() {
   assert.equal((await fetchOpenRelayH3Health(fetchImpl)).persistentCacheReady, true);
   assert.equal(await drainOpenRelayH3Worker(fetchImpl), true);
   assert.equal((await submitOpenRelayH3Render(request, fetchImpl)).runtime.gpuModel, "A100");
+  assert.equal(openRelayH3ProfileForDuration(10).profile.frames, 243);
+  assert.equal(openRelayH3ProfileForDuration(15).nativeDurationSec, 14.375);
+  assert.equal(
+    (await submitOpenRelayH3Render({ ...request, profile: openRelayH3ProfileForDuration(15).profile }, fetchImpl)).profile.frames,
+    345,
+  );
+  assert.throws(() => openRelayH3ProfileForDuration(12), /native 5, 10, or up-to-15/i);
+  await assert.rejects(
+    submitOpenRelayH3Render({ ...request, max_cost_usd: 0.51 }, fetchImpl),
+    /sealed worker contract/i,
+  );
   assert.equal((await reconcileOpenRelayH3Render(request, fetchImpl)).status, "complete");
   const renderCall = calls.find((call) => call.url.endsWith("/v1/videos") && call.method === "POST");
   assert.equal(renderCall?.headers.get("x-worker-authorization"), `Bearer ${process.env.MINIMAX_H3_OPENRELAY_WORKER_TOKEN}`);
