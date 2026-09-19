@@ -22,6 +22,11 @@ assert.ok(
   legacyNarration?.params.some((field) => field.key === "qwenSpeaker"),
   "the legacy catalog must retain historic settings for existing channel receipts",
 );
+assert.match(
+  legacyNarration?.params.find((field) => field.key === "ttsProvider")?.options?.find((option) => option.value === "qwen3")?.label ?? "",
+  /qualified cloud route/i,
+  "the legacy Qwen control must describe the cloud-backed qualified route rather than a retired GPU topology",
+);
 
 const whiteboard = MODULE_CATALOG.find((module) => module.block === "whiteboard_scribe");
 assert.ok(whiteboard, "the catalog must describe the Whiteboard renderer");

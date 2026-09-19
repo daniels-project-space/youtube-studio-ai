@@ -149,7 +149,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
         key: "ttsProvider", label: "Voice engine", type: "select",
         options: [
           { value: "elevenlabs", label: "ElevenLabs v3 · expressive" },
-          { value: "qwen3", label: "Qwen3-TTS · open 4090 worker" },
+          { value: "qwen3", label: "Qwen3-TTS · qualified cloud route" },
         ],
         help: "New-channel casting supports ElevenLabs or a qualified Qwen worker. Existing Fish channels need separately reviewed cast evidence.",
       },

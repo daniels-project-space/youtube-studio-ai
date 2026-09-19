@@ -40,6 +40,19 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 function main(): void {
+  const narration = CORE_MODULE_SURFACES.find((card) => card.key === "narration_tts");
+  const providerKnob = narration?.customization?.knobs.find((knob) => knob.id === "ttsProvider");
+  assert.match(
+    providerKnob?.describes ?? "",
+    /qualified cloud worker/i,
+    "the narration surface must describe the current qualified Qwen route, not a retired self-hosted topology",
+  );
+  assert.doesNotMatch(
+    providerKnob?.describes ?? "",
+    /self-hosted/i,
+    "the operator-facing narration surface must not imply a VPS-only Qwen route",
+  );
+
   // Blocks live under src/trigger/blocks; a few read their params through
   // engine helpers, so the whole of src is the haystack.
   const sources = [...walk(join(ROOT, "src", "trigger")), ...walk(join(ROOT, "src", "engine")), ...walk(join(ROOT, "src", "lib"))]
