@@ -38,9 +38,11 @@ export default function RunsPage() {
   const projection = runs
     ? projectRunHistory(runs, selectedSlug, filter, visibleLimit)
     : undefined;
-  const scopedRuns = runs?.filter((run) => selectedSlug ? run.channelSlug === selectedSlug : true) ?? [];
-  const outputCount = scopedRuns.filter((run) => run.youtubeVideoId).length;
-  const totalCost = scopedRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0);
+  // Keep historical inferred records inspectable through the explicit archive,
+  // but do not let them distort the production totals an operator uses now.
+  const currentRuns = projection?.current ?? [];
+  const outputCount = currentRuns.filter((run) => run.youtubeVideoId).length;
+  const totalCost = currentRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0);
   const chooseFilter = (next: RunFilter) => {
     setFilter((current) => (current === next && next !== "all" ? "all" : next));
     setVisibleLimit(INITIAL_VISIBLE_RUNS);
@@ -112,7 +114,9 @@ export default function RunsPage() {
           title="No runs match"
           description={
             filter === "all"
-              ? "No runs yet."
+              ? "No current runs yet. Legacy records remain in the archive."
+              : filter === "legacy"
+                ? "No legacy records are retained for this view."
               : `No runs in ${RUN_FILTER_LABEL[filter].toLowerCase()}.`
           }
         />

@@ -5,17 +5,19 @@ export const RUN_FILTERS = [
   "ok",
   "failed",
   "canceled",
+  "legacy",
 ] as const;
 
 export type RunFilter = (typeof RUN_FILTERS)[number];
 
 export const RUN_FILTER_LABEL: Record<RunFilter, string> = {
-  all: "All runs",
+  all: "Current runs",
   running: "Live now",
   queued: "In queue",
   ok: "Completed",
   failed: "Needs attention",
   canceled: "Canceled",
+  legacy: "Legacy archive",
 };
 
 export const INITIAL_VISIBLE_RUNS = 12;
@@ -102,9 +104,19 @@ export function diagnoseRunFailure(error: string): RunFailureDiagnostic {
 type RunHistoryItem = {
   channelSlug: string;
   status: string;
+  /** Older records without a frozen pipeline are historic evidence, not a live recovery candidate. */
+  pipelineSource?: "frozen" | "legacy_inferred";
 };
 
-/** One truthful projection powers counts, filtering, and progressive history. */
+export function isLegacyInferredRun(run: Pick<RunHistoryItem, "pipelineSource">): boolean {
+  return run.pipelineSource === "legacy_inferred";
+}
+
+/**
+ * One truthful projection powers counts, filtering, and progressive history.
+ * Legacy inferred runs stay inspectable, but must not inflate an operator's
+ * current failure queue or imply that the pipeline doctor can resume them.
+ */
 export function projectRunHistory<T extends RunHistoryItem>(
   runs: readonly T[],
   selectedSlug: string | null,
@@ -114,21 +126,29 @@ export function projectRunHistory<T extends RunHistoryItem>(
   const scope = runs.filter((run) =>
     selectedSlug ? run.channelSlug === selectedSlug : true,
   );
-  const matching = scope.filter((run) =>
-    filter === "all" ? true : run.status === filter,
-  );
+  const current = scope.filter((run) => !isLegacyInferredRun(run));
+  const legacy = scope.filter(isLegacyInferredRun);
+  const matching = filter === "legacy"
+    ? legacy
+    : filter === "all"
+      ? current
+      : current.filter((run) => run.status === filter);
   const statusCounts = Object.fromEntries(
     RUN_FILTERS.map((status) => [
       status,
       status === "all"
-        ? scope.length
-        : scope.filter((run) => run.status === status).length,
+        ? current.length
+        : status === "legacy"
+          ? legacy.length
+          : current.filter((run) => run.status === status).length,
     ]),
   ) as Record<RunFilter, number>;
   const safeLimit = Math.max(0, Math.trunc(visibleLimit));
   const visible = matching.slice(0, safeLimit);
 
   return {
+    current,
+    legacy,
     matching,
     visible,
     statusCounts,

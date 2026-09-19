@@ -25,6 +25,23 @@ assert.equal(expanded.remaining, 0);
 
 assert.equal(projectRunHistory(rows, null, "all", -4).visible.length, 0);
 
+const mixedRows = [
+  { id: "current-failed", channelSlug: "alpha", status: "failed", pipelineSource: "frozen" as const },
+  { id: "current-ok", channelSlug: "alpha", status: "ok", pipelineSource: "frozen" as const },
+  { id: "legacy-failed", channelSlug: "alpha", status: "failed", pipelineSource: "legacy_inferred" as const },
+  { id: "legacy-ok", channelSlug: "beta", status: "ok", pipelineSource: "legacy_inferred" as const },
+];
+const currentFleet = projectRunHistory(mixedRows, null, "all", INITIAL_VISIBLE_RUNS);
+assert.deepEqual(currentFleet.matching.map((run) => run.id), ["current-failed", "current-ok"],
+  "the default fleet view excludes non-recoverable inferred history");
+assert.equal(currentFleet.statusCounts.failed, 1,
+  "needs-attention measures only current failed runs");
+assert.equal(currentFleet.statusCounts.legacy, 2,
+  "legacy volume remains explicit rather than being silently discarded");
+const legacyArchive = projectRunHistory(mixedRows, null, "legacy", INITIAL_VISIBLE_RUNS);
+assert.deepEqual(legacyArchive.visible.map((run) => run.id), ["legacy-failed", "legacy-ok"],
+  "the archive remains inspectable for audit and retention decisions");
+
 assert.deepEqual(diagnoseRunFailure('budget ceiling exceeded: spent $3.23 > budget $2.00 after block "whiteboard_scribe"'), {
   faultDomain: "Spend boundary",
   cause: "Recorded stage spend reached the channel ceiling before completion.",
