@@ -55,6 +55,19 @@ export const ChannelProfileSchema = z.object({
 /** The canonical per-account object. Source of truth = the zod schema above. */
 export type ChannelProfile = z.infer<typeof ChannelProfileSchema>;
 
+/**
+ * Read the canonical profile embedded in a frozen pipeline invocation.
+ *
+ * Profiles are additive to existing invocation seeds so historic snapshots can
+ * still use their original field-level adapters. A malformed profile is never
+ * treated as an absent one: callers must fail before any provider work rather
+ * than quietly replacing an immutable run's identity with live channel data.
+ */
+export function parseFrozenChannelProfile(value: unknown): ChannelProfile | undefined {
+  if (value === undefined) return undefined;
+  return ChannelProfileSchema.parse(value);
+}
+
 /* --------------------------------- helpers --------------------------------- */
 
 /** The set of module/block ids this channel actually runs. */

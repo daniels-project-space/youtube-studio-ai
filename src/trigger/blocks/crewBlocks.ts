@@ -17,7 +17,11 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ShowBible, StyleDNA } from "@/engine/creative/types";
-import { buildChannelProfile, type ChannelProfile } from "@/engine/channelProfile";
+import {
+  buildChannelProfile,
+  parseFrozenChannelProfile,
+  type ChannelProfile,
+} from "@/engine/channelProfile";
 import { resolveCrew, type ResolvedCrew } from "@/lib/crew/crewProfile";
 import type { CrewRoleId } from "@/lib/crew/roles";
 import { resolveDirectorConfig } from "@/lib/crew/director";
@@ -64,6 +68,8 @@ interface ChannelGrounding {
   template?: string;
   budget?: number;
   moduleConfig?: Record<string, Record<string, unknown>>;
+  /** Full immutable profile for current ordinary invocations. */
+  profile?: ChannelProfile;
 }
 
 /**
@@ -86,6 +92,31 @@ interface ChannelGrounding {
  * never take this path.
  */
 async function loadGrounding(ctx: StageContext): Promise<ChannelGrounding> {
+  // Current ordinary invocations carry one canonical profile, frozen with the
+  // exact effective pipeline and validated module controls. Parse it before
+  // touching the legacy loose keys or Convex: malformed immutable identity is
+  // a run error, never a reason to switch to mutable channel state.
+  const profile = parseFrozenChannelProfile(ctx.store["channelProfile"]);
+  if (profile) {
+    const identity = profile.identity;
+    return {
+      // ChannelIdentity deliberately keeps its persisted creativeBrief broad
+      // for backwards compatibility; the existing Show Bible contract is the
+      // runtime authority for crew blocks, exactly as it was for loose seeds.
+      bible: (identity?.creativeBrief as ShowBible | undefined) ?? null,
+      dna: profile.styleDNA ?? null,
+      channelName: profile.name,
+      niche: identity?.niche,
+      persona: identity?.persona,
+      styleGrammar: identity?.styleGrammar,
+      slug: profile.slug,
+      status: profile.status,
+      template: profile.template,
+      budget: profile.budget,
+      moduleConfig: profile.moduleOverrides,
+      profile,
+    };
+  }
   const storeShowBible = ctx.store["showBible"] as ShowBible | null | undefined;
   const storeSlug = ctx.store["channelSlug"] as string | undefined;
   if (storeShowBible !== undefined || storeSlug !== undefined) {
@@ -171,17 +202,12 @@ function resolveBible(g: ChannelGrounding, blockId: string, log: (m: string) => 
 }
 
 /**
- * Build the minimal ChannelProfile resolveCrew needs (pipeline + moduleOverrides
- * only — resolveCrew never touches identity/styleDNA/archetype). This is a
- * local, read-only construction scoped to this check: the pipeline-wide
- * ChannelProfile cutover (`src/engine/channelProfile.ts`'s documented TODO) is
- * a separate, much larger change and is NOT what this does. moduleOverrides
- * comes straight from the channel's real `moduleConfig['show-bible']` (preset +
- * role toggles, written by Settings' "Pipeline modules" section); an empty
- * `pipeline` is fine because `moduleParams()` merges moduleOverrides on top of
- * (or in place of) any pipeline-entry params for the same block id.
+ * Current invocations use their full frozen ChannelProfile. Historic snapshots
+ * predate that seed and retain this local read-only adapter, so replay never
+ * changes meaning merely because the profile migration was introduced later.
  */
 function crewProfileFor(ctx: StageContext, g: ChannelGrounding): ChannelProfile {
+  if (g.profile) return g.profile;
   return buildChannelProfile({
     row: {
       _id: ctx.channelId,
@@ -312,7 +338,19 @@ function roleProfile(
    * behavior is byte-identical to before this function grew this parameter.
    */
   crewFallback?: Record<string, unknown>,
+  frozenProfile?: ChannelProfile,
 ): ChannelProfile {
+  if (frozenProfile) {
+    return {
+      ...frozenProfile,
+      pipeline: frozenProfile.pipeline.map((entry) => entry.block === block
+        ? {
+            ...entry,
+            params: { ...crewFallback, ...(entry.params ?? {}), ...ctx.params },
+          }
+        : entry),
+    };
+  }
   return {
     pipeline: [{ block, params: { ...crewFallback, ...ctx.params } }],
     moduleOverrides: {},
@@ -362,7 +400,7 @@ export const directorBriefBlock: Block = {
     logCrewDoctrineGap(ctx, rc, "director_brief", "director");
     // No equivalent knob on DIRECTOR_SURFACE for show-bible's directorStyle —
     // see resolveChannelCrew's doc comment. Nothing to thread here.
-    const config = resolveDirectorConfig(roleProfile(ctx, "director_brief"));
+    const config = resolveDirectorConfig(roleProfile(ctx, "director_brief", undefined, g.profile));
     const out = await briefDirector(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("director_brief");
     ctx.log(`director_brief: ${out.beats.length} beats`);
@@ -383,7 +421,7 @@ export const dpBriefBlock: Block = {
     logCrewDoctrineGap(ctx, rc, "dp_brief", "cinematographer");
     // No equivalent knob on CINEMATOGRAPHER_SURFACE for a show-bible hint —
     // see resolveChannelCrew's doc comment. Nothing to thread here.
-    const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief"));
+    const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief", undefined, g.profile));
     const directives = cinematographerDirectives(config);
     const out = await briefCinematographer(bible, crewCtx(ctx, g, directives));
     if (!out) failLoud("dp_brief");
@@ -418,7 +456,7 @@ export const editorBriefBlock: Block = {
     // config always wins). rc === null (no saved show-bible config, or a
     // resolution failure) means no fallback object at all — zero regression.
     const config = resolveEditorConfig(
-      roleProfile(ctx, "editor_brief", rc ? { cadence: rc.editorCadence } : undefined),
+      roleProfile(ctx, "editor_brief", rc ? { cadence: rc.editorCadence } : undefined, g.profile),
     );
     const directives = editorDirectives(config);
     const out = await briefEditor(bible, crewCtx(ctx, g, directives));
@@ -441,7 +479,7 @@ export const composerBriefBlock: Block = {
     logCrewDoctrineGap(ctx, rc, "composer_brief", "composer");
     // No equivalent knob on COMPOSER_SURFACE (musicMood/duckDepth/loudness/
     // voiceFx) for any show-bible knob — see resolveChannelCrew's doc comment.
-    const config = resolveComposerConfig(roleProfile(ctx, "composer_brief"));
+    const config = resolveComposerConfig(roleProfile(ctx, "composer_brief", undefined, g.profile));
     const directives = composerDirectives(config);
     const out = await briefComposer(bible, crewCtx(ctx, g, { config, directives }));
     if (!out) failLoud("composer_brief");
@@ -472,6 +510,7 @@ export const criticSpecBlock: Block = {
         ctx,
         "critic_spec",
         rc ? { strictness: rc.criticStrictness, marketAware: rc.marketAwareCritic } : undefined,
+        g.profile,
       ),
     );
     const out = await briefCritic(bible, crewCtx(ctx, g, config));

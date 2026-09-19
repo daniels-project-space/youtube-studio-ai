@@ -262,6 +262,9 @@ const CREW_GROUNDING_CONSUMES = [
   // Read by loadGrounding since 2a5397d and never declared.
   "showBible", "channelSlug", "persona", "styleGrammar",
   "channelStatus", "channelTemplate", "channelBudget", "channelModuleConfig",
+  // Current ordinary invocations provide this canonical profile. Historic
+  // snapshots use the declared loose-key compatibility adapter instead.
+  "channelProfile",
   // Read when resolving the channel's crew and role profiles.
   "channelProgramRoute",
 ] as const;

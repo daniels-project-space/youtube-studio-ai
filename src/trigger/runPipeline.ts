@@ -175,6 +175,7 @@ import {
   assertChildrenShowBibleSeeded,
 } from "@/engine/childrenShowBible";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
+import { buildChannelProfile } from "@/engine/channelProfile";
 import { hasSourceAttributedDataStoryParams } from "@/engine/dataStory";
 import {
   admitReviewedEvidencePackForSourceDataStoryRun,
@@ -2133,6 +2134,30 @@ export const runPipelineTask = task({
             Object.assign(seedStore, admitted.seed);
           }
         }
+      }
+
+      // Fresh ordinary runs carry one canonical, typed profile alongside the
+      // existing field-level seeds. At this point all lane injection, module
+      // configuration, and route/evidence admissions have resolved the exact
+      // pipeline that the invocation will freeze. Never backfill it into a
+      // durable snapshot or a private/probe context: both are already sealed
+      // under their own identity contract and must remain replayable.
+      if (!durableInvocation && !privateInvocationContext) {
+        seedStore.channelProfile = buildChannelProfile({
+          row: {
+            _id: payload.channelId,
+            name: channel.name,
+            slug: channel.slug,
+            status: channel.status,
+            template: channel.template,
+            budget: channel.budget,
+            identity: channel.identity,
+          },
+          archetype: channel.template ?? channel.family ?? "unknown",
+          pipeline: entries,
+          ...(channel.styleDNA ? { styleDNA: channel.styleDNA } : {}),
+          ...(frozenModuleConfig ? { moduleOverrides: frozenModuleConfig } : {}),
+        });
       }
 
       // Hydrate scoped provider credentials only after every route/profile/
