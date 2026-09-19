@@ -5,8 +5,9 @@ import { hasAnyFootageProvider } from "@/lib/footage";
 import { hasMusicProvider } from "@/lib/music";
 import { hasMotionComic } from "@/lib/motionComic";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { hasQualifiedQwenTts } from "@/lib/qwenTts";
 import { hasTopicraft } from "@/lib/topicraft";
-import { hasFishKey } from "@/lib/tts";
+import { hasElevenLabsKey, hasFishKey, normalizeTtsProvider, type TtsProvider } from "@/lib/tts";
 import { hasNonGoogleVisionKey } from "@/lib/vision";
 import { hasWhiteboardSync } from "@/lib/whiteboardSync";
 
@@ -48,7 +49,8 @@ export interface AutomaticFamilyExecutionCapabilityReader {
   /** Final production visual QA must never silently fall back to Gemini. */
   readonly nonGoogleVisionReady: () => boolean;
   readonly topicPlannerReady: () => boolean;
-  readonly narrationReady: () => boolean;
+  /** Checks the exact TTS provider frozen into this channel's narration block. */
+  readonly narrationReady: (provider: TtsProvider) => boolean;
   readonly footageReady: () => boolean;
   readonly musicReady: () => boolean;
 }
@@ -68,7 +70,11 @@ const LIVE_CAPABILITIES: AutomaticFamilyExecutionCapabilityReader = {
   thumbnailRouteReady: () => hasNanoBanana(),
   nonGoogleVisionReady: () => hasNonGoogleVisionKey(),
   topicPlannerReady: () => hasTopicraft(),
-  narrationReady: () => hasFishKey(),
+  narrationReady: (provider) => {
+    if (provider === "elevenlabs") return hasElevenLabsKey();
+    if (provider === "qwen3") return hasQualifiedQwenTts();
+    return hasFishKey();
+  },
   footageReady: () => hasAnyFootageProvider(),
   musicReady: () => hasMusicProvider(),
 };
@@ -82,6 +88,29 @@ const STOCK_FOOTAGE_FAMILIES = new Set<FamilyKey>([
 const MUSIC_FAMILIES = new Set<FamilyKey>([
   "narrated_stock", "sleep", "shorts", "whiteboard", "quizyear", "illustrated_explainer",
 ]);
+
+export interface AutomaticFamilyExecutionReadinessOptions {
+  /**
+   * The narration provider frozen in the active channel/module configuration.
+   * Omitted intentionally preserves the renderer's historic Fish default for
+   * old records with no explicit narration setting.
+   */
+  readonly narrationProvider?: unknown;
+}
+
+function narrationProviderForReadiness(value: unknown): TtsProvider | undefined {
+  try {
+    return normalizeTtsProvider(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function narrationProviderLabel(provider: TtsProvider): string {
+  if (provider === "qwen3") return "qualified Qwen3 narration worker";
+  if (provider === "elevenlabs") return "ElevenLabs narration provider";
+  return "Fish narration provider";
+}
 
 function knownFamily(value: unknown): FamilyKey | undefined {
   return typeof value === "string" && (FAMILY_KEYS as readonly string[]).includes(value)
@@ -98,6 +127,7 @@ export function requiresAutomaticFamilyExecutionReadiness(family: unknown): bool
 export function assessAutomaticFamilyExecutionReadiness(
   family: FamilyKey,
   capabilities: AutomaticFamilyExecutionCapabilityReader = LIVE_CAPABILITIES,
+  options: AutomaticFamilyExecutionReadinessOptions = {},
 ): AutomaticFamilyExecutionReadiness {
   const blockers: string[] = [];
   if (!capabilities.thumbnailRouteReady()) {
@@ -113,8 +143,13 @@ export function assessAutomaticFamilyExecutionReadiness(
   if (TOPIC_AND_NARRATION_FAMILIES.has(family) && !capabilities.topicPlannerReady()) {
     blockers.push("automatic execution requires the non-Gemini topic-planning provider");
   }
-  if (TOPIC_AND_NARRATION_FAMILIES.has(family) && !capabilities.narrationReady()) {
-    blockers.push("automatic execution requires the Fish narration provider");
+  if (TOPIC_AND_NARRATION_FAMILIES.has(family)) {
+    const narrationProvider = narrationProviderForReadiness(options.narrationProvider);
+    if (!narrationProvider) {
+      blockers.push("automatic execution requires a recognized narration provider (Fish, ElevenLabs, or qualified Qwen3)");
+    } else if (!capabilities.narrationReady(narrationProvider)) {
+      blockers.push(`automatic execution requires the ${narrationProviderLabel(narrationProvider)}`);
+    }
   }
   if (STOCK_FOOTAGE_FAMILIES.has(family) && !capabilities.footageReady()) {
     blockers.push("automatic execution requires at least one configured stock-footage provider");
@@ -165,6 +200,7 @@ export function assessAutomaticFamilyExecutionReadiness(
 export function automaticFamilyExecutionReadinessAdmission(
   family: unknown,
   capabilities: AutomaticFamilyExecutionCapabilityReader = LIVE_CAPABILITIES,
+  options: AutomaticFamilyExecutionReadinessOptions = {},
 ): AutomaticFamilyExecutionReadinessAdmission {
   const resolved = knownFamily(family);
   if (!resolved || !certifiedFamilyAdmission(resolved).automatic) {
@@ -174,7 +210,7 @@ export function automaticFamilyExecutionReadinessAdmission(
       reason: "live automatic execution readiness does not apply to this route",
     };
   }
-  const assessment = assessAutomaticFamilyExecutionReadiness(resolved, capabilities);
+  const assessment = assessAutomaticFamilyExecutionReadiness(resolved, capabilities, options);
   return assessment.ready
     ? {
         applies: true,
@@ -191,8 +227,11 @@ export function automaticFamilyExecutionReadinessAdmission(
 }
 
 /** Fail before any inception provider action if a live automatic renderer is unavailable. */
-export function assertAutomaticFamilyExecutionReadiness(family: FamilyKey): void {
-  const assessment = assessAutomaticFamilyExecutionReadiness(family);
+export function assertAutomaticFamilyExecutionReadiness(
+  family: FamilyKey,
+  options: AutomaticFamilyExecutionReadinessOptions = {},
+): void {
+  const assessment = assessAutomaticFamilyExecutionReadiness(family, LIVE_CAPABILITIES, options);
   if (!assessment.ready) {
     throw new Error(
       `${family} cannot start automatic channel inception: ${assessment.blockers.join("; ")}`,

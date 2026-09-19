@@ -80,6 +80,10 @@ interface ChannelRow {
   contentLane?: unknown;
   family?: unknown;
   pipeline?: unknown;
+  // listChannels returns the complete owner-scoped channel record. The
+  // scheduler needs only this one frozen field to prove its selected TTS
+  // provider before it claims any spend-capable plan work.
+  moduleConfig?: Record<string, Record<string, unknown>>;
 }
 
 /**
@@ -292,7 +296,11 @@ export const generationScheduler = schedules.task({
       // Channel setup may have succeeded with a different provider state. A
       // cadence run must re-check the now-hydrated live stack before claiming
       // a plan or reaching any provider-capable path.
-      const automaticRuntimeAdmission = automaticFamilyExecutionReadinessAdmission(ch.family);
+      const automaticRuntimeAdmission = automaticFamilyExecutionReadinessAdmission(
+        ch.family,
+        undefined,
+        { narrationProvider: (ch.moduleConfig as Record<string, Record<string, unknown>> | undefined)?.["narration_tts"]?.["ttsProvider"] },
+      );
       if (!automaticRuntimeAdmission.automatic) {
         console.log(
           `[scheduler] ${ch.name}: automatic execution stack manual gate; ` +

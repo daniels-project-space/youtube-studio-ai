@@ -1071,7 +1071,11 @@ export const runPipelineTask = task({
       } catch (error) {
         throwForTaskRetryPolicy(error);
       }
-      const automaticRuntimeAdmission = automaticFamilyExecutionReadinessAdmission(persistedFamily);
+      const automaticRuntimeAdmission = automaticFamilyExecutionReadinessAdmission(
+        persistedFamily,
+        undefined,
+        { narrationProvider: (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig?.["narration_tts"]?.["ttsProvider"] },
+      );
       if (!automaticRuntimeAdmission.automatic) {
         console.log(
           `[run-pipeline] automatic execution stack manual gate for ${payload.runId}: ` +

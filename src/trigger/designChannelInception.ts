@@ -2190,7 +2190,10 @@ export async function executeDesignChannel(
   // Catalog admission alone cannot guarantee that the self-contained renderer
   // stack is present in this environment. Fail before research, art, or any
   // other inception provider work when an automatic family cannot execute.
-  assertAutomaticFamilyExecutionReadiness(payload.family);
+  // New automatic creation pins ElevenLabs in the currently certified
+  // onboarding catalog. Pass that exact provider to the generic gate rather
+  // than accidentally testing the legacy Fish default.
+  assertAutomaticFamilyExecutionReadiness(payload.family, { narrationProvider: "elevenlabs" });
 
   // A missing template or unavailable runtime cannot pass an end-to-end proof.
   // Persist only the deterministic shell and stop before research/model/art/

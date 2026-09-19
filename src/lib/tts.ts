@@ -35,6 +35,15 @@ export function hasFishKey(): boolean {
 }
 
 /**
+ * Keep provider admission checks alongside the provider implementation.  The
+ * automatic channel gate must not infer ElevenLabs readiness from an unrelated
+ * legacy Fish credential.
+ */
+export function hasElevenLabsKey(): boolean {
+  return Boolean(process.env.ELEVENLABS_API_KEY);
+}
+
+/**
  * Resolve a Fish Audio reference_id from a channel voice key, a niche, or a raw
  * 32-hex reference id (passed through). Defaults to sleepless_historian.
  */

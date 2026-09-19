@@ -54,6 +54,29 @@ assert.deepEqual(
 assert.equal(
   assessAutomaticFamilyExecutionReadiness("narrated_stock", {
     ...allReady,
+    narrationReady: (provider) => provider === "elevenlabs",
+  }, { narrationProvider: "elevenlabs" }).ready,
+  true,
+  "a newly created ElevenLabs channel must not be rejected for lacking a legacy Fish key",
+);
+assert.equal(
+  assessAutomaticFamilyExecutionReadiness("narrated_stock", {
+    ...allReady,
+    narrationReady: (provider) => provider === "elevenlabs",
+  }, { narrationProvider: "qwen3" }).ready,
+  false,
+  "a channel pinned to Qwen must prove Qwen, not merely an unrelated TTS provider",
+);
+assert.ok(
+  assessAutomaticFamilyExecutionReadiness("narrated_stock", {
+    ...allReady,
+    narrationReady: () => true,
+  }, { narrationProvider: "not-a-provider" }).blockers.some((blocker) => blocker.includes("recognized narration provider")),
+  "an unknown provider must stop before provider work rather than inheriting the historical Fish default",
+);
+assert.equal(
+  assessAutomaticFamilyExecutionReadiness("narrated_stock", {
+    ...allReady,
     thumbnailRouteReady: () => false,
   }).ready,
   false,

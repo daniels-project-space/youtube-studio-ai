@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../designChannelInception.ts", import.meta.url), "utf8");
 const bootstrap = source.indexOf("await bootstrapSecrets(log);");
-const capabilityGate = source.indexOf("assertAutomaticFamilyExecutionReadiness(payload.family);");
+const capabilityGate = source.indexOf("assertAutomaticFamilyExecutionReadiness(payload.family,");
 const unavailableDesign = source.indexOf("if (!design.available || !design.productionReady)");
 
 assert.ok(bootstrap >= 0, "inception must hydrate server-only capabilities before checking them");
