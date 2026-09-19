@@ -140,9 +140,7 @@ export function ChannelFolderWorkspace({
   return (
     <section className={styles.workspace} aria-labelledby="channel-folders-title">
       <header className={styles.header}>
-        <div>
-          <h2 id="channel-folders-title">Rooms</h2>
-        </div>
+        <h2 id="channel-folders-title">Rooms</h2>
         <button
           type="button"
           className="studio-button"
@@ -176,7 +174,7 @@ export function ChannelFolderWorkspace({
           onDrop={(event) => void dropChannel(event, null)}
         >
           <span className={styles.folderMark} aria-hidden="true"><AllGlyph /></span>
-          <span><strong>Main channels</strong><small>Standalone fleet</small></span>
+          <span><strong>Main</strong><small>Standalone</small></span>
           <i>{standaloneCount}</i>
         </button>
 
@@ -203,7 +201,7 @@ export function ChannelFolderWorkspace({
                 <>
                   <button type="button" className={styles.roomMain} onClick={() => onSelect(selectedFolder === folder.name ? null : folder.name)} aria-pressed={selectedFolder === folder.name}>
                     <span className={styles.folderMark} aria-hidden="true"><FolderGlyph /></span>
-                    <span className={styles.roomCopy}><strong>{folder.name}</strong><small>{roomChannels.length ? `${roomChannels.length} ${roomChannels.length === 1 ? "channel" : "channels"}` : "Ready for a channel"}</small></span>
+                    <span className={styles.roomCopy}><strong>{folder.name}</strong><small>{roomChannels.length || "Empty"}</small></span>
                     <span className={styles.avatars} aria-hidden="true">
                       {roomChannels.slice(0, 3).map((channel) => (
                         <ChannelAvatar key={channel._id} imageKey={channel.identity?.imageKey} name={channel.name} niche={channel.identity?.niche} palette={channel.identity?.palette} size={24} radius={7} />
