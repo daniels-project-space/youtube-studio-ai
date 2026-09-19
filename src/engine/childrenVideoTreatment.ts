@@ -127,8 +127,8 @@ export function buildChildrenVideoTreatment(args: {
 
 export function assertChildrenVideoTreatment(value: unknown): ChildrenVideoTreatment {
   const treatment = ChildrenVideoTreatmentSchema.parse(value);
-  const { fingerprint: _fingerprint, ...unsigned } = treatment;
-  if (treatment.fingerprint !== childrenVideoTreatmentFingerprint(unsigned)) {
+  const { fingerprint, ...unsigned } = treatment;
+  if (fingerprint !== childrenVideoTreatmentFingerprint(unsigned)) {
     throw new Error("children_video_treatment: fingerprint does not match treatment contents");
   }
   return treatment;
@@ -159,8 +159,12 @@ export function assertChildrenVideoTreatmentForRender(args: {
   // composition contract; when that module is present, its handoff is strict.
   if (args.treatment === undefined) return;
   const treatment = assertChildrenVideoTreatment(args.treatment);
+  const durationSec = typeof args.durationSec === "number" && Number.isFinite(args.durationSec)
+    ? args.durationSec
+    : undefined;
   if (
-    Math.abs(treatment.format.durationSec - Number(args.durationSec)) > 0.05 ||
+    durationSec === undefined ||
+    Math.abs(treatment.format.durationSec - durationSec) > 0.05 ||
     treatment.format.aspect !== args.aspect
   ) {
     throw new Error("children_video_treatment: renderer geometry or duration does not match the sealed handoff");
