@@ -39,6 +39,8 @@ assert.match(wizard, /reviewHandoffHref/);
 assert.match(desk, /api\.childrenReviewIntakes\.listMine/);
 assert.match(desk, /api\.childrenReviewIntakes\.saveMine/);
 assert.match(desk, /No review, approval, notification, render, or release has occurred/);
+assert.match(desk, /Sign in as the workspace owner to save a private review draft/);
+assert.match(desk, /disabled=\{!owner\}/, "a non-owner must not receive controls that appear writable");
 
 for (const path of [
   "src/trigger/runPipeline.ts",

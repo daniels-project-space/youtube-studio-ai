@@ -48,6 +48,13 @@ function ChildrenReviewDesk() {
   const [savedStatus, setSavedStatus] = useState<"draft" | "ready_for_review" | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const owner = access === "owner";
+  const briefCompletion = [
+    form.channelName,
+    form.learningObjective,
+    form.curriculumDraft,
+    form.showBibleDraft,
+  ].filter((value) => value.trim().length > 0).length;
 
   const edit = (key: keyof typeof EMPTY, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -69,7 +76,7 @@ function ChildrenReviewDesk() {
   };
 
   const save = async (readyForReview: boolean) => {
-    if (access !== "owner" || busy) return;
+    if (!owner || busy) return;
     setBusy(true);
     setMessage("");
     try {
@@ -88,26 +95,36 @@ function ChildrenReviewDesk() {
 
   return <div className={styles.page}>
     <header className={styles.header}>
-      <div><small>CHILDREN’S LEARNING · PRIVATE</small><h1>Learning draft</h1><p>Set the show and one outcome. Child-editor review comes before production.</p></div>
+      <div><small>CHILDREN’S LEARNING · PRIVATE</small><h1>Learning draft</h1><p>One show, one measurable outcome, then child-editor review.</p></div>
       <Link href="/channels/new">New channel</Link>
     </header>
 
     <div className={styles.layout}>
       <section className={styles.card} aria-label="Children's show review draft">
-        <div className={styles.cardHeader}><div><small>01 / SHOW BRIEF</small><h2>{intakeId ? "Edit draft" : "New draft"}</h2></div><span>{savedStatus === "ready_for_review" ? "Editor review" : savedStatus === "draft" ? "Saved" : "Private"}</span></div>
-        <label>Show name<input value={form.channelName} maxLength={120} onChange={(event) => edit("channelName", event.target.value)} placeholder="Original learning show" /></label>
-        <label>Age band<select value={form.ageBand} onChange={(event) => edit("ageBand", event.target.value)}><option value="toddler">Toddler · 2–3</option><option value="preschool">Preschool · 3–5</option><option value="early_primary">Early primary · 5–8</option></select></label>
-        <label>Learning outcome<input value={form.learningObjective} maxLength={240} onChange={(event) => edit("learningObjective", event.target.value)} placeholder="A child can identify…" /></label>
-        <label>Curriculum evidence<textarea value={form.curriculumDraft} maxLength={4000} rows={5} onChange={(event) => edit("curriculumDraft", event.target.value)} placeholder="Topic, source, vocabulary, practice, and the observable result." /></label>
-        <label>Show bible<textarea value={form.showBibleDraft} maxLength={4000} rows={5} onChange={(event) => edit("showBibleDraft", event.target.value)} placeholder="Original guide, world, recurring problem, participation, and recall." /></label>
-        <p className={styles.hint}>Original fictional characters only. Do not include children’s personal details.</p>
-        {access === "owner" ? <div className={styles.actions}><button disabled={busy} onClick={() => void save(false)}>Save draft</button><button disabled={busy} className={styles.primary} onClick={() => void save(true)}>Mark ready for child editor</button></div>
-          : <p className={styles.notice}>Owner access is required to open or save private review drafts.</p>}
+        <div className={styles.cardHeader}><div><small>01 / SHOW BRIEF</small><h2>{intakeId ? "Edit draft" : "New draft"}</h2></div><div className={styles.statusGroup}><span>{briefCompletion}/4 complete</span><span>{savedStatus === "ready_for_review" ? "Editor review" : savedStatus === "draft" ? "Saved" : "Private"}</span></div></div>
+        <div className={styles.formGrid}>
+          <label>Show name<input disabled={!owner} value={form.channelName} maxLength={120} onChange={(event) => edit("channelName", event.target.value)} placeholder="Original learning show" /></label>
+          <label>Age band<select disabled={!owner} value={form.ageBand} onChange={(event) => edit("ageBand", event.target.value)}><option value="toddler">Toddler · 2–3</option><option value="preschool">Preschool · 3–5</option><option value="early_primary">Early primary · 5–8</option></select></label>
+          <label className={styles.wideField}>Learning outcome<input disabled={!owner} value={form.learningObjective} maxLength={240} onChange={(event) => edit("learningObjective", event.target.value)} placeholder="A child can identify…" /></label>
+        </div>
+        <div className={styles.detailStack}>
+          <details open>
+            <summary><span>Curriculum evidence</span><small>{form.curriculumDraft.trim() ? "Added" : "Required"}</small></summary>
+            <label className={styles.detailLabel}>Topic, source, vocabulary, practice, and observable result<textarea disabled={!owner} value={form.curriculumDraft} maxLength={4000} rows={4} onChange={(event) => edit("curriculumDraft", event.target.value)} placeholder="Topic, source, vocabulary, practice, and the observable result." /></label>
+          </details>
+          <details>
+            <summary><span>Show bible</span><small>{form.showBibleDraft.trim() ? "Added" : "Required"}</small></summary>
+            <label className={styles.detailLabel}>Original guide, world, participation, and recall<textarea disabled={!owner} value={form.showBibleDraft} maxLength={4000} rows={4} onChange={(event) => edit("showBibleDraft", event.target.value)} placeholder="Original guide, world, recurring problem, participation, and recall." /></label>
+          </details>
+        </div>
+        <p className={styles.hint}>Use original fictional characters. Never include a child’s personal details.</p>
+        {owner ? <div className={styles.actions}><button disabled={busy} onClick={() => void save(false)}>Save draft</button><button disabled={busy} className={styles.primary} onClick={() => void save(true)}>Send to child editor</button></div>
+          : <p className={styles.notice}>Sign in as the workspace owner to save a private review draft.</p>}
         {message && <p className={styles.notice} role="status">{message}</p>}
       </section>
 
       <aside className={styles.side}>
-        <section className={styles.card}><small>02 / REVIEW</small><h2>Private by design</h2><p>This desk does not create a channel, render a video, or change YouTube.</p><ul><li>Age band + outcome</li><li>Original identity</li><li>Curriculum + safety proof</li></ul></section>
+        <section className={styles.card}><small>02 / REVIEW</small><h2>Private by design</h2><ul className={styles.checklist}><li><span>01</span>Age-fit outcome</li><li><span>02</span>Original world</li><li><span>03</span>Curriculum proof</li></ul><p>This desk only saves a private handoff. It never creates, renders, or releases a channel.</p></section>
         <section className={styles.card}><small>SAVED DRAFTS · LATEST 24</small><h2>Continue a draft</h2>{drafts?.length ? <div className={styles.draftList}>{drafts.map((draft) => <button key={draft._id} onClick={() => select(draft)} data-active={intakeId === draft._id ? "true" : undefined}><strong>{draft.channelName}</strong><span>{draft.readyForReview ? "Editor review · private" : "Draft · private"}</span></button>)}</div> : <p>{drafts === undefined && access === "owner" ? "Loading drafts…" : "No saved drafts yet."}</p>}</section>
       </aside>
     </div>
