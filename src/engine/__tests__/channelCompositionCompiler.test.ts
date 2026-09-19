@@ -65,6 +65,19 @@ const input = {
 const compiled = compileCertifiedChannelComposition(input);
 const replay = compileCertifiedChannelComposition(input);
 
+const pinnedPipeline: PipelineEntry[] = [
+  ...narratedFixture.map((entry) => ({ ...entry, version: "2.0.0" })),
+  { block: "visual_inserts", version: "3.0.0", params: { maxInserts: 1 } },
+];
+const pinnedBefore = canonicalJson(pinnedPipeline);
+const pinnedComposition = compileCertifiedChannelComposition({ ...input, pipeline: pinnedPipeline });
+assert.equal(pinnedComposition.pipeline.find((entry) => entry.block === "script_gen")?.version, "2.0.0");
+assert.equal(pinnedComposition.pipeline.find((entry) => entry.block === "visual_inserts")?.version, "3.0.0",
+  "certified placement and parameter merge must retain the selected implementation");
+assert.equal(pinnedComposition.pipeline.find((entry) => entry.block === "visual_inserts")?.params?.maxInserts, 5);
+assert.equal(canonicalJson(pinnedPipeline), pinnedBefore);
+assert.notEqual(pinnedComposition.fingerprint, compiled.fingerprint);
+
 assert.equal(compiled.version, CHANNEL_COMPOSITION_COMPILER_VERSION);
 assert.equal(compiled.compositionBinding.kind, "capability_plan_v1");
 assert.equal(compiled.compositionBinding.plan.base.key, "narrated_visual_essay");

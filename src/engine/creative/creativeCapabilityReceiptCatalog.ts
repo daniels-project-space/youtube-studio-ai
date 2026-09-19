@@ -41,6 +41,7 @@ export interface CreativeCapabilityReceiptIntent {
 
 export interface CreativeCapabilityReceiptPipelineEntry {
   block: string;
+  version?: string;
   params?: Readonly<Record<string, unknown>>;
 }
 

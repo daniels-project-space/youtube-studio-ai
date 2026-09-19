@@ -24,6 +24,7 @@ import type { PipelineEntry } from "./types";
 /** One module the channel runs, with its per-channel params. Mirrors PipelineEntry. */
 export const PipelineEntrySchema = z.object({
   block: z.string(),
+  version: z.string().refine((value) => value.trim().length > 0, "version must be a non-empty string").optional(),
   params: z.record(z.string(), z.unknown()).optional(),
 });
 

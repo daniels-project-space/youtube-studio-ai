@@ -71,10 +71,16 @@ export function validatePipeline(
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    const manifest = getManifest(entry.block);
+    if (entry.version !== undefined && (typeof entry.version !== "string" || !entry.version.trim())) {
+      throw new PipelineValidationError(
+        `step ${i} block "${entry.block}" version must be a non-empty string`,
+      );
+    }
+    const manifest = getManifest(entry.block, entry.version);
     if (!manifest) {
       throw new PipelineValidationError(
-        `step ${i} references unknown block "${entry.block}" (not in registry)`,
+        `step ${i} references unknown block "${entry.block}"` +
+          (entry.version === undefined ? "" : ` version "${entry.version}"`) + " (not in registry)",
       );
     }
     const block = manifest.block;

@@ -26,6 +26,7 @@ import { getObjectBytes, putObject } from "@/lib/storage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
+import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 
 export interface PlanWeekPreparedScriptArgs {
   ownerId: string;
@@ -219,6 +220,7 @@ export const planWeekPreparedScriptTask = task({
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "OPENROUTER_API_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script");
     const sidecarKey = planWeekPreparedScriptKey({
       ownerId: payload.ownerId,
       channelSlug: payload.channelSlug,

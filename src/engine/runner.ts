@@ -22,6 +22,7 @@ import {
   type StageStatus,
 } from "./types";
 import type { ResolvedPipeline } from "./validate";
+import { assertExecutableSelection } from "./executableSelection";
 import type { VisualRepairSignal } from "./healer";
 import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
@@ -560,6 +561,7 @@ export async function runPipeline(
   resolved: ResolvedPipeline,
   opts: RunPipelineOptions,
 ): Promise<RunResult> {
+  assertExecutableSelection(resolved);
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
   const artifactRefs: Record<string, ArtifactRef> = {};

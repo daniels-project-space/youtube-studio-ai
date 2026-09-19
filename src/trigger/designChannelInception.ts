@@ -1139,7 +1139,7 @@ function customizePipelineFromDna(
         changed.push("whiteboard_scribe.boardMode=chalk");
       }
     }
-    return { block: entry.block, params: Object.keys(params).length ? params : undefined };
+    return { ...entry, params: Object.keys(params).length ? params : undefined };
   });
   return { pipeline, changed };
 }
@@ -1151,7 +1151,7 @@ function wireVoiceReadiness(
   channelId: Id<"channels">,
 ): { pipeline: PipelineEntry[]; wired: string[] } {
   const pipeline = source.map((entry) => ({
-    block: entry.block,
+    ...entry,
     ...(entry.params ? { params: { ...entry.params } } : {}),
   }));
   const voiceCastingValidation = {
@@ -1303,7 +1303,7 @@ function buildProbePipeline(source: readonly PipelineEntry[]): PipelineEntry[] {
         params.panels = 4;
         params.width = 1280;
       }
-      return { block: entry.block, params: Object.keys(params).length ? params : undefined };
+      return { ...entry, params: Object.keys(params).length ? params : undefined };
     });
 }
 

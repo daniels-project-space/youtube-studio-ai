@@ -102,6 +102,7 @@ export function buildRouteQualificationBenchmarkPipeline(
     .filter((entry) => !DELIVERY_ONLY_BLOCKS.has(entry.block))
     .map((entry) => ({
       block: entry.block,
+      ...(entry.version === undefined ? {} : { version: entry.version }),
       ...(entry.params === undefined ? {} : { params: structuredClone(entry.params) }),
     }));
   if (benchmark.some((entry) => DELIVERY_ONLY_BLOCKS.has(entry.block))) {

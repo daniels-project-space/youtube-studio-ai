@@ -16,6 +16,7 @@ export type ChannelPublishAction = (typeof CHANNEL_PUBLISH_ACTIONS)[number];
 
 type PipelineEntryLike = {
   block?: unknown;
+  version?: unknown;
   params?: unknown;
 };
 
@@ -49,7 +50,7 @@ export function channelPublishConfiguration(
           Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
       )
     : [];
-  const externalBlocks: Array<{ block: string; params: Record<string, unknown> }> = [];
+  const externalBlocks: Array<{ block: string; version?: string; params: Record<string, unknown> }> = [];
   const actions = new Set<ChannelPublishAction>();
 
   for (const entry of entries) {
@@ -58,7 +59,14 @@ export function channelPublishConfiguration(
       continue;
     }
     const params = paramsOf(entry);
-    externalBlocks.push({ block: entry.block, params });
+    if (entry.version !== undefined && (typeof entry.version !== "string" || !entry.version.trim())) {
+      throw new Error(`channel publish configuration has invalid version for ${entry.block}`);
+    }
+    externalBlocks.push({
+      block: entry.block,
+      ...(entry.version === undefined ? {} : { version: entry.version }),
+      params,
+    });
     if (entry.block === "upload_draft") {
       if (params["publishMode"] === "public") actions.add("youtube_public");
       if (params["publishMode"] === "scheduled") actions.add("youtube_scheduled");

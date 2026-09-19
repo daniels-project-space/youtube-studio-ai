@@ -27,6 +27,7 @@ import { ChannelMusicProgramSchema, createChannelMusicProgram, type ChannelMusic
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { getMusicBrief } from "@/engine/creative/brief";
 import { assertOriginalMusicProgramPlanBinding } from "@/engine/originalMusicProgram";
+import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
@@ -269,6 +270,7 @@ export const planWeekPreparedMusicTask = task({
     const payload = assertArgs(rawPayload);
     await bootstrapSecrets(() => undefined, { services: ["cloudflare"] });
     const manifest = await readManifest(payload);
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-music");
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     const sidecarKey = planWeekPreparedMusicKey(scope);
     const audioKey = planWeekPreparedMusicAudioKey(scope);

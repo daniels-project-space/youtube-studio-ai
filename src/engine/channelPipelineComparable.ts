@@ -17,6 +17,7 @@ export function comparablePipeline(entries: readonly PipelineEntry[]): string {
   return JSON.stringify(
     entries.map((entry) => ({
       block: entry.block,
+      ...(entry.version === undefined ? {} : { version: entry.version }),
       params: canonicalValue(entry.params ?? null),
     })),
   );

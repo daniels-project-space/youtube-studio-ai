@@ -155,6 +155,8 @@ export interface Block {
 /** One entry of a channel's ordered pipeline. */
 export interface PipelineEntry {
   block: string;
+  /** Exact installed manifest version; omitted entries retain the default implementation. */
+  version?: string;
   params?: Record<string, unknown>;
 }
 

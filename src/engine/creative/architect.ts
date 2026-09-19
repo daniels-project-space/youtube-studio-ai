@@ -531,7 +531,7 @@ export function applyArchitectPlan(
   const byBlock = new Map([...ARCHITECT_TOOLBOX, ...(opts.extraTools ?? [])].map((t) => [t.block, t]));
 
   let pipeline: PipelineEntry[] = base.map((e) => ({
-    block: e.block,
+    ...e,
     params: e.params ? { ...e.params } : undefined,
   }));
   const applied: ArchitectResult["report"]["applied"] = [];
@@ -539,7 +539,7 @@ export function applyArchitectPlan(
 
   const tryValidated = (next: PipelineEntry[], op: { action: string; block: string }, reason?: string): boolean => {
     try {
-      const probe = next.map((e) => ({ block: e.block, params: e.params }));
+      const probe = next.map((e) => ({ ...e }));
       enforceInvariants(probe);
       validatePipeline(probe);
       assertPipelineMatchesContentLane(contentLane, probe);
@@ -649,7 +649,7 @@ export function applyArchitectPlan(
       continue;
     }
     const next = pipeline.map((e) =>
-      e.block === d.block ? { block: e.block, params: { ...(e.params ?? {}), ...clean } } : e,
+      e.block === d.block ? { ...e, params: { ...(e.params ?? {}), ...clean } } : e,
     );
     if (tryValidated(next, d, "param change breaks the graph")) {
       applied.push({ action: "set_params", block: d.block, params: clean, why: d.why });
@@ -662,7 +662,7 @@ export function applyArchitectPlan(
   // Final invariant pass on the winning pipeline.
   enforceInvariants(pipeline);
   try {
-    validatePipeline(pipeline.map((e) => ({ block: e.block, params: e.params })));
+    validatePipeline(pipeline.map((e) => ({ ...e })));
     assertPipelineMatchesContentLane(contentLane, pipeline);
   } catch (e) {
     // Should be unreachable (incremental gates) — fall back to the floor.

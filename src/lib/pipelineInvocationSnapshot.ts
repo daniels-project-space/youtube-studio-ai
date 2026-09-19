@@ -214,6 +214,9 @@ export function normalizePipelineInvocationSnapshot(
     const block = requiredText(entry.block, "block id");
     return {
       block,
+      ...(entry.version === undefined
+        ? {}
+        : { version: requiredText(entry.version, `version for ${block}`) }),
       ...(entry.params !== undefined
         ? { params: record(entry.params, `params for ${block}`) }
         : {}),

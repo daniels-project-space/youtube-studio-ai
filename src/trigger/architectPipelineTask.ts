@@ -111,7 +111,7 @@ export const architectPipelineTask = task({
       ok: true,
       dryRun: Boolean(payload.dryRun),
       report: arch.report,
-      pipeline: arch.pipeline.map((e) => ({ block: e.block, params: e.params })),
+      pipeline: arch.pipeline.map((e) => ({ ...e })),
     };
   },
 });

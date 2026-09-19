@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PipelineEntry } from "./types";
 import type { ResolvedPipeline } from "./validate";
+import { assertExecutableSelection } from "./executableSelection";
 import { allManifests, getManifest } from "./registry";
 import { configuredMaxCostUsd } from "./moduleManifest";
 import {
@@ -218,8 +219,11 @@ const structuralPolicyManifestById = new Map(
   STRUCTURAL_POLICY_MANIFESTS.map((manifest) => [manifest.id, manifest]),
 );
 
-function projectRuntimeManifest(id: string): PolicyManifestProjection | undefined {
-  const manifest = getManifest(id);
+function projectRuntimeManifest(id: string, version?: string): PolicyManifestProjection | undefined {
+  const manifest = getManifest(id, version);
+  if (version !== undefined && !manifest) {
+    throw new PipelinePolicyError(`unknown executable version for ${id}: ${version}`);
+  }
   if (!manifest) return undefined;
   return {
     id: manifest.id,
@@ -233,8 +237,12 @@ function projectRuntimeManifest(id: string): PolicyManifestProjection | undefine
 function getPolicyManifest(
   id: string,
   source: PolicyManifestSource,
+  version?: string,
 ): PolicyManifestProjection | undefined {
-  return source === "runtime" ? projectRuntimeManifest(id) : structuralPolicyManifestById.get(id);
+  if (version !== undefined && source === "structural") {
+    throw new PipelinePolicyError(`explicit executable version for ${id} requires runtime manifest validation`);
+  }
+  return source === "runtime" ? projectRuntimeManifest(id, version) : structuralPolicyManifestById.get(id);
 }
 
 function allPolicyManifests(source: PolicyManifestSource): readonly PolicyManifestProjection[] {
@@ -285,7 +293,7 @@ function pipelineCapabilities(
   source: PolicyManifestSource,
 ): Set<string> {
   return new Set(
-    entries.flatMap((entry) => getPolicyManifest(entry.block, source)?.capabilities ?? []),
+    entries.flatMap((entry) => getPolicyManifest(entry.block, source, entry.version)?.capabilities ?? []),
   );
 }
 
@@ -295,7 +303,7 @@ function findArtifactProducerIndex(
   source: PolicyManifestSource,
 ): number {
   return entries.findIndex((entry) => {
-    const manifest = getPolicyManifest(entry.block, source);
+    const manifest = getPolicyManifest(entry.block, source, entry.version);
     return Boolean(manifest?.produces.includes(artifact));
   });
 }
@@ -323,7 +331,7 @@ function insertCapabilityProvider(
   for (const candidate of candidates) {
     const existingProduced = new Set(
       entries.flatMap((entry) => {
-        return getPolicyManifest(entry.block, source)?.produces ?? [];
+        return getPolicyManifest(entry.block, source, entry.version)?.produces ?? [];
       }),
     );
     if (candidate.produces.some((artifact) => existingProduced.has(artifact))) continue;
@@ -345,7 +353,7 @@ function producesArtifact(
   artifact: string,
   source: PolicyManifestSource,
 ): boolean {
-  return Boolean(getPolicyManifest(entry.block, source)?.produces.includes(artifact));
+  return Boolean(getPolicyManifest(entry.block, source, entry.version)?.produces.includes(artifact));
 }
 
 /**
@@ -462,10 +470,14 @@ export function completePipelineForPolicy(
 ): { entries: PipelineEntry[]; inserted: string[]; retired: string[] } {
   const generationProfileId = options?.generationProfile ?? DEFAULT_GENERATION_PROFILE;
   const manifestSource = options?.manifestSource ?? "runtime";
-  const entries = source.map((entry) => ({
+  const entries: PipelineEntry[] = source.map((entry) => ({
     block: entry.block,
+    ...(entry.version !== undefined ? { version: entry.version } : {}),
     ...(entry.params ? { params: { ...entry.params } } : {}),
   }));
+  for (const entry of entries) {
+    if (entry.version !== undefined) getPolicyManifest(entry.block, manifestSource, entry.version);
+  }
   const retired: string[] = [];
 
   // qa_refine is a proven no-op whose implementation was fully replaced by
@@ -474,6 +486,9 @@ export function completePipelineForPolicy(
   // the retired block no longer needs to remain registered forever.
   for (let index = entries.length - 1; index >= 0; index--) {
     if (entries[index].block !== "qa_refine") continue;
+    if (entries[index].version !== undefined) {
+      throw new PipelinePolicyError("cannot retire explicitly versioned qa_refine");
+    }
     entries.splice(index, 1);
     retired.push("qa_refine");
   }
@@ -488,6 +503,9 @@ export function completePipelineForPolicy(
     if (assembleEntry.block !== "assemble" || assembleEntry.params?.["deblurIntro"] === false) continue;
     for (let index = assembleIndex - 1; index >= 0; index--) {
       if (entries[index].block !== "intro_card") continue;
+      if (entries[index].version !== undefined) {
+        throw new PipelinePolicyError("cannot retire explicitly versioned intro_card");
+      }
       entries.splice(index, 1);
       retired.push("intro_card");
       assembleIndex--;
@@ -696,8 +714,10 @@ export function compilePipeline(
   resolved: ResolvedPipeline,
   policy: PipelinePolicy = PRODUCTION_CONTRACT_POLICY,
 ): PipelineCompilation {
-  if (resolved.manifests.length !== resolved.entries.length) {
-    throw new PipelinePolicyError("resolved pipeline lost its executable manifest alignment");
+  try {
+    assertExecutableSelection(resolved);
+  } catch (error) {
+    throw new PipelinePolicyError(error instanceof Error ? error.message : "invalid executable selection");
   }
 
   const capabilities = new Set<string>();

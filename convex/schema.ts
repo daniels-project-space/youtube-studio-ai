@@ -379,6 +379,7 @@ export default defineSchema({
     pipeline: v.array(
       v.object({
         block: v.string(),
+        version: v.optional(v.string()),
         params: v.optional(v.any()),
       }),
     ),

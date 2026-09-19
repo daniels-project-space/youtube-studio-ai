@@ -76,6 +76,7 @@ function cloneParams(params: Readonly<Record<string, unknown>>): Record<string, 
 function clonePipeline(pipeline: readonly PipelineEntry[]): PipelineEntry[] {
   return pipeline.map((entry) => ({
     block: entry.block,
+    ...(entry.version !== undefined ? { version: entry.version } : {}),
     ...(entry.params ? { params: cloneParams(entry.params) } : {}),
   }));
 }
@@ -235,7 +236,7 @@ function mergeBlockParams(
     }),
   );
   pipeline[index] = {
-    block: entry.block,
+    ...entry,
     params: {
       ...(entry.params ? cloneParams(entry.params) : {}),
       ...cloneParams(operation.params),

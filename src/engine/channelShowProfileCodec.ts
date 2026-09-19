@@ -145,9 +145,12 @@ function parsePipeline(value: unknown): CreativeCapabilityReceiptPipelineEntry[]
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`channel show profile pipeline entry ${index} is invalid`);
     }
-    const candidate = entry as { block?: unknown; params?: unknown };
+    const candidate = entry as { block?: unknown; version?: unknown; params?: unknown };
     if (typeof candidate.block !== "string" || !candidate.block.trim()) {
       throw new Error(`channel show profile pipeline entry ${index} has an invalid block`);
+    }
+    if (candidate.version !== undefined && (typeof candidate.version !== "string" || !candidate.version.trim())) {
+      throw new Error(`channel show profile pipeline entry ${index} has an invalid version`);
     }
     if (
       candidate.params !== undefined &&
@@ -157,6 +160,7 @@ function parsePipeline(value: unknown): CreativeCapabilityReceiptPipelineEntry[]
     }
     return {
       block: candidate.block,
+      ...(candidate.version === undefined ? {} : { version: candidate.version }),
       ...(candidate.params === undefined
         ? {}
         : { params: candidate.params as Readonly<Record<string, unknown>> }),

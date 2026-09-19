@@ -573,7 +573,7 @@ export function designPipelineCore(
           delete params.seriesCount;
         }
       }
-      return { block: e.block, params: Object.keys(params).length ? params : undefined };
+      return { ...e, params: Object.keys(params).length ? params : undefined };
     });
 
   // A child-directed pipeline may render an original private review candidate,
@@ -596,7 +596,7 @@ export function designPipelineCore(
         params.publishMode = "draft";
         params.madeForKids = true;
       }
-      return { block: entry.block, params: Object.keys(params).length ? params : undefined };
+      return { ...entry, params: Object.keys(params).length ? params : undefined };
     });
   }
 
@@ -1461,7 +1461,7 @@ export function enforceLengthContract(
         pin("targetSeconds", lenSec);
       }
     }
-    return { block: e.block, params: Object.keys(p).length ? p : undefined };
+    return { ...e, params: Object.keys(p).length ? p : undefined };
   });
   return { pipeline: out, changed };
 }

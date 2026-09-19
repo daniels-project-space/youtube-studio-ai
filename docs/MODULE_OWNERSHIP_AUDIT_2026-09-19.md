@@ -38,6 +38,19 @@ do not exercise this adapter. Whiteboard separately hardcodes gain `0.10` in
 `cinematic`. Whiteboard needs separate integration/proof; this reproduction
 does not qualify every family or justify enabling EDL for unsupported routes.
 
+**Precedence follow-up:** simply forwarding the dropped object is not a safe
+fix. The current planner puts composer directives above explicit assembly
+parameters. An opted-in replacement must resolve each field as explicit
+assembly choice, then validated composer directive, then the existing default.
+Explicit zero gain and an explicitly chosen default loudness remain choices,
+not missing values. Only `bodyMusicVol` and final-master `targetLufs` belong in
+this assembly handoff. Composer `voiceFx` must not cause a second voice-effect
+pass: narration currently owns its own explicit-param/composer-audio fallback.
+LLM `duckDb`/`bedLufs`, music-track DNA loudness and Studio prose are different
+contracts, not interchangeable sources for these final-mix numbers. The
+production no-profile adapter also ignores `musicDuckProfile`; activating that
+control needs explicit precedence tests rather than an accidental side effect.
+
 ## 2. Generation imposes an independent arrangement over accepted direction
 
 [roleSections:199](/home/ubuntu/youtube-studio-ai/src/engine/channelMusicProgram.ts:199)

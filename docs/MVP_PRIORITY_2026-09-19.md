@@ -182,6 +182,18 @@ YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime npx tsx scripts/test
 
 ### Ordered delivery
 
+The [explicit module selection development batch](MODULE_VERSION_ISOLATION_2026-09-19.md)
+adds exact version dispatch, preservation through pipeline transformations and
+version-bound recovery checks. It is not yet complete legacy/helper/deployment
+isolation and does not authorize production activation of replacement modules.
+All 831 direct readiness tests pass, together with the production build including
+TypeScript, focused ESLint, structural audits and a 31.02-second real hermetic
+assembly smoke test. Real remote-worker fixture tests verify selected dispatch,
+missing-version/fingerprint refusal and unchanged historical selection. Weekly
+tasks now reject explicit pins before reuse/generation until their independent
+implementations are revision-aware and qualified. The code graph was refreshed;
+this batch remains on the development branch, with production main at `722facc4`.
+
 1. Preserve and reconcile the broken session's work. Aggregate `4da39dec` is
    protected by branch `recovery/studio-pre-rebase-4da39dec`. Both main and
    `/tmp/ysa-next-bcb` were clean at the starting revision. The aggregate is

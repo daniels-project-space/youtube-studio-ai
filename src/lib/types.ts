@@ -75,7 +75,7 @@ export type ChannelRow = {
   identity?: ChannelIdentity;
   /** Persisted cadence policy used by the automatic scheduler and calendar. */
   schedule?: ChannelSchedulePolicy;
-  pipeline?: { block: string; params?: unknown }[];
+  pipeline?: { block: string; version?: string; params?: unknown }[];
   /** A multilingual family is operated through its room/group surface rather
    * than being duplicated among standalone fleet cards. */
   groupId?: string;
