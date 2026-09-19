@@ -19,6 +19,8 @@ assert.match(page, /hiddenNicheCount > 0/u, "the full territory catalog must rem
 assert.match(page, /function creatorReadinessSummary\(/u,
   "creator holds need a concise user-facing admission explanation");
 assert.match(page, /H3 visual worker needs activation\./u);
+assert.match(page, /setClipNote\(null\);\s*setFamily\(next\);/u,
+  "a newly admitted route must clear stale route warnings instead of repeating old status beneath valid controls");
 assert.doesNotMatch(page, /nicheBlocker\}>Held: \{defaultFamilyReadiness\.blockers\[0\]\}/u,
   "the initial territory grid must not expose raw worker/environment variable names");
 assert.match(page, /const attentionStages = stageRows\.filter/u,

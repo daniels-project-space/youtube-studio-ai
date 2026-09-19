@@ -614,6 +614,9 @@ export default function NewChannelWizard() {
       setClipNote(`${FAMILIES[next].label} is held by its creator contract. ${creatorReadinessSummary(liveRuntime.blockers[0])}`);
       return;
     }
+    // A newly admitted route owns the visible status surface. Do not retain a
+    // rejection/suggestion note from the prior route beneath its real controls.
+    setClipNote(null);
     setFamily(next);
     setExecutableFormatAlternatives([]);
     setReviewHrefs([]);
@@ -665,7 +668,6 @@ export default function NewChannelWizard() {
         // opens its $0 intake rather than pretending the normal automatic
         // pipeline is merely unavailable.
         selectFamily(n.defaultFamily, preset?.targetSeconds, supervised);
-        setClipNote(`${FAMILIES[n.defaultFamily].label} starts with a private lesson-and-show review packet. It cannot render, create a YouTube channel, or publish until its child-editor evidence is complete.`);
       } else {
         // A blocked renderer is not permission to turn a lofi, lore, or
         // cinematic channel into an unrelated format. Leave the format
