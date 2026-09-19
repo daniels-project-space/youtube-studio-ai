@@ -21,6 +21,7 @@ import {
 } from "@/components/LibraryFilters";
 import { IconLibrary, IconSpark } from "@/components/icons";
 import {
+  defaultLibraryCollection,
   LIBRARY_PAGE_SIZE,
   pageLibraryGroup,
 } from "./libraryPaging";
@@ -60,6 +61,9 @@ export default function LibraryPage() {
   const setLibraryState = useMutation(api.videos.setLibraryState);
   const applyBulkLibraryState = useMutation(api.videos.applyBulkLibraryState);
   const undoBulkLibraryState = useMutation(api.videos.undoBulkLibraryState);
+  const currentCount = summary?.currentCount ?? 0;
+  const legacyCount = summary?.legacyCount ?? summary?.activeCount ?? 0;
+  const archivedCount = summary?.archivedCount ?? 0;
 
   const [filters, setFilters] = useState<LibraryFilterState>({
     channelSlug: null,
@@ -71,7 +75,10 @@ export default function LibraryPage() {
   });
   const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
-  const [collection, setCollection] = useState<CollectionMode>("current");
+  // A null selection means "use the useful data-led default". Once an
+  // operator picks a collection, their choice is retained for this view.
+  const [collectionOverride, setCollectionOverride] = useState<CollectionMode | null>(null);
+  const collection = collectionOverride ?? defaultLibraryCollection({ currentCount, legacyCount });
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: LibraryState } | null>(null);
   const [changeError, setChangeError] = useState<string | null>(null);
@@ -139,10 +146,6 @@ export default function LibraryPage() {
     }, LIBRARY_LOADING_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [loading]);
-  const currentCount = summary?.currentCount ?? 0;
-  const legacyCount = summary?.legacyCount ?? summary?.activeCount ?? 0;
-  const archivedCount = summary?.archivedCount ?? 0;
-
   // A closed review queue followed by an empty vault made the Library look as
   // if it had no work, even when it held retained thumbnail candidates. Make
   // that real work the first thing an operator sees; after their first toggle,
@@ -187,7 +190,7 @@ export default function LibraryPage() {
   };
 
   const selectCollection = (next: CollectionMode) => {
-    setCollection(next);
+    setCollectionOverride(next);
     setVisibleLimit(LIBRARY_PAGE_SIZE);
     setLightbox(null);
     setRecentChange(null);

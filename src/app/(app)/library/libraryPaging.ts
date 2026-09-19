@@ -1,5 +1,21 @@
 export const LIBRARY_PAGE_SIZE = 8;
 
+export type LibraryDefaultCollection = "current" | "legacy";
+
+/**
+ * Prefer the collection that contains retained work when a new Library view
+ * has no explicit operator selection. Archived items remain opt-in.
+ */
+export function defaultLibraryCollection({
+  currentCount,
+  legacyCount,
+}: {
+  currentCount: number;
+  legacyCount: number;
+}): LibraryDefaultCollection {
+  return currentCount === 0 && legacyCount > 0 ? "legacy" : "current";
+}
+
 export type LibraryPage<T> = {
   visible: T[];
   total: number;

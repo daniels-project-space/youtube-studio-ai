@@ -49,6 +49,12 @@ assert.match(library, /Legacy review/);
 assert.match(library, /isCurrentLibraryMaster/);
 assert.match(library, /legacyCount = summary\?\.legacyCount \?\? summary\?\.activeCount \?\? 0/,
   "the web release must preserve a truthful legacy view while a matching Convex function rollout is in flight");
+assert.match(library, /collectionOverride \?\? defaultLibraryCollection\(\{ currentCount, legacyCount \}\)/,
+  "an empty current vault must open the retained legacy review automatically when that is the only actionable collection");
+assert.match(paging, /export function defaultLibraryCollection\(/,
+  "the Library default must be a direct behavior contract, independently testable from the page");
+assert.match(library, /Once an\n  \/\/ operator picks a collection, their choice is retained for this view/,
+  "the data-led legacy default must not override an operator's explicit collection choice");
 assert.match(library, /Moved to archive/);
 assert.match(library, />\s*Undo\s*</);
 assert.match(card, /<article className="glass video-card"/);
