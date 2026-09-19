@@ -686,6 +686,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
           </span>
           {destination ? <Link href={destination.href}>{destination.label}<span aria-hidden="true">↗</span></Link> : null}
         </div>
+        {contract ? <ModuleContract contract={contract} /> : null}
         <div className={styles.moduleFacts}>
           <div data-warning={executionIsWarning}>
             <small>Runtime binding</small>
@@ -700,7 +701,6 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             <strong>{promotionProof ? `Recorded ${promotionProof.verifiedAt}` : "Not promoted"}</strong>
           </div>
         </div>
-        {contract ? <ModuleContract contract={contract} /> : null}
         {MODULES_WITH_PROOF.has(m.key) ? (
           <section className={styles.moduleEvidence} aria-label={`${m.title} evidence`}>
             <header><span>Evidence</span><small>{moduleEvidenceLabel(m.key)}</small></header>
