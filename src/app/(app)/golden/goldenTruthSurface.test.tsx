@@ -28,11 +28,10 @@ async function main(): Promise<void> {
   assert.match(html, /Reference card only/);
   assert.match(html, /title="No compiler binding"/);
   assert.match(html, /Studio Asset Library/);
-  assert.match(html, /Children’s Learning Studio/);
-  assert.match(html, /SUPERVISED/);
-  assert.match(html, /Supervised learning pathway/);
-  assert.match(html, /Curriculum intake · Learning Contract · Show Bible · Scene Compiler · child-editor review/);
-  assert.match(html, /SUPERVISED · PRIVATE REVIEW/);
+  assert.match(html, /Children’s Video Treatment/);
+  assert.match(html, /Children’s Show Bible/);
+  assert.match(html, /REGISTERED PIPELINE MODULE/);
+  assert.match(html, /Private child-editor review only/);
   assert.match(html, /Open children review desk/);
   assert.match(html, /IC controls remain unavailable until exact workflow/);
   assert.match(html, /MANIFEST REFERENCE/);

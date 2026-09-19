@@ -408,6 +408,53 @@ function assertProduced(manifest: ModuleManifest, patch: Record<string, unknown>
 }
 
 /**
+ * Validate every artifact a module is about to consume before it can execute.
+ *
+ * Outputs are already checked at the producer boundary, but a resumed run,
+ * seed store, remote rehydration, or a hand-authored pipeline can otherwise
+ * place an invalid value in the shared store.  Letting that value reach a
+ * provider makes a module appear to accept a handoff while failing later (or,
+ * worse, spending against the wrong interpretation).  Deferred inputs are
+ * intentionally skipped while absent: their module owns a separate durable
+ * rehydration path and `assertDeferredInputsExecutable` handles admission.
+ */
+export function assertConsumedArtifacts(
+  manifest: ModuleManifest,
+  store: Readonly<Record<string, unknown>>,
+): void {
+  const validate = (
+    key: string,
+    contract: ModuleManifest["consumes"][string],
+    required: boolean,
+  ) => {
+    const value = store[key];
+    if (value === undefined || value === null) {
+      if (required && !manifest.deferredConsumes?.includes(key)) {
+        throw new Error(
+          `module "${manifest.id}" requires input "${key}" but the upstream artifact is absent`,
+        );
+      }
+      return;
+    }
+    try {
+      validateArtifact(contract, value);
+    } catch (error) {
+      throw new Error(
+        `module "${manifest.id}" received invalid ${contract.type}@${contract.version} for "${key}": ` +
+          `${error instanceof Error ? error.message : error}`,
+      );
+    }
+  };
+
+  for (const [key, contract] of Object.entries(manifest.consumes)) {
+    validate(key, contract, true);
+  }
+  for (const [key, contract] of Object.entries(manifest.optionalConsumes)) {
+    validate(key, contract, false);
+  }
+}
+
+/**
  * VERIFIED parallel groups: contiguous pipeline blocks proven (by reading their
  * store access, not just `consumes`) to never read each other's products. These
  * are the ONLY blocks the runner co-schedules — everything else stays strictly
@@ -1193,6 +1240,10 @@ export async function runPipeline(
       ) {
         await rehydrateCachedInputsForLocalFallback(block, blockIndex);
       }
+      // The declared ABI is a runtime boundary, not documentation: validate
+      // typed handoffs after any local rehydration and before remote dispatch
+      // or a provider-backed retry can begin.
+      assertConsumedArtifacts(manifest, store);
       const retries = normalizeRetryCount(params["retries"], opts.defaultRetries);
       let patch: Record<string, unknown>;
       if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {

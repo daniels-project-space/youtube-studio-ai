@@ -12,10 +12,8 @@ export interface CatalogExecutionBinding {
   /**
    * `registered-private-release` keeps a locally registered post-QA block
    * auditable without presenting it as a creator-admitted executable route.
-   * `supervised-pathway` documents a real owner-facing intake that composes
-   * separately owned blocks, without falsely claiming a second executor.
    */
-  kind: "pipeline-module" | "registered-private-release" | "supervised-pathway" | "external-task" | "catalog-only";
+  kind: "pipeline-module" | "registered-private-release" | "external-task" | "catalog-only";
   executableIds: readonly string[];
   note?: string;
 }
@@ -429,13 +427,6 @@ export function catalogExecutionAvailability(
         label: "PRIVATE REVIEW ONLY",
         detail:
           "Registered for controlled private-review use. It has no owner-facing intake and cannot become an automatic creator route through registry presence.",
-      };
-    case "supervised-pathway":
-      return {
-        state: "private-review-only",
-        label: "SUPERVISED · PRIVATE REVIEW",
-        detail:
-          "Owner-facing supervised pathway. It composes its declared child-learning contracts into a private review handoff, never an automatic render, spend, scheduled, or public-release route.",
       };
     case "external-task":
       return {

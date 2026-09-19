@@ -103,7 +103,7 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
   },
   "children-video-treatment": {
     title: "Children’s Video Treatment",
-    promise: "Give every specialist module the exact child-video direction it needs.",
+    promise: "Give every module exact child-video direction.",
     bullets: ["One approved visual identity", "Renderer and thumbnail handoffs"],
   },
   "children-show-bible": {

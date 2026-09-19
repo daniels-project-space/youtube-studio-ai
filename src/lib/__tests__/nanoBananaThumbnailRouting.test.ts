@@ -34,8 +34,10 @@ async function main(): Promise<void> {
   assert.match(production, /generateFalNanoBananaProThumbnailWithReceipt\s*\(/);
   assert.match(production, /consumes:\s*\["title", "thumbnailDescription", "topic", "packageToOpeningPlan"\]/,
     "the universal thumbnail block must require a concrete visual brief and its package-to-opening binding");
-  assert.match(production, /sceneSeed:\s*thumbnailDescription/,
-    "the required brief must reach the thumbnail art director");
+  assert.match(production, /sceneSeed:\s*thumbnailSceneSeed/,
+    "the required brief and any domain handoff must reach the thumbnail art director");
+  assert.match(production, /childrenThumbnailDirection/,
+    "domain modules must be able to send typed direction without taking thumbnail ownership");
   assert.doesNotMatch(production, /draft_preview_placeholder|thumbnailer\s*===\s*["']title_card["']/,
     "title-card previews must not remain an alternate thumbnail route");
 
