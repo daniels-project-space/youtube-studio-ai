@@ -63,6 +63,16 @@ async function main(): Promise<void> {
   delete process.env.QWEN3_TTS_WORKER_TOKEN;
   delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST;
   assert.equal(qwenTtsReadiness().configured, false);
+  let unconfiguredSubmissions = 0;
+  globalThis.fetch = async () => {
+    unconfiguredSubmissions += 1;
+    throw new Error("an unconfigured worker must not be contacted");
+  };
+  await assert.rejects(
+    () => synthQwenNarration({ text: "Fail before a worker submission.", speaker: "Aiden" }),
+    /WORKER_IMAGE_DIGEST/,
+  );
+  assert.equal(unconfiguredSubmissions, 0);
   process.env.QWEN3_TTS_WORKER_URL = "https://qwen-worker.example/v1/synthesize";
   process.env.QWEN3_TTS_WORKER_TOKEN = "qwen-test-token-that-is-longer-than-thirty-two-characters";
   process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
