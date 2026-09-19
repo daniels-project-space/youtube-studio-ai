@@ -1,13 +1,13 @@
 /**
- * Curated Nano Banana avatar refresh for the current non-Stoic channel fleet.
+ * Curated Novita avatar refresh for the current non-Stoic channel fleet.
  *
  * Dry-run is the default. Generation writes provider-receipted local review
  * copies but does not publish or change a channel. Reviewed files are staged
  * and adopted separately, so no unchecked render can become a live avatar.
  *
- * Generate (one candidate each; maximum 9 images / $0.36):
+ * Generate (up to three reviewed candidates per channel):
  *   npx tsx --env-file=.env.local \
- *     scripts/refresh-channel-avatars.ts --generate --confirm-max-spend-usd=0.36
+ *     scripts/refresh-channel-avatars.ts --generate --confirm-max-spend-usd=<printed-cap>
  *
  * Apply only after reviewing manifest.json and every local image:
  *   npx tsx --env-file=.env.local scripts/refresh-channel-avatars.ts \
@@ -19,25 +19,24 @@ import { join } from "node:path";
 
 import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
-import { generateFalNanoBananaAvatarImageWithReceipt } from "@/lib/falNanoBananaAvatar";
-import {
-  NANO_BANANA_AVATAR_PROFILE,
-  type NanoBananaAvatarReceipt,
-} from "@/lib/nanoBananaAvatarContract";
 import {
   avatarPrompt,
+  CHANNEL_ART_NOVITA_PROFILE,
+  generateChannelArtAssetWithProvenance,
   type ArtIdentity,
 } from "@/lib/channelArt";
+import type { ChannelArtAssetProvenance } from "@/lib/channelArtIdentity";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { imageToJpeg } from "@/lib/ffmpeg";
-import { channelKey, headObjectMetadata, putObject } from "@/lib/storage";
+import { getObjectBytes, headObjectMetadata } from "@/lib/storage";
 import { hydrateEnv } from "@/lib/vault";
 
 const OWNER_ID = "owner_daniel";
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://astute-camel-689.convex.cloud";
-const VERSION = "nano-avatar-20260901-v1";
-const MAX_ATTEMPTS = 1;
-const MAX_TOTAL_USD = 0.36;
+const VERSION = "novita-avatar-refresh-20260919-v1";
+const MAX_ATTEMPTS = 3;
+const MAX_PER_CHANNEL_USD = Number((
+  MAX_ATTEMPTS * CHANNEL_ART_NOVITA_PROFILE.maxImageCostUsd
+).toFixed(2));
 const OUTPUT_DIR = join(process.cwd(), "output", "channel-avatars", VERSION);
 const MANIFEST_PATH = join(OUTPUT_DIR, "manifest.json");
 
@@ -107,6 +106,10 @@ const TARGETS: Readonly<Record<string, Omit<ArtIdentity, "name" | "niche">>> = {
   },
 };
 
+const MAX_TOTAL_USD = Number((
+  Object.keys(TARGETS).length * MAX_PER_CHANNEL_USD
+).toFixed(2));
+
 type Channel = Doc<"channels">;
 
 interface GeneratedRow {
@@ -116,15 +119,14 @@ interface GeneratedRow {
   oldKey?: string;
   newKey?: string;
   localPath?: string;
-  sourceSha256?: string;
-  jpegSha256?: string;
+  outputSha256?: string;
   prompt: string;
-  providerReceipt?: NanoBananaAvatarReceipt;
+  provenance?: ChannelArtAssetProvenance;
   error?: string;
 }
 
 interface RefreshManifest {
-  contractVersion: "channel-avatar-refresh/v1";
+  contractVersion: "channel-avatar-refresh/v2";
   ownerId: typeof OWNER_ID;
   version: typeof VERSION;
   generatedAt: string;
@@ -173,7 +175,7 @@ async function generate(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true });
   const selected = targetedChannels(await channels(studioClient()));
   const manifest: RefreshManifest = {
-    contractVersion: "channel-avatar-refresh/v1",
+    contractVersion: "channel-avatar-refresh/v2",
     ownerId: OWNER_ID,
     version: VERSION,
     generatedAt: new Date().toISOString(),
@@ -199,26 +201,27 @@ async function generate(): Promise<void> {
     }
     try {
       console.log(`\n[avatar] ${channel.name}`);
-      const generated = await generateFalNanoBananaAvatarImageWithReceipt({
-        prompt: row.prompt,
-        idempotencyContext: `${OWNER_ID}/${channel.slug}/art/avatar/${VERSION}/manual-review-candidate-01`,
-      });
-      row.providerReceipt = generated.receipt;
-      const sourcePath = join(OUTPUT_DIR, `${channel.slug}.source.png`);
-      await writeFile(sourcePath, generated.bytes);
-      row.sourceSha256 = sha256(generated.bytes);
-      if (row.sourceSha256 !== generated.receipt.responseSha256) {
-        throw new Error("Fal avatar receipt did not bind the returned source bytes");
-      }
-      row.localPath = join(OUTPUT_DIR, `${channel.slug}.jpg`);
-      await imageToJpeg(sourcePath, row.localPath, 1_024, 1_024);
-      const jpegBytes = await readFile(row.localPath);
-      row.jpegSha256 = sha256(jpegBytes);
-      row.newKey = channelKey(
+      const generated = await generateChannelArtAssetWithProvenance(
         OWNER_ID,
         channel.slug,
-        `art/avatar/${VERSION}/approved-${row.jpegSha256.slice(0, 20)}.jpg`,
+        "avatar",
+        identity,
+        (message, extra) => console.log(`  ${message}`, extra ?? ""),
+        {
+          version: VERSION,
+          maxAttempts: MAX_ATTEMPTS,
+          maxProviderSpendUsd: MAX_PER_CHANNEL_USD,
+        },
       );
+      const previewBytes = await getObjectBytes(generated.key);
+      if (sha256(previewBytes) !== generated.provenance.outputSha256) {
+        throw new Error("Novita avatar output does not match its sealed approval provenance");
+      }
+      row.newKey = generated.key;
+      row.localPath = join(OUTPUT_DIR, `${channel.slug}.jpg`);
+      row.outputSha256 = generated.provenance.outputSha256;
+      row.provenance = generated.provenance;
+      await writeFile(row.localPath, previewBytes);
     } catch (error) {
       row.error = error instanceof Error ? error.message : String(error);
       if (/spend cap breached|billing|project-wide quota/i.test(row.error)) {
@@ -234,7 +237,7 @@ async function generate(): Promise<void> {
   const manifestSha256 = sha256(manifestBytes);
   console.log(`\nmanifest: ${MANIFEST_PATH}`);
   console.log(`manifest sha256: ${manifestSha256}`);
-  if (manifest.rows.some((row) => row.error || !row.providerReceipt || !row.localPath)) {
+  if (manifest.rows.some((row) => row.error || !row.provenance || !row.localPath)) {
     throw new Error("one or more avatars failed; review the manifest and rerun failed channels under a new version");
   }
 }
@@ -249,7 +252,7 @@ async function apply(): Promise<void> {
   }
   const manifest = JSON.parse(bytes.toString("utf8")) as RefreshManifest;
   if (
-    manifest.contractVersion !== "channel-avatar-refresh/v1" ||
+    manifest.contractVersion !== "channel-avatar-refresh/v2" ||
     manifest.ownerId !== OWNER_ID ||
     manifest.version !== VERSION ||
     manifest.rows.length !== Object.keys(TARGETS).length ||
@@ -257,9 +260,8 @@ async function apply(): Promise<void> {
       row.error ||
       !row.newKey ||
       !row.localPath ||
-      !row.sourceSha256 ||
-      !row.jpegSha256 ||
-      !row.providerReceipt
+      !row.outputSha256 ||
+      !row.provenance
     )
   ) {
     throw new Error("manifest is incomplete or does not match the sealed refresh contract");
@@ -269,42 +271,17 @@ async function apply(): Promise<void> {
   const reader = studioClient();
   const before = await channels(reader);
   for (const row of manifest.rows) {
-    if (
-      row.providerReceipt!.provider !== NANO_BANANA_AVATAR_PROFILE.provider ||
-      row.providerReceipt!.model !== NANO_BANANA_AVATAR_PROFILE.model ||
-      row.providerReceipt!.route !== NANO_BANANA_AVATAR_PROFILE.route ||
-      row.providerReceipt!.costUsd !== NANO_BANANA_AVATAR_PROFILE.outputImageUsd ||
-      row.providerReceipt!.responseSha256 !== row.sourceSha256
-    ) {
-      throw new Error(`provider receipt drifted before apply: ${row.name}`);
-    }
     const bytes = await readFile(row.localPath!);
-    if (sha256(bytes) !== row.jpegSha256) {
+    if (sha256(bytes) !== row.outputSha256) {
       throw new Error(`reviewed avatar bytes drifted before apply: ${row.name}`);
     }
-    const expectedKey = channelKey(
-      OWNER_ID,
-      row.slug,
-      `art/avatar/${VERSION}/approved-${row.jpegSha256!.slice(0, 20)}.jpg`,
-    );
-    if (row.newKey !== expectedKey) throw new Error(`avatar key contract drifted for ${row.name}`);
+    if (
+      row.provenance!.outputKey !== row.newKey ||
+      row.provenance!.outputSha256 !== row.outputSha256 ||
+      row.provenance!.providerRoute !== CHANNEL_ART_NOVITA_PROFILE.route
+    ) throw new Error(`Novita avatar provenance drifted before apply: ${row.name}`);
     const existing = await headObjectMetadata(row.newKey!);
-    if (existing) {
-      if (existing.metadata["content-sha256"] !== row.jpegSha256) {
-        throw new Error(`immutable avatar key collision for ${row.name}`);
-      }
-      continue;
-    }
-    await putObject(row.newKey!, bytes, {
-      contentType: "image/jpeg",
-      ifNoneMatch: "*",
-      metadata: {
-        "content-sha256": row.jpegSha256!,
-        "provider-request-sha256": row.providerReceipt!.providerRequestSha256,
-        "provider-response-sha256": row.providerReceipt!.responseSha256,
-        contract: NANO_BANANA_AVATAR_PROFILE.contractVersion,
-      },
-    });
+    if (!existing) throw new Error(`approved avatar disappeared before apply: ${row.name}`);
   }
   const writer = new StudioConvexHttpClient(CONVEX_URL);
   for (const row of manifest.rows) {
@@ -320,11 +297,15 @@ async function apply(): Promise<void> {
     if (channel.identity.imageKey !== row.oldKey) {
       throw new Error(`avatar compare-and-swap failed for ${row.name}`);
     }
-    const result = await writer.mutation(api.channels.updateChannel, {
+    const result = await writer.mutation(api.channels.applyChannelArtAsset, {
+      ownerId: OWNER_ID,
       channelId: channel._id,
-      identity: { ...channel.identity, imageKey: row.newKey },
+      kind: "avatar",
+      expectedAssetKey: row.oldKey ?? null,
+      assetKey: row.newKey!,
+      provenance: row.provenance!,
     });
-    if (result.forked) throw new Error(`avatar apply unexpectedly forked ${row.name}`);
+    if (!result.applied) throw new Error(`avatar apply was rejected for ${row.name}`);
     console.log(`APPLIED ${row.name}: ${row.oldKey} -> ${row.newKey}`);
   }
 
@@ -346,7 +327,7 @@ async function dryRun(): Promise<void> {
   for (const { channel, identity } of selected) {
     console.log(`${channel.name}\n  ${channel.identity?.imageKey ?? "no current avatar"}\n  ${avatarPrompt(identity)}\n`);
   }
-  console.log(`${selected.length} channels; maximum ${selected.length * MAX_ATTEMPTS} Nano Banana images / $${MAX_TOTAL_USD.toFixed(2)}`);
+  console.log(`${selected.length} channels; up to ${selected.length * MAX_ATTEMPTS} reviewed Novita candidates / $${MAX_TOTAL_USD.toFixed(2)}`);
 }
 
 async function main(): Promise<void> {

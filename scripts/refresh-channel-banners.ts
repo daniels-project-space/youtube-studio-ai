@@ -2,7 +2,7 @@
  * Reviewed, channel-world banner refresh.
  *
  * This is intentionally two-phase. Generation uses the same receipt-bound,
- * Fal Nano Banana + vision-judge channel-art contract as Channel Inception,
+ * Novita + vision-judge channel-art contract as Channel Inception,
  * but it leaves the accepted candidate off the live channel until its local
  * preview and manifest are explicitly accepted. Existing art stays a rollback
  * until the compare-and-swap succeeds.
@@ -24,11 +24,11 @@ import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import {
   bannerPrompt,
+  CHANNEL_ART_NOVITA_PROFILE,
   channelArtIdentityFromSource,
   generateChannelArtAssetWithProvenance,
 } from "@/lib/channelArt";
 import type { ChannelArtAssetProvenance } from "@/lib/channelArtIdentity";
-import { FAL_NANO_BANANA_BANNER_PROFILE } from "@/lib/falNanoBananaBannerContract";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { getObjectBytes, headObjectMetadata } from "@/lib/storage";
 import { hydrateEnv } from "@/lib/vault";
@@ -36,10 +36,10 @@ import { hydrateEnv } from "@/lib/vault";
 const OWNER_ID = "owner_daniel";
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://astute-camel-689.convex.cloud";
 const VERSION = process.argv.find((arg) => arg.startsWith("--version="))
-  ?.slice("--version=".length) ?? "channel-world-refresh-20260907-provenance-v1";
+  ?.slice("--version=".length) ?? "channel-world-refresh-20260919-novita-v1";
 const MAX_ATTEMPTS = 3;
 const MAX_PER_CHANNEL_USD = Number((
-  MAX_ATTEMPTS * FAL_NANO_BANANA_BANNER_PROFILE.admissionCeilingUsd
+  MAX_ATTEMPTS * CHANNEL_ART_NOVITA_PROFILE.maxImageCostUsd
 ).toFixed(2));
 const OUTPUT_DIR = join(process.cwd(), "output", "channel-banners", VERSION);
 const MANIFEST_PATH = join(OUTPUT_DIR, "manifest.json");
@@ -122,7 +122,7 @@ function parseApproval(
     throw new Error("banner candidate is not approved by the channel-art contract");
   }
   if (approval.outputKey !== expectedKey) throw new Error("banner approval output key mismatch");
-  if (approval.providerRoute !== FAL_NANO_BANANA_BANNER_PROFILE.route) {
+  if (approval.providerRoute !== CHANNEL_ART_NOVITA_PROFILE.route) {
     throw new Error("banner approval provider route mismatch");
   }
   const score = typeof approval.score === "number" ? approval.score : Number.NaN;

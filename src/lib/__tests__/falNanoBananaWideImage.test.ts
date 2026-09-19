@@ -6,8 +6,18 @@ import {
   FalNanoBananaWideTransportError,
   generateFalNanoBananaWideImageWithReceipt,
 } from "@/lib/falNanoBananaWideImage";
-import { FAL_NANO_BANANA_BANNER_PROFILE } from "@/lib/falNanoBananaBannerContract";
+import { FAL_NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaThumbnailContract";
 import { createImageUsageScope } from "@/lib/imageUsage";
+
+// The shared transport owns its geometry guard; the production thumbnail
+// adapter supplies the same bounds at its public boundary.
+const WIDE_THUMBNAIL_PROFILE = {
+  ...FAL_NANO_BANANA_THUMBNAIL_PROFILE,
+  minimumWidth: 512,
+  maximumWidth: 4_096,
+  minimumHeight: 288,
+  maximumHeight: 4_096,
+} as const;
 
 function requestUrl(input: Parameters<typeof fetch>[0]): string {
   return input instanceof Request ? input.url : String(input);
@@ -32,7 +42,7 @@ async function nativePictureOnlyContract(): Promise<void> {
     const url = requestUrl(input);
     if (url.startsWith("https://fal.run/")) {
       providerPosts++;
-      assert.equal(url, "https://fal.run/fal-ai/nano-banana/edit");
+      assert.equal(url, "https://fal.run/fal-ai/nano-banana");
       assert.equal(init?.method, "POST");
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       assert.equal(body.num_images, 1);
@@ -40,8 +50,7 @@ async function nativePictureOnlyContract(): Promise<void> {
       assert.equal(body.output_format, "png");
       assert.equal(body.limit_generations, true);
       assert.match(String(body.prompt), /PICTURE ONLY, NO TEXT/i);
-      assert.deepEqual(body.image_urls, ["data:image/png;base64,AAAA"]);
-      assert.ok(!("image_url" in body));
+      assert.ok(!("image_urls" in body));
       return new Response(JSON.stringify({
         request_id: "provider-request-01",
         images: [{
@@ -61,18 +70,16 @@ async function nativePictureOnlyContract(): Promise<void> {
   const scope = createImageUsageScope();
   await scope.run(async () => {
     const first = await generateFalNanoBananaWideImageWithReceipt({
-      profile: FAL_NANO_BANANA_BANNER_PROFILE,
+      profile: WIDE_THUMBNAIL_PROFILE,
       prompt: "a quiet marble philosopher at dawn",
       idempotencyContext: "owner/channel/art/banner/v1/candidate-01",
       label: "fixture banner",
-      referenceImageDataUri: "data:image/png;base64,AAAA",
     });
     const second = await generateFalNanoBananaWideImageWithReceipt({
-      profile: FAL_NANO_BANANA_BANNER_PROFILE,
+      profile: WIDE_THUMBNAIL_PROFILE,
       prompt: "a quiet marble philosopher at dawn",
       idempotencyContext: "owner/channel/art/banner/v1/candidate-01",
       label: "fixture banner",
-      referenceImageDataUri: "data:image/png;base64,AAAA",
     });
     assert.deepEqual([...first.bytes], [...image]);
     assert.deepEqual([...second.bytes], [...image]);
@@ -89,7 +96,7 @@ async function nativePictureOnlyContract(): Promise<void> {
   assert.equal(usage.calls, 1);
   assert.equal(usage.cacheHits, 1);
   assert.equal(usage.costUsd, 0.039);
-  assert.equal(usage.records[0].route, FAL_NANO_BANANA_BANNER_PROFILE.route);
+  assert.equal(usage.records[0].route, FAL_NANO_BANANA_THUMBNAIL_PROFILE.route);
 }
 
 async function paidReceiptSurvivesCdnFailure(): Promise<void> {
@@ -114,11 +121,10 @@ async function paidReceiptSurvivesCdnFailure(): Promise<void> {
   await scope.run(async () => {
     await assert.rejects(
       generateFalNanoBananaWideImageWithReceipt({
-        profile: FAL_NANO_BANANA_BANNER_PROFILE,
+        profile: WIDE_THUMBNAIL_PROFILE,
         prompt: "mist over an ancient forum",
         idempotencyContext: "owner/channel/art/banner/v1/candidate-cdn",
         label: "fixture banner",
-        referenceImageDataUri: "data:image/png;base64,AAAA",
       }),
       (error: unknown) => {
         assert.ok(error instanceof FalNanoBananaWideTransportError);
@@ -128,11 +134,10 @@ async function paidReceiptSurvivesCdnFailure(): Promise<void> {
       },
     );
     const recovered = await generateFalNanoBananaWideImageWithReceipt({
-      profile: FAL_NANO_BANANA_BANNER_PROFILE,
+      profile: WIDE_THUMBNAIL_PROFILE,
       prompt: "mist over an ancient forum",
       idempotencyContext: "owner/channel/art/banner/v1/candidate-cdn",
       label: "fixture banner",
-      referenceImageDataUri: "data:image/png;base64,AAAA",
     });
     assert.deepEqual([...recovered.bytes], [...image]);
   });
@@ -150,11 +155,10 @@ async function invalidOrAmbiguousOutputFailsClosed(): Promise<void> {
   }) as typeof fetch;
   await assert.rejects(
     generateFalNanoBananaWideImageWithReceipt({
-      profile: FAL_NANO_BANANA_BANNER_PROFILE,
+      profile: WIDE_THUMBNAIL_PROFILE,
       prompt: "must not retry an ambiguous paid request",
       idempotencyContext: "owner/channel/art/banner/v1/candidate-ambiguous",
       label: "fixture banner",
-      referenceImageDataUri: "data:image/png;base64,AAAA",
     }),
     (error: unknown) => {
       assert.ok(error instanceof FalNanoBananaWideSubmissionError);
