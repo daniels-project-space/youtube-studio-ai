@@ -206,6 +206,8 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
   assert.doesNotMatch(code, /realesrgan/i, "no paid upscale may be purchased");
   assert.equal(LORESHORT_PATHS.budget.upscale, "ffmpeg",
     "the engine's budget lane must still be the free ffmpeg path the block pins");
+  assert.equal(LORESHORT_PATHS.budget.model, "h3",
+    "the budget lane must use the current H3 renderer rather than a retired LTX path");
 
   // Critique-loop cost safety: text-only production, capped iterations, frozen
   // checkpoint, and a fail-closed outage gate before any paid rendering.

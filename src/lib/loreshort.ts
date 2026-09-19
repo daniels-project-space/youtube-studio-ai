@@ -59,7 +59,8 @@ export interface LoreShortCfg {
   subStyle?: string;
   voiceId?: string;
   narrationSpeed?: number; // TTS speaking-rate multiplier (<1 = slower/graver); default 0.96
-  model?: "h3" | "ltx" | "wan" | "seedance";
+  /** H3 is the production route; Seedance/Wan remain explicit non-production experiments. */
+  model?: "h3" | "wan" | "seedance";
   frames?: number;
   seedanceRes?: "480p" | "720p" | "1080p";
   seedanceDur?: number;
@@ -77,7 +78,7 @@ export interface LoreShortCfg {
 
 /** The two cost/quality lanes. Spread onto a cfg (or pass cfg.path). */
 export const LORESHORT_PATHS = {
-  budget:  { model: "ltx" as const,      frames: 145, upscale: "ffmpeg" as const,     upscaleRes: "2k" as const, note: "LTX-distilled + FREE ffmpeg 2K — ~$0.4/video, fastest, softest figures" },
+  budget:  { model: "h3" as const,       frames: 145, upscale: "ffmpeg" as const,     upscaleRes: "2k" as const, note: "MiniMax H3 + FREE ffmpeg 2K — production worker required" },
   premium: { model: "seedance" as const, seedanceRes: "480p" as const, seedanceDur: 5, upscale: "realesrgan" as const, upscaleRes: "4k" as const, note: "Seedance-1-lite 480p + Real-ESRGAN 4K — ~$1.35/video, best figures, true 4K" },
 } as const;
 
@@ -108,7 +109,7 @@ export const LORESHORT_MODULE = {
     path: "'budget' | 'premium' — picks a LORESHORT_PATHS lane (default = premium defaults)",
     subStyle: "key of SUB_STYLES — 'cinematic' | 'watercolor_pencil' | add your own (default cinematic)",
     nScenes: "beats ≈ seconds/6 (default 9)", voiceId: "ElevenLabs voice id",
-    model: "'h3' | 'seedance' | 'ltx' | 'wan'", seedanceRes: "'480p'|'720p'|'1080p'",
+    model: "'h3' | 'seedance' | 'wan'", seedanceRes: "'480p'|'720p'|'1080p'",
     upscale: "'realesrgan' | 'ffmpeg' | 'none'", upscaleRes: "'2k' | '4k'",
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },
@@ -139,7 +140,6 @@ const DEFAULTS = {
   pause: 0.45, dissolve: 0.35, host: "http://87.106.233.113", webDir: "/var/www/html/loreshort",
 };
 
-const LTX_VERSION = "e7f2778ec419047c564a6620b2d9bf7d6c64673411bf2ae13e628ee2b2c0b5b1"; // lightricks/ltx-video-0.9.7-distilled
 const SEEDANCE_VERSION = "6e47dd83529ee0599c68f274f225635080e4fd218360a85e2a3a78396d388b73"; // bytedance/seedance-1-lite (better figures, native HD)
 const ESRGAN_VER = "3e56ce4b57863bd03048b42bc09bdd4db20d427cca5fde9d8ae4dc60e1bb4775";  // lucataco/real-esrgan-video
 
@@ -592,16 +592,15 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
       log(`clip ${i} ✓ (injected generator)`);
       return;
     }
+    if (cfg.model === "h3") {
+      throw new Error("lore_short: MiniMax H3 is mandatory for this lane and requires the injected attested production renderer");
+    }
     const image = await dataUri(imgJpg, "image/jpeg");
     let endpoint: string, input: Record<string, unknown>, body: Record<string, unknown>;
     if (cfg.model === "seedance") {
       endpoint = "https://api.replicate.com/v1/predictions";
       input = { image, prompt, duration: cfg.seedanceDur, resolution: cfg.seedanceRes, aspect_ratio: "16:9" }; // Seedance has no negative_prompt
       body = { version: SEEDANCE_VERSION, input };
-    } else if (cfg.model === "ltx") {
-      endpoint = "https://api.replicate.com/v1/predictions";
-      input = { image, prompt, resolution: 720, aspect_ratio: "16:9", num_frames: cfg.frames, negative_prompt: negative };
-      body = { version: LTX_VERSION, input };
     } else {
       endpoint = "https://api.replicate.com/v1/models/wan-video/wan-2.2-i2v-fast/predictions";
       input = { image, prompt, resolution: "720p", num_frames: 81, negative_prompt: negative };
