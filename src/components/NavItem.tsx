@@ -12,10 +12,12 @@ export function NavItem({
   href,
   label,
   icon,
+  compactOnly = false,
 }: {
   href: string;
   label: string;
   icon: ReactNode;
+  compactOnly?: boolean;
 }) {
   const pathname = usePathname();
   const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -26,6 +28,7 @@ export function NavItem({
       aria-current={active ? "page" : undefined}
       className="studio-nav-item"
       data-active={active ? "true" : undefined}
+      data-compact-only={compactOnly || undefined}
     >
       <span className="studio-nav-icon">{icon}</span>
       <span className="studio-nav-copy">{label}</span>

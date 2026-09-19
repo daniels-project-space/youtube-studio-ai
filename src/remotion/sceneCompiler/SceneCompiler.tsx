@@ -1,4 +1,4 @@
-import type { CSSProperties, FC } from "react";
+import { useMemo, type CSSProperties, type FC } from "react";
 import {
   AbsoluteFill,
   Easing,
@@ -19,6 +19,7 @@ import {
   type EvidenceVisualIntent,
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
+import { SCENE_PORTRAIT_LAYOUT, SCENE_PORTRAIT_PROFILE, portraitLabelLines, preflightSceneLayout, resolveSceneLayout, type SceneLayoutProfileId } from "./layoutProfile";
 
 export const SCENE_COMPILER_FPS = 30;
 export const SCENE_COMPILER_COMPOSITION_ID = "SceneManifest";
@@ -32,6 +33,7 @@ export interface SceneCompilerProps {
   manifest?: SceneManifest;
   width?: number;
   height?: number;
+  layoutProfile?: SceneLayoutProfileId;
 }
 
 interface Palette {
@@ -474,7 +476,7 @@ function PanelVisual({ seed, palette }: { seed: string; palette: Palette }) {
   );
 }
 
-function PuppetVisual({ scene, palette }: { scene: NormalizedScene; palette: Palette }) {
+function PuppetVisual({ scene, palette, portrait = false }: { scene: NormalizedScene; palette: Palette; portrait?: boolean }) {
   const subjectSeed = scene.characterIds[0] ?? scene.id;
   const visualText = `${scene.action} ${scene.props.join(" ")} ${scene.label}`.toLowerCase();
   const garden = /garden|seed|plant|soil|water|sun|grow/.test(visualText);
@@ -487,7 +489,7 @@ function PuppetVisual({ scene, palette }: { scene: NormalizedScene; palette: Pal
   const hasSecondCharacter = scene.characterIds.length > 1;
 
   return (
-    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-hidden>
+    <svg viewBox={portrait ? "0 0 936 1160" : "0 0 1000 720"} style={{ width: "100%", height: "100%" }} aria-hidden>
       <defs>
         <linearGradient id={`sky-${scene.id}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={garden ? "#B8E2FF" : palette.primary} stopOpacity={garden ? "1" : "0.45"} />
@@ -498,7 +500,8 @@ function PuppetVisual({ scene, palette }: { scene: NormalizedScene; palette: Pal
           <stop offset="100%" stopColor={palette.accent} />
         </linearGradient>
       </defs>
-      <rect width="1000" height="720" fill={`url(#sky-${scene.id})`} />
+      <rect width={portrait ? 936 : 1000} height={portrait ? 1160 : 720} fill={`url(#sky-${scene.id})`} />
+      <g transform={portrait ? "translate(0 380) scale(0.94)" : undefined}>
       {garden ? (
         <>
           <circle cx="846" cy="104" r="58" fill="#FFE38A" opacity={sunlight ? "1" : "0.68"} />
@@ -518,7 +521,8 @@ function PuppetVisual({ scene, palette }: { scene: NormalizedScene; palette: Pal
           <path d="M0 560 C196 478 318 632 502 554 C710 466 824 596 1000 516 V720 H0Z" fill={`${palette.ink}44`} />
         </>
       )}
-      <g transform="translate(560 184)">
+      </g>
+      <g transform={portrait ? "translate(212 470) scale(1.22)" : "translate(560 184)"}>
         <path d="M138 330 L93 486" stroke="#29415A" strokeWidth="36" strokeLinecap="round" />
         <path d="M218 330 L264 486" stroke="#29415A" strokeWidth="36" strokeLinecap="round" />
         <path d="M110 204 C58 254 56 304 24 342" fill="none" stroke={skin} strokeWidth="31" strokeLinecap="round" />
@@ -540,7 +544,7 @@ function PuppetVisual({ scene, palette }: { scene: NormalizedScene; palette: Pal
         ) : null}
       </g>
       {hasSecondCharacter ? (
-        <g transform="translate(438 378) scale(0.62)">
+        <g transform={portrait ? "translate(32 716) scale(0.70)" : "translate(438 378) scale(0.62)"}>
           <circle cx="180" cy="108" r="76" fill="#DCA97D" />
           <path d="M112 96 C122 18 245 8 252 104 C215 70 158 70 112 96Z" fill="#2E2430" />
           <rect x="100" y="178" width="158" height="190" rx="76" fill={palette.primary} />
@@ -691,6 +695,100 @@ function VisualByKind({ scene, palette }: { scene: NormalizedScene; palette: Pal
   }
 }
 
+/** Native portrait geometry. No scaled/cropped landscape viewport. */
+function PortraitVisual({ scene, palette }: { scene: NormalizedScene; palette: Palette }) {
+  const kind = scene.syntheticScenarioVisualKind ?? scene.kind;
+  const seed = scene.id;
+  const svg = { viewBox: "0 0 936 1160", style: { width: "100%", height: "100%" }, "aria-hidden": true as const };
+  const text = { fill: palette.text, fontFamily: "Arial", fontSize: 40, fontWeight: 800 };
+  if (kind === "puppet") return <PuppetVisual scene={scene} palette={palette} portrait />;
+  if (kind === "map") {
+    const points = Array.from({ length: 5 }, (_, index) => ({ x: 190 + unit(seed, index * 2) * 560, y: 150 + index * 210 }));
+    return <svg {...svg}>
+      <path d="M210 1020 C810 800 90 620 680 120" fill="none" stroke={palette.muted} strokeWidth="96" opacity="0.2" strokeLinecap="round" />
+      <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={palette.accent} strokeWidth="12" strokeLinejoin="round" />
+      {points.map((point, index) => <g key={index}><circle cx={point.x} cy={point.y} r="43" fill={palette.surface} stroke={palette.primary} strokeWidth="6" /><circle cx={point.x} cy={point.y} r="15" fill={palette.accent} /></g>)}
+    </svg>;
+  }
+  if (kind === "chart") {
+    return <svg {...svg}>
+      <text {...text} x="80" y="124" fontSize="36">ILLUSTRATIVE SIGNALS</text>
+      {[0, 1, 2, 3, 4, 5, 6].map((index) => <g key={index}>
+        <line x1="88" x2="842" y1={250 + index * 116} y2={250 + index * 116} stroke={`${palette.muted}44`} strokeWidth="3" />
+        <rect x="90" y={192 + index * 116} width={180 + unit(seed, index + 11) * 550} height="58" rx="15" fill={index === 6 ? palette.accent : palette.primary} opacity={index === 6 ? 1 : 0.76} />
+      </g>)}
+    </svg>;
+  }
+  if (kind === "diagram") {
+    const nodes = [{ x: 468, y: 175 }, { x: 230, y: 450 }, { x: 706, y: 450 }, { x: 230, y: 900 }, { x: 706, y: 900 }];
+    return <svg {...svg}>
+      {nodes.slice(1).map((point, index) => <path key={index} d={`M468 175 L${point.x} ${point.y}`} fill="none" stroke={`${palette.muted}BB`} strokeWidth="9" />)}
+      {nodes.map((point, index) => <g key={index}><circle cx={point.x} cy={point.y} r="94" fill={`${palette.primary}22`} /><circle cx={point.x} cy={point.y} r={60 + unit(seed, index) * 10} fill={index === 0 ? palette.accent : palette.surface} stroke={palette.primary} strokeWidth="7" /></g>)}
+    </svg>;
+  }
+  if (kind === "panel") {
+    return <svg {...svg}>{[0, 1, 2].map((index) => <g key={index} transform={`translate(94 ${100 + index * 334})`}>
+      <rect width="748" height="272" rx="30" fill={index === 1 ? `${palette.accent}BB` : `${palette.primary}AA`} stroke={`${palette.text}55`} strokeWidth="5" />
+      <rect x="38" y="38" width="200" height="196" rx="20" fill={`${palette.ink}88`} />
+      <rect x="280" y="62" width="346" height="20" rx="10" fill={palette.text} />
+      <rect x="280" y="116" width="398" height="16" rx="8" fill={`${palette.text}AA`} />
+      <rect x="280" y="170" width={200 + unit(seed, index) * 160} height="16" rx="8" fill={`${palette.ink}77`} />
+    </g>)}</svg>;
+  }
+  if (kind === "screen") {
+    return <svg {...svg}>
+      <rect x="68" y="80" width="800" height="1000" rx="32" fill={palette.surface} stroke={`${palette.text}55`} strokeWidth="5" />
+      <path d="M70 178 H866" stroke={`${palette.text}44`} strokeWidth="4" />
+      {[0, 1, 2].map((index) => <circle key={index} cx={110 + index * 40} cy="128" r="12" fill={index === 0 ? palette.accent : palette.primary} />)}
+      {[0, 1, 2].map((index) => <rect key={index} x={108 + index * 244} y="224" width="216" height="88" rx="18" fill={index === 0 ? palette.primary : `${palette.primary}33`} />)}
+      {[0, 1, 2, 3, 4].map((index) => <rect key={index} x="114" y={396 + index * 112} width={300 + unit(seed, index + 220) * 410} height={index === 0 ? 48 : 28} rx="12" fill={index === 0 ? palette.accent : `${palette.primary}AA`} />)}
+    </svg>;
+  }
+  if (kind === "town_overview" || kind === "town_turn") {
+    const overview = kind === "town_overview";
+    return <svg {...svg}>
+      <rect x="48" y="56" width="840" height="1050" rx="30" fill={`${palette.ink}88`} stroke={`${palette.primary}66`} strokeWidth="4" />
+      <text {...text} x="90" y="132">{overview ? "WORLD STATE" : "NEXT TURN"}</text>
+      {Array.from({ length: 30 }, (_, index) => {
+        const x = 90 + (index % 4) * 194;
+        const y = 194 + Math.floor(index / 4) * 108;
+        const occupied = unit(seed, index + 330) > (overview ? 0.26 : 0.42);
+        return <g key={index}><rect x={x} y={y} width={110 + unit(seed, index + 150) * 34} height="66" rx="10" fill={occupied ? `${palette.primary}AA` : palette.surface} stroke={occupied ? palette.accent : palette.muted} strokeWidth="3" /><circle cx={x + 162} cy={y + 82} r="8" fill={palette.text} /></g>;
+      })}
+    </svg>;
+  }
+  if (kind === "decision_options" || kind === "decision_outcome") {
+    const outcome = kind === "decision_outcome";
+    return <svg {...svg}>
+      <path d="M140 154 V916 M140 388 H254 M140 642 H254 M140 896 H254" fill="none" stroke={palette.muted} strokeWidth="9" strokeLinecap="round" />
+      <circle cx="140" cy="130" r="62" fill={palette.accent} /><text {...text} x="140" y="145" textAnchor="middle" fill={palette.ink}>AI</text>
+      {["A", "B", "C"].map((option, index) => {
+        const selected = outcome && index === hash(seed) % 3;
+        const y = 276 + index * 254;
+        return <g key={option}>
+          <rect x="258" y={y} width="574" height="216" rx="28" fill={selected ? palette.accent : palette.surface} stroke={selected ? palette.text : palette.primary} strokeWidth="5" />
+          <text {...text} x="294" y={y + 68} fill={selected ? palette.ink : palette.text}>OPTION {option}</text>
+          <rect x="294" y={y + 98} width="448" height="15" rx="7" fill={selected ? `${palette.ink}88` : `${palette.primary}AA`} />
+          {selected ? <text {...text} fontSize="34" x="294" y={y + 176} fill={palette.ink}>CHOSEN PATH</text> : <rect x="294" y={y + 146} width={180 + unit(seed, index) * 190} height="15" rx="7" fill={`${palette.text}66`} />}
+        </g>;
+      })}
+      <text {...text} fontSize="34" x="80" y="1082">{outcome ? "TRADE-OFF REVEAL" : "CONSTRAINTS → CHOICE"}</text>
+    </svg>;
+  }
+  if (kind === "pov_hud") {
+    return <svg {...svg}>
+      <rect width="936" height="1160" fill={palette.ink} /><rect width="936" height="790" fill={`${palette.primary}55`} />
+      <circle cx="720" cy="294" r="114" fill={`${palette.accent}AA`} />
+      {Array.from({ length: 6 }, (_, index) => { const h = 160 + unit(seed, index + 780) * 320; return <rect key={index} x={index * 166 - 20} y={900 - h} width="142" height={h} fill={palette.surface} stroke={`${palette.primary}77`} strokeWidth="4" />; })}
+      <path d="M306 1160 C344 986 414 910 468 986 C522 910 592 986 630 1160" fill={`${palette.primary}AA`} />
+      <path d="M50 1100 L240 918 L358 994 M886 1100 L696 918 L578 994" fill="none" stroke={palette.text} strokeWidth="40" strokeLinecap="round" />
+      <rect x="48" y="70" width="638" height="104" rx="20" fill={palette.ink} stroke={palette.primary} strokeWidth="4" />
+      <text {...text} fontSize="36" x="78" y="135">POV // SIGNAL LIVE</text>
+    </svg>;
+  }
+  throw new Error(`Portrait visual has no implementation for ${kind}.`);
+}
+
 function cameraTransform(scene: NormalizedScene, localFrame: number, sceneFrames: number): string {
   const progress = interpolate(localFrame, [0, Math.max(1, sceneFrames)], [0, 1], {
     extrapolateLeft: "clamp",
@@ -708,11 +806,13 @@ function SceneLayer({
   opacity,
   clipPath,
   labelOpacity = 1,
+  portrait = false,
 }: {
   scene: NormalizedScene;
   opacity: number;
   clipPath?: string;
   labelOpacity?: number;
+  portrait?: boolean;
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -727,6 +827,26 @@ function SceneLayer({
     transformOrigin: "center",
     background: `radial-gradient(circle at ${22 + unit(scene.id, 901) * 55}% ${15 + unit(scene.id, 902) * 40}%, ${palette.primary}32, transparent 42%), ${palette.ink}`,
   };
+
+  if (portrait) {
+    const layout = SCENE_PORTRAIT_LAYOUT;
+    const rectStyle = (rect: typeof layout.visual | typeof layout.label | typeof layout.disclosure): CSSProperties => ({ position: "absolute", left: rect.x, top: rect.y, width: rect.width, height: rect.height, boxSizing: "border-box" });
+    return <AbsoluteFill style={{ opacity }} data-scene-layout={layout.id} data-scene-id={scene.id}>
+      <AbsoluteFill style={{ background: visualStyle.background, clipPath }}>
+      <Grid palette={palette} />
+      <div data-portrait-region="visual" style={{ ...rectStyle(layout.visual), borderRadius: 38, overflow: "hidden", background: `${palette.surface}88`, border: `2px solid ${palette.text}1F` }}>
+        <AbsoluteFill style={{ transform: cameraTransform(scene, localFrame, sceneFrames) }}><PortraitVisual scene={scene} palette={palette} /></AbsoluteFill>
+      </div>
+      </AbsoluteFill>
+      <div data-portrait-region="label" style={{ ...rectStyle(layout.label), opacity: labelOpacity, color: palette.text, fontFamily: "Arial, Helvetica, sans-serif", fontWeight: 800, fontSize: layout.labelFontSize, lineHeight: layout.labelLineHeight, textShadow: "0 4px 22px #00000088" }}>
+        {portraitLabelLines(scene.label).map((line, index) => <div key={index} data-portrait-text="label">{line}</div>)}
+      </div>
+      {scene.syntheticScenarioProfile ? <div data-portrait-region="disclosure" style={{ ...rectStyle(layout.disclosure), display: "flex", flexDirection: "column", justifyContent: "center", padding: "16px 24px", borderRadius: 24, background: "#071525", border: `2px solid ${palette.accent}`, color: palette.text, fontFamily: "Arial, Helvetica, sans-serif", fontWeight: 800, fontSize: layout.disclosureFontSize, lineHeight: 1.3 }}>
+        <div data-portrait-text="disclosure">FICTIONAL AI SCENARIO</div>
+        <div data-portrait-text="disclosure">ILLUSTRATIVE ASSUMPTIONS</div>
+      </div> : null}
+    </AbsoluteFill>;
+  }
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -757,9 +877,15 @@ function activeSceneIndex(scenes: readonly NormalizedScene[], second: number): n
   return next >= 0 ? Math.max(0, next - 1) : Math.max(0, scenes.length - 1);
 }
 
-export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest }) => {
+export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest, layoutProfile }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
+  const layout = useMemo(() => {
+    const resolved = resolveSceneLayout({ layoutProfile, width, height });
+    if (manifest) preflightSceneLayout(manifest, resolved);
+    return resolved;
+  }, [manifest, layoutProfile, width, height]);
+  const portrait = layout.id === SCENE_PORTRAIT_PROFILE;
   const scenes = (manifest?.scenes ?? [])
     .map((scene) => normalizeScene(scene, manifest?.audience ?? "general"))
     .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
@@ -791,12 +917,13 @@ export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest }) => {
 
   return (
     <AbsoluteFill style={{ background: "#101827", overflow: "hidden" }}>
-      {previous ? <SceneLayer scene={previous} opacity={1} labelOpacity={previousLabelOpacity} /> : null}
+      {previous ? <SceneLayer scene={previous} opacity={1} labelOpacity={previousLabelOpacity} portrait={portrait} /> : null}
       <SceneLayer
         scene={current}
         opacity={currentOpacity}
         clipPath={currentClip}
         labelOpacity={currentLabelOpacity}
+        portrait={portrait}
       />
     </AbsoluteFill>
   );

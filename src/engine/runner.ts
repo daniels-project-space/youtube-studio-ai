@@ -14,6 +14,7 @@ import {
   COST_PATCH_KEY,
   type ArtifactRef,
   type Block,
+  type CachedOutputValidationContext,
   type CostModelUsageKind,
   type ModelUsageCostSnapshot,
   type ResumeRehydrationRequest,
@@ -26,15 +27,17 @@ import type { VisualRepairSignal } from "./healer";
 import { createHash } from "node:crypto";
 import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
+  ExecutionError,
   classifyExecutionError,
   executionRetryDelayMs,
   type ExecutionRetryScope,
 } from "./executionErrors";
-import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
+import { assertExecutableManifest, configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
+import { reconcileInlineCheckpoint, reconcileInlineCheckpointCosts, type InlineCheckpointContext } from "./inlineCheckpointAdmission";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -42,6 +45,8 @@ export interface RunPipelineOptions {
   channelId: string;
   /** Active generation required by Trigger-originated durable side effects. */
   executionLease?: RunExecutionLeaseFence;
+  /** Bound service-only assertion; no-op/default approval is never supplied. */
+  assertInlinePaidExecutionLease?: () => Promise<void>;
   keyPrefix: string;
   budgetUsd: number;
   /** Per-block params keyed by block id (from pipeline entries). */
@@ -304,6 +309,14 @@ function hashPayload(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+function freezeCheckpointInputs<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freezeCheckpointInputs(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function artifactSummary(value: unknown): string {
   if (typeof value === "string") return value.length <= 300 ? value : `${value.slice(0, 300)}…[${value.length} chars]`;
   if (Array.isArray(value)) return `[array:${value.length}]`;
@@ -425,6 +438,19 @@ export async function runPipeline(
   resolved: ResolvedPipeline,
   opts: RunPipelineOptions,
 ): Promise<RunResult> {
+  // Recheck explicit code-owned opt-ins before persistence reads/writes, including
+  // callers holding a resolved manifest that changed after registration. Omitted
+  // policy leaves the established cached/paid resume path untouched.
+  for (const [index, manifest] of resolved.manifests.entries()) {
+    const block = resolved.blocks[index];
+    if (block?.resumePolicy !== undefined || manifest.block.resumePolicy !== undefined || manifest.retryAndResume.resumePolicy !== undefined) {
+      assertExecutableManifest(manifest);
+      if (manifest.block !== block) throw new Error(`block ${manifest.id} resume policy lost its code-owned executable binding`);
+      if (opts.remoteBlocks?.has(manifest.id) && opts.runRemoteBlock) {
+        throw new Error(`block ${manifest.id} resume policy requires local deterministic execution`);
+      }
+    }
+  }
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
   const artifactRefs: Record<string, ArtifactRef> = {};
@@ -745,14 +771,15 @@ export async function runPipeline(
         `resolved pipeline alignment mismatch at step ${blockIndex}: block=${block.id}, manifest=${manifest.id}`,
       );
     }
-    const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
-    const priorStage = priorStageMap.get(block.id);
+    let params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
+    let priorStage = priorStageMap.get(block.id);
+    let bodyStore = store;
     const isRemoteExecution = opts.remoteBlocks?.has(block.id) === true && Boolean(opts.runRemoteBlock);
-    const costBaseline = executionCostBaseline(
+    let costBaseline = executionCostBaseline(
       priorStage,
       isRemoteExecution,
     );
-    const checkpointCostScope = createCheckpointCostScope(priorStage?.checkpointCostReceipts ?? [], costBaseline.priorCost);
+    let checkpointCostScope = createCheckpointCostScope(priorStage?.checkpointCostReceipts ?? [], costBaseline.priorCost);
     // Remote child work is normally keyed by Trigger's durable idempotency key;
     // a parent retry can reattach to that child instead of deadlocking itself.
     // A remote child marked as requiring reconciliation is different: it may
@@ -772,26 +799,6 @@ export async function runPipeline(
           (priorStage?.status === "running" ||
             (priorStage?.status === "failed" &&
               priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER)))));
-    if (paidStageNeedsReconciliation) {
-      const started = priorStage?.startedAt
-        ? ` (started ${new Date(priorStage.startedAt).toISOString()})`
-        : "";
-      const message =
-        `${PAID_STAGE_RECONCILIATION_MARKER}: paid block "${block.id}" was left ` +
-        `${priorStage?.status ?? "unknown"}${started}; refusing automatic replay because the ` +
-        "provider may already have accepted or completed the charge. Reconcile the provider receipt, then supersede the stage or start a new run.";
-      await opts.sink.upsert({
-        ownerId: opts.ownerId,
-        runId: opts.runId,
-        block: block.id,
-        status: "failed",
-        finishedAt: Date.now(),
-        error: message,
-      });
-      stages.push({ block: block.id, status: "failed" });
-      log(message);
-      return { status: "failed", cost: 0, error: message };
-    }
     // Debug snapshot only — SUMMARIZED. Persisting the full consumed values
     // (whole scripts, clip-path arrays, timing tables) shipped hundreds of KB
     // per stage transition to every open dashboard for zero consumer value.
@@ -826,8 +833,50 @@ export async function runPipeline(
     // A confirmed-missing artifact may be regenerated only for an unpaid block;
     // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
+    const cachedValidationContext = (outputs: Record<string, unknown>): CachedOutputValidationContext => {
+      const inputKeys = [...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes)];
+      const inputs = Object.fromEntries(inputKeys.filter((key) => key in store).map((key) => [key, store[key]]));
+      return Object.freeze({
+        ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId, keyPrefix: opts.keyPrefix,
+        params: freezeCheckpointInputs(structuredClone(params)),
+        store: declaredArtifactStore(manifest, freezeCheckpointInputs(structuredClone(inputs)), new Set()),
+        outputs: freezeCheckpointInputs(structuredClone(outputs)),
+      });
+    };
+    const bindingRefusal = (error: unknown): ExecutionError => {
+      const message = `CACHED_OUTPUT_BINDING_REFUSED: completed block "${block.id}" requires reconciliation; ` +
+        `retaining its outputs and costs without automatic regeneration: ${error instanceof Error ? error.message : String(error)}`;
+      log(message);
+      return new ExecutionError(message, { code: "CACHED_OUTPUT_BINDING_REFUSED", retryable: false, phase: "cached_output_validation" });
+    };
+    let validatedLocalOutputKeys: readonly string[] | null = null;
+    if (cached && block.cachedOutputValidator !== undefined) {
+      try {
+        const validator = block.cachedOutputValidator;
+        const prepare = () => {
+          const keys = validator.prepare(cachedValidationContext(migrateCachedOutputsForResume(block.id, { ...cached })));
+          if (keys !== null && (!Array.isArray(keys) || keys.some((key) =>
+            typeof key !== "string" || !(key in manifest.produces || key in manifest.optionalProduces)))) {
+            throw new Error("cached output validator requested an undeclared output");
+          }
+          return keys;
+        };
+        validatedLocalOutputKeys = prepare();
+        if (validatedLocalOutputKeys !== null) {
+          if (!opts.rehydrate) throw new Error("no configured artifact rehydrator for bound completed output");
+          await rehydrateCachedInputsForLocalFallback(block, blockIndex);
+          validatedLocalOutputKeys = prepare();
+          if (validatedLocalOutputKeys === null) throw new Error("cached output validation changed applicability during input hydration");
+        }
+      } catch (error) {
+        throw bindingRefusal(error);
+      }
+    }
     let cachedFallbackToLocalRun = false;
-    if (cached && !opts.rehydrate) {
+    if (cached && manifest.retryAndResume.resumePolicy === "recompute_unpaid_deterministic") {
+      log(`block ${block.id}: code-owned resume policy — recomputing from current inputs`);
+      cachedFallbackToLocalRun = true;
+    } else if (cached && !opts.rehydrate) {
       if (manifest.costAndLatency.paid) {
         return await refusePaidCachedReplay("has no configured artifact rehydrator");
       }
@@ -836,12 +885,17 @@ export async function runPipeline(
     } else if (cached && opts.rehydrate) {
       try {
         const restored = await opts.rehydrate(block.id, { ...cached }, {
-          neededOutputKeys: localConsumerKeysAfter(blockIndex),
+          neededOutputKeys: validatedLocalOutputKeys === null
+            ? localConsumerKeysAfter(blockIndex)
+            : new Set([...localConsumerKeysAfter(blockIndex), ...validatedLocalOutputKeys]),
         });
         const outputs = migrateCachedOutputsForResume(block.id, restored.outputs);
         const { ok } = restored;
         if (ok) {
           delete outputs[COST_PATCH_KEY];
+          if (validatedLocalOutputKeys !== null) {
+            await block.cachedOutputValidator!.validate(cachedValidationContext(outputs));
+          }
           assertProduced(manifest, outputs);
           const allowedInputs = new Set([
             ...Object.keys(manifest.consumes),
@@ -868,12 +922,14 @@ export async function runPipeline(
           log(`block resumed (cached, no re-spend): ${block.id}`);
           return { status: "ok", cost: 0 };
         }
+        if (validatedLocalOutputKeys !== null) throw new Error("bound completed outputs could not be materialized");
         if (manifest.costAndLatency.paid) {
           return await refusePaidCachedReplay("has missing or non-rehydratable durable outputs");
         }
         log(`block ${block.id}: cached outputs not rehydratable — re-running unpaid block`);
         cachedFallbackToLocalRun = true;
       } catch (e) {
+        if (validatedLocalOutputKeys !== null) throw bindingRefusal(e);
         // A thrown rehydrate error means storage/auth/transport itself failed,
         // not that this artifact is known missing. Re-running a paid producer
         // under an R2 outage converts an infrastructure incident into spend.
@@ -891,6 +947,92 @@ export async function runPipeline(
         index: blockIndex,
         store,
       });
+    }
+
+    let inlineCheckpointAdmitted = false;
+    if (manifest.costAndLatency.paid && block.inspectPaidInlineResume !== undefined && !isRemoteExecution) {
+      try {
+        if (typeof block.inspectPaidInlineResume !== "function" || GROUP_OF.has(block.id) || opts.remoteBlocks?.has(block.id)) {
+          throw new Error("inline checkpoint admission requires an executable sequential local adapter");
+        }
+        if (opts.resume === false || !opts.sink.getResumeState) {
+          throw new Error("inline checkpoint admission requires the complete persisted resume state");
+        }
+        const inputSnapshot = () => Object.fromEntries([...new Set([
+          ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
+        ])].filter((key) => Object.prototype.hasOwnProperty.call(store, key)).map((key) => [key, store[key]]));
+        const frozen = freezeCheckpointInputs(structuredClone({ params, store: inputSnapshot() }));
+        const binding = Object.freeze({ ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId,
+          keyPrefix: opts.keyPrefix, moduleId: manifest.id, moduleVersion: manifest.version,
+          inputFingerprint: hashPayload(frozen) });
+        const inspectionContext: InlineCheckpointContext = Object.freeze({
+          ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId, keyPrefix: opts.keyPrefix,
+          binding, params: frozen.params,
+          store: declaredArtifactStore(manifest, frozen.store, new Set()),
+          ...(priorStage ? { priorStage: Object.freeze({ status: priorStage.status, costUsd: priorStage.cost ?? 0 }) } : {}),
+        });
+        const proof = await block.inspectPaidInlineResume(inspectionContext);
+        if (hashPayload({ params, store: inputSnapshot() }) !== binding.inputFingerprint) {
+          throw new Error("inline checkpoint inputs changed during inspection");
+        }
+        const priorCheckpoint = priorStage ? {
+          status: priorStage.status, costUsd: priorStage.cost ?? 0, receipts: priorStage.checkpointCostReceipts ?? [],
+        } : undefined;
+        const recovered = reconcileInlineCheckpointCosts(binding, proof, priorCheckpoint);
+        // This is verified spend even when the subsequent summary write fails.
+        // Count it in a failed result too; persistence is still mandatory before
+        // permitting any new work or applying the reservation credit.
+        spentUsd += recovered.discoveredCostUsd;
+        if (proof.kind === "cost_only") {
+          const message = `${PAID_STAGE_RECONCILIATION_MARKER}: ${proof.reason}`;
+          // A single failed transition records known charges and the hold.
+          // Never mark this running, call its body, or grant reservation credit.
+          await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+            status: "failed", finishedAt: Date.now(), error: message,
+            cost: recovered.priorCostUsd, checkpointCostReceipts: recovered.receipts });
+          stages.push({ block: block.id, status: "failed" }); log(message);
+          return { status: "failed", cost: recovered.discoveredCostUsd, error: message };
+        }
+        if (recovered.needsPersistence) {
+          // Do not make a fresh claim or purchase until newly discovered R2
+          // charges and their identities are durable under the current fence.
+          await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+            status: "running", cost: recovered.priorCostUsd, checkpointCostReceipts: recovered.receipts });
+        }
+        if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0 ||
+          configuredEnvelope === undefined || !Number.isFinite(configuredEnvelope) || configuredEnvelope <= 0) {
+          throw new Error("inline checkpoint admission requires a positive finite budget and module envelope");
+        }
+        const reconciled = reconcileInlineCheckpoint(binding, proof, priorCheckpoint, configuredEnvelope);
+        priorStage = { ...priorStage, status: priorStage?.status ?? "queued", cost: reconciled.priorCostUsd,
+          checkpointCostReceipts: reconciled.receipts };
+        priorStageMap.set(block.id, priorStage);
+        // Keep all historical spend carried. Credit changes reservation only,
+        // never the execution baseline or the fresh-usage accounting floor.
+        costBaseline = { priorCost: reconciled.priorCostUsd, carriedCost: reconciled.priorCostUsd,
+          creditedCost: reconciled.reservationCreditUsd };
+        checkpointCostScope = createCheckpointCostScope(reconciled.receipts, reconciled.priorCostUsd);
+        params = frozen.params; bodyStore = frozen.store;
+        inlineCheckpointAdmitted = true;
+      } catch (error) {
+        const message = `${PAID_STAGE_RECONCILIATION_MARKER}: inline checkpoint admission failed: ${error instanceof Error ? error.message : String(error)}`;
+        await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+          status: "failed", finishedAt: Date.now(), error: message });
+        stages.push({ block: block.id, status: "failed" }); log(message);
+        return { status: "failed", cost: 0, error: message };
+      }
+    }
+    if (paidStageNeedsReconciliation && !inlineCheckpointAdmitted) {
+      const started = priorStage?.startedAt ? ` (started ${new Date(priorStage.startedAt).toISOString()})` : "";
+      const message = `${PAID_STAGE_RECONCILIATION_MARKER}: paid block "${block.id}" was left ` +
+        `${priorStage?.status ?? "unknown"}${started}; refusing automatic replay because the ` +
+        "provider may already have accepted or completed the charge. Reconcile the provider receipt, then supersede the stage or start a new run.";
+      await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+        status: "failed", finishedAt: Date.now(), error: message });
+      stages.push({ block: block.id, status: "failed" }); log(message);
+      return { status: "failed", cost: 0, error: message };
+    }
+    if (configuredEnvelope !== undefined) {
       const additionalReservation = Math.max(0, configuredEnvelope - costBaseline.creditedCost);
       if (
         opts.budgetUsd > 0 &&
@@ -948,7 +1090,9 @@ export async function runPipeline(
           priorStageMap.get(candidate.id),
           opts.remoteBlocks?.has(candidate.id) === true && Boolean(opts.runRemoteBlock),
         );
-        reservedMaxCostUsd += Math.max(0, candidateEnvelope - candidateCostBaseline.creditedCost);
+        const credit = candidateIndex === blockIndex && inlineCheckpointAdmitted
+          ? costBaseline.creditedCost : candidateCostBaseline.creditedCost;
+        reservedMaxCostUsd += Math.max(0, candidateEnvelope - credit);
         blockIds.push(candidate.id);
       }
       const required = args.requiredFuturePaidBlockIds ?? [];
@@ -1070,9 +1214,10 @@ export async function runPipeline(
       runId: opts.runId,
       channelId: opts.channelId,
       ...(opts.executionLease ? { executionLease: opts.executionLease } : {}),
+      ...(opts.assertInlinePaidExecutionLease ? { assertInlinePaidExecutionLease: opts.assertInlinePaidExecutionLease } : {}),
       keyPrefix: opts.keyPrefix,
       params,
-      store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
+      store: declaredArtifactStore(manifest, bodyStore, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
       ...(configuredEnvelope === undefined ? {} : { stageBudgetUsd: configuredEnvelope }),

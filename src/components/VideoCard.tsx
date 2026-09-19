@@ -1,10 +1,7 @@
 "use client";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
-import {
-  youtubeThumb,
-  fmtViews,
-} from "@/lib/asset-url";
+import { youtubeThumb } from "@/lib/asset-url";
 import { StageBadge } from "./StageBadge";
 import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { IconLibrary } from "./icons";
@@ -12,7 +9,7 @@ import { MediaPreview } from "./MediaPreview";
 
 /**
  * A single finished-video tile: 16:9 thumbnail + status badge + title (2-line
- * clamp) + channel/date + an estimated-views line when present. Thumbnail
+ * clamp) + channel/date + retained-master evidence. Thumbnail
  * holds space for the retained R2 image, then falls back to YouTube only if it
  * cannot be resolved or loaded.
  * Clicking opens the lightbox (handled by the parent via `onOpen`).
@@ -30,8 +27,6 @@ export function VideoCard({
     onAction: () => void;
   };
 }) {
-  const views = fmtViews(video.estimatedViews);
-
   const content = (
     <>
       <MediaPreview
@@ -62,9 +57,8 @@ export function VideoCard({
         </div>
         <div className="video-card-evidence">
           <span className="video-card-evidence-label">Master evidence</span>
-          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
         </div>
-        {views && <div className="video-card-views">~{views} est. views</div>}
       </div>
     </>
   );

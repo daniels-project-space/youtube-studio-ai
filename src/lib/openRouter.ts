@@ -6,7 +6,7 @@
  * boundary and does not pass through this text/vision client.
  */
 import { recordModelUsage } from "@/lib/modelUsage";
-import type { ModelCallKind } from "@/lib/modelUsage";
+import type { ModelCallKind, ModelUsageRecord } from "@/lib/modelUsage";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Final multimodal receipts can take longer than lightweight planning calls.
@@ -72,6 +72,16 @@ type OpenRouterMessage = {
   role: "system" | "user";
   content: unknown;
 };
+
+export type JsonSchemaValue = string | number | boolean | null |
+  readonly JsonSchemaValue[] | { readonly [key: string]: JsonSchemaValue };
+
+/** Opt-in structured output contract; schema-aware callers still validate the response locally. */
+export interface OpenRouterJsonSchema {
+  readonly name: string;
+  readonly strict: true;
+  readonly schema: Readonly<Record<string, JsonSchemaValue>>;
+}
 
 export type OpenRouterProviderPreferences = {
   only: string[];
@@ -165,12 +175,62 @@ function responseText(value: unknown): string {
  */
 const REASONING_STARVATION_RATIO = 0.6;
 
+// OpenRouter completion_tokens includes reasoning; the shared accounting
+// contract keeps visible output and reasoning separate (native Gemini does
+// too). Normalize here, never change pricing semantics for other providers.
+function completionUsage(usage?: Record<string, unknown>): Pick<ModelUsageRecord,
+  "outputTokens" | "reasoningTokens" | "unpricedReason" | "additionalUnpricedReason"> {
+  const completion = usage?.completion_tokens;
+  const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!count(completion)) return { unpricedReason: "OpenRouter completion token count is missing or invalid" };
+  const details = usage?.completion_tokens_details;
+  const invalidDetails = details != null && (typeof details !== "object" || Array.isArray(details));
+  const nested = !invalidDetails && details != null ? (details as Record<string, unknown>).reasoning_tokens : undefined;
+  // Retain the flat breakdown used by older recorded responses, but never
+  // add it a second time or silently prefer conflicting provider evidence.
+  const flat = usage?.reasoning_tokens;
+  const reasoning = nested ?? flat ?? 0;
+  if (invalidDetails || !count(reasoning) || reasoning > completion ||
+    (nested != null && !count(nested)) || (flat != null && !count(flat)) ||
+    (nested != null && flat != null && nested !== flat)) {
+    // The inclusive completion total is still known. Preserve that charge
+    // while marking the malformed breakdown incomplete for spend admission.
+    return { outputTokens: completion, additionalUnpricedReason: "OpenRouter completion/reasoning breakdown is invalid or conflicting" };
+  }
+  return { outputTokens: completion - reasoning, reasoningTokens: reasoning };
+}
+
+// Response cost is denominated in USD credits. For BYOK, the router fee and
+// external inference bill are separate; for credit-funded calls, cost already
+// includes upstream inference. Never infer funding mode from matching amounts.
+function reportedCharge(usage?: Record<string, unknown>): Pick<ModelUsageRecord, "reportedCostUsd" | "unpricedReason"> {
+  if (!usage) return {};
+  const byok = usage.is_byok;
+  // Retain the former configured-rate path for legacy responses without a
+  // charge field. This is compatibility, not a new actual-bill receipt.
+  if (!Object.hasOwn(usage, "cost") && (byok === undefined || byok === false)) return {};
+  const valid = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  const reasons: string[] = [];
+  let known = valid(usage.cost), amount = known ? usage.cost as number : 0;
+  if (!known) reasons.push("OpenRouter credit charge is missing or invalid");
+  if (byok === true) {
+    const details = usage.cost_details;
+    const upstream = details && typeof details === "object" && !Array.isArray(details)
+      ? (details as Record<string, unknown>).upstream_inference_cost : undefined;
+    if (valid(upstream) && valid(amount + upstream)) { amount += upstream; known = true; }
+    else reasons.push("OpenRouter BYOK external charge is missing or invalid");
+  } else if (byok !== false) reasons.push("OpenRouter funding mode is missing or invalid");
+  return { ...(known ? { reportedCostUsd: amount } : {}),
+    ...(reasons.length ? { unpricedReason: reasons.join("; ") } : {}) };
+}
+
 export async function openRouterChat(args: {
   model: string;
   messages: OpenRouterMessage[];
   maxTokens: number;
   temperature?: number;
   json?: boolean;
+  jsonSchema?: OpenRouterJsonSchema;
   kind?: ModelCallKind;
   log?: (message: string) => void;
 }): Promise<string> {
@@ -179,6 +239,10 @@ export async function openRouterChat(args: {
   if (!key) throw new Error("OpenRouter requires OPENROUTER_API_KEY");
   const provider = PROVIDERS[args.model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${args.model}`);
+  if (args.jsonSchema !== undefined && (
+    !args.jsonSchema || typeof args.jsonSchema.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(args.jsonSchema.name) ||
+    args.jsonSchema.strict !== true || !args.jsonSchema.schema || typeof args.jsonSchema.schema !== "object" || Array.isArray(args.jsonSchema.schema)
+  )) throw new Error("OpenRouter requires a named strict JSON schema object");
   const controller = new AbortController();
   const requestDeadline = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -191,8 +255,10 @@ export async function openRouterChat(args: {
         messages: args.messages,
         max_tokens: args.maxTokens,
         ...(args.temperature === undefined ? {} : { temperature: args.temperature }),
-        ...(args.json ? { response_format: { type: "json_object" } } : {}),
-        provider,
+        ...(args.jsonSchema !== undefined
+          ? { response_format: { type: "json_schema", json_schema: args.jsonSchema } }
+          : args.json ? { response_format: { type: "json_object" } } : {}),
+        provider: args.jsonSchema !== undefined ? { ...provider, require_parameters: true } : provider,
       }),
       signal: controller.signal,
     });
@@ -237,14 +303,18 @@ export async function openRouterChat(args: {
   const returnedModel = payload && typeof payload === "object"
     ? String((payload as { model?: unknown }).model ?? args.model)
     : args.model;
+  const completion = completionUsage(usage);
+  const charge = reportedCharge(usage);
+  const incomplete = [completion.unpricedReason, charge.unpricedReason].filter(Boolean).join("; ");
   recordModelUsage({
     provider: "openrouter",
     model: returnedModel,
     kind: args.kind ?? "text",
     requestId: payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") || undefined : undefined,
     inputTokens: typeof usage?.prompt_tokens === "number" ? usage.prompt_tokens : undefined,
-    outputTokens: typeof usage?.completion_tokens === "number" ? usage.completion_tokens : undefined,
-    reasoningTokens: typeof usage?.reasoning_tokens === "number" ? usage.reasoning_tokens : undefined,
+    ...completion,
+    ...charge,
+    ...(incomplete ? { unpricedReason: incomplete } : {}),
     cachedInputTokens: typeof usage?.prompt_tokens_details === "object" && usage.prompt_tokens_details
       && typeof (usage.prompt_tokens_details as { cached_tokens?: unknown }).cached_tokens === "number"
       ? (usage.prompt_tokens_details as { cached_tokens: number }).cached_tokens
@@ -273,7 +343,7 @@ export async function openRouterChat(args: {
   // on every video, an advisor that never advised, a topic gate skipped on two
   // slates in three, and a safety scan that failed precisely when it had
   // something to report.
-  const reasoningTokens = typeof usage?.reasoning_tokens === "number" ? usage.reasoning_tokens : 0;
+  const reasoningTokens = completion.reasoningTokens ?? 0;
   if (reasoningTokens > 0 && reasoningTokens > args.maxTokens * REASONING_STARVATION_RATIO) {
     (args.log ?? (() => {}))(
       `openRouter: STARVATION RISK — reasoning used ${reasoningTokens} of the ${args.maxTokens}-token ceiling ` +
@@ -288,7 +358,7 @@ export async function openRouterChat(args: {
       { status: response.status },
     );
   }
-  if (args.json) {
+  if (args.json || args.jsonSchema !== undefined) {
     try {
       parseJson(text);
     } catch (error) {
@@ -310,6 +380,7 @@ export async function openRouterJson<T>(args: {
   maxTokens: number;
   temperature?: number;
   log?: (message: string) => void;
+  jsonSchema?: OpenRouterJsonSchema;
 }): Promise<T> {
   const model = args.model?.trim() || openRouterModel(args.tier === "pro" ? "creative" : "intelligence");
   return parseJson<T>(await openRouterChat({
@@ -321,6 +392,7 @@ export async function openRouterJson<T>(args: {
     maxTokens: args.maxTokens,
     temperature: args.temperature,
     json: true,
+    ...(args.jsonSchema === undefined ? {} : { jsonSchema: args.jsonSchema }),
     log: args.log,
   }));
 }

@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { lintTitle } from "@/lib/metacraft";
 
-// P2-1 (GOLDEN_MODULE_AUDIT_2026-08.md): "metadata gate internals unverified
-// (clickScore >=7, payoff-in-50-chars, claims-grounding lint) and no dedicated
-// test exists." This file exercises the two gates that are deterministic and
-// callable in isolation (lintTitle's payoff-window + claims-grounding checks),
-// then pins the clickScore/direct >=7 judge gate — which lives inside
-// craftMetadata's live permitted-model/YouTube-Data round trip and cannot run without
-// network + ANTHROPIC_API_KEY — via a source-anchored assertion so a silent
-// weakening of the threshold breaks this test instead of shipping quietly.
+// Deterministic lint tests only; passing lexical checks is not factual verification.
 
 /* ------------------------ payoff-in-50-chars gate ------------------------ */
 
@@ -218,29 +209,4 @@ import { lintTitle } from "@/lib/metacraft";
 
 console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding lint behavior verified");
 
-/* ------- craftMetadata judge gate (clickScore & direct >=7) -- pinned ------ */
-//
-// craftMetadata() ranks title candidates through a live permitted-model judge call and
-// only accepts a winner when BOTH clickScore and direct clear 7 (metacraft.ts).
-// That round trip needs ANTHROPIC_API_KEY plus network and cannot run as a plain
-// unit test, so this pins the literal threshold expression: if a future edit
-// silently loosens the gate (e.g. drops the `direct` half, or lowers either
-// number), this assertion breaks loudly instead of the regression shipping
-// unnoticed, per P2-1's own effort note ("Read + add one unit test").
-{
-  const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
-  const gateExpr = "(r.clickScore ?? 0) >= 7 && (r.direct ?? 10) >= 7";
-  assert.ok(
-    source.includes(gateExpr),
-    "metacraft.ts: craftMetadata's judge gate must still require BOTH clickScore >=7 AND direct >=7 " +
-      "(catalog claim: 'clickScore >=7') — literal expression not found, gate may have moved or weakened",
-  );
-  // The gate's own rejection message, surfaced in the retry-fix-loop, is the
-  // second half of the wiring proof: a rejected slate must say so and retry.
-  assert.ok(
-    source.includes('lastIssues.push("no candidate gated clickScore+direct ≥7")'),
-    "metacraft.ts: the judge-rejection retry path must still exist so a failed gate causes a real retry, not a silent pass",
-  );
-}
-
-console.log("metacraftGates.test.ts: craftMetadata clickScore+direct >=7 judge gate pinned against live source");
+// Strict judge admission and source-packet parity are exercised behaviorally in titleDecision.test.ts.

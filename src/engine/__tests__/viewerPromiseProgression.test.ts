@@ -221,9 +221,10 @@ function transcriptProof(sourceSha256: string): NarrationTranscriptProof {
     expected: { textSha256: expectedTextSha256, wordCount: 10 },
     transcript: {
       text: "Mira waters.",
-      wordCount: 1,
+      wordCount: 2,
       words: [
         { text: "Mira", startMs: 0, endMs: 300 },
+        { text: "waters.", startMs: 350, endMs: 600 },
       ],
     },
     assessment: {

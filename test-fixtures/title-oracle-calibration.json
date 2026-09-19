@@ -1,0 +1,771 @@
+{
+  "version": "title-oracle-calibration/v1",
+  "createdOn": "2026-09-09",
+  "purpose": "Synthetic/adversarial calibration of the production title judge, not title generation and not evidence of audience engagement.",
+  "providerCallsPerformed": 0,
+  "ownerApprovedVideoTitlesIncluded": 0,
+  "historicalReplay": false,
+  "policy": {
+    "judgeInputAllowlist": "Send only each inputs[].args and inputs[].candidates to judgeTitleCandidates. Never send provenance, expectations, fixture descriptions, or case IDs to the model.",
+    "labelsAre": "Human-designed test expectations, not model output or owner-approved creative answers.",
+    "sourceSupportMeans": "Fidelity to the supplied packet only; retained narration is not independently externally fact-checked here.",
+    "notGenerationExamples": "These candidates must not be used as generated production titles, few-shot exemplars, prompt hints or new-channel creative answers.",
+    "candidateOrder": "Five fact-corruption pairs begin with the supported candidate and five begin with the unsupported candidate. Also replay each pair reversed and remap indexes before scoring."
+  },
+  "hashConventions": {
+    "sourceTextSha256": "SHA-256 of exact UTF-8 inputs[].args.scriptExcerpt, without normalization",
+    "judgeInputSha256": "SHA-256 of JSON.stringify({args: input.args, candidates: input.candidates}), preserving stored field order",
+    "retainedFixtureSha256": "SHA-256 of the frozen baseline JSON file bytes; additionally bind the full narration digest and exact excerpt offsets"
+  },
+  "inputs": [
+    {
+      "id": "c01",
+      "args": {
+        "topic": "Preservation and exposure of a soldier's satchel and letter in battlefield clay",
+        "channelName": "Inked Histories",
+        "niche": "History",
+        "persona": "A scholarly yet dramatic narrator, guiding viewers through the turning pages of history as if revealing a lost epic. The tone is immersive and reverent, focusing on the human story within grand events.",
+        "format": "motion_comic",
+        "language": "en",
+        "scriptExcerpt": "Encased in its protective shell of wet earth, the officer's satchel has survived the decades in a state of suspended animation, untouched by air. Look at this! The leather stitching is completely intact. But the moment this subterranean vault is breached, the clock begins ticking once more, as sudden exposure to the atmosphere threatens to destroy what the earth kept. The sudden influx of oxygen awakens dormant microbes, meaning the relic will rapidly disintegrate if it isn't stabilized immediately by the excavation team. Get the stabilization gel! The air will ruin it. Working with breathless urgency, Doctor Thorne applies a specialized chemical sealant to the porous leather, replacing the lost moisture before the fibers can dry and crack. The heavy trench mud had acted as a perfect barrier against the elements, a miraculous tomb of chemistry that preserved even the faintest oil stains. It looks like it was dropped yesterday. With agonizing care, she unfastens the tarnished brass buckle, revealing a cache of folded paper that defies all logical expectations of a battlefield grave. Because the surrounding soil was highly acidic, the sheer density of the clay created a localized micro-environment, a sealed pocket where fragile paper could somehow survive. There is a letter inside. Perfectly dry. The neat, cursive ink remains startlingly vivid across the yellowed page, carrying a fallen soldier's final, desperate thoughts to a family he would never see again. The very mud that dragged these young men down into the dark also became their ultimate protector, refusing to let their final words fade away. To my dearest mother...",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 1649,
+          "totalChars": 2915
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Mud That Preserved a Soldier's Last Letter"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Air That Preserved a Soldier's Last Letter"
+        }
+      ]
+    },
+    {
+      "id": "c02",
+      "args": {
+        "topic": "Taxation: income, spending, ownership and shared public services",
+        "channelName": "Chalk & Compound",
+        "niche": "Finance",
+        "persona": "A calm, authoritative guide who breaks down complex financial concepts into simple, visually compelling stories. The tone is educational and reassuring, never sensational or alarmist.",
+        "format": "whiteboard_explainer",
+        "language": "en",
+        "scriptExcerpt": "At its core, taxation is how a society pools its resources to fund shared needs. Instead of everyone building their own roads or hiring private firefighters, we chip in a portion of our income. This collective pot allows the government to provide public goods that benefit everyone, creating a foundation for a functioning economy. The most common way governments collect this money is through an income tax. When you earn money from a job or a business, a percentage goes to the state. This system is often progressive, meaning those who earn more pay a higher rate, which aims to balance the financial burden across different income levels. Another major pillar is the consumption tax, like sales tax or value-added tax. Every time you buy a coffee, a pair of shoes, or a new car, a small extra charge is added to the price. Unlike income tax, this targets what you spend rather than what you earn, capturing revenue at the point of sale.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 940,
+          "totalChars": 2592
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Why Sales Tax Comes Directly From Your Income"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "How Income Tax Differs From Sales Tax"
+        }
+      ]
+    },
+    {
+      "id": "c03",
+      "args": {
+        "topic": "Gratitude for close companions as a gentle bedtime practice",
+        "channelName": "Gratitude Springs",
+        "niche": "ambient sleep meditation",
+        "persona": "A calm, warm guided-gratitude meditation channel: gentle female guide, unhurried, speaking softly to one listener.",
+        "format": "ambient_guided",
+        "language": "en",
+        "scriptExcerpt": "You spend so many waking hours pouring your energy into the world... Now, it is time to rest.\n\n[softly] Your mind holds onto the faces and voices you encountered today... the demands, the conversations, the passing moments... [pause] Tonight, on day four of our practice, we gently release the strangers... and draw close the warmth of the people beside you... the ones who simply let you be... [long pause] Breathe in their quiet acceptance... let it soften your jaw, your neck, your chest... as my voice guides you into the deepest sanctuary of sleep...\n\nWelcome to Gratitude Springs. If you have carried the friction of a hundred hurried interactions with you to this moment... give yourself permission to set it down. Tonight, we will simply breathe and find our way back to peace.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 785,
+          "totalChars": 2894
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "A Gentle Gratitude Practice Before Sleep"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Gratitude cures insomnia for every listener"
+        }
+      ]
+    },
+    {
+      "id": "c04",
+      "args": {
+        "topic": "Stoic agency and boundaries around demanding people",
+        "channelName": "The Quiet Stoic",
+        "niche": "stoic philosophy resilience",
+        "persona": "A calm, measured voice that speaks like a trusted mentor sitting across a firelit table — unhurried, thoughtful, and deeply grounded in ancient wisdom applied to modern struggle.",
+        "format": "narrated_documentary",
+        "language": "en",
+        "scriptExcerpt": "The modern world has completely misunderstood what it means to be a Stoic. It is not about enduring bad behavior in silence.\n\nPeople think resilience means standing like a stone statue while a frantic relative chips away at your sanity. That is not philosophy. That is just self-destruction. Real Stoicism is deeply active. When Epictetus taught his students in Nicopolis two thousand years ago, he did not tell them to absorb the chaos of others. He taught them how to ruthlessly cut off the supply. You possess a specific type of inner agency that demanding people rely on. Once you learn to recognize the exact moment they ask for it, you can simply refuse to hand it over.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 676,
+          "totalChars": 3648
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Stoicism Means Enduring Bad Behavior in Silence"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Stoicism Is Not Enduring Bad Behavior in Silence"
+        }
+      ]
+    },
+    {
+      "id": "c05",
+      "args": {
+        "topic": "How an earlier start affects a stated long-term compounding example",
+        "channelName": "Investory",
+        "niche": "Finance",
+        "persona": "A calm, authoritative narrator who demystifies wealth-building through cinematic storytelling, making complex financial concepts feel accessible and aspirational without hype or fluff.",
+        "format": "narrated_documentary",
+        "language": "en",
+        "scriptExcerpt": "What if the most powerful asset for building wealth isn't an investment you pick, but a force you simply allow? Most investors fixate on returns. They chase hot stocks or the next big thing. But here is what changes everything: time. Imagine two individuals. Both invest two hundred dollars every month. The first starts at age twenty-five. The second waits just ten years, starting at age thirty-five. Both earn a consistent seven percent annual return. According to financial models based on historical market averages, by age sixty-five, the early starter has accumulated over four hundred thousand dollars. The one who waited? They have less than two hundred thousand dollars. That ten-year delay cost them over two hundred thousand dollars in potential wealth. This isn't about clever stock picking. It's about the relentless, compounding power of time itself. As Benjamin Franklin once noted, “Time is money.” He meant it literally. Every year of delay exacts a substantial, often invisible, tax on your future.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 1017,
+          "totalChars": 10040
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Why Starting Ten Years Earlier Grows More Wealth"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Why Starting Ten Years Later Grows More Wealth"
+        }
+      ]
+    },
+    {
+      "id": "c06",
+      "args": {
+        "topic": "A fictional bridge failure and its fatal outcome",
+        "channelName": "Archive of Structures",
+        "niche": "fictional engineering incident documentary",
+        "persona": "A careful documentary narrator explaining a fictional engineering incident from the supplied incident record. Preserve casualty counts and distinguish causes from rescue outcomes.",
+        "format": "narrated_engineering_documentary",
+        "language": "en",
+        "scriptExcerpt": "Synthetic incident record: During the east-span failure, 47 engineers were on the bridge. All 47 engineers died in the collapse; none survived. The rescue crew arrived afterward and recovered the bodies. The bridge itself did not remain standing. The episode reconstructs the structural sequence and the human cost.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 315,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Bridge Collapse That 47 Engineers Survived"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Bridge Collapse That Killed 47 Engineers"
+        }
+      ]
+    },
+    {
+      "id": "c07",
+      "args": {
+        "topic": "A fictional bridge collapse and a successful evacuation",
+        "channelName": "Archive of Structures",
+        "niche": "fictional engineering incident documentary",
+        "persona": "A careful documentary narrator explaining a fictional engineering incident from the supplied incident record. Preserve casualty counts and distinguish causes from rescue outcomes.",
+        "format": "narrated_rescue_chronicle",
+        "language": "en",
+        "scriptExcerpt": "Synthetic incident record: A lookout detected the east-span failure early. A rescue crew evacuated all 47 engineers from the bridge before the collapse reached their position. All 47 engineers survived. None of the engineers died. The bridge fell into the river after their evacuation. The episode reconstructs how the warning and the evacuation kept the engineers alive.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 371,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "How All 47 Engineers Survived the Bridge Collapse"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "How All 47 Engineers Died in the Bridge Collapse"
+        }
+      ]
+    },
+    {
+      "id": "c08",
+      "args": {
+        "topic": "Conflicting chronicles about the fall of the Silver Gate",
+        "channelName": "Watercolor Chronicles",
+        "niche": "original fantasy lore",
+        "persona": "A reflective storyteller exploring an invented world's disputed chronicles through watercolor illustrations. Wonder and curiosity are welcome, but disputed theories remain visibly disputed.",
+        "format": "watercolor_lore_narration",
+        "language": "en",
+        "scriptExcerpt": "Synthetic lore packet: Two contradictory chronicles describe the fall of the Silver Gate. One accuses the Ash King of betrayal; the other says his seal was stolen and the order forged. No surviving witness or document resolves who issued the order. The episode presents both accounts and explores whether the Ash King betrayed the Silver Gate without choosing a proven answer.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 376,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Why the Ash King Betrayed the Silver Gate"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Did the Ash King Betray the Silver Gate?"
+        }
+      ]
+    },
+    {
+      "id": "c09",
+      "args": {
+        "topic": "The bank clerk's alibi and acquittal after a fictional heist",
+        "channelName": "The Case Ledger",
+        "niche": "fictional crime and court records",
+        "persona": "A measured case narrator separating allegation, witness testimony and the court's stated finding. An unresolved perpetrator is not an invitation to identify an innocent suspect as guilty.",
+        "format": "narrated_crime_case_record",
+        "language": "en",
+        "scriptExcerpt": "Synthetic case record: Prosecutors accused a bank clerk of helping plan a heist. Station footage established that the clerk was elsewhere at the relevant time. The court acquitted the clerk, and the judgment records no conviction against that clerk. The actual organizer remains unidentified. The episode follows the accusation, the alibi and the acquittal.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 357,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Bank Clerk Acquitted After a Heist"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Bank Clerk Convicted After a Heist"
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "args": {
+        "topic": "Tidal locking and the relationship between rotation and orbital period",
+        "channelName": "Orbit Classroom",
+        "niche": "introductory astronomy",
+        "persona": "A concise, friendly science educator whose searchable titles state the lesson topic and accurately describe the actual lesson format.",
+        "format": "narrated_science_lesson",
+        "language": "en",
+        "scriptExcerpt": "Synthetic lesson and artifact facts: The completed narrated lesson is 720 seconds long, exactly 12 minutes; it is not a 2-hour lecture or extended loop. The lesson uses 2 diagrams to explain why one side of a tidally locked moon faces its planet, and distinguishes rotation on an axis from orbiting the planet. The title's viewing-duration claim must refer to the completed lesson, not to an example period in the lesson.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 421,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Tidal Locking Explained in 2 Hours"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Tidal Locking Explained in 12 Minutes"
+        }
+      ]
+    },
+    {
+      "id": "c11",
+      "args": {
+        "topic": "The three main tax bases and public revenue",
+        "channelName": "Civic Chalk",
+        "niche": "introductory civic finance",
+        "persona": "A calm, reassuring classroom guide for people anxious about money. Explain public systems precisely and without villains, fear cues or mocking the learner. The voice is practical, not adversarial or theatrical.",
+        "format": "whiteboard_classroom_explainer",
+        "language": "en",
+        "scriptExcerpt": "Synthetic episode packet: This lesson explains three ways governments collect taxes: income tax on earnings, consumption tax on purchases, and property tax on ownership. It traces where each applies and how the combined revenue pays for shared public services. A wallet is a metaphor for the individual's resources; the episode contains no claim that a literal monster exists or that taxes are secretly illegal.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 411,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "How Taxes Apply to Income, Spending and Property"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Income, Spending, Property: Meet the Tax Monster"
+        }
+      ]
+    },
+    {
+      "id": "c12",
+      "args": {
+        "topic": "The three main tax bases and public revenue",
+        "channelName": "Wallet Theatre",
+        "niche": "playful introductory civic finance",
+        "persona": "A warm, playful theatre narrator turning everyday money systems into comic characters. Audience members expect obvious creature personification and a light dramatic introduction, while the explanation remains accurate and never claims a conspiracy.",
+        "format": "narrated_finance_stage_comedy",
+        "language": "en",
+        "scriptExcerpt": "Synthetic episode packet: This lesson explains three ways governments collect taxes: income tax on earnings, consumption tax on purchases, and property tax on ownership. It traces where each applies and how the combined revenue pays for shared public services. A wallet is a metaphor for the individual's resources; the episode contains no claim that a literal monster exists or that taxes are secretly illegal.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 411,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "How Taxes Apply to Income, Spending and Property"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Income, Spending, Property: Meet the Tax Monster"
+        }
+      ]
+    }
+  ],
+  "provenance": [
+    {
+      "id": "c01",
+      "sourceOrigin": "retained_narration_excerpt",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "current_identity_observed_2026-09-08_not_historical",
+      "retainedFixture": "test-fixtures/title-baseline/js76ghf4s44b4w5d97cs2f49bd89znxa.json",
+      "retainedFixtureSha256": "6e91a83df7226ede72bdcd72cce65dfb95827ce5338b35839fc7d93a8c6d73cd",
+      "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+      "narrationStageId": "jn75arcy88zn2ah2ahxcptprt589zw66",
+      "narrationSha256": "bbf3313ad8da0e1661e78069815a170adc25b2872b9388c17021fa2d86e790f6",
+      "sourcePath": "source.stages[id=jn75arcy88zn2ah2ahxcptprt589zw66].outputs.narrationText",
+      "excerptStart": 917,
+      "excerptEndExclusive": 2566,
+      "sourceTextSha256": "4a4fa5fd5ad5dce13f0d27563611e27e018d6075918ee75ed2d9852616f05169",
+      "judgeInputSha256": "aa428b86f1d2480130fb818746233d1f8d5baf51927ff4e8fba19692bcef4fa4",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c02",
+      "sourceOrigin": "retained_narration_excerpt",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "current_identity_observed_2026-09-08_not_historical",
+      "retainedFixture": "test-fixtures/title-baseline/js705md1etr1kr0mpbpvpqaz8x89znvt.json",
+      "retainedFixtureSha256": "66ef00c9b197c209815a0947c007b767c8ebbc66821e4beeba56c4b62d4eac19",
+      "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+      "narrationStageId": "jn7cfb6wydhmt9wq7jzd6979js89zwng",
+      "narrationSha256": "03cb6b228d2341dc078cef89b757c720993f300ab571b7cf58d74a0b83678d98",
+      "sourcePath": "source.stages[id=jn7cfb6wydhmt9wq7jzd6979js89zwng].outputs.narrationText",
+      "excerptStart": 0,
+      "excerptEndExclusive": 940,
+      "sourceTextSha256": "f290a611d34443125bb7f8e819cd58302dc94cb546e3bf65bb42c5dbbc291feb",
+      "judgeInputSha256": "f275f6f7ea2afa8438a3b04f3e908d20d38ff2f9112c043b1b0c84510904494d",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c03",
+      "sourceOrigin": "retained_narration_excerpt",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "current_identity_observed_2026-09-08_not_historical",
+      "retainedFixture": "test-fixtures/title-baseline/js72d9gty4nrqqq7wevv0m0hyd89xgk9.json",
+      "retainedFixtureSha256": "b20fcaecbdd81691afb88c260482f2fca1e6001e7ba86391d28f175b47abaf92",
+      "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+      "narrationStageId": "jn7bq24qb4a4mgxg00bv4wx09189wyd5",
+      "narrationSha256": "ca8b7072b604869d25448995186491812a3ed3352076f30a587fd1370f643f5b",
+      "sourcePath": "source.stages[id=jn7bq24qb4a4mgxg00bv4wx09189wyd5].outputs.narrationText",
+      "excerptStart": 0,
+      "excerptEndExclusive": 785,
+      "sourceTextSha256": "05a2e7425e47aba22580d7a82ffcf168a06f8eb956ee925f7e88f13d9c0253a2",
+      "judgeInputSha256": "45c37b6ed32a8173ed1b35a3793632800f40887d72f5846a6a84961ce458fb5a",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c04",
+      "sourceOrigin": "retained_narration_excerpt",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "current_identity_observed_2026-09-08_not_historical",
+      "retainedFixture": "test-fixtures/title-baseline/js7eh3rvdhjyqwkmnseb0qtvfh88mrq7.json",
+      "retainedFixtureSha256": "228e8ae39577f02eb90bc98d4388fadc9ce5e5b4d3f8a46d0e9f62e11f1e8147",
+      "runId": "js7eh3rvdhjyqwkmnseb0qtvfh88mrq7",
+      "narrationStageId": "jn7235pyg7j36t5x5n8vj8c7ps88n96b",
+      "narrationSha256": "9a7b7acabdce786a3896c75b8f9f3188151df39dbe846924ada54d0777ef0793",
+      "sourcePath": "source.stages[id=jn7235pyg7j36t5x5n8vj8c7ps88n96b].outputs.narrationText",
+      "excerptStart": 0,
+      "excerptEndExclusive": 676,
+      "sourceTextSha256": "3939572d529dc9e60f62721492a89f0346d0195a676652690365b14912be858b",
+      "judgeInputSha256": "85f8ec5d51c95755a2c35a6b85e0dfe8eaa7e16640c685c3ee5b9ee30750f14a",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c05",
+      "sourceOrigin": "retained_narration_excerpt",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "current_identity_observed_2026-09-08_not_historical",
+      "retainedFixture": "test-fixtures/title-baseline/js72sy9xyvxtptvtbbg2z8aegs88ez4t.json",
+      "retainedFixtureSha256": "9341834d2c1edbd1a19a52c2c54a5d44493a8a011085a562aaaffb59367fca4e",
+      "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+      "narrationStageId": "jn73vfk0pmxbexbrxfhgzeysk588fcje",
+      "narrationSha256": "384842735e7c22540c36b60b127a7863b3c16cad2afe69594bdaa27b5b8c6e89",
+      "sourcePath": "source.stages[id=jn73vfk0pmxbexbrxfhgzeysk588fcje].outputs.narrationText",
+      "excerptStart": 4197,
+      "excerptEndExclusive": 5214,
+      "sourceTextSha256": "980b35dc3631da345c6a723c8387f91f442fe992701034ac6b9c15cca9397eb0",
+      "judgeInputSha256": "2ef35390e8d05722c6751cb12677d5e060b36a93fed6c67a41150018a5d4601a",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c06",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "39e739bcd14ee18ea7192ff79ff12d73bd9afe49af85cee6bf0e8db2f9d0a098",
+      "judgeInputSha256": "b33ff680554ecdcbeb542873f18aed00ef402072ec9a044a5dc13201209e1448",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c07",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "55c953f6e499779108c3d9162ed8c515b9b803e94371893e558c143f6edab520",
+      "judgeInputSha256": "c2c2efa0f85f49553ef215f660c8c5b9a46cc390be175154bacc924b347dd2be",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c08",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "3ce0ba2d3d8a11d64293de9d3f6004b7506ec0da9c1382c224a9a5c8fdd4e220",
+      "judgeInputSha256": "e66a395454ea46d965d81ed137af13dde5aeb06dfc5191847e42c4debcfa5a59",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c09",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "a5bc4aafc34901fd406fbe7738f9cf7e8b0838ee6b30b9f6506958b50575da0b",
+      "judgeInputSha256": "fc62a2b0ef47402d59211461a5414617f59416e9b3c76bad0bba9eeb588b2ff0",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c10",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "3c44ec903461b2a6bbee61775d1ea649e423308341c84afd271f515f33457b5d",
+      "judgeInputSha256": "43281dc566852e7c261258a033d0db778e35312dfde3a5ca2f6ffeac6f3b565d",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c11",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "4814ed8d109e6e68f8c5431261a02b397213f1d9f0da43f639f69460a3b602fb",
+      "judgeInputSha256": "10c2a3c481366ad3ca59a5e33c9b27d6667c12ad30185a9f8fd334a971849515",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    },
+    {
+      "id": "c12",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_calibration_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "4814ed8d109e6e68f8c5431261a02b397213f1d9f0da43f639f69460a3b602fb",
+      "judgeInputSha256": "d4aa47b7cd314348c7d94ce26dbac4177dac06233fae00acaafd407d893b4a91",
+      "sourceClaimScope": "Fidelity to the supplied text, not independent external fact verification",
+      "historicalReplay": false
+    }
+  ],
+  "expectations": [
+    {
+      "id": "c01",
+      "dimension": "cause_and_agent_reversal",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Wet earth is the protective shell for the satchel and letter carrying the fallen soldier's final thoughts. Exposure to air threatens destruction."
+        },
+        {
+          "idx": 1,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The supplied excerpt says exposure to oxygen threatens destruction and stabilization is needed; air is not the preserving agent."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "The packet includes the later letter discovery as well as the preserving-earth/damaging-air contrast. The physical preservation explanation is a retained narrative claim, not externally verified conservation science."
+    },
+    {
+      "id": "c02",
+      "dimension": "relation_not_token_overlap",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The source explicitly contrasts sales tax targeting what you spend with income tax targeting what you earn. Shared tax and income tokens do not establish this relation."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The source distinguishes tax on earnings from sales/value-added tax on spending."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference."
+    },
+    {
+      "id": "c03",
+      "dimension": "universal_health_promise_without_evidence",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The excerpt offers a soft gratitude-and-breathing practice for rest, not a guaranteed clinical outcome."
+        },
+        {
+          "idx": 1,
+          "grounding": "insufficient",
+          "identity": "not_asserted",
+          "reason": "No evidence supports curing insomnia or universal effectiveness. The source's invitation to sleep is not a clinical or guaranteed cure."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "No external medical conclusion is being made; this checks whether the title adds a promise the supplied script cannot substantiate."
+    },
+    {
+      "id": "c04",
+      "dimension": "explicit_negation",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The candidate asserts exactly the definition that the source negates. The shared words must not yield a supported verdict."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The narration explicitly rejects enduring bad behavior in silence and describes active personal agency."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference."
+    },
+    {
+      "id": "c05",
+      "dimension": "comparative_outcome_reversal",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Within the supplied model's identical contributions and returns, the earlier starter accumulates more by age sixty-five."
+        },
+        {
+          "idx": 1,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The source gives the later starter less than two hundred thousand dollars versus over four hundred thousand for the earlier starter, not more."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "The source's financial models and attribution are not independently validated. This pair tests the explicitly stated comparison only, not a real-world guaranteed return."
+    },
+    {
+      "id": "c06",
+      "dimension": "fatal_outcome_counterpair",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "None survived in this source. A source token match for survived comes from a negation, not an affirmative rescue outcome."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "All forty-seven engineers died in the stipulated fictional incident."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "Synthetic only; not a claim about any historical bridge or real fatalities. Compare c07: the same verb survived must be accepted when its relation is supported."
+    },
+    {
+      "id": "c07",
+      "dimension": "valid_rescue_and_negation_counterpair",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The source explicitly establishes that all forty-seven survived due to early warning and evacuation."
+        },
+        {
+          "idx": 1,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "None of the engineers died; asserting all died reverses the source."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "Synthetic only. A ban on survived would fail the valid case; a ban on died would fail c06. Source relationships, not verbs, decide."
+    },
+    {
+      "id": "c08",
+      "dimension": "uncertainty_and_question_presupposition",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "insufficient",
+          "identity": "not_asserted",
+          "reason": "Why presupposes the betrayal happened. The supplied conflicting accounts do not establish that fact; uncertainty is not evidence that the opposite happened."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The question names the disputed claim and matches an episode that investigates it without a proven answer."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference."
+    },
+    {
+      "id": "c09",
+      "dimension": "allegation_judgment_and_subject_binding",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The named clerk was acquitted after the alibi was established."
+        },
+        {
+          "idx": 1,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The same clerk was not convicted. The existence of a heist or an accusation cannot be transferred into a conviction."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "Synthetic only. This does not identify or accuse any real person."
+    },
+    {
+      "id": "c10",
+      "dimension": "artifact_duration_not_source_number_presence",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "Two appears in the source but belongs to diagram count and an explicitly negated two-hour format, not the completed artifact's duration."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The stipulated completed artifact is exactly twelve minutes and teaches tidal locking."
+        }
+      ],
+      "pairDecision": "Only the supported candidate is factually eligible; this is not an observed click preference.",
+      "annotationNote": "The artifact facts are synthetic test metadata included in the shared source packet, not fabricated facts about an existing video. This catches duration contradiction, not a production duration connector."
+    },
+    {
+      "id": "c11",
+      "dimension": "identity_contrast_calm_classroom",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "A direct subject-led explanation is fact-supported and appropriate for the stated classroom audience."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "violates",
+          "reason": "The three tax bases are supported and monster is identifiable personification, but the adversarial creature framing conflicts with this calm, non-villainizing classroom identity."
+        }
+      ],
+      "pairDecision": "Candidate 0 is acceptable. Candidate 1 is fact-supported but violates this specific identity; do not use factuality to hide a tone mismatch.",
+      "annotationNote": "Identity expectations are human-designed and must be reviewed as subjective calibration labels, not a universal ban on theatrical titles."
+    },
+    {
+      "id": "c12",
+      "dimension": "identity_contrast_playful_theatre",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The direct title remains a valid searchable explanation; this fixture does not require it to fail just because a more theatrical title is available."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The same source-backed tax explanation can use obvious creature personification within this explicitly playful stage-comedy identity."
+        }
+      ],
+      "pairDecision": "Both candidates are acceptable. No mandated winner or click-score ordering; the theatrical candidate must not be rejected by a global house-style rule.",
+      "annotationNote": "Same source bytes and candidate bytes as c11; only the channel identity and presentation format change."
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
 import { MediaPreview as CurrentMediaPreview } from "@/components/MediaPreview";
+import { SignedVideoPlayer } from "./SignedVideoPlayer";
 import {
   assetLabel,
   fileName,
@@ -42,6 +43,9 @@ export function RunMediaWorkbench({
   const { media, historicalThumbnails } = partitionRunThumbnailAssets(ordered, currentThumbnail);
   const selectedMaster = selectedRunMaster(media, selectedVideoAssetId);
   const visible = visibleRunMedia(media, selectedMaster, showAll);
+  const supporting = visible.filter((asset) => asset._id !== selectedMaster?._id);
+  const documents = supporting.filter((asset) => mediaType(asset) === "file");
+  const previews = supporting.filter((asset) => mediaType(asset) !== "file");
   const hiddenCount = Math.max(0, media.length - visible.length);
   const stageState = summarizeStageReceipts(stages);
   const isActiveRun = runStatus === "running" || runStatus === "queued";
@@ -51,15 +55,10 @@ export function RunMediaWorkbench({
       <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.headerCopy}>
-            <p className={styles.eyebrow}>Output</p>
             <h2 id="recorded-work-title" className={styles.title}>
               Media
             </h2>
-            <p className={styles.subtitle}>
-              {isActiveRun
-                ? "Saved output appears as stages finish."
-                : "Saved output from this run."}
-            </p>
+            {isActiveRun && <p className={styles.subtitle}>Saved output appears as stages finish.</p>}
           </div>
 
           <dl className={styles.metrics}>
@@ -83,16 +82,18 @@ export function RunMediaWorkbench({
           </div>
         ) : (
           <>
-            <div className={styles.mediaGrid}>
-              <CurrentThumbnailCard thumbnail={currentThumbnail} />
-              {visible.map((asset) => (
-                <RunMediaAssetCard
-                  key={asset._id}
-                  asset={asset}
-                  selectedMaster={asset._id === selectedMaster?._id}
-                />
-              ))}
+            <div className={styles.primaryMedia} data-has-master={selectedMaster ? true : undefined}>
+              {selectedMaster && <RunMediaAssetCard asset={selectedMaster} selectedMaster />}
+              <div className={styles.packaging}>
+                <CurrentThumbnailCard thumbnail={currentThumbnail} />
+                {documents.map((asset) => <RunMediaAssetCard key={asset._id} asset={asset} selectedMaster={false} />)}
+              </div>
             </div>
+            {previews.length > 0 && (
+              <div className={styles.mediaGrid}>
+                {previews.map((asset) => <RunMediaAssetCard key={asset._id} asset={asset} selectedMaster={false} />)}
+              </div>
+            )}
 
             {(hiddenCount > 0 || showAll) && (
               <div className={styles.moreRow}>
@@ -198,20 +199,50 @@ function RunMediaAssetCard({
   selectedMaster: boolean;
   historical?: boolean;
 }) {
-  const source = useAssetUrlState(asset.r2Key);
-  const [mediaFailed, setMediaFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const cardRef = useRef<HTMLElement>(null);
   const type = mediaType(asset);
-  const facts = mediaFacts(asset.meta);
-  const label = historical ? "Historical thumbnail" : assetLabel(asset.kind);
-
   return (
     <article
+      ref={cardRef}
+      tabIndex={-1}
       className={`${styles.assetCard} ${selectedMaster ? styles.selectedMaster : ""}`}
       data-media-type={type}
       data-historical-thumbnail={historical || undefined}
     >
-      <div className={styles.preview}>
-        {selectedMaster && <span className={styles.masterFlag}>Selected master</span>}
+      <RunMediaAssetContent
+        key={`${asset._id}\u0000${asset.r2Key}\u0000${attempt}`}
+        asset={asset}
+        selectedMaster={selectedMaster}
+        historical={historical}
+        onRetry={() => {
+          // The card survives while the failed resolver is retried. Other
+          // assets keep their source, playback and shared signing receipt.
+          cardRef.current?.focus({ preventScroll: true });
+          setAttempt(value => value + 1);
+        }}
+      />
+    </article>
+  );
+}
+
+function RunMediaAssetContent({ asset, selectedMaster, historical, onRetry }: {
+  asset: RunMediaAsset;
+  selectedMaster: boolean;
+  historical: boolean;
+  onRetry: () => void;
+}) {
+  const source = useAssetUrlState(asset.r2Key);
+  const [mediaFailed, setMediaFailed] = useState(false);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  const type = mediaType(asset);
+  const facts = mediaFacts(asset.meta);
+  const label = historical ? "Historical thumbnail" : assetLabel(asset.kind);
+  const sourceUrl = playbackUrl ?? source.url;
+
+  return (
+    <>
+      {type !== "file" && <div className={styles.preview}>
         <MediaPreview
           asset={asset}
           type={type}
@@ -219,27 +250,37 @@ function RunMediaAssetCard({
           url={source.url}
           failed={mediaFailed}
           onMediaError={() => setMediaFailed(true)}
+          onRetry={onRetry}
+          onPlaybackSource={setPlaybackUrl}
           label={label}
         />
-      </div>
+      </div>}
 
       <div className={styles.assetBody}>
         <div className={styles.assetHeading}>
           <div>
-            <p className={styles.assetKind}>{label}</p>
+            <p className={styles.assetKind}>{selectedMaster ? "Selected master" : label}</p>
             <h3>{fileName(asset.r2Key)}</h3>
           </div>
-          {source.url && (
+          {sourceUrl && (
             <a
               className={styles.sourceLink}
-              href={source.url}
+              href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label={`Open ${label.toLowerCase()} source: ${fileName(asset.r2Key)}`}
             >
               Open source ↗
             </a>
           )}
         </div>
+
+        {type === "file" && !source.url && (
+          <div className={styles.fileStatus} role="status">
+            {source.status === "loading" ? "Preparing file link…" : "File link unavailable"}
+            {source.status === "error" && <button type="button" className={styles.retryButton} onClick={onRetry}>Retry link</button>}
+          </div>
+        )}
 
         {facts.length > 0 && (
           <ul className={styles.facts} aria-label={`${label} metadata`}>
@@ -254,7 +295,7 @@ function RunMediaAssetCard({
           <code title={asset.r2Key}>{asset.r2Key}</code>
         </details>
       </div>
-    </article>
+    </>
   );
 }
 
@@ -265,6 +306,8 @@ function MediaPreview({
   url,
   failed,
   onMediaError,
+  onRetry,
+  onPlaybackSource,
   label,
 }: {
   asset: RunMediaAsset;
@@ -273,6 +316,8 @@ function MediaPreview({
   url: string | null;
   failed: boolean;
   onMediaError: () => void;
+  onRetry: () => void;
+  onPlaybackSource: (url: string) => void;
   label: string;
 }) {
   if (status === "loading") {
@@ -280,7 +325,10 @@ function MediaPreview({
   }
 
   if (status === "error") {
-    return <div className={styles.previewState}>Preview URL unavailable</div>;
+    return <div className={styles.previewState} role="status">
+      <span>Preview URL unavailable</span>
+      <button type="button" className={styles.retryButton} onClick={onRetry}>Retry {type === "video" ? "video" : "preview"}</button>
+    </div>;
   }
 
   if (!url || failed) {
@@ -307,22 +355,22 @@ function MediaPreview({
 
   if (type === "video") {
     return (
-      <video
+      <SignedVideoPlayer
+        assetKey={asset.r2Key}
         className={styles.video}
+        aria-label={`${label}: ${fileName(asset.r2Key)}`}
         controls
+        playsInline
         preload="metadata"
         src={url}
-        onError={onMediaError}
-      >
-        Your browser cannot preview this saved video.
-      </video>
+        onLoadedMetadata={event => onPlaybackSource(event.currentTarget.currentSrc)}
+      />
     );
   }
 
   if (type === "audio") {
     return (
       <div className={styles.audioPreview}>
-        <span>{assetLabel(asset.kind)}</span>
         <audio controls preload="metadata" src={url} onError={onMediaError}>
           Your browser cannot preview this saved audio.
         </audio>

@@ -20,6 +20,7 @@ import {
 } from "@/lib/serializedProgramEpisode";
 import { serializedProgramEpisodeContextBlocks } from "../serializedProgramEpisodeContextBlocks";
 import { serializedProgramEpisodeContextForStage } from "../../serializedProgramEpisodeContext";
+import { metadataTitleArgsForStage } from "../intelligenceBlocks";
 
 function source(relativePath: string): string {
   return readFileSync(join(process.cwd(), relativePath), "utf8");
@@ -83,6 +84,10 @@ const receipt = createSerializedProgramEpisodeContext({
 const bridge = serializedProgramEpisodeContextBlocks.find(
   (block) => block.id === "serialized_program_episode_context",
 );
+const metadataInput = { runId, params: {}, store: { topic, channelProgramRoute: serializedSeed, serializedProgramEpisodeContext: receipt } };
+assert.match(metadataTitleArgsForStage(metadataInput).continuityContext ?? "", /Episode one establishes a question/);
+assert.throws(() => metadataTitleArgsForStage({ ...metadataInput, runId: "foreign-run" }), /run/i,
+  "metadata inspection and execution share exact serialized episode binding");
 assert.ok(bridge, "the route-owned receipt bridge must be registered");
 assert.deepEqual(bridge.consumes, ["topic"]);
 assert.deepEqual(bridge.produces, ["serializedProgramEpisodeContext"]);

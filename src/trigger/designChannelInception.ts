@@ -212,7 +212,7 @@ import {
 import { compilePipeline, completePipelineForPolicy } from "@/engine/pipelineCompiler";
 import { validatePipeline } from "@/engine/validate";
 import { registerAllBlocks } from "@/engine/blocks";
-import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import {
   isSyntheticScenarioContract,
   syntheticScenarioContract,
@@ -1362,7 +1362,7 @@ function certifyChannelPipeline(args: {
   // a structurally valid graph must not silently lose Story Spine, the local
   // quiz route, or another family-owned non-Gemini admission requirement.
   assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);
-  assertChannelShowProfilePipelineCompatibility({
+  const admittedShowProfile = assertChannelShowProfilePipelineCompatibility({
     profile: args.showProfile,
     programBrief: args.programBrief,
     pipeline: args.pipeline,
@@ -1373,7 +1373,12 @@ function certifyChannelPipeline(args: {
   }
   assertMinimumVideoFoundation({ family: args.family, contentLane: lane, pipeline: args.pipeline });
   const compilation = compilePipeline(
-    validatePipeline(args.pipeline, ["contentLane", ...childrenShowBibleSeedKeys(lane)]),
+    validatePipeline(args.pipeline, channelPipelineValidationSeedKeys(
+      lane,
+      admittedShowProfile.programRoute
+        ? channelProgramRouteRunSeed({ route: admittedShowProfile.programRoute, programBrief: args.programBrief })
+        : undefined,
+    )),
   );
   const claims = {
     version: "channel-inception-pipeline-certification/v2" as const,

@@ -1,0 +1,27 @@
+.root { min-width: 0; overflow-wrap: anywhere; }
+.header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .4rem 1rem; margin-bottom: 1rem; }
+.header strong { font-size: 1rem; color: var(--color-fg); }
+.header span, .label, .verdict, .alternate { font-size: .875rem; }
+.header span, .label, .note { color: var(--color-muted); }
+.selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 1.5rem; }
+.title { margin: .3rem 0 .65rem; font-size: 1.25rem; font-weight: 600; line-height: 1.35; color: var(--color-fg); }
+.reason { margin: .4rem 0 0; color: var(--color-muted); font-size: 1rem; line-height: 1.5; white-space: pre-wrap; }
+.verdict { color: var(--color-blueprint); }
+.verdict[data-grounding="contradicted"], .verdict[data-grounding="insufficient"] { color: var(--color-amber); }
+.scores { display: flex; flex-wrap: wrap; gap: 1.1rem; margin: .3rem 0; }
+.scores div { display: grid; gap: .2rem; }
+.scores dt { color: var(--color-muted); font-size: .875rem; }
+.scores dd { margin: 0; font-size: 1.25rem; color: var(--color-fg); font-variant-numeric: tabular-nums; }
+.scores small { margin-left: .12rem; color: var(--color-muted); font-size: .8125rem; }
+.note { margin: 1rem 0 0; font-size: .875rem; line-height: 1.5; }
+.warning { margin: 0 0 1rem; padding: .75rem 1rem; border-left: 2px solid var(--color-amber); background: color-mix(in srgb, var(--color-amber) 7%, transparent); color: var(--color-fg); font-size: 1rem; line-height: 1.5; }
+.comparison { margin-top: .75rem; border-top: 1px solid var(--color-border); }
+.comparison summary { padding: .8rem .15rem; cursor: pointer; color: var(--color-fg); font-size: 1rem; min-height: 44px; }
+.comparison summary:focus-visible { outline: 2px solid var(--color-blueprint); outline-offset: 3px; border-radius: 4px; }
+.options { list-style: none; padding: 0; margin: 0; }
+.options li { border-top: 1px solid var(--color-border); padding: 1rem 0; }
+.optionHeading { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem .8rem; margin-bottom: .5rem; }
+.optionHeading strong { font-size: 1rem; font-weight: 600; color: var(--color-fg); }
+.alternate { color: var(--color-blueprint); }
+.options .scores { margin-top: .7rem; }
+@media (max-width: 720px) { .selection { grid-template-columns: minmax(0, 1fr); gap: .75rem; } }

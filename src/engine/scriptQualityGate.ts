@@ -3,6 +3,18 @@
  * the critique however their family is configured, then use this small gate to
  * prevent an unreviewed or rejected narration from reaching paid audio/video.
  */
+export function parseScriptCritique(value: unknown): { pass: boolean; issues: string[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("malformed script critique: expected an object with pass and issues");
+  }
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).length !== 2 || typeof row.pass !== "boolean" || !Array.isArray(row.issues) ||
+      row.issues.length > 5 || row.issues.some((issue) => typeof issue !== "string" || !issue.trim() || issue.length > 140)) {
+    throw new Error("malformed script critique: expected an explicit boolean verdict and at most five bounded text issues");
+  }
+  return { pass: row.pass, issues: row.issues.map((issue: string) => issue.trim()) };
+}
+
 export function assertScriptCritiqueAccepted(input: {
   accepted: boolean;
   issues?: readonly string[];

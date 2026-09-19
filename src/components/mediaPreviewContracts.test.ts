@@ -55,7 +55,12 @@ assert.match(videoCard, /reviewedSrc=\{video\.reviewedThumbnailUrl\}/);
 assert.match(videoCard, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /ReleaseEvidenceBadge/);
 assert.match(rail, /reviewedSrc=\{video\.reviewedThumbnailUrl\}/);
-assert.match(rail, /Reviewed ERNIE/);
+// A reviewed URL does not identify its generator. Keep source provenance
+// distinct from both the provider and the persisted release-evidence status.
+assert.match(rail, /source === "reviewed" \? "Reviewed"/);
+assert.match(rail, /source === "r2" \? "Saved"/);
+assert.match(rail, /source === "youtube" \? "YouTube" : "Public"/);
+assert.doesNotMatch(rail, /Reviewed ERNIE/);
 assert.match(rail, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /state === "ready" && source !== "unavailable"/);
 assert.match(rail, /aria-label=\{`\$\{title\} video artifacts`\}/);

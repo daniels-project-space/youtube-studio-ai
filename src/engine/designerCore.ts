@@ -28,6 +28,7 @@ import {
 import {
   assertChannelProgramRouteBinding,
   assertChannelProgramRoutePipelineCompatibility,
+  channelProgramRouteRunSeed,
   type ChannelProgramRoute,
 } from "./channelProgramRoute";
 import {
@@ -61,7 +62,7 @@ import {
   type CertifiedQuizProfileKey,
 } from "./certifiedQuizProfile";
 import { validatePipeline } from "./validate";
-import { childrenShowBibleSeedKeys } from "./childrenShowBible";
+import { channelPipelineValidationSeedKeys } from "./channelPipelineSeedKeys";
 import { materializeSelfContainedStoryPlanningHandoff } from "./selfContainedStoryPlanning";
 import { sanitizeParamOverrides } from "./moduleCatalog";
 import type { PipelineEntry } from "./types";
@@ -1356,11 +1357,12 @@ export function designPipelineCore(
     // executions. Seed it during creator-time validation so route-owned local
     // blocks (for example scenario_visual_treatment) validate the same graph
     // they will receive at runtime.
-    const resolved = validatePipeline(pipeline, [
-      "contentLane",
-      ...childrenShowBibleSeedKeys(contentLane),
-      ...(programRoute ? ["channelProgramRoute"] : []),
-    ]);
+    const resolved = validatePipeline(pipeline, channelPipelineValidationSeedKeys(
+      contentLane,
+      programRoute && opts.programBrief
+        ? channelProgramRouteRunSeed({ route: programRoute, programBrief: opts.programBrief })
+        : undefined,
+    ));
     if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);

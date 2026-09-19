@@ -1,0 +1,380 @@
+{
+  "version": "title-oracle-holdout/v1",
+  "createdOn": "2026-09-09",
+  "purpose": "Fresh synthetic source-fidelity holdout for the revised production judge; not title generation, not a new-channel end-to-end test.",
+  "providerCallsPerformed": 0,
+  "ownerApprovedVideoTitlesIncluded": 0,
+  "historicalReplay": false,
+  "holdoutProtocol": {
+    "designBasis": "Only previously reported failure classes: figurative phrasing misread as literal invention, insufficient evidence misread as contradiction, and a compatible plain title rejected for not being the most theatrical option.",
+    "revisedPromptInspected": false,
+    "exactCasesSharedWithPromptEditorBeforeFreeze": false,
+    "sealScope": "Freeze fixture bytes and hashes before the revised prompt is inspected or this holdout is replayed. Any later revision requires a new reported version, not silent correction after results.",
+    "doNotLeak": "Do not give sources, titles, labels or rationales to the prompt editor until the parent has recorded the revised prompt freeze."
+  },
+  "policy": {
+    "judgeInputAllowlist": "Send only inputs[i].args and inputs[i].candidates to judgeTitleCandidates. Never send IDs, provenance, expectations, purpose or this holdout protocol.",
+    "labelsAre": "Human-designed holdout expectations, not model output, owner approval or creative generation answers.",
+    "notGenerationExamples": "Never use these candidates as production titles, prompt hints, few-shot examples or substitute outputs in an automatic new-channel test.",
+    "candidateOrder": "Three supported-first and three unsupported-first pairs; original and reversed replay must remap indexes before comparison.",
+    "scope": "English source fidelity and channel compatibility only. No measured creativity, virality, multilingual, rendered-video or pipeline-quality claim."
+  },
+  "hashConventions": {
+    "sourceTextSha256": "SHA-256 of exact UTF-8 inputs[].args.scriptExcerpt, without normalization",
+    "judgeInputSha256": "SHA-256 of JSON.stringify({args: input.args, candidates: input.candidates}), preserving stored field order"
+  },
+  "inputs": [
+    {
+      "id": "h01",
+      "args": {
+        "topic": "Reading seasonal layers in a sampled glacier core",
+        "channelName": "Ice Ledger",
+        "niche": "glaciers and climate evidence",
+        "persona": "A measured field-science narrator making physical evidence understandable without inflating what a sample proves. Vivid accessible language is welcome; the explanation stays specific to the observation.",
+        "format": "narrated_glaciology_documentary",
+        "language": "en",
+        "scriptExcerpt": "Synthetic field record: The team examined an ice core containing 37 consecutive annual layers. Each layer represents snowfall from one winter, and the trapped dust lets the episode compare conditions across those 37 winters. The glacier's surveyed edge is 370 metres wide; that measurement is a width, not the age or layer count of the core. The episode reconstructs the changing conditions recorded in the sampled layers.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 422,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Glacier's Diary of 37 Winters"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Glacier's Diary of 370 Winters"
+        }
+      ]
+    },
+    {
+      "id": "h02",
+      "args": {
+        "topic": "Dormancy and later germination in a common wildflower seed lot",
+        "channelName": "Seedbench",
+        "niche": "seed biology for home gardeners",
+        "persona": "A patient, practical garden educator explaining why familiar living things behave unexpectedly. The voice is friendly and curious, with ordinary language rather than miracle claims.",
+        "format": "hands_on_botany_explainer",
+        "language": "en",
+        "scriptExcerpt": "Synthetic greenhouse record: A batch of living seeds from a common, abundant wildflower did not germinate during a dry storage period. They remained viable in dormancy. After the gardener supplied moisture and a suitable temperature, they germinated and grew into ordinary plants of that same species. The experiment demonstrates delayed germination in viable seeds; the species is not extinct and the seeds did not die during storage.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 435,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Extinct Flower Brought Back From the Dead"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Seeds That Hit the Snooze Button"
+        }
+      ]
+    },
+    {
+      "id": "h03",
+      "args": {
+        "topic": "Diagnosing and repairing a cello's unstable bridge",
+        "channelName": "Bench and Bow",
+        "niche": "string instrument restoration",
+        "persona": "A quiet, visually led craft storyteller who lets diagnosis and skilled repair carry the episode. Titles may be evocative or plain, but must promise the work and material story actually shown.",
+        "format": "instrument_repair_workshop",
+        "language": "en",
+        "scriptExcerpt": "Synthetic workshop record: A student brought a cello to the repair bench because it produced a thin buzz instead of a clear note. The luthier found that the bridge had shifted and no longer supported the strings correctly. After resetting the bridge and checking the setup, the luthier played the same musical phrase again; the notes were clear and resonant. The episode follows the instrument's diagnosis, adjustment and sound comparison.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 439,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Cello That Found Its Voice Again"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Lost Tape That Gave a Cellist Her Father Back"
+        }
+      ]
+    },
+    {
+      "id": "h04",
+      "args": {
+        "topic": "A cache-key collision that returned incorrect search results",
+        "channelName": "Friday Patch",
+        "niche": "software debugging and system behavior",
+        "persona": "An energetic but candid developer team explaining mistakes through concrete observations. The audience likes a human account of the investigation, with precise boundaries between incorrect results and lost data.",
+        "format": "first_person_software_postmortem",
+        "language": "en",
+        "scriptExcerpt": "Synthetic team postmortem: We spent Saturday and Sunday tracking a search-results bug. Two different queries accidentally shared one cache key, so the second query could receive the first query's cached answer. The persistent search index and every customer's stored records remained unchanged. We fixed the cache-key construction and invalidated the incorrect cached answers. The episode traces the two-day investigation and the final correction.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 447,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Cache Bug That Erased Every Customer's Data"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "The Cache Bug That Ate Our Weekend"
+        }
+      ]
+    },
+    {
+      "id": "h05",
+      "args": {
+        "topic": "An unresolved investigation into a marsh fish die-off",
+        "channelName": "Marshwatch",
+        "niche": "wetland ecology and field investigation",
+        "persona": "A clear local-science reporter who distinguishes observations from causal conclusions. Direct questions and useful explanations are both appropriate; uncertainty remains visible until the investigation resolves it.",
+        "format": "local_environmental_evidence_report",
+        "language": "en",
+        "scriptExcerpt": "Synthetic investigation record: Several fish were found dead in the marsh after heavy rain. Samples collected later showed low oxygen, but investigators could not determine whether oxygen had fallen before or after the fish died. A resident also reported possible pesticide runoff, but no retained sample established that pesticides reached the marsh. The report compares the two hypotheses. The available evidence does not establish the cause of the die-off.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 459,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "The Unsolved Marsh Fish Die-Off"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "Pesticides Caused the Marsh Fish Die-Off"
+        }
+      ]
+    },
+    {
+      "id": "h06",
+      "args": {
+        "topic": "A forged nineteenth-century letter whose author remains unidentified",
+        "channelName": "Margins Archive",
+        "niche": "fictional literary archives and document attribution",
+        "persona": "A careful archive storyteller separating the physical authenticity of an object from uncertainty about its maker. A straightforward evidence-led title is welcome; atmosphere must not turn a known finding into a mystery or a mystery into certainty.",
+        "format": "literary_archive_investigation",
+        "language": "en",
+        "scriptExcerpt": "Synthetic archive record: A letter offered as an 1842 original by the fictional poet Edda Voss was examined. Its paper contains a manufacturer's watermark first introduced in 1996. The catalogue review and material examination establish that this object is not an authentic 1842 letter. The investigation has not identified who made the forgery; competing attributions remain unresolved. The episode explains the physical proof of forgery and the still-open authorship question.",
+        "sourceCoverage": {
+          "kind": "script_excerpt",
+          "providedChars": 478,
+          "totalChars": null
+        },
+        "suggestions": [],
+        "competitorTitles": []
+      },
+      "candidates": [
+        {
+          "frame": "candidate-a",
+          "title": "Edda Voss's Genuine Letter From 1842"
+        },
+        {
+          "frame": "candidate-b",
+          "title": "A Forged Letter and Its Unknown Author"
+        }
+      ]
+    }
+  ],
+  "provenance": [
+    {
+      "id": "h01",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "a4bf0b69b3f795106ddae848adc889e7823d88bf054e0105ac7ecf0c4d3b8105",
+      "judgeInputSha256": "b50fdf1b0d35aa4de32cce11fec6b884182d672e8d630a8bef77501bf3f42fbe",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    },
+    {
+      "id": "h02",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "ea5e14b2f78bfe5f1703462b989ed8a15422134e3f10f2d63721f805e4387035",
+      "judgeInputSha256": "3ff038f62cbb174e6bd739968b40ea3b2e42ddb7cb3414fa9c6d1f0fdc041012",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    },
+    {
+      "id": "h03",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "d5e227482320e48b0e501b9bdba334085bc5f4b22304f49f6de7bed13e291f95",
+      "judgeInputSha256": "9ad9576b249f9564641d6391fac74ac689f5e57eb58af4dc81b0af28e44d84aa",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    },
+    {
+      "id": "h04",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "c8dbfb214b560c6f933fb561add77de36d368463fd31a93083276764372ed3d3",
+      "judgeInputSha256": "71a9b9916d85ea3384184f594948c465f76fba393d2b8c5babb83b6321fb5e27",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    },
+    {
+      "id": "h05",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "8db32e5a97523a8ee2921ec71fd9b1630f969548eb93e9a29850a0c9d3f3a1d6",
+      "judgeInputSha256": "171c7211c2a489b68e82bb2d02891686ddc89ed3be0502c92420e34a82618916",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    },
+    {
+      "id": "h06",
+      "sourceOrigin": "synthetic_fact_packet",
+      "candidateOrigin": "human_designed_adversarial_holdout_only",
+      "identityBasis": "synthetic_test_brief",
+      "sourceTextSha256": "0bbd8c63a2efac5f4eecfa560164a0d622e988582f6cbe4b8c6c3429f3346d1c",
+      "judgeInputSha256": "d05c855eed4479b24c96208f905c3e5f40e013b207347204d6be7bb2528d5767",
+      "sourceClaimScope": "Fidelity to explicitly synthetic supplied facts only, not an external real-world claim or full-video review",
+      "historicalReplay": false
+    }
+  ],
+  "expectations": [
+    {
+      "id": "h01",
+      "dimension": "rhetorical_record_versus_quantity_relationship",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Diary personifies the physical record; it does not assert a literal book or a writing glacier. Thirty-seven winters follows the specified thirty-seven annual layers."
+        },
+        {
+          "idx": 1,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The core contains thirty-seven annual layers, not three hundred seventy. The latter number is the glacier edge's width, not recorded winters. Accepting the metaphor does not permit changing its quantity."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    },
+    {
+      "id": "h02",
+      "dimension": "personification_versus_invented_extinction_and_revival",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The source specifies an abundant non-extinct species and viable living seeds. Extinction and return from death reverse those explicit facts."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Snooze button is a recognizable metaphor for dormancy and delayed germination, not a claim that seeds used an alarm clock or chose to sleep."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    },
+    {
+      "id": "h03",
+      "dimension": "musical_metaphor_versus_unsupported_recording_and_family_story",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Voice refers to the cello's restored musical sound. The source supplies the before-and-after repair; no literal human speech is required."
+        },
+        {
+          "idx": 1,
+          "grounding": "insufficient",
+          "identity": "not_asserted",
+          "reason": "The source supplies neither a lost recording nor a cellist's father or family reunion. Figurative language cannot supply those missing material story elements. Their absence is not proof that such a family event could never occur."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    },
+    {
+      "id": "h04",
+      "dimension": "time_cost_idiom_versus_false_data_loss",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The source explicitly says the persistent index and all stored customer records remained unchanged. Incorrect cached answers are not erasure of customer data."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Ate our weekend is an idiom for the team's Saturday-and-Sunday investigation. It does not claim a living creature consumed time."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    },
+    {
+      "id": "h05",
+      "dimension": "unresolved_causality_not_disproved_hypothesis",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "The title explicitly describes the investigation as unsolved, matching the source without promising a resolved cause. A title can be valid and plain without being the most dramatic alternative."
+        },
+        {
+          "idx": 1,
+          "grounding": "insufficient",
+          "identity": "not_asserted",
+          "reason": "The pesticide hypothesis has not been established by the available evidence. The report does not prove it false either, so contradicted would overstate what the packet establishes."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    },
+    {
+      "id": "h06",
+      "dimension": "proven_contradiction_with_separate_unresolved_attribution",
+      "candidates": [
+        {
+          "idx": 0,
+          "grounding": "contradicted",
+          "identity": "not_asserted",
+          "reason": "The source establishes that this particular object is not an authentic 1842 letter. Unknown authorship does not make the already-disproved authenticity claim merely insufficient."
+        },
+        {
+          "idx": 1,
+          "grounding": "supported",
+          "identity": "acceptable",
+          "reason": "Forgery is established in the source while the maker is unknown. Keeping those distinct is a valid direct promise, not insufficient merely because one aspect remains unresolved."
+        }
+      ],
+      "pairDecision": "Evaluate each candidate's grounding and compatibility independently. Do not infer click quality, require a particular score or force a winner."
+    }
+  ]
+}

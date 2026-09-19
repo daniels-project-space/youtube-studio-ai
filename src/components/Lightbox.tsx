@@ -9,7 +9,6 @@ import { fmtDateTime } from "@/lib/format";
 import {
   youtubeThumb,
   useAssetUrl,
-  fmtViews,
 } from "@/lib/asset-url";
 import { VideoPlayer } from "./VideoPlayer";
 import { StageBadge } from "./StageBadge";
@@ -75,12 +74,15 @@ export function Lightbox({
         onClose();
         return;
       }
-      if (e.key === "ArrowLeft") {
-        prev();
-        return;
-      }
-      if (e.key === "ArrowRight") {
-        next();
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        // Native playback, sliders and editable controls own their arrow keys.
+        // Switching clips here would interrupt seeking and discard media focus.
+        const target = e.target;
+        if (e.defaultPrevented || (target instanceof HTMLElement &&
+          (target.isContentEditable || target.closest("video, audio, input, textarea, select, [role='slider']")))) return;
+        e.preventDefault();
+        if (e.key === "ArrowLeft") prev();
+        else next();
         return;
       }
       if (e.key !== "Tab") return;
@@ -116,7 +118,6 @@ export function Lightbox({
 
   if (!video) return null;
 
-  const views = fmtViews(video.estimatedViews);
   const hasIntel = Boolean(video.thumbnailTitle || video.visualRationale);
 
   return (
@@ -128,7 +129,7 @@ export function Lightbox({
         zIndex: 100,
         display: "grid",
         placeItems: "center",
-        padding: "clamp(1rem, 4vw, 3rem)",
+        padding: "clamp(12px, 3vw, 32px)",
         background: "rgba(6, 6, 8, 0.78)",
         backdropFilter: "blur(14px)",
         WebkitBackdropFilter: "blur(14px)",
@@ -146,7 +147,7 @@ export function Lightbox({
           width: "min(960px, 100%)",
           maxHeight: "90vh",
           overflowY: "auto",
-          padding: "1.1rem 1.2rem 1.3rem",
+          padding: "clamp(12px, 2vw, 20px)",
           borderRadius: "var(--radius-card)",
           boxShadow: "var(--shadow-lift)",
         }}
@@ -154,10 +155,10 @@ export function Lightbox({
         {/* Header */}
         <div
           style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: "1rem",
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 44px",
+            alignItems: "start",
+            gap: "0.5rem 0.75rem",
             marginBottom: "0.9rem",
           }}
         >
@@ -165,37 +166,43 @@ export function Lightbox({
             <div
               style={{
                 display: "flex",
+                flexWrap: "wrap",
                 alignItems: "center",
                 gap: "0.6rem",
                 marginBottom: "0.35rem",
               }}
             >
               <StageBadge status={video.status} size="sm" />
-              <span style={{ fontSize: "0.78rem", color: "var(--color-faint)" }}>
+              <span style={{ fontSize: "0.8125rem", color: "var(--color-muted)", overflowWrap: "anywhere" }}>
                 {video.channelName} · {fmtDateTime(video.createdAt)}
               </span>
             </div>
-            <h2
+          </div>
+          <h2
               id={titleId}
               style={{
+                gridColumn: "1 / -1",
+                gridRow: 2,
                 fontSize: "1.15rem",
                 fontWeight: 600,
                 lineHeight: 1.3,
                 margin: 0,
+                overflowWrap: "anywhere",
               }}
             >
               {detail?.title ?? video.title}
-            </h2>
-          </div>
+          </h2>
           <button
             ref={closeRef}
             type="button"
             onClick={onClose}
             aria-label="Close"
             style={{
+              gridColumn: 2,
+              gridRow: 1,
               flexShrink: 0,
-              width: 32,
-              height: 32,
+              width: 44,
+              height: 44,
               borderRadius: 8,
               border: "1px solid var(--color-border)",
               background: "var(--color-surface)",
@@ -209,19 +216,9 @@ export function Lightbox({
           </button>
         </div>
 
-        {/* Player + prev/next */}
-        <div style={{ position: "relative" }}>
-          {/* Keep the cross-origin player out of this modal's tab loop. The
-              adjacent Watch on YouTube link remains the keyboard-accessible
-              path to the full player without trapping Escape in another document. */}
-          <VideoPlayer video={video} embedTabIndex={-1} />
-          {count > 1 && (
-            <>
-              <NavArrow side="left" onClick={prev} />
-              <NavArrow side="right" onClick={next} />
-            </>
-          )}
-        </div>
+        {/* Keep cross-origin embeds out of the modal's tab loop. The adjacent
+            YouTube link remains accessible without trapping Escape in an iframe. */}
+        <VideoPlayer video={video} embedTabIndex={-1} />
 
         {/* Caption / meta row */}
         <div
@@ -235,12 +232,6 @@ export function Lightbox({
             color: "var(--color-muted)",
           }}
         >
-          {views && (
-            <span style={{ color: "var(--color-secondary)" }}>
-              ~{views} est. views
-              {video.estimatedViewsSource ? ` · ${video.estimatedViewsSource}` : ""}
-            </span>
-          )}
           {video.youtubeVideoId && (
             <a
               href={`https://www.youtube.com/watch?v=${video.youtubeVideoId}`}
@@ -257,9 +248,15 @@ export function Lightbox({
             </a>
           )}
           {count > 1 && (
-            <span style={{ marginLeft: "auto", color: "var(--color-faint)" }}>
-              {index + 1} / {count}
-            </span>
+            <div role="group" aria-label="Video navigation" style={{
+              display: "flex", alignItems: "center", gap: "0.5rem", marginLeft: "auto",
+            }}>
+              <NavArrow side="left" onClick={prev} />
+              <span style={{ color: "var(--color-muted)", whiteSpace: "nowrap" }}>
+                {index + 1} / {count}
+              </span>
+              <NavArrow side="right" onClick={next} />
+            </div>
           )}
         </div>
 
@@ -318,7 +315,10 @@ export function Lightbox({
                   color: "var(--color-muted)",
                   background: "var(--color-surface)",
                   border: "1px solid var(--color-border)",
-                  whiteSpace: "nowrap",
+                  whiteSpace: "normal",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  overflowWrap: "anywhere",
                 }}
               >
                 {tag}
@@ -474,18 +474,14 @@ function NavArrow({
       onClick={onClick}
       aria-label={side === "left" ? "Previous" : "Next"}
       style={{
-        position: "absolute",
-        top: "50%",
-        transform: "translateY(-50%)",
-        [side]: 8,
-        width: 38,
-        height: 38,
+        flexShrink: 0,
+        width: 44,
+        height: 44,
         display: "grid",
         placeItems: "center",
-        borderRadius: "50%",
+        borderRadius: 8,
         border: "1px solid var(--color-border-strong)",
-        background: "rgba(10, 10, 11, 0.65)",
-        backdropFilter: "blur(6px)",
+        background: "var(--color-surface)",
         color: "var(--color-fg)",
         cursor: "pointer",
       }}

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import {
-  schedule, listReleaseChecks, recordReleaseObservations, claimDue, complete, fail,
+  schedule, listReleaseChecks, recordReleaseObservations, claimDue, authorizeDeletion, complete, fail,
 } from "../../../convex/runArtifactRetentions";
 import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
+  RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
@@ -91,6 +92,14 @@ function fixture() {
   });
   const claim = (now: number) => invoke<Row | null>(claimDue, { ownerId, now, leaseToken: "a".repeat(64) });
   return { db, ctx, invoke, scheduleArgs, observe, claim };
+}
+
+function deletionArgs(row: Row, observedAt: number) {
+  return { ownerId, retentionId: row._id, leaseToken: "a".repeat(64),
+    binding: runArtifactCleanupBinding(row as unknown as Parameters<typeof runArtifactCleanupBinding>[0]),
+    connectorId: "connector-a", connectorVersion: 4, observedAt,
+    observation: { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
+      publishedAt: new Date(uploadedAt + 86_400_000).toISOString() } };
 }
 
 test("private→public transition waits actual release plus fourteen days and rechecks before deletion", async () => {
@@ -191,6 +200,122 @@ test("expired or failed cleanup leases require a new provider observation", asyn
   assert.equal(row.attempts, 2);
   assert.equal(row.releaseObservationAt, undefined);
   assert.equal(await f.claim(expired), null);
+});
+
+test("a channel locked by its owner cannot enter destructive artifact cleanup", async () => {
+  const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+  const due = uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2;
+  await f.observe(row._id, due);
+  await f.db.patch("channel-a", { locked: true });
+  assert.equal(await f.claim(due), null);
+  assert.equal(row.attempts, 0, "a locked channel must not consume a cleanup attempt");
+});
+
+test("fresh post-verification authorization does not extend a lease or rewrite identical evidence", async () => {
+  const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+  const due = uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2;
+  await f.observe(row._id, due); await f.claim(due);
+  const leaseEnd = Number(row.leaseExpiresAt);
+  // Simulate byte hashing which outlives the initial five-minute observation.
+  const now = due + 10 * 60_000;
+  const clock = mock.method(Date, "now", () => now);
+  const writes = mock.method(f.db, "patch");
+  try {
+    const args = deletionArgs(row, now);
+    const grant = await f.invoke<{ expiresAt: number }>(authorizeDeletion, args);
+    assert.equal(grant.expiresAt, now + RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS);
+    assert.equal(row.releaseObservationAt, now);
+    assert.equal(row.leaseExpiresAt, leaseEnd);
+    assert.equal(row.status, "processing");
+    assert.equal(writes.mock.callCount(), 1);
+    assert.deepEqual(await f.invoke(authorizeDeletion, args), grant);
+    assert.equal(writes.mock.callCount(), 1, "same evidence is reauthorized without another row write");
+  } finally { clock.mock.restore(); writes.mock.restore(); }
+});
+
+test("destructive authorization rejects every revoked ownership/lease/identity boundary", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["channel-a", { locked: true }], ["channel-a", { ownerId: "other" }], ["channel-a", { slug: "other" }],
+    ["run-a", { ownerId: "other" }], ["run-a", { channelId: "other" }],
+    ["run-a", { youtubeVideoId: "other-video" }], ["run-a", { releaseEvidenceStatus: "legacy_unverified" }],
+    ["run-a", { releaseEvidenceCertificateKey: "other-key" }],
+    ["connector-a", { ownerId: "other" }], ["connector-a", { channelId: "other" }],
+    ["connector-a", { status: "revoked" }], ["connector-a", { tokenVersion: 5 }],
+    ["connector-a", { ytChannelId: "UC-other" }],
+    ["retention", { leaseExpiresAt: 0 }], ["retention", { leaseExpiresAt: uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2 }],
+    ["retention", { leaseExpiresAt: NaN }], ["retention", { leaseToken: "b".repeat(64) }],
+    ["retention", { status: "pending" }], ["retention", { ownerId: "other" }],
+    ["retention", { keyPrefix: "owner/other/channel/other/" }],
+    ["retention", { keepNames: ["changed.mp4"] }], ["retention", { additionalCertificateKeys: ["new-proof"] }],
+  ];
+  const now = uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2;
+  const clock = mock.method(Date, "now", () => now);
+  try {
+    for (const [target, patch] of cases) {
+      const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+      await f.observe(row._id, now); await f.claim(now);
+      const args = deletionArgs(row, now);
+      await f.db.patch(target === "retention" ? row._id : target, patch);
+      const before = JSON.stringify(row);
+      await assert.rejects(f.invoke(authorizeDeletion, args), /deletion|locked|Studio resource access denied/);
+      assert.equal(JSON.stringify(row), before, "rejection must not extend or refresh the worker's authority");
+    }
+  } finally { clock.mock.restore(); }
+});
+
+test("authorization requires current public/processed release and rejects stale, future or shortened retention", async () => {
+  const now = uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2;
+  const clock = mock.method(Date, "now", () => now);
+  try {
+    const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+    await f.observe(row._id, now); await f.claim(now);
+    const args = deletionArgs(row, now);
+    const invalid = [
+      { observation: null },
+      { observation: { ...args.observation, privacyStatus: "private" } },
+      { observation: { ...args.observation, privacyStatus: "unlisted" } },
+      { observation: { ...args.observation, uploadStatus: "failed" } },
+      { observation: { ...args.observation, videoId: "other" } },
+      { observation: { ...args.observation, channelId: "other" } },
+      { observation: { ...args.observation, publishedAt: new Date(now - 86_400_000).toISOString() } },
+      { observedAt: now - RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS - 1 },
+      { observedAt: now + 1 }, { observedAt: NaN },
+    ];
+    for (const change of invalid) await assert.rejects(f.invoke(authorizeDeletion, { ...args, ...change }), /deletion|timestamp/);
+    const ownerContext = { ...f.ctx, auth: { getUserIdentity: async () => ({
+      role: "owner", owner_id: ownerId, subject: ownerId,
+    }) } };
+    await assert.rejects((authorizeDeletion as unknown as {
+      _handler: (ctx: unknown, args: unknown) => Promise<unknown>;
+    })._handler(ownerContext, args), /service identity/);
+  } finally { clock.mock.restore(); }
+});
+
+test("missing records and non-service identities cannot authorize destructive cleanup", async () => {
+  const now = uploadedAt + RUN_ARTIFACT_RETENTION_MS * 2;
+  const clock = mock.method(Date, "now", () => now);
+  try {
+    for (const [table, id] of [["channels", "channel-a"], ["runs", "run-a"],
+      ["youtubeAuth", "connector-a"], ["runArtifactRetentions", "retention"]]) {
+      const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+      await f.observe(row._id, now); await f.claim(now);
+      const args = deletionArgs(row, now);
+      f.db.tables.get(table)!.delete(id === "retention" ? row._id : id);
+      const writes = mock.method(f.db, "patch");
+      try {
+        await assert.rejects(f.invoke(authorizeDeletion, args));
+        assert.equal(writes.mock.callCount(), 0, `missing ${table} must not refresh authority`);
+      } finally { writes.mock.restore(); }
+    }
+    const f = fixture(); const row = await f.invoke(schedule, f.scheduleArgs);
+    await f.observe(row._id, now); await f.claim(now);
+    for (const identity of [null, { role: "viewer", owner_id: ownerId, subject: "viewer" },
+      { role: "service", owner_id: "other-owner", subject: "service:youtube-studio-ai" }]) {
+      await assert.rejects((authorizeDeletion as unknown as {
+        _handler: (ctx: unknown, args: unknown) => Promise<unknown>;
+      })._handler({ ...f.ctx, auth: { getUserIdentity: async () => identity } }, deletionArgs(row, now)));
+    }
+  } finally { clock.mock.restore(); }
 });
 
 test("old private drafts are deferred fairly and do not monopolize the bounded observer", async () => {

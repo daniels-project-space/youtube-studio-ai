@@ -24,13 +24,17 @@ export function ChannelSwitcher() {
 
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function onDoc(e: PointerEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape" && ref.current?.contains(document.activeElement)) {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
     }
     document.addEventListener("pointerdown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -59,6 +63,7 @@ export function ChannelSwitcher() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="channel-switcher-button"
+        ref={buttonRef}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls="channel-switcher-options"
@@ -88,6 +93,7 @@ export function ChannelSwitcher() {
           id="channel-switcher-options"
           className="channel-switcher-menu"
           role="listbox"
+          aria-label="Channel view"
         >
           <DropdownItem
             label="All channels"
@@ -96,19 +102,20 @@ export function ChannelSwitcher() {
             onClick={() => {
               setSelectedSlug(null);
               setOpen(false);
+              buttonRef.current?.focus();
             }}
           />
           {channels?.map((c) => (
             <DropdownItem
               key={c._id}
               label={c.name}
-              sub={c.template}
               imageKey={c.identity?.imageKey}
               palette={c.identity?.palette}
               active={c.slug === selectedSlug}
               onClick={() => {
                 setSelectedSlug(c.slug);
                 setOpen(false);
+                buttonRef.current?.focus();
               }}
             />
           ))}
@@ -125,14 +132,12 @@ export function ChannelSwitcher() {
 
 function DropdownItem({
   label,
-  sub,
   imageKey,
   palette,
   active,
   onClick,
 }: {
   label: string;
-  sub?: string;
   imageKey?: string;
   palette?: string[];
   active: boolean;
@@ -162,7 +167,6 @@ function DropdownItem({
       )}
       <span className="channel-switcher-option-copy">
         <strong>{label}</strong>
-        {sub && <small>{sub}</small>}
       </span>
       <i aria-hidden="true" />
     </button>

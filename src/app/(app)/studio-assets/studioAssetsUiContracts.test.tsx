@@ -15,8 +15,19 @@ async function main(): Promise<void> {
   }
   assert.match(source, /function LockedAssetRegistry/);
   assert.match(source, /Approvals, adapters, and private previews remain unloaded/);
-  assert.match(source, /Registry locked/,
-    "viewer mode must not imply that a private registry request is loading");
+  assert.match(source, /Private asset library/);
+  assert.match(source, /Access check unavailable/);
+  assert.match(source, /if \(operationsAccess === "owner"\) return <OwnedStudioAssetsPage \/>/,
+    "private inventory state must unmount when owner access is lost");
+  assert.match(source, /summary=\{registryReady \? summary : null\}/,
+    "only a successful current inventory may expose counts");
+  assert.match(source, /const registryReady = loaded && !loading && !loadError/);
+  assert.match(source, /registryRequestRef\.current\?\.abort\(\)/);
+  assert.match(source, /signal: controller\.signal/);
+  assert.match(source, /every\(Array\.isArray\)/,
+    "missing collections are unavailable, not an empty registry");
+  assert.match(source, /asset.status === "approved" && asset.scope === "owned_studio" && asset.identitySensitivity === "portable"/);
+  assert.match(source, /aria-pressed=\{room === item.id\}/);
   assert.doesNotMatch(source, /<PageHeader/);
   assert.doesNotMatch(source, /<OwnerOnlyNotice/);
   assert.match(source, /Read-only evidence inventory/i);
@@ -110,7 +121,9 @@ async function main(): Promise<void> {
   assert.match(api, /recommendedWorkflowProfiles/);
   assert.match(api, /VISUAL_TREATMENT_CATALOG/);
   assert.match(api, /activePlanningFamilies/);
-  assert.match(styles, /\.orbitField/);
+  assert.doesNotMatch(styles, /\.orbitField/);
+  assert.match(styles, /\.metricRail/);
+  assert.match(styles, /min-height: 44px/);
   assert.match(styles, /prefers-reduced-motion: reduce/);
   console.log("studio assets UI contracts passed");
 }

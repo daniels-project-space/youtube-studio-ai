@@ -81,9 +81,11 @@ function main(): void {
   );
   assert.match(
     metacraft,
-    /pinned comment failed, shipping without one/,
+    /optional pinned comment unavailable/,
     "the pinned-comment failure must name itself in the log",
   );
+  // The behavioral companion in titleDecision.test.ts verifies the log actually
+  // fires for a fully received rejection and unknown paid outcomes still throw.
 
   console.log("REASONING TOKEN CEILINGS PASS — measured ceilings held, soft failures stay loud");
 }

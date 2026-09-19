@@ -23,7 +23,8 @@ import {
 } from "@/lib/narrationTranscriptProof";
 
 const sha = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-const words = [{ text: "The", startMs: 0, endMs: 100 }, { text: "narration", startMs: 120, endMs: 300 }];
+const words = "The narration is an independently transcribed exact approved source with enough words for a stable test"
+  .split(" ").map((text, index) => ({ text, startMs: index * 120, endMs: index * 120 + 100 }));
 
 async function main() {
   const temp = mkdtempSync(join(tmpdir(), "narration-proof-test-"));

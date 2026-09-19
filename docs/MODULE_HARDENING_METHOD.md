@@ -245,3 +245,45 @@ four modules that had nothing else in common. It is worth its own rules.
     child_content_safety delegates to a 13-throw assertion, casefile_source_packet
     to a 25-issue evaluator, and originality_gate's assertion sits in a helper
     defined ABOVE the block. Follow the delegation before reporting a gap.
+
+## Required structural-design pass — owner addition, 9 September
+
+Before optimizing each module, write a short, evidence-backed design decision.
+This is engineering work by the agent, not a new paid reasoning call inserted
+into every production run. Reuse a decision while its inputs and implementation
+remain unchanged; reopen it when evidence or the module changes.
+
+1. **Question the unit of work.** What result does the viewer need, and why are
+   we generating this many images, speech fragments, render passes or requests?
+   Trace the real producer, transport, consumer and retry boundary first.
+2. **Compare structural alternatives.** Consider combining work, generating a
+   reusable representation, deterministic rendering, shared immutable inputs,
+   delaying work until it is needed, and retaining the current design. Choose
+   only alternatives relevant to this module; record why others lose.
+3. **Include the cost of failure.** Compare cost and time per *accepted output*,
+   including reference preparation, GPU startup, rejected generations, repair,
+   QA, storage and orchestration. Six panels becoming one page is not evidence
+   of sixfold cost savings: the page may cost more or need broader retries.
+4. **Preserve channel quality.** State identity, readability, timing, accuracy,
+   continuity and originality invariants. Lower resolution, weaker models,
+   reduced review coverage or narrower channel support are not automatic wins.
+5. **Define the smallest falsifiable experiment.** Freeze identical inputs,
+   include difficult and known-bad cases, measure output and failure recovery,
+   and use the actual production adapters. Fixtures establish correctness;
+   real rendered artifacts establish visual/audio quality and paid economics.
+6. **Integrate and prove the choice.** Test isolated execution, real consumers,
+   compiler ordering, automatic channel creation, locks, UI controls, retries
+   and deployment. Report observed gains separately from estimates. A rejected
+   experiment remains evidence, not a quiet fallback or a completed request.
+
+For new capabilities, first establish that the current module catalog and
+executors cannot already provide the result. Prefer a small reusable extension
+when it suffices. A genuinely new module needs a declared artifact contract,
+an actual registered executor and compiler caller, independent quality gates,
+minimal actionable controls, and a new-channel end-to-end proof. A new card,
+prompt preset or unwired schema alone does not expand Studio's capabilities.
+
+The comic-page experiment, cross-module opportunity list and new capability
+selection are tracked in
+[the structural efficiency plan](MODULE_STRUCTURAL_EFFICIENCY_AND_CAPABILITY_PLAN_2026-09.md)
+and additive goal items 152–178.

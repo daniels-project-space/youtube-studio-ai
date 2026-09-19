@@ -503,7 +503,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   metadata: contract(["package.metadata"], {
     optionalConsumes: [
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona",
-      "nicheIntel", "seoDatabank", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
+      "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
       "clickbaitLevel",
@@ -587,16 +587,18 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
+    optionalProduces: ["workedExampleEditorialApproval"],
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
-      "documentaryEpisodePlan"],
+      "documentaryEpisodePlan", "workedExampleRequest", "workedExamplePreparation"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
+    optionalProduces: ["workedExampleAudioBinding"],
     optionalConsumes: [
-      "styleDNA", "musicBrief", "script", "voiceId", "niche",
+      "styleDNA", "musicBrief", "script", "voiceId", "niche", "workedExampleRequest", "workedExamplePreparation", "workedExampleEditorialApproval",
       // Grounds the cold-open take judge in this channel's own voice standard.
           ],
     providerProfiles: [managed],
@@ -699,6 +701,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
+      "workedExampleRequest", "workedExamplePreparation", "workedExampleAudioBinding", "workedExampleEditorialApproval", "scriptApproved", "chapterPlan",
       "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
       "tags", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
@@ -864,6 +867,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     providerProfiles: [local],
     qualityRequired: true,
   }),
+
+  // Held typed arithmetic preparation, not script approval or catalog qualification.
+  worked_example_prepare: {
+    ...contract(["learning.integer_preparation"], {
+      requiredConsumes: ["workedExampleRequest"],
+      providerProfiles: [local],
+      maxCostUsd: 0,
+      qualityRequired: true,
+    }),
+    certificationEvidence: "workedExample core and registered-caller contract tests; narration/render handoff pending",
+  },
+  worked_example_script: {
+    ...contract(["learning.integer_narration_draft"], {
+      requiredConsumes: ["workedExampleRequest", "workedExamplePreparation"],
+      providerProfiles: [local], maxCostUsd: 0, qualityRequired: true,
+    }),
+    certificationEvidence: "held exact arithmetic speech adapter; independent editorial review, audition and renderer qualification required",
+  },
 
   // An operator-supplied, child-editor-signed episode intent. This happens
   // before generic story planning, but emits only a private-review handoff.

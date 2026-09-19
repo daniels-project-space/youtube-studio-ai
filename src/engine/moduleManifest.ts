@@ -75,6 +75,7 @@ export interface ModuleManifest {
   retryAndResume: {
     retryable: boolean;
     durableCheckpoint: boolean;
+    resumePolicy?: Block["resumePolicy"];
   };
   qualityContract: {
     required: boolean;
@@ -136,6 +137,7 @@ export function manifestFromBlock(
     retryAndResume: {
       retryable: !effects.has("delete_scoped_artifacts"),
       durableCheckpoint: Boolean(block.paid) || effects.has("publish_media"),
+      ...(block.resumePolicy === undefined ? {} : { resumePolicy: block.resumePolicy }),
     },
     qualityContract: {
       required: override?.qualityRequired ?? false,
@@ -185,6 +187,16 @@ export function configuredMaxCostUsd(
 export function assertExecutableManifest(manifest: ModuleManifest): void {
   if (manifest.id !== manifest.block.id) {
     throw new Error(`manifest id ${manifest.id} does not match block id ${manifest.block.id}`);
+  }
+  const resumePolicy = manifest.block.resumePolicy;
+  if (resumePolicy !== undefined || manifest.retryAndResume.resumePolicy !== undefined) {
+    if (resumePolicy !== "recompute_unpaid_deterministic" || manifest.retryAndResume.resumePolicy !== resumePolicy) {
+      throw new Error(`manifest ${manifest.id} resume policy must match its explicit code-owned recompute policy`);
+    }
+    const effects = manifest.securityAndSideEffects.effects;
+    if (manifest.block.paid || manifest.costAndLatency.paid || effects.length !== 1 || effects[0] !== "none") {
+      throw new Error(`manifest ${manifest.id} resume policy requires an unpaid, side-effect-free deterministic block`);
+    }
   }
   const overlap = Object.keys(manifest.optionalConsumes).filter((key) => key in manifest.consumes);
   if (overlap.length) {

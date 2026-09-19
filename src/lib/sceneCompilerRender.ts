@@ -5,26 +5,21 @@ import {
   type SceneCompilerProps,
   sceneManifestMetadata,
 } from "@/remotion/sceneCompiler/SceneCompiler";
+import { preflightSceneLayout, resolveSceneLayout, type SceneLayoutProfileId } from "@/remotion/sceneCompiler/layoutProfile";
 
 export interface RenderSceneManifestArgs {
   manifest: SceneManifest;
   outPath: string;
   width?: number;
   height?: number;
+  layoutProfile?: SceneLayoutProfileId;
+  /** Explicit installed browser for hermetic diagnostics; no implicit download. */
+  browserExecutable?: string;
   log?: (message: string) => void;
   concurrency?: number;
 }
 
 let sceneCompilerServeUrl: Promise<string> | undefined;
-
-function assertSixteenByNine(width: number, height: number): void {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    throw new Error("Scene compiler width and height must be positive finite values.");
-  }
-  if (Math.abs(width / height - 16 / 9) > 0.001) {
-    throw new Error(`Scene compiler requires a 16:9 frame; received ${width}x${height}.`);
-  }
-}
 
 export async function getSceneCompilerServeUrl(): Promise<string> {
   if (!sceneCompilerServeUrl) {
@@ -32,6 +27,10 @@ export async function getSceneCompilerServeUrl(): Promise<string> {
       const { bundle } = await import("@remotion/bundler");
       return bundle({
         entryPoint: path.join(process.cwd(), "src/remotion/sceneCompiler/index.ts"),
+        webpackOverride: (configuration) => ({
+          ...configuration,
+          resolve: { ...configuration.resolve, alias: { ...configuration.resolve?.alias, "@": path.join(process.cwd(), "src") } },
+        }),
       });
     })();
   }
@@ -43,24 +42,26 @@ export async function getSceneCompilerServeUrl(): Promise<string> {
  * no model, storage, network-provider, or publishing side effects.
  */
 export async function renderSceneManifest(args: RenderSceneManifestArgs): Promise<string> {
-  const width = args.width ?? 1920;
-  const height = args.height ?? 1080;
-  assertSixteenByNine(width, height);
+  const layout = resolveSceneLayout(args);
+  const { width, height } = layout;
   if (!args.outPath.trim()) throw new Error("Scene compiler render requires an output path.");
   if (!args.manifest.scenes.length) throw new Error("Scene compiler render requires at least one scene.");
+  preflightSceneLayout(args.manifest, layout);
 
   const { selectComposition, renderMedia, ensureBrowser } = await import("@remotion/renderer");
-  await ensureBrowser();
+  await ensureBrowser(args.browserExecutable ? { browserExecutable: args.browserExecutable } : undefined);
   const serveUrl = await getSceneCompilerServeUrl();
   const inputProps = {
     manifest: args.manifest,
     width,
     height,
+    layoutProfile: layout.id,
   } satisfies SceneCompilerProps;
   const composition = await selectComposition({
     serveUrl,
     id: SCENE_COMPILER_COMPOSITION_ID,
     inputProps,
+    browserExecutable: args.browserExecutable,
   });
   const metadata = sceneManifestMetadata(args.manifest, width, height);
   let lastPct = -10;
@@ -71,6 +72,7 @@ export async function renderSceneManifest(args: RenderSceneManifestArgs): Promis
     inputProps,
     codec: "h264",
     outputLocation: args.outPath,
+    browserExecutable: args.browserExecutable,
     chromiumOptions: { gl: "angle" },
     ...(args.concurrency ? { concurrency: args.concurrency } : {}),
     onProgress: ({ progress }) => {

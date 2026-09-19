@@ -49,7 +49,6 @@ test("the overview derives issues only from real actionable state", () => {
     plan: [readyPlan, { ...readyPlan, _id: "plans:failed", status: "failed" }],
     youtubeLinks: [],
     now: 3_000,
-    publishedCount: 7,
   });
 
   assert.equal(snapshot.activeChannelCount, 1, "paused channels are not treated as operating");
@@ -62,7 +61,8 @@ test("the overview derives issues only from real actionable state", () => {
   assert.equal(snapshot.decision.href, "/runs/runs%3Astalled");
   assert.equal(snapshot.recordedSpend, 2);
   assert.equal(snapshot.successRate, 50);
-  assert.equal(snapshot.publishedCount, 7);
+  assert.equal(snapshot.recentRunCount, 3);
+  assert.equal(snapshot.terminalRunCount, 2);
 });
 
 test("a healthy connector and live run produce a precise monitor decision", () => {

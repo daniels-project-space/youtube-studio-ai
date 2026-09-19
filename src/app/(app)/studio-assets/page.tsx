@@ -247,103 +247,83 @@ function curatedExecutionTargetLabel(target: NonNullable<CuratedLtxCatalogItem["
 function AssetHero({
   access,
   summary,
-  runtime,
   loading,
   onRefresh,
 }: {
   access: ReturnType<typeof useOperationsAccess>;
-  summary: { approved: number; pending: number; reusable: number; ltx: number; control: number };
-  runtime: DirectLtxRuntimeStatus | null;
+  summary: { approved: number; pending: number; reusable: number } | null;
   loading: boolean;
   onRefresh: () => void;
 }) {
   return (
-    <section className={styles.hero} aria-busy={access === "checking" || (access === "owner" && loading) || undefined}>
+    <header className={styles.hero} aria-busy={access === "checking" || (access === "owner" && loading) || undefined}>
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}>Reusable media &amp; recipes</p>
         <h1>Studio assets</h1>
-        <div className={styles.heroActions}>
-          <button type="button" className={styles.refresh} disabled={loading || access !== "owner"} onClick={onRefresh}>{access !== "owner" ? access === "checking" ? "Checking access…" : "Registry locked" : loading ? "Reading registry…" : "Refresh registry"}</button>
-          <span>Owner-only previews</span>
-        </div>
+        <p>Reusable media, recipes &amp; character assets.</p>
       </div>
-      <div className={styles.registryMap}>
-        <div className={styles.registryHeader}><span>Reuse admission</span><small>scope × evidence × runtime</small></div>
-        <div className={styles.orbitField}>
-          <div className={styles.orbitCore} data-state={summary.approved ? "ready" : "empty"}><span>APPROVED</span><strong>{String(summary.approved).padStart(2, "0")}</strong><small>registry entries</small></div>
-          <RegistryNode className={styles.nodeQuality} index="01" label="Quality" value={summary.approved ? "Reviewed" : "Waiting"} />
-          <RegistryNode className={styles.nodeScope} index="02" label="Scope" value={summary.reusable ? `${summary.reusable} portable` : "Bound"} />
-          <RegistryNode className={styles.nodeRuntime} index="03" label="Runtime" value={runtime?.status === "attested" ? "Attested" : "Unattested"} />
-          <i className={styles.orbitA} aria-hidden="true" /><i className={styles.orbitB} aria-hidden="true" /><i className={styles.orbitC} aria-hidden="true" />
-        </div>
-      </div>
-      <div className={styles.metricRail}>
-        <AssetMetric index="01" label="Approved" value={String(summary.approved).padStart(2, "0")} detail="evidence-backed" />
-        <AssetMetric index="02" label="Decisions" value={String(summary.pending).padStart(2, "0")} detail="owner review" />
-        <AssetMetric index="03" label="Portable" value={String(summary.reusable).padStart(2, "0")} detail="Studio-wide" />
-        <AssetMetric index="04" label="LTX candidates" value={String(summary.ltx + summary.control).padStart(2, "0")} detail={`${summary.control} IC controls`} />
-        <AssetMetric index="05" label="Authority" value={access === "owner" ? "Open" : access === "checking" ? "Checking" : "Locked"} detail="signed session" />
-      </div>
-    </section>
+      {access === "owner" ? <button type="button" className={styles.refresh} disabled={loading} onClick={onRefresh}>
+        {loading ? "Reading registry…" : "Refresh registry"}
+      </button> : null}
+      {summary ? <ul className={styles.metricRail} aria-label="Registry summary">
+        <li><span>Ready to reuse</span><strong>{summary.approved}</strong></li>
+        <li><span>Awaiting review</span><strong>{summary.pending}</strong></li>
+        <li><span>Studio-wide</span><strong>{summary.reusable}</strong></li>
+      </ul> : null}
+    </header>
   );
-}
-
-function RegistryNode({ className, index, label, value }: { className: string; index: string; label: string; value: string }) {
-  return <div className={`${styles.registryNode} ${className}`}><span>{index}</span><div><small>{label}</small><strong>{value}</strong></div><i /></div>;
-}
-
-function AssetMetric({ index, label, value, detail }: { index: string; label: string; value: string; detail: string }) {
-  return <div className={styles.metric}><span>{index} / {label}</span><strong>{value}</strong><small>{detail}</small></div>;
 }
 
 function LockedAssetRegistry({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
   return (
     <section className={styles.lockedRegistry} aria-live={access === "checking" ? "polite" : undefined}>
-      <div className={styles.registrySeal} aria-hidden="true"><span>ASSET</span><i /><b /></div>
       <div className={styles.lockedCopy}>
-        <p className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Private workspace"}</p>
-        <h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2>
+        <h2>{access === "checking" ? "Checking access…" : access === "unavailable" ? "Access check unavailable" : "Private asset library"}</h2>
         <p>{access === "checking" ? "Reading this browser session." : "Approvals, adapters, and private previews remain unloaded."}</p>
-        {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       </div>
-      <div className={styles.lockedRules}>
-        <div><span>01</span><strong>Channel-bound identity</strong></div>
-        <div><span>02</span><strong>Verified runtime</strong></div>
-        <div><span>03</span><strong>Short-lived previews</strong></div>
-      </div>
+      {access !== "checking" ? <a href="/api/operations/authorize" className={styles.refresh}>Verify with YouTube</a> : null}
     </section>
   );
 }
 
 function AssetRoomTabs({ room, setRoom, counts }: { room: AssetRoom; setRoom: (room: AssetRoom) => void; counts: Record<AssetRoom, number> }) {
-  const rooms: { id: AssetRoom; label: string; detail: string }[] = [
-    { id: "approved", label: "Approved", detail: "Reusable inventory" },
-    { id: "decisions", label: "Decisions", detail: "Owner approvals" },
-    { id: "identity", label: "Identity", detail: "Series characters" },
-    { id: "runtime", label: "Runtime", detail: "Worker readiness" },
-    { id: "catalog", label: "Catalog", detail: "Quality candidates" },
+  const rooms: { id: AssetRoom; label: string }[] = [
+    { id: "approved", label: "Inventory" },
+    { id: "decisions", label: "Decisions" },
+    { id: "identity", label: "Characters" },
+    { id: "runtime", label: "Workers" },
+    { id: "catalog", label: "Catalog" },
   ];
   return (
-    <nav className={styles.roomTabs} aria-label="Studio asset rooms" role="tablist">
-      {rooms.map((item, index) => <button key={item.id} type="button" role="tab" aria-selected={room === item.id} className={room === item.id ? styles.roomTabActive : ""} onClick={() => setRoom(item.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.label}</strong><small>{item.detail}</small></div><b>{counts[item.id]}</b></button>)}
+    <nav className={styles.roomTabs} aria-label="Studio asset rooms">
+      {rooms.map(item => <button key={item.id} type="button" aria-pressed={room === item.id} className={room === item.id ? styles.roomTabActive : ""} onClick={() => setRoom(item.id)}><strong>{item.label}</strong><span>{counts[item.id]}</span></button>)}
     </nav>
   );
 }
 
 function AssetRoomIntro({ room }: { room: AssetRoom }) {
-  const copy: Record<AssetRoom, { eyebrow: string; title: string; detail: string }> = {
-    approved: { eyebrow: "Reusable inventory", title: "Approved visual language", detail: "Evidence-backed recipes and source assets that earned a specific compatibility boundary." },
-    decisions: { eyebrow: "Owner decision", title: "Candidates awaiting a deliberate answer", detail: "Approval rechecks the retained final-master certificate and remains restricted to its source channel." },
-    identity: { eyebrow: "Series identity", title: "Characters allowed to remain themselves", detail: "Accepted adapters can return only for the same sealed specification, dataset, runtime, and review path." },
-    runtime: { eyebrow: "Execution boundary", title: "Workers with measured readiness", detail: "Runtime evidence proves only its benchmarked path; it does not authorize dispatch, spend, or release." },
-    catalog: { eyebrow: "Descriptor catalog", title: "Candidates, controls, and treatment plans", detail: "Catalog entries describe a possible improvement. They are not installed weights and never imply render admission." },
+  const copy: Record<AssetRoom, { title: string; detail: string }> = {
+    approved: { title: "Media & recipes", detail: "Only approved entries can be reused within their recorded scope." },
+    decisions: { title: "Review candidates", detail: "Approve proven recipes for the same channel. Approval rechecks final-master evidence." },
+    identity: { title: "Character identity", detail: "Accepted adapters stay bound to their original character, dataset, and runtime." },
+    runtime: { title: "Worker readiness", detail: "Benchmarks qualify a specific path, not permission to spend or publish." },
+    catalog: { title: "Quality catalog", detail: "Model and treatment references—not installed weights or render permission." },
   };
   const selected = copy[room];
-  return <header className={styles.roomHeader}><div><span className={styles.kind}>{selected.eyebrow}</span><h2>{selected.title}</h2></div><p>{selected.detail}</p></header>;
+  return <header className={styles.roomHeader}><h2>{selected.title}</h2><p>{selected.detail}</p></header>;
 }
 
 export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
+  // Private state is discarded when owner access is lost, including previews.
+  // A later owner session must obtain its own inventory, not reuse old counts.
+  if (operationsAccess === "owner") return <OwnedStudioAssetsPage />;
+  return <div className={styles.page}>
+    <AssetHero access={operationsAccess} summary={null} loading={false} onRefresh={() => {}} />
+    <LockedAssetRegistry access={operationsAccess} />
+  </div>;
+}
+
+function OwnedStudioAssetsPage() {
   const [room, setRoom] = useState<AssetRoom>("approved");
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [reusableMedia, setReusableMedia] = useState<StudioReusableMedia[]>([]);
@@ -355,6 +335,8 @@ export default function StudioAssetsPage() {
   const [musicVideoA2Vid, setMusicVideoA2Vid] = useState<MusicVideoA2VidReadiness | null>(null);
   const [directLtxRuntime, setDirectLtxRuntime] = useState<DirectLtxRuntimeStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<StudioAssetImagePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
@@ -362,12 +344,17 @@ export default function StudioAssetsPage() {
   const [approvingCandidate, setApprovingCandidate] = useState<string | null>(null);
   const previewOriginRef = useRef<HTMLElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement | null>(null);
+  const registryRequestRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
+    registryRequestRef.current?.abort();
+    const controller = new AbortController();
+    registryRequestRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     setMessage(null);
     try {
-      const response = await fetch("/api/studio-assets", { cache: "no-store" });
+      const response = await fetch("/api/studio-assets", { cache: "no-store", signal: controller.signal });
       const payload = await response.json() as {
         ok?: boolean;
         assets?: StudioAsset[];
@@ -382,6 +369,13 @@ export default function StudioAssetsPage() {
         error?: string;
       };
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not load Studio assets");
+      // All inventory collections are required by the real API. A partial or
+      // malformed response is unavailable data, not a successfully empty room.
+      if (![payload.assets, payload.reusableMedia, payload.candidates, payload.curatedLtxCatalog,
+        payload.visualTreatmentCatalog, payload.releaseFeedback, payload.acceptedCharacterLoRAs].every(Array.isArray)) {
+        throw new Error("The registry response is incomplete. Refresh to try again.");
+      }
+      if (controller.signal.aborted) return;
       setAssets(payload.assets ?? []);
       setReusableMedia(payload.reusableMedia ?? []);
       setCandidates(payload.candidates ?? []);
@@ -391,50 +385,58 @@ export default function StudioAssetsPage() {
       setAcceptedCharacterLoRAs(payload.acceptedCharacterLoRAs ?? []);
       setMusicVideoA2Vid(payload.musicVideoA2Vid ?? null);
       setDirectLtxRuntime(payload.directLtxRuntime ?? null);
+      setLoaded(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not load Studio assets");
+      if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load Studio assets");
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   const approveCandidate = useCallback(async (candidateFingerprint: string) => {
     if (approvingCandidate) return;
+    const signal = registryRequestRef.current?.signal;
     setApprovingCandidate(candidateFingerprint);
     setMessage(null);
     try {
       const response = await fetch("/api/studio-assets", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approve-candidate", candidateFingerprint }),
       });
       const payload = await response.json() as { ok?: boolean; error?: string };
+      if (signal?.aborted) return;
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error ?? "Could not approve Studio asset candidate");
       }
       await refresh();
+      if (registryRequestRef.current?.signal.aborted) return;
       setMessage("Candidate approved for its source channel. It can now be reused only where its sealed compatibility matches.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not approve Studio asset candidate");
+      if (!signal?.aborted) setMessage(error instanceof Error ? error.message : "Could not approve Studio asset candidate");
     } finally {
       setApprovingCandidate(null);
     }
   }, [approvingCandidate, refresh]);
 
   const openImagePreview = useCallback(async (asset: StudioAsset, origin: HTMLElement) => {
-    if (!asset.resource?.contentType.startsWith("image/") || previewLoading) return;
+    if (asset.status !== "approved" || !asset.resource?.contentType.startsWith("image/") || previewLoading) return;
+    const signal = registryRequestRef.current?.signal;
     previewOriginRef.current = origin;
     setPreviewLoading(asset.fingerprint);
     setPreviewError(null);
     try {
       const response = await fetch(`/api/studio-assets?preview=${encodeURIComponent(asset.fingerprint)}`, {
         cache: "no-store",
+        signal,
       });
       const payload = await response.json() as {
         ok?: boolean;
         preview?: { url?: unknown; contentType?: unknown; contentSha256?: unknown };
         error?: string;
       };
+      if (signal?.aborted) return;
       if (
         !response.ok
         || !payload.ok
@@ -451,7 +453,7 @@ export default function StudioAssetsPage() {
         contentSha256: payload.preview.contentSha256,
       });
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Approved image preview is unavailable");
+      if (!signal?.aborted) setPreviewError(error instanceof Error ? error.message : "Approved image preview is unavailable");
     } finally {
       setPreviewLoading(null);
     }
@@ -472,18 +474,18 @@ export default function StudioAssetsPage() {
   }, [preview]);
 
   useEffect(() => {
-    if (operationsAccess !== "owner") return;
     const timer = window.setTimeout(() => void refresh(), 0);
-    return () => window.clearTimeout(timer);
-  }, [operationsAccess, refresh]);
+    return () => {
+      window.clearTimeout(timer);
+      registryRequestRef.current?.abort();
+    };
+  }, [refresh]);
 
   const summary = useMemo(() => ({
     approved: assets.filter((asset) => asset.status === "approved").length + reusableMedia.filter((asset) => asset.status === "approved").length,
     pending: candidates.length,
-    reusable: assets.filter((asset) => asset.scope === "owned_studio").length + reusableMedia.length,
-    ltx: curatedLtxCatalog.filter((candidate) => candidate.adapterClass === "standard_lora").length,
-    control: curatedLtxCatalog.filter((candidate) => candidate.adapterClass === "ic_lora").length,
-  }), [assets, candidates, curatedLtxCatalog, reusableMedia]);
+    reusable: assets.filter((asset) => asset.status === "approved" && asset.scope === "owned_studio" && asset.identitySensitivity === "portable").length,
+  }), [assets, candidates, reusableMedia]);
   const feedbackByAsset = useMemo(
     () => new Map(releaseFeedback.map((feedback) => [feedback.assetEntryFingerprint, feedback])),
     [releaseFeedback],
@@ -495,27 +497,24 @@ export default function StudioAssetsPage() {
     runtime: (directLtxRuntime ? 1 : 0) + (musicVideoA2Vid ? 1 : 0),
     catalog: curatedLtxCatalog.length + visualTreatmentCatalog.length,
   };
+  const registryReady = loaded && !loading && !loadError;
 
   return (
     <div className={styles.page}>
       <AssetHero
-        access={operationsAccess}
-        summary={summary}
-        runtime={directLtxRuntime}
+        access="owner"
+        summary={registryReady ? summary : null}
         loading={loading}
         onRefresh={() => { void refresh(); }}
       />
 
-      {operationsAccess !== "owner" ? (
-        <LockedAssetRegistry access={operationsAccess} />
-      ) : (<>
-
-      <section className={styles.boundaryStrip}>
-        <span className={styles.kind}>Read-only evidence inventory</span>
-        <strong>Metadata first. Reuse only after exact compatibility.</strong>
-        <p>Browse approved Studio assets. Owner approval is explicit.</p>
-        <small>It never shows storage locations, model bytes, or persistent signed URLs; an owner may explicitly open one short-lived preview for an approved image. Official catalog entries are not installed weights or render permission; an assembly consumer is not admitted until render-parity is proven.</small>
-      </section>
+      {loading ? <p className={styles.loadStatus} role="status">Loading Studio asset registry…</p> : null}
+      {loadError ? <div className={styles.error} role="alert"><strong>Inventory unavailable</strong><p>{loadError}</p></div> : null}
+      {message ? <p className={styles.error} role="alert">{message}</p> : null}
+      {previewError ? <p className={styles.error} role="alert">{previewError}</p> : null}
+      {registryReady ? <>
+      <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} />
+      <AssetRoomIntro room={room} />
 
       {!loading && room === "runtime" && directLtxRuntime ? <section className={styles.runtimeBanner} aria-label="Direct LTX runtime readiness">
         <strong>Direct LTX runtime · {directLtxRuntime.status === "attested" ? "benchmark admitted" : "benchmark not admitted"}</strong>
@@ -526,16 +525,10 @@ export default function StudioAssetsPage() {
         </p>
       </section> : null}
 
-      {message ? <p className={styles.error} role="alert">{message}</p> : null}
-      {previewError ? <p className={styles.error} role="alert">{previewError}</p> : null}
-      <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} />
-      <AssetRoomIntro room={room} />
-
-      {loading ? <div className={styles.empty}>Loading Studio asset registry…</div> : null}
       {!loading && room === "approved" && !message && assets.length === 0 && reusableMedia.length === 0 ? (
         <div className={styles.empty}>
           <strong>No approved Studio assets yet.</strong>
-          <span>Assets appear here only after an evidence-backed promotion. A missing asset tells the pipeline to create a new reviewed candidate; it never borrows another channel’s material.</span>
+          <span>Reviewed assets will appear here. Until then, pipelines create original material.</span>
         </div>
       ) : null}
 
@@ -574,14 +567,7 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
-      {!loading && room === "decisions" && candidates.length ? <section className={styles.catalog} aria-labelledby="studio-asset-candidate-approvals">
-        <div className={styles.catalogHead}>
-          <div>
-            <span className={styles.kind}>Owner decision required</span>
-            <h2 id="studio-asset-candidate-approvals">Reviewed candidates awaiting approval</h2>
-          </div>
-          <p>Approve proven recipes for the same channel.</p>
-        </div>
+      {!loading && room === "decisions" && candidates.length ? <section className={styles.catalog} aria-label="Reviewed candidates awaiting approval">
         <div className={styles.grid}>
           {candidates.map((candidate) => <article className={styles.card} key={candidate.candidateFingerprint}>
             <div className={styles.cardHead}>
@@ -615,7 +601,7 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
-      {!loading && room === "approved" && assets.length ? <section className={styles.grid} aria-label="Approved Studio assets">
+      {!loading && room === "approved" && assets.length ? <section className={styles.grid} aria-label="Studio asset inventory">
         {assets.map((asset) => {
           const feedback = feedbackByAsset.get(asset.fingerprint);
           return <article className={styles.card} key={asset.fingerprint}>
@@ -638,7 +624,7 @@ export default function StudioAssetsPage() {
               {asset.compatibility.treatments.map((value) => <span key={`treatment-${value}`}>{kindLabel(value)}</span>)}
             </div>
             {asset.recipePreview.length ? <p className={styles.recipe}>{asset.recipePreview.join(" · ")}</p> : null}
-            {asset.resource?.contentType.startsWith("image/") ? <button
+            {asset.status === "approved" && asset.resource?.contentType.startsWith("image/") ? <button
               type="button"
               className={styles.previewButton}
               disabled={previewLoading !== null}
@@ -660,14 +646,7 @@ export default function StudioAssetsPage() {
         })}
       </section> : null}
 
-      {!loading && room === "identity" && acceptedCharacterLoRAs.length ? <section className={styles.catalog} aria-labelledby="series-character-adapter-registry">
-        <div className={styles.catalogHead}>
-          <div>
-            <span className={styles.kind}>Series identity registry</span>
-            <h2 id="series-character-adapter-registry">Persistent character adapters</h2>
-          </div>
-          <p>Reuse identity adapters only with their original character.</p>
-        </div>
+      {!loading && room === "identity" && acceptedCharacterLoRAs.length ? <section className={styles.catalog} aria-label="Persistent character adapters">
         <div className={styles.grid}>
           {acceptedCharacterLoRAs.map((adapter) => (
             <article className={styles.card} key={adapter.registryIdentity}>
@@ -804,8 +783,19 @@ export default function StudioAssetsPage() {
 
       {!loading && room !== "approved" && roomCounts[room] === 0 ? <div className={styles.empty}>
         <strong>No {room} records are available.</strong>
-        <span>The registry preserves this as an empty evidence state; it does not infer an approval, adapter, runtime, or catalog entry.</span>
+        <span>The registry returned no entries for this section.</span>
       </div> : null}
+
+      <details className={styles.boundaryStrip}>
+        <summary>Reuse rules</summary>
+        <ul>
+          <li>Browse approved Studio assets. Owner approval is explicit.</li>
+          <li>Read-only evidence inventory: no storage locations, model bytes, or persistent signed URLs.</li>
+          <li>Open one short-lived preview for an approved image. Channel and character identity stay within their recorded scope.</li>
+          <li>Official catalog entries are not installed weights or render permission; an assembly consumer is not admitted until render-parity is proven.</li>
+        </ul>
+      </details>
+      </> : null}
 
       {preview ? <div className={styles.previewBackdrop} role="presentation" onMouseDown={() => setPreview(null)}>
         <section
@@ -838,7 +828,6 @@ export default function StudioAssetsPage() {
           <p className={styles.previewProof}>Image evidence · {preview.contentType} · SHA-256 {shortHash(preview.contentSha256)}</p>
         </section>
       </div> : null}
-      </>)}
     </div>
   );
 }

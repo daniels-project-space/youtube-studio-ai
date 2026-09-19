@@ -44,6 +44,7 @@ import type * as reviewedLtxRuntimeState from "../reviewedLtxRuntimeState.js";
 import type * as routeQualificationBenchmarkRuns from "../routeQualificationBenchmarkRuns.js";
 import type * as runArtifactRetentions from "../runArtifactRetentions.js";
 import type * as runArtifacts from "../runArtifacts.js";
+import type * as runExecutionAdmission from "../runExecutionAdmission.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
@@ -110,6 +111,7 @@ declare const fullApi: ApiFromModules<{
   routeQualificationBenchmarkRuns: typeof routeQualificationBenchmarkRuns;
   runArtifactRetentions: typeof runArtifactRetentions;
   runArtifacts: typeof runArtifacts;
+  runExecutionAdmission: typeof runExecutionAdmission;
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;

@@ -15,7 +15,11 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext } from "@/engine/types";
+import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext, type CachedOutputValidationContext } from "@/engine/types";
+import { currentWorkedExampleScript, createWorkedExampleAudioBinding, assertWorkedExampleTtsBindingInputs, assertWorkedExampleAudioMetadata, assertWorkedExampleAudioBytes } from "@/engine/workedExampleAudioBinding";
+import { prepareWorkedExampleSpeechAdmission, assertWorkedExampleSpeechProof, createWorkedExampleSpeechReport,
+  assertWorkedExampleSpeechReportCurrent, assertWorkedExampleSpeechFile, workedExampleSpeechRefusal,
+  workedExampleSpeechFailureEvidence, type WorkedExampleSpeechReport } from "@/engine/workedExampleSpeech";
 import {
   assertVoiceGatePreconditions,
   qualityProfile,
@@ -91,6 +95,7 @@ import {
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseScriptCritique,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
@@ -106,6 +111,11 @@ import {
 } from "@/engine/cinematicCaseSequence";
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
 import { StorySpineSchema, storySpineVisualReviewLocks } from "@/engine/storySpine";
+import {
+  assertWorkedExampleNarrationBinding,
+  assertWorkedExampleEditorialApproval,
+  workedExampleEditorialApprovalFor,
+} from "@/engine/workedExampleNarration";
 import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
@@ -177,6 +187,8 @@ import {
   finalMasterNarrationTranscriptAuditObjectKey,
   prepareFinalMasterNarrationTranscriptAudit,
   sealFinalMasterNarrationSemanticEvidence,
+  assertFinalMasterNarrationSemanticEvidence,
+  assertFinalMasterNarrationTranscriptAudit,
   proveNarrationTranscript,
   sha256NarrationTranscriptSource,
   type FinalMasterNarrationSemanticEvidence,
@@ -323,6 +335,53 @@ function splitSentences(text: string): string[] {
     .split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+type NarrationChapterScript = { hook?: string; sections?: { heading: string; narration: string }[] };
+type NarrationChapterItem = { kind: "narration" | "heading"; text: string; chap?: number };
+/** Shared exact synthesis projection, including bounded headings and their spoken chapter numbers. */
+function narrationChapterItems(script: NarrationChapterScript): NarrationChapterItem[] {
+  const items: NarrationChapterItem[] = [];
+  if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
+  const sections = script.sections ?? [];
+  const lastIdx = sections.length - 1;
+  const eligibleChapterSections = sections
+    .map((sec, idx) => ({ heading: sec.heading, idx }))
+    .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && sections.length >= 3));
+  const boundedChapterHeadings = boundNarrationChapterHeadings(eligibleChapterSections.map(({ heading }) => heading));
+  const chapterBySection = new Map<number, { heading: string; chap: number }>();
+  boundedChapterHeadings.forEach((heading, candidateIndex) => {
+    if (!heading) return;
+    chapterBySection.set(eligibleChapterSections[candidateIndex].idx, { heading, chap: chapterBySection.size + 1 });
+  });
+  sections.forEach((sec, idx) => {
+    const chapter = chapterBySection.get(idx);
+    if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
+    for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
+  });
+  return items;
+}
+const speakChapterItem = (it: NarrationChapterItem) =>
+  it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+
+function currentNarrationSpokenSequence(ctx: Pick<CachedOutputValidationContext, "store" | "params">): string[] {
+  const script = ctx.store.script as NarrationChapterScript | undefined;
+  if (ctx.params.chapterCards === true && (script?.sections?.length ?? 0) >= 2) return narrationChapterItems(script!).map(speakChapterItem);
+  return splitSentences(sanitizeSpoken(String(ctx.store.narrationText), { keepAudioTags: normalizeTtsProvider(ctx.params.ttsProvider) === "elevenlabs" }));
+}
+
+function prepareWorkedExampleQaRestore(ctx: CachedOutputValidationContext): readonly string[] | null {
+  const script = currentWorkedExampleScript(ctx);
+  if (!script && ctx.outputs.workedExampleEditorialApproval === undefined) return null;
+  assertWorkedExampleEditorialApproval(ctx.outputs.workedExampleEditorialApproval, script);
+  if (ctx.outputs.scriptApproved !== true) throw new Error("cached arithmetic QA has no affirmative current approval");
+  return [];
+}
+function prepareWorkedExampleAudioRestore(ctx: CachedOutputValidationContext): readonly string[] | null {
+  const script = currentWorkedExampleScript(ctx);
+  if (!script && ctx.outputs.workedExampleAudioBinding === undefined && ctx.store.workedExampleEditorialApproval === undefined) return null;
+  assertWorkedExampleAudioMetadata(ctx, currentNarrationSpokenSequence(ctx));
+  return ["narrationLocalPath"];
 }
 import {
   evaluateThumbnail,
@@ -788,7 +847,7 @@ export const scriptGen: Block = {
       critique: async (draft, iter) => {
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+          const crit = parseScriptCritique(await claudeJson<unknown>({
             prompt:
               `Critique this YouTube narration draft for quality and on-brand voice` +
               (req.persona ? ` (channel persona: ${req.persona})` : "") +
@@ -814,9 +873,9 @@ export const scriptGen: Block = {
             // trailing delimiter after the JSON block.
             maxTokens: 2500,
             temperature: 0.3,
-          });
-          const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
-          const rejected = crit.pass === false;
+          }));
+          const issues = crit.issues;
+          const rejected = !crit.pass;
           const rejectionIssues = issues.length
             ? issues
             : ["independent narrative critic rejected the draft without usable remediation"];
@@ -1055,9 +1114,18 @@ export const hookCraft: Block = {
 export const qaScript: Block = {
   id: "qa_script",
   consumes: ["narrationText"],
-  produces: ["scriptApproved"],
+  produces: ["scriptApproved", "workedExampleEditorialApproval"],
+  cachedOutputValidator: {
+    prepare: prepareWorkedExampleQaRestore,
+    validate: async (ctx) => { prepareWorkedExampleQaRestore(ctx); },
+  },
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const workedExampleScript = assertWorkedExampleNarrationBinding({
+      request: ctx.store["workedExampleRequest"], preparation: ctx.store["workedExamplePreparation"],
+      script: ctx.store["script"], narrationText: narration,
+      ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
+    });
     const programRoute = programRouteForNarratedBlock(ctx, "qa_script");
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");
@@ -1120,7 +1188,7 @@ export const qaScript: Block = {
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
-      const res = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+      const res = parseScriptCritique(await claudeJson<unknown>({
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
@@ -1160,9 +1228,8 @@ export const qaScript: Block = {
         // trailing delimiter after the JSON block.
         maxTokens: 2500,
         temperature: 0.3,
-      });
-      const issues = Array.isArray(res.issues) ? res.issues : [];
-      const pass = res.pass !== false;
+      }));
+      const { issues, pass } = res;
       ctx.log(`qa_script: pass=${pass}`, { issues: issues.slice(0, 5) });
       // HARD GATE: a confirmed craft-quality failure must not proceed into the
       // paid narration/visual stages that follow — same pattern as the sibling
@@ -1174,7 +1241,10 @@ export const qaScript: Block = {
           `narration/visual stages (${issues.slice(0, 5).join(" | ") || "no specific issues returned"})`,
         );
       }
-      return { scriptApproved: true };
+      return {
+        scriptApproved: true,
+        ...(workedExampleScript ? { workedExampleEditorialApproval: workedExampleEditorialApprovalFor(workedExampleScript) } : {}),
+      };
     } catch (e) {
       // A confirmed quality failure must propagate. A model/parse/network
       // error is also fail-closed: unverified is not approved for paid media.
@@ -1197,10 +1267,22 @@ export const narrationTts: Block = {
     "narrationPerformanceEvidence",
     "sentenceTimings",
     "chapterPlan",
+    "workedExampleAudioBinding",
   ],
   paid: true,
+  cachedOutputValidator: {
+    prepare: prepareWorkedExampleAudioRestore,
+    validate: async (ctx) => { await assertWorkedExampleAudioBytes(ctx, currentNarrationSpokenSequence(ctx)); },
+  },
   run: async (ctx) => {
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
+    const workedExampleScript = assertWorkedExampleNarrationBinding({
+      request: ctx.store["workedExampleRequest"], preparation: ctx.store["workedExamplePreparation"],
+      script: ctx.store["script"], narrationText: ctx.store["narrationText"],
+      ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
+    });
+    assertWorkedExampleEditorialApproval(ctx.store["workedExampleEditorialApproval"], workedExampleScript);
+    if (workedExampleScript) assertWorkedExampleTtsBindingInputs(ctx);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // Unknown providers must fail before spend; they must never inherit the
     // historical Fish fallback just because a string was misspelled.
@@ -1396,32 +1478,10 @@ export const narrationTts: Block = {
     if (chapterMode && script?.sections) {
       const preSec = Number(ctx.params["chapterPreSec"] ?? 3); // silence as the card fades in, before the heading
       const postSec = Number(ctx.params["chapterPostSec"] ?? 3); // silence after the heading, as the card fades out
-      type Item = { kind: "narration" | "heading"; text: string; chap?: number };
-      const items: Item[] = [];
-      if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
       // Chapter cards belong to the BODY only: the INTRO (first section) flows
       // straight out of the cold open with no "Chapter 1" interrupt, and the
       // OUTRO (final section) lands as the closing narration with no card.
-      const lastIdx = script.sections.length - 1;
-      const eligibleChapterSections = script.sections
-        .map((sec, idx) => ({ heading: sec.heading, idx }))
-        .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && script.sections!.length >= 3));
-      const boundedChapterHeadings = boundNarrationChapterHeadings(
-        eligibleChapterSections.map(({ heading }) => heading),
-      );
-      const chapterBySection = new Map<number, { heading: string; chap: number }>();
-      boundedChapterHeadings.forEach((heading, candidateIndex) => {
-        if (!heading) return;
-        chapterBySection.set(eligibleChapterSections[candidateIndex].idx, {
-          heading,
-          chap: chapterBySection.size + 1,
-        });
-      });
-      script.sections.forEach((sec, idx) => {
-        const chapter = chapterBySection.get(idx);
-        if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
-        for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
-      });
+      const items = narrationChapterItems(script);
 
       const partPaths: string[] = [];
       const gaps: number[] = [];
@@ -1432,8 +1492,7 @@ export const narrationTts: Block = {
       let chap = 0;
       const flush = () => { if (footAccum > 0.1) { chapterPlan.push({ kind: "footage", durSec: footAccum }); footAccum = 0; } };
       // PARALLEL synthesis (small pool — Fish concurrency limit; see sentence mode).
-      const speakOf = (it: Item) =>
-        it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+      const speakOf = speakChapterItem;
       const chapterCadencePlan = planNarrationCadence({
         sentences: items.map(speakOf),
         baseGapSec: baseGap,
@@ -1533,10 +1592,11 @@ export const narrationTts: Block = {
         ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
       }
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-      await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+      const narrationBytes = await readBytes(local);
+      await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
       ctx.log(`narration_tts ok (chapter mode): ${durationSec.toFixed(0)}s, ${chap} chapters, ${sentenceTimings.length} sentences`);
-      return {
+      const outputs: BlockPatch = {
         narrationKey,
         narrationDurationSec: durationSec,
         narrationLocalPath: local,
@@ -1549,6 +1609,8 @@ export const narrationTts: Block = {
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
       };
+      if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, items.map(speakOf), narrationBytes);
+      return outputs;
     }
 
     // Synth PER SENTENCE and concat with a silence gap → organic pauses, plus
@@ -1661,14 +1723,15 @@ export const narrationTts: Block = {
     }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-    await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+    const narrationBytes = await readBytes(local);
+    await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
     await recordAsset(ctx, "narration", narrationKey, {
       durationSec,
       sentences: sentences.length,
       gapSec: baseGap,
     });
     ctx.log(`narration_tts ok: ${durationSec}s, ${sentences.length} sentences (~${baseGap}s pauses)`);
-    return {
+    const outputs: BlockPatch = {
       narrationKey,
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
@@ -1681,6 +1744,8 @@ export const narrationTts: Block = {
       chapterPlan: [],
       [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
     };
+    if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, sentences, narrationBytes);
+    return outputs;
     } catch (error) {
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
@@ -4058,6 +4123,34 @@ export function persistQaVisualStageOutputs(patch: Readonly<BlockPatch>): BlockP
   return persisted;
 }
 
+/** Read-only arithmetic cache admission. Ordinary QA restoration remains untouched. */
+function currentWorkedExampleQaRestore(ctx: CachedOutputValidationContext) {
+  const admission = prepareWorkedExampleSpeechAdmission(ctx);
+  const qaReport = ctx.outputs.qaReport as Record<string, unknown> | undefined;
+  const validation = qaReport?.renderValidation as Record<string, unknown> | undefined;
+  if (!admission) {
+    if (validation?.workedExampleCriticalSpeech !== undefined) throw new Error("cached arithmetic QA has no current verified arithmetic inputs");
+    return;
+  }
+  if (ctx.outputs.qaPassed !== true || typeof ctx.outputs.finalMasterSha256 !== "string") throw new Error("cached arithmetic QA has no completed passing master identity");
+  const report = assertWorkedExampleSpeechReportCurrent(validation?.workedExampleCriticalSpeech, admission, ctx.outputs.finalMasterSha256);
+  const semantic = assertFinalMasterNarrationSemanticEvidence(validation?.finalMasterNarrationSemantic);
+  if (semantic.finalMaster.sha256 !== ctx.outputs.finalMasterSha256 || semantic.finalMaster.durationSec !== ctx.store.videoDurationSec ||
+    semantic.narration.durationSec !== ctx.store.narrationDurationSec || semantic.narration.sourceSha256 !== admission.source.sha256 ||
+    semantic.narration.expectedTextSha256 !== admission.expectedTextSha256) throw new Error("cached arithmetic QA source/master timeline differs from current inputs");
+  const currentStart = ctx.store.narrationStartSec === undefined
+    ? ctx.store.introApplied === true ? Math.max(0, Number(ctx.store.introSec ?? 0)) : 0
+    : Number(ctx.store.narrationStartSec);
+  if (!Number.isFinite(currentStart) || currentStart < 0 || semantic.narration.startSec !== currentStart) throw new Error("cached arithmetic QA narration offset differs");
+  for (const [observed, proof] of [[report.source, semantic.sourceTranscript], [report.finalMaster, semantic.finalMasterTranscript]] as const) {
+    if (observed.proofSha256 !== proof.proofSha256 || observed.sourceSha256 !== proof.source.sha256 || observed.sourceByteLength !== proof.source.byteLength ||
+      observed.expectedTextSha256 !== proof.expected.textSha256 || observed.transcriptTextSha256 !== proof.transcript.textSha256 || observed.timestampWordsSha256 !== proof.transcript.timestampWordsSha256) throw new Error("cached arithmetic QA report differs from retained transcript receipt summaries");
+  }
+  const ref = semantic.auditArtifact;
+  if (ref.r2Key !== finalMasterNarrationTranscriptAuditObjectKey(ctx.keyPrefix, ctx.runId, ref.contentSha256)) throw new Error("cached arithmetic QA audit key differs from current namespace/content identity");
+  return { report, semantic, ref };
+}
+
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
@@ -4071,7 +4164,31 @@ export const qaVisual: Block = {
   ],
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
+  cachedOutputValidator: {
+    prepare: (ctx) => currentWorkedExampleQaRestore(ctx) ? [] : null,
+    validate: async (ctx) => {
+      const current = currentWorkedExampleQaRestore(ctx);
+      if (!current) throw new Error("arithmetic QA restore applicability changed");
+      await assertWorkedExampleSpeechFile(ctx.store.narrationLocalPath, current.report.source);
+      await assertWorkedExampleSpeechFile(ctx.store.videoLocalPath, current.report.finalMaster);
+      // Existing read buffers the object; timeout and post-read identity checks are
+      // not a streaming byte cap. Never substitute another key or run ASR on failure.
+      const bytes = await getObjectBytes(current.ref.r2Key, undefined, { timeoutMs: 30_000 });
+      if (bytes.byteLength !== current.ref.byteLength || createHash("sha256").update(bytes).digest("hex") !== current.ref.contentSha256) throw new Error("cached arithmetic QA audit bytes differ from retained receipt");
+      const audit = assertFinalMasterNarrationTranscriptAudit(JSON.parse(Buffer.from(bytes).toString("utf8")));
+      const prepared = prepareFinalMasterNarrationTranscriptAudit(audit);
+      if (!prepared.bytes.equals(Buffer.from(bytes)) || canonicalJson(audit.workedExampleCriticalSpeech) !== canonicalJson(current.report) ||
+        canonicalJson(prepared.sourceTranscript) !== canonicalJson(current.semantic.sourceTranscript) || canonicalJson(prepared.finalMasterTranscript) !== canonicalJson(current.semantic.finalMasterTranscript) ||
+        canonicalJson(audit.narration) !== canonicalJson(current.semantic.narration) || canonicalJson(audit.finalMaster) !== canonicalJson(current.semantic.finalMaster)) throw new Error("cached arithmetic QA audit is not the exact bound current report and proofs");
+      await assertWorkedExampleSpeechFile(ctx.store.narrationLocalPath, current.report.source);
+      await assertWorkedExampleSpeechFile(ctx.store.videoLocalPath, current.report.finalMaster);
+    },
+  },
   run: async (ctx) => {
+    const workedExampleSpeechAdmission = (() => {
+      try { return prepareWorkedExampleSpeechAdmission(ctx); }
+      catch (error) { throw workedExampleSpeechRefusal(error, "current-inputs"); }
+    })();
     // A legacy fictional route remains readable for audit, but must not mint
     // a new QA/certificate path without the sealed visual treatment that
     // binds its independently publishable thumbnail.
@@ -5305,6 +5422,7 @@ export const qaVisual: Block = {
       | ReturnType<typeof prepareFinalMasterNarrationTranscriptAudit>
       | undefined;
     let finalMasterNarrationAuditKey: string | undefined;
+    let workedExampleCriticalSpeech: WorkedExampleSpeechReport | undefined;
     let narrationCueTiming: NarrationCueTimingEvidence | undefined;
     let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
     const narrationPerformanceEvidence: string[] = [];
@@ -5348,11 +5466,21 @@ export const qaVisual: Block = {
         } else if (expectedNarrationText) {
           try {
             const sourceSha256 = await sha256NarrationTranscriptSource(narrationPath);
+            if (workedExampleSpeechAdmission) await assertWorkedExampleSpeechFile(narrationPath, {
+              sourceSha256: workedExampleSpeechAdmission.source.sha256, sourceByteLength: workedExampleSpeechAdmission.source.byteLength,
+            });
             const proof = proveNarrationTranscript({
               audioPath: narrationPath,
               expectedText: expectedNarrationText,
               sourceSha256,
             });
+            if (workedExampleSpeechAdmission) {
+              try { assertWorkedExampleSpeechProof(workedExampleSpeechAdmission, proof, "source", sourceSha256); }
+              catch (error) {
+                ctx.log("qa_visual: arithmetic source critical speech held", { workedExampleCriticalSpeechFailure: workedExampleSpeechFailureEvidence(workedExampleSpeechAdmission, proof, "source") });
+                throw workedExampleSpeechRefusal(error, "source");
+              }
+            }
             finalNarrationTranscript = {
               wordErrorRate: proof.assessment.wordErrorRate,
               lexicalRecall: proof.assessment.lexicalRecall,
@@ -5407,6 +5535,15 @@ export const qaVisual: Block = {
                   expectedText: expectedNarrationText,
                   sourceSha256: finalMasterTranscriptSha256,
                 });
+                if (workedExampleSpeechAdmission) {
+                  try { workedExampleCriticalSpeech = createWorkedExampleSpeechReport(workedExampleSpeechAdmission, proof, finalMasterProof, finalMasterTranscriptSha256); }
+                  catch (error) {
+                    ctx.log("qa_visual: arithmetic final-master critical speech held", { workedExampleCriticalSpeechFailure: workedExampleSpeechFailureEvidence(workedExampleSpeechAdmission, finalMasterProof, "final-master") });
+                    throw workedExampleSpeechRefusal(error, "final-master");
+                  }
+                  await assertWorkedExampleSpeechFile(narrationPath, workedExampleCriticalSpeech.source);
+                  await assertWorkedExampleSpeechFile(video, workedExampleCriticalSpeech.finalMaster);
+                }
                 const narration = {
                   sourceSha256,
                   expectedTextSha256: proof.expected.textSha256,
@@ -5422,6 +5559,7 @@ export const qaVisual: Block = {
                   narration,
                   sourceTranscript: proof,
                   finalMasterTranscript: finalMasterProof,
+                  ...(workedExampleCriticalSpeech ? { workedExampleCriticalSpeech } : {}),
                 });
                 const auditKey = finalMasterNarrationTranscriptAuditObjectKey(
                   ctx.keyPrefix,
@@ -5449,10 +5587,17 @@ export const qaVisual: Block = {
                   `(${finalMasterNarrationSemantic.receiptFingerprint.slice(0, 12)}; audit ${preparedAudit.contentSha256.slice(0, 12)})`,
                 );
               } catch (error) {
+                if (workedExampleSpeechAdmission) {
+                  if (workedExampleCriticalSpeech) ctx.log("qa_visual: arithmetic report retained; final-master evidence held", {
+                    workedExampleCriticalSpeechFailure: { verdict: "hold", scope: "final-master", report: workedExampleCriticalSpeech },
+                  });
+                  throw workedExampleSpeechRefusal(error, "final-master");
+                }
                 critical.push(`final-master narration semantic evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
               }
             }
           } catch (error) {
+            if (workedExampleSpeechAdmission) throw workedExampleSpeechRefusal(error, "source");
             if (productionQa) {
               critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
             } else {
@@ -5476,6 +5621,7 @@ export const qaVisual: Block = {
             `(start ${narrationStartSec.toFixed(2)}s)`,
         );
       } catch (error) {
+        if (workedExampleSpeechAdmission) throw workedExampleSpeechRefusal(error, "source");
         if (productionQa) {
           critical.push(`narration-mix evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
         } else {
@@ -5483,6 +5629,7 @@ export const qaVisual: Block = {
         }
       }
     }
+    if (workedExampleSpeechAdmission && !workedExampleCriticalSpeech) throw workedExampleSpeechRefusal(new Error("required source/final-master arithmetic evidence missing"), "source/final-master");
     const narrationMixEvidence = finalNarrationMix
       ? [
           `narrationMixCorrelation=${finalNarrationMix.correlation ?? "unmeasured"}`,
@@ -5496,6 +5643,7 @@ export const qaVisual: Block = {
           `narrationTranscriptRecall=${finalNarrationTranscript.lexicalRecall.toFixed(3)}`,
           `narrationTranscriptProof=${finalNarrationTranscript.passed ? "passed" : "failed"}`,
           "narrationTranscriptEvaluator=faster-whisper-small.en/offline",
+          ...(workedExampleCriticalSpeech ? [`workedExampleCriticalSpeech=${workedExampleCriticalSpeech.reportFingerprint}`] : []),
         ]
       : [];
     const finalMasterNarrationSemanticEvidence = finalMasterNarrationSemantic
@@ -6903,6 +7051,7 @@ export const qaVisual: Block = {
           narrationMix: finalNarrationMix ?? undefined,
           finalMasterNarrationSemantic: finalMasterNarrationSemantic ?? undefined,
           narrationCueTiming,
+          ...(workedExampleCriticalSpeech ? { workedExampleCriticalSpeech } : {}),
         },
       },
       qualityEvidence,

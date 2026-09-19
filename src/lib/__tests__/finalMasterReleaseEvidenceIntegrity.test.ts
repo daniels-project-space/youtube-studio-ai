@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { mock } from "node:test";
+import { GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { getFunctionName } from "convex/server";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +22,12 @@ import {
   createPackageToOpeningReceipt,
 } from "@/engine/packageToOpening";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
+import { ObjectDeletionError, getR2Client } from "@/lib/storage";
+import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { sweepDueRunArtifactRetentions } from "@/trigger/runArtifactRetentionSweeper";
+import { encryptSecret } from "@/lib/secretEnvelope";
+import { youtubeConnectorAad } from "@/lib/youtubeConnector";
+import { authorizeDeletion } from "../../../convex/runArtifactRetentions";
 
 const keyPrefix = "owner/alice/channel/casefile/";
 const runId = "run-byte-evidence";
@@ -283,6 +292,10 @@ async function localUploadVerifierAvoidsR2MasterRestream(): Promise<void> {
 async function pruneFixture(
   fixture: ReturnType<typeof buildFixture>,
   additionalFixtures: Array<ReturnType<typeof buildFixture>> = [],
+  overrides: {
+    list?: (keys: string[]) => string[];
+    delete?: (keys: string[], objects: Map<string, Buffer>) => Promise<number>;
+  } = {},
 ) {
   const objects = new Map(fixture.objects);
   for (const additional of additionalFixtures) {
@@ -305,13 +318,165 @@ async function pruneFixture(
     keepNames: ["final.mp4", "thumbnail.jpg"],
     getObjectBytes: getObjectBytes(objects),
     getObjectIntegrity: getObjectIntegrity(objects),
-    listObjects: async (prefix) => [...objects.keys()].filter((key) => key.startsWith(prefix)),
+    listObjects: async (prefix) => {
+      const keys = [...objects.keys()].filter((key) => key.startsWith(prefix));
+      return overrides.list ? overrides.list(keys) : keys;
+    },
     deleteObjects: async (keys) => {
       deleteCalls.push([...keys]);
+      if (overrides.delete) return overrides.delete(keys, objects);
+      for (const key of keys) objects.delete(key);
       return keys.length;
     },
   });
   return { result, deleteCalls, objects };
+}
+
+/** Runs the actual sweeper → certificate checks → storage SDK wrapper boundary. */
+async function retentionWorkerDeletionOutcomes() {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const env = {
+    R2_ACCOUNT_ID: "fixture", R2_ENDPOINT: "https://storage-fixture.invalid", R2_ACCESS_KEY_ID: "fixture",
+    R2_SECRET_ACCESS_KEY: "fixture", R2_BUCKET: "fixture", STUDIO_OWNER_ID: "alice",
+    STUDIO_CONVEX_JWT_PRIVATE_KEY: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    NEXT_PUBLIC_CONVEX_URL: "https://retention-fixture.convex.cloud",
+    VAULT_URL: "https://vault-fixture.invalid", VAULT_ACCESS_TOKEN: "fixture",
+    INTERNAL_QUERY_SECRET: "fixture", YOUTUBE_CLIENT_ID: "fixture", YOUTUBE_CLIENT_SECRET: "fixture",
+    YOUTUBE_TOKEN_ENCRYPTION_KEY: "a".repeat(64),
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  try {
+    for (const mode of ["partial", "complete", "asset-row-failure", "locked-during-verification",
+      "expired-during-verification", "private-at-deletion", "connector-changed", "run-changed", "provider-unavailable",
+      "empty-retry", "empty-retry-locked"] as const) {
+      const empty = mode.startsWith("empty-retry");
+      const completed = mode === "complete" || mode === "empty-retry";
+      const denied = !["partial", "complete", "asset-row-failure", "empty-retry"].includes(mode);
+      const f = buildFixture();
+      f.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("second intermediate"));
+      if (empty) for (const key of f.objects.keys()) {
+        if (key.includes("/intermediates/")) f.objects.delete(key);
+      }
+      const operations: string[] = [];
+      const events: string[] = [];
+      const publishedAt = new Date(Date.now() - 15 * 86_400_000).toISOString();
+      const retention: Record<string, unknown> = {
+        _id: "retention-fixture", ownerId: "alice", channelId: "channel-fixture", runId,
+        keyPrefix, certificateKey: f.certificateKey, additionalCertificateKeys: [], keepNames: ["final.mp4"],
+        status: "processing", leaseExpiresAt: Date.now() + 90 * 60_000,
+        releaseVideoId: "abcdefghijk", releaseYouTubeChannelId: "UC-fixture", releaseObservationAt: Date.now(),
+      };
+      const channel = { _id: "channel-fixture", ownerId: "alice", slug: "casefile", locked: false };
+      const run = { _id: runId, ownerId: "alice", channelId: "channel-fixture", youtubeVideoId: "abcdefghijk",
+        releaseEvidenceStatus: "release_evidence_recorded", releaseEvidenceCertificateKey: f.certificateKey };
+      const connector = { _id: "connector-fixture", ownerId: "alice", channelId: "channel-fixture",
+        tokenVersion: 4, ytChannelId: "UC-fixture", status: "active",
+        refreshTokenCiphertext: encryptSecret("fixture-refresh-token", {
+          envName: "YOUTUBE_TOKEN_ENCRYPTION_KEY", aad: youtubeConnectorAad("alice", "channel-fixture"),
+        }) };
+      const records = new Map<string, Record<string, unknown>>([
+        ["retention-fixture", retention], [channel._id, channel], [runId, run], [connector._id, connector],
+      ]);
+      const authorityCtx = {
+        auth: { getUserIdentity: async () => ({ role: "service", owner_id: "alice", subject: "service:youtube-studio-ai" }) },
+        db: { get: async (id: string) => records.get(id) ?? null,
+          normalizeId: (_table: string, id: string) => records.has(id) ? id : null,
+          patch: async (id: string, patch: Record<string, unknown>) => { Object.assign(records.get(id)!, patch); } },
+      };
+      const fetchMock = mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+        if (url === "https://vault-fixture.invalid/api/query") return Response.json({ status: "success", value: [] });
+        if (url === "https://oauth2.googleapis.com/token") {
+          assert.equal(new URLSearchParams(String(init?.body)).get("refresh_token"), "fixture-refresh-token");
+          return Response.json({ access_token: "fixture-access", expires_in: 3600 });
+        }
+        assert.ok(url.startsWith("https://www.googleapis.com/youtube/v3/videos?"), "unexpected network request");
+        assert.equal(new URL(url).searchParams.get("id"), "abcdefghijk");
+        assert.ok(events.includes("listed"), "fresh provider observation follows byte verification and listing");
+        events.push("observed");
+        if (mode === "provider-unavailable") return new Response(null, { status: 503 });
+        if (mode === "connector-changed") connector.tokenVersion = 5;
+        if (mode === "run-changed") run.youtubeVideoId = "other-video";
+        return Response.json({ items: [{ id: "abcdefghijk", snippet: { channelId: "UC-fixture", publishedAt },
+          status: { privacyStatus: mode === "private-at-deletion" ? "private" : "public", uploadStatus: "processed" } }] });
+      });
+      const storage = mock.method(getR2Client(), "send", async (command: unknown) => {
+        if (command instanceof GetObjectCommand) {
+          const bytes = f.objects.get(command.input.Key!);
+          assert.ok(bytes, "only exact existing evidence may be read");
+          return { Body: { transformToByteArray: async () => bytes,
+            [Symbol.asyncIterator]: async function* () { yield bytes; } } };
+        }
+        if (command instanceof ListObjectsV2Command) {
+          assert.equal(command.input.Prefix, `${keyPrefix}runs/${runId}/`);
+          events.push("listed");
+          if (mode === "locked-during-verification" || mode === "empty-retry-locked") channel.locked = true;
+          if (mode === "expired-during-verification") retention.leaseExpiresAt = Date.now() - 1;
+          return { Contents: [...f.objects.keys()].map((Key) => ({ Key })), IsTruncated: false };
+        }
+        assert.ok(command instanceof DeleteObjectsCommand);
+        assert.equal(empty, false, "a retry with only retained evidence must not send an empty deletion request");
+        assert.equal(events.at(-1), "authorized", "storage must follow the real authority handler");
+        events.push("deleted");
+        assert.equal(command.input.Delete?.Quiet, false);
+        const rows = command.input.Delete!.Objects!;
+        assert.equal(rows.length, 2);
+        assert.ok(rows.every((row) => row.Key?.includes("/intermediates/")));
+        const deleted = mode === "partial" ? rows.slice(0, 1) : rows;
+        for (const row of deleted) f.objects.delete(row.Key!);
+        return { $metadata: { httpStatusCode: 200 }, Deleted: deleted,
+          Errors: mode === "partial" ? [{ ...rows[1], Code: "AccessDenied" }] : [] };
+      });
+      const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
+        const name = getFunctionName(reference);
+        if (name === "runArtifactRetentions:listReleaseChecks") return [];
+        assert.equal(name, "youtubeAuth:getForChannel");
+        return connector;
+      });
+      const mutation = mock.method(StudioConvexHttpClient.prototype, "mutation", async (reference: never, args: Record<string, unknown>) => {
+        const name = getFunctionName(reference);
+        operations.push(name);
+        if (name === "runArtifactRetentions:claimDue") {
+          retention.leaseToken = args.leaseToken;
+          return retention;
+        }
+        if (name === "runArtifactRetentions:authorizeDeletion") {
+          const grant = await (authorizeDeletion as unknown as {
+            _handler: (ctx: unknown, args: unknown) => Promise<{ expiresAt: number }>;
+          })._handler(authorityCtx, args);
+          events.push("authorized");
+          return grant;
+        }
+        if (name === "assets:pruneRun") {
+          if (mode === "asset-row-failure") throw new Error("controlled asset-row write failure");
+          return null;
+        }
+        if (name === "runArtifactRetentions:complete") {
+          assert.equal(args.removedObjects, empty ? 0 : 2);
+          assert.equal(args.retainedObjectCount, 7);
+          return { status: "completed" };
+        }
+        assert.equal(name, "runArtifactRetentions:fail");
+        return { status: "pending" };
+      });
+      try {
+        const result = await sweepDueRunArtifactRetentions({ limit: 1 });
+        assert.deepEqual(result, { claimed: 1, completed: completed ? 1 : 0,
+          blocked: 0, removedObjects: denied || empty ? 0 : mode === "partial" ? 1 : 2 });
+        assert.deepEqual(operations, ["runArtifactRetentions:claimDue",
+          ...(mode === "provider-unavailable" ? [] : ["runArtifactRetentions:authorizeDeletion"]),
+          ...(mode === "partial" || denied ? [] : ["assets:pruneRun"]),
+          completed ? "runArtifactRetentions:complete" : "runArtifactRetentions:fail"]);
+        assert.equal(f.objects.size, empty ? 7 : denied ? 9 : mode === "partial" ? 8 : 7);
+        assert.ok(f.objects.has(f.certificate.finalMaster.r2Key));
+        assert.ok(f.objects.has(f.certificateKey));
+      } finally { storage.mock.restore(); query.mock.restore(); mutation.mock.restore(); fetchMock.mock.restore(); }
+    }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 }
 
 async function main() {
@@ -445,6 +610,43 @@ async function main() {
     [[`${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`]],
     "cleanup must retain the certificate, receipt, manifest, frames, and final master",
   );
+  assert.equal(validCleanup.objects.size, 7);
+  assert.equal(validCleanup.result.retainedObjectCount, 7);
+  for (const key of validCleanup.result.retainedReleaseEvidence) assert.ok(validCleanup.objects.has(key));
+
+  for (const badKey of ["owner/bob/channel/other/runs/other/final.mp4", `${keyPrefix}runs/${runId}-other/a`, `${keyPrefix}runs/${runId}/`]) {
+    const badListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, badKey] });
+    assert.equal(badListing.result.cleaned, false);
+    assert.equal(badListing.result.removedObjects, 0);
+    assert.equal(badListing.deleteCalls.length, 0, "listing must be scoped before any destructive request");
+  }
+  const duplicateListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, keys[0]] });
+  assert.equal(duplicateListing.result.cleaned, false);
+  assert.equal(duplicateListing.deleteCalls.length, 0);
+
+  for (const deleted of [0, -1, 2, NaN, 0.5]) {
+    const shortDelete = await pruneFixture(buildFixture(), [], { delete: async () => deleted });
+    assert.equal(shortDelete.result.cleaned, false, "only an exact acknowledgement count may complete cleanup");
+    assert.equal(shortDelete.result.removedObjects, 0);
+    assert.equal(shortDelete.result.retainedObjectCount, 7);
+  }
+
+  const partialFixture = buildFixture();
+  partialFixture.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("another intermediate"));
+  const partial = await pruneFixture(partialFixture, [], {
+    delete: async (keys, objects) => {
+      objects.delete(keys[0]);
+      throw new ObjectDeletionError("Object deletion is incomplete", 1, keys.length);
+    },
+  });
+  assert.equal(partial.result.cleaned, false);
+  assert.equal(partial.result.removedObjects, 1);
+  assert.equal(partial.result.retainedObjectCount, 7);
+  for (const key of partial.result.retainedReleaseEvidence) assert.ok(partial.objects.has(key));
+  const retry = await pruneFixture({ ...partialFixture, objects: partial.objects });
+  assert.equal(retry.result.cleaned, true);
+  assert.equal(retry.result.removedObjects, 1, "a retry must target only the intermediate still present");
+  assert.equal(retry.objects.size, 7);
 
   const parentForDerivativeCleanup = buildFixture();
   const shortForDerivativeCleanup = buildFixture("short");
@@ -523,6 +725,7 @@ async function main() {
     [],
     "cleanup must not delete anything when final-master bytes diverge",
   );
+  await retentionWorkerDeletionOutcomes();
 }
 
 main().then(() => console.log("final-master release evidence integrity tests passed"));

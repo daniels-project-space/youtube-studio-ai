@@ -57,7 +57,8 @@ export type StudioOverviewSnapshot = {
   scheduledPlanCount: number;
   unscheduledPlanCount: number;
   planBuildingCount: number;
-  publishedCount: number;
+  recentRunCount: number;
+  terminalRunCount: number;
   recordedSpend: number;
   successRate: number | null;
   failedRuns: StudioOverviewRun[];
@@ -98,7 +99,6 @@ export function buildStudioOverview(args: {
   plan: StudioOverviewPlan[];
   youtubeLinks: StudioOverviewYoutubeLink[];
   now: number;
-  publishedCount?: number;
 }): StudioOverviewSnapshot {
   const activeChannels = args.channels.filter((channel) => channel.status === "active");
   const activeRunIds = new Set(args.activeRuns.map((run) => run._id));
@@ -236,7 +236,8 @@ export function buildStudioOverview(args: {
     scheduledPlanCount: readyPlans.filter((item) => item.scheduledAt !== undefined).length,
     unscheduledPlanCount: readyPlans.filter((item) => item.scheduledAt === undefined).length,
     planBuildingCount: args.plan.filter((item) => item.status === "generating").length,
-    publishedCount: args.publishedCount ?? 0,
+    recentRunCount: args.recentRuns.length,
+    terminalRunCount: terminalRuns.length,
     recordedSpend: args.recentRuns.reduce(
       (total, run) => total + (Number.isFinite(run.costTotal) ? run.costTotal : 0),
       0,

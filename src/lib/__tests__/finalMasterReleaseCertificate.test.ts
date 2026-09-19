@@ -76,8 +76,9 @@ function passingTranscriptProof(sourceSha256: string): NarrationTranscriptProof 
     expected: { textSha256: approvedNarrationTextSha256, wordCount: 10 },
     transcript: {
       text: "Narration is intelligible in the released master.",
-      wordCount: 1,
-      words: [{ text: "Narration", startMs: 0, endMs: 250 }],
+      wordCount: 7,
+      words: "Narration is intelligible in the released master.".split(" ")
+        .map((text, index) => ({ text, startMs: index * 300, endMs: index * 300 + 250 })),
     },
     assessment: {
       wordErrorRate: 0.1,

@@ -3,7 +3,7 @@
 import { useId, type ReactNode } from "react";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
-import { fmtViews, youtubeThumb } from "@/lib/asset-url";
+import { youtubeThumb } from "@/lib/asset-url";
 import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { StageBadge } from "./StageBadge";
 import { MediaPreview } from "./MediaPreview";
@@ -83,7 +83,6 @@ function ArtifactCard({
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
 }) {
-  const views = fmtViews(video.estimatedViews);
   const cardContent = (
     <>
       <MediaPreview
@@ -102,7 +101,7 @@ function ArtifactCard({
             <StageBadge status={video.status} size="sm" />
             {state === "ready" && source !== "unavailable" && (
               <span className={styles.sourceBadge}>
-                {source === "reviewed" ? "Reviewed ERNIE" : source === "r2" ? "R2 preview" : source === "youtube" ? "YouTube preview" : "Public preview"}
+                {source === "reviewed" ? "Reviewed" : source === "r2" ? "Saved" : source === "youtube" ? "YouTube" : "Public"}
               </span>
             )}
           </div>
@@ -116,9 +115,8 @@ function ArtifactCard({
         </div>
         <div className={styles.proof}>
           <span className={styles.proofLabel}>Master evidence</span>
-          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
         </div>
-        {views && <span className={styles.views}>~{views} est. views</span>}
       </div>
     </>
   );

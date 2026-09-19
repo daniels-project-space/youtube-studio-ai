@@ -1103,6 +1103,13 @@ export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRe
   onReceipt?: NovitaImageReceiptObserver;
 }): (request: T) => Promise<Buffer> {
   return async (request) => {
+    // This text-only route cannot condition on reference pixels. Check the
+    // generic caller's extended request before ID allocation or paid work;
+    // never silently discard references while returning attested text-only art.
+    const images = (request as NovitaPromptImageRequest & { images?: unknown }).images;
+    if (images !== undefined && (!Array.isArray(images) || images.length !== 0)) {
+      throw new Error("novita image: reference images are unsupported by this text-only route; images must be absent or an empty array");
+    }
     const rendered = await renderAttestedNovitaImageBytes({
       prefix: args.prefix,
       id: args.id(request),

@@ -1,13 +1,16 @@
 import { v } from "convex/values";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
+import { assertChannelWritable, isChannelLocked } from "./channelLock";
 import {
   RUN_ARTIFACT_RETENTION_VERSION,
   RUN_ARTIFACT_RELEASE_CHECK_MS,
+  RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
   dueRunArtifactRetentionLease,
   evaluateRunArtifactRelease,
   expectedChannelKeyPrefix,
   hasFreshRunArtifactRelease,
+  runArtifactCleanupBinding,
   scheduleRunArtifactRetention,
   validateRunArtifactKeepNames,
   validateRunArtifactRetentionObjectKeys,
@@ -20,6 +23,12 @@ const releaseMode = v.union(
   v.literal("scheduled"),
   v.literal("public"),
 );
+
+const releaseObservation = v.union(v.null(), v.object({
+  videoId: v.string(), channelId: v.string(),
+  privacyStatus: v.optional(v.string()), uploadStatus: v.optional(v.string()),
+  publishedAt: v.optional(v.string()),
+}));
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -160,11 +169,7 @@ export const recordReleaseObservations = mutation({
       connectorId: v.optional(v.id("youtubeAuth")),
       connectorVersion: v.optional(v.number()),
       error: v.optional(v.string()),
-      observation: v.union(v.null(), v.object({
-        videoId: v.string(), channelId: v.string(),
-        privacyStatus: v.optional(v.string()), uploadStatus: v.optional(v.string()),
-        publishedAt: v.optional(v.string()),
-      })),
+      observation: releaseObservation,
     })),
   },
   returns: v.any(),
@@ -273,7 +278,8 @@ export const claimDue = mutation({
       // Historical schedules and stale/failed provider reads never authorize
       // deletion, even when the old calculated retainUntil is in the past.
       if (!hasFreshRunArtifactRelease({ ...candidate, now: args.now })) continue;
-      const run = await ctx.db.get(candidate.runId);
+      const [run, channel] = await Promise.all([ctx.db.get(candidate.runId), ctx.db.get(candidate.channelId)]);
+      if (!channel || channel.ownerId !== args.ownerId || isChannelLocked(channel)) continue;
       if (!candidate.releaseVideoId || !candidate.releaseYouTubeChannelId ||
           !run || run.ownerId !== args.ownerId || run.channelId !== candidate.channelId ||
           run.youtubeVideoId !== candidate.releaseVideoId ||
@@ -304,6 +310,63 @@ export const claimDue = mutation({
       updatedAt: args.now,
     });
     return await ctx.db.get(row._id);
+  },
+});
+
+/** Rechecked immediately before each destructive batch, after slow byte verification. */
+export const authorizeDeletion = mutation({
+  args: {
+    ownerId: v.string(), retentionId: v.id("runArtifactRetentions"), leaseToken: v.string(),
+    binding: v.string(), connectorId: v.id("youtubeAuth"), connectorVersion: v.number(),
+    observedAt: v.number(), observation: releaseObservation,
+  },
+  returns: v.object({ expiresAt: v.number() }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "run artifact deletion authorization");
+    const now = Date.now();
+    const row = await ctx.db.get(args.retentionId);
+    if (!row || row.ownerId !== args.ownerId || row.status !== "processing" ||
+        row.leaseToken !== args.leaseToken || !Number.isSafeInteger(row.leaseExpiresAt) ||
+        row.leaseExpiresAt! <= now || runArtifactCleanupBinding(row) !== args.binding) {
+      throw new Error("run artifact deletion lease or immutable scope is missing, expired, or mismatched");
+    }
+    const [channel, run, connector] = await Promise.all([
+      ctx.db.get(row.channelId), ctx.db.get(row.runId), ctx.db.get(args.connectorId),
+    ]);
+    if (!channel || channel.ownerId !== args.ownerId || !run || run.ownerId !== args.ownerId ||
+        run.channelId !== row.channelId || !row.releaseVideoId || !row.releaseYouTubeChannelId ||
+        run.youtubeVideoId !== row.releaseVideoId ||
+        run.releaseEvidenceStatus !== "release_evidence_recorded" ||
+        run.releaseEvidenceCertificateKey !== row.certificateKey ||
+        row.keyPrefix !== expectedChannelKeyPrefix({ ownerId: args.ownerId, channelSlug: channel.slug })) {
+      throw new Error("run artifact deletion owner, channel, run, or release evidence changed");
+    }
+    assertChannelWritable(channel, "artifact retention deletion");
+    if (!connector || connector.ownerId !== args.ownerId || connector.channelId !== row.channelId ||
+        (connector.status ?? "active") !== "active" ||
+        (connector.tokenVersion ?? 1) !== args.connectorVersion ||
+        connector.ytChannelId !== row.releaseYouTubeChannelId) {
+      throw new Error("run artifact deletion connector identity or version changed");
+    }
+    const decision = evaluateRunArtifactRelease({
+      expectedVideoId: row.releaseVideoId, expectedChannelId: row.releaseYouTubeChannelId,
+      observedAt: args.observedAt, observation: args.observation,
+    });
+    if (!decision.released || !hasFreshRunArtifactRelease({
+      now, releaseConfirmedAt: args.observedAt, releaseObservationAt: args.observedAt,
+      releaseAt: decision.releaseAt, retainUntil: decision.retainUntil,
+    }) || args.observedAt < (row.releaseObservationAt ?? 0)) {
+      throw new Error("run artifact deletion requires a fresh public release older than fourteen days");
+    }
+    // Refresh evidence, never extend the worker's lease. Repeated batches with
+    // the same live read still recheck authority but need no extra row write.
+    if (row.releaseObservationAt !== args.observedAt) {
+      await ctx.db.patch(row._id, {
+        releaseAt: decision.releaseAt, retainUntil: decision.retainUntil,
+        releaseObservationAt: args.observedAt, updatedAt: now,
+      });
+    }
+    return { expiresAt: Math.min(row.leaseExpiresAt!, args.observedAt + RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS) };
   },
 });
 

@@ -110,6 +110,12 @@ def main():
     hypothesis = tokens(transcript_text)
     if not hypothesis:
         raise RuntimeError("transcriber produced no spoken words")
+    # Timestamp entries and lexical WER tokens have different units: e.g.
+    # "2,157" is one timestamp entry but two existing lexical tokens. Require
+    # complete ordered lexical coverage without rewriting either observation.
+    timestamp_tokens = tokens(" ".join(word["text"] for word in words))
+    if timestamp_tokens != hypothesis:
+        raise RuntimeError("timestamped words do not cover the transcript lexical sequence")
     distance = levenshtein(reference, hypothesis)
     word_error_rate = distance / len(reference)
     recall = lexical_recall(reference, hypothesis)
@@ -135,7 +141,7 @@ def main():
         },
         "transcript": {
             "text": transcript_text,
-            "wordCount": len(hypothesis),
+            "wordCount": len(words),
             "words": words,
         },
         "assessment": {
