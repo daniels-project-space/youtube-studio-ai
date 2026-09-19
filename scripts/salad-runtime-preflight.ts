@@ -23,7 +23,7 @@ const specs = [
   },
   {
     route: "minimax-h3-turbo8-5090", gpu: "RTX 5090" as SaladGpuModel,
-    prefix: "minimax-h3-turbo8-5090-v1", manifestSha256: "eca7ade81afd2edd4b912275a8657b9504cab71ca7e538aed7ce12f27acc90c9",
+    prefix: "minimax-h3-turbo8-5090-v1", manifestSha256: "1e1b44f69249511e8e7308e5ceb9c9fa60efff4abde37f200dc33f28345b5ae3",
     imageEnv: "SALAD_H3_WORKER_IMAGE", cpu: 8, memoryMb: 131072, storageGiB: 100,
     qualifications: ["h3_license_scope_review_required", "salad_5090_native_turbo8_output_quality_unverified", "worker_job_deduplication_and_resume_unverified"],
     countryCodes: ["cn"],

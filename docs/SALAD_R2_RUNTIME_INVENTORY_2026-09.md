@@ -22,7 +22,7 @@ The correct model bucket is `salad-render-infra`. The legacy vault `SALAD_R2_BUC
 | Route | Immutable manifest key | SHA-256 of exact manifest bytes | Files verified present with exact byte counts |
 | --- | --- | --- | --- |
 | ERNIE SFT, 3090 | `ernie-image-sft-v1/immutable-manifest.json` | `4147d735ed0663a83460034da391f5a4c081aefef44ef2f37ad7163f7e275637` | 4 / 4; 30,998,316,546 bytes |
-| MiniMax H3 Turbo8, 5090 | `minimax-h3-turbo8-5090-v1/immutable-manifest.json` | `eca7ade81afd2edd4b912275a8657b9504cab71ca7e538aed7ce12f27acc90c9` | 5 / 5 |
+| MiniMax H3 Turbo8, 5090 | `minimax-h3-turbo8-5090-v1/immutable-manifest.json` | `1e1b44f69249511e8e7308e5ceb9c9fa60efff4abde37f200dc33f28345b5ae3` | 5 / 5 |
 | MiniMax Music3 BF16, 3090 | `minimax-music3-bf16-v1/immutable-manifest.json` | `fde881bc3a6fe11fecb6c2211967038093766f9db2ca0c07e89e846117e1c32a` | 88 / 88; 57,353,379,600 bytes |
 
 Each manifest lists object keys, byte lengths and per-file hashes. Listing/size verification does not prove every stored file's content hash; the existing worker hydrator must rehash the actual bytes before inference.
