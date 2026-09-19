@@ -272,9 +272,12 @@ function safeReviewHrefs(value: unknown): string[] {
 }
 
 function reviewHrefLabel(href: string): string {
-  if (href === "/casefile") return "Open Casefile desk";
-  if (href === "/editorial-evidence") return "Open factual evidence desk";
-  if (href === "/children-review") return "Open children review desk";
+  // Review handoffs may carry harmless prefill query parameters. Match their
+  // route, not the exact serialised URL, so a child-review link never falls
+  // back to the generic private-desk label after a channel name is supplied.
+  if (href.startsWith("/casefile")) return "Open Casefile desk";
+  if (href.startsWith("/editorial-evidence")) return "Open factual evidence desk";
+  if (href.startsWith("/children-review")) return "Open children review desk";
   return "Open private review desk";
 }
 

@@ -20,6 +20,7 @@ assert.match(page, /supervisedCreatorSelectionForFamily/u, "supervised territory
 assert.match(page, /"\/children-review"/u, "a children-review recovery handoff must be a supported destination");
 assert.match(page, /review ready/u, "a supervised learning route must not be mislabeled as held");
 assert.match(page, /supervisedRouteAction/u, "a selected supervised route must expose its review desk before the final wizard step");
+assert.match(page, /href\.startsWith\("\/children-review"\)/u, "children review links with a channel-name prefill must keep their specific action label");
 assert.match(page, /!supervisedAdmission && !automaticFamilyCreatorReadiness\(fam\.key\)\.ready/u, "a supervised route must not present its intentional manual-review state as an automatic-route warning");
 
 console.log("children learning creator entry tests passed");
