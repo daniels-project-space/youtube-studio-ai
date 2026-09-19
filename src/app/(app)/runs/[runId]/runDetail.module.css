@@ -69,6 +69,8 @@
 .errorSummary { display: grid; min-width: 0; gap: .2rem; }
 .errorSummary strong { overflow-wrap: anywhere; font-family: inherit; font-size: .76rem; }
 .errorSummary span { color: color-mix(in srgb,var(--color-failed) 72%,var(--color-fg)); font-size: .66rem; }
+.errorAction { display: inline-flex; width: fit-content; align-items: center; gap: .34rem; padding: .34rem .52rem; border: 1px solid color-mix(in srgb,var(--color-failed) 46%,transparent); border-radius: 5px; color: color-mix(in srgb,var(--color-failed) 76%,var(--color-fg)); background: color-mix(in srgb,var(--color-failed) 9%,transparent); font: 700 .62rem/1 var(--font-mono); letter-spacing: .025em; text-decoration: none; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+.errorAction:hover { border-color: var(--color-failed); background: color-mix(in srgb,var(--color-failed) 16%,transparent); transform: translateX(2px); }
 .errorTechnical { min-width: 0; border-top: 1px solid color-mix(in srgb,var(--color-failed) 18%,transparent); padding-top: .45rem; }
 .errorTechnical summary { width: fit-content; cursor: pointer; color: color-mix(in srgb,var(--color-failed) 78%,var(--color-fg)); font-size: .6rem; font-weight: 700; }
 .errorTechnical code { display: block; max-height: 14rem; margin-top: .4rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }

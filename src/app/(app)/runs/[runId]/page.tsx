@@ -233,6 +233,11 @@ export default function RunDetailPage({
               <strong>{failure.reason}{failure.block ? ` · ${failure.block}` : ""}</strong>
               {failure.hint && <span>{failure.hint}</span>}
             </div>
+            {failure.recovery === "youtube_connection" && channelSlug ? (
+              <Link className={styles.errorAction} href={`/channels/${channelSlug}?tab=settings`}>
+                Check YouTube connection <span aria-hidden="true">→</span>
+              </Link>
+            ) : null}
             <details className={styles.errorTechnical}>
               <summary>Technical detail</summary>
               <code>{run.error}</code>

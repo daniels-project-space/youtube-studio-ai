@@ -10,9 +10,11 @@ export interface FailureInfo {
   reason: string;
   /** Optional actionable hint (what to fix). */
   hint?: string;
+  /** A safe, in-Studio recovery destination when one is known. */
+  recovery?: "youtube_connection";
 }
 
-const RULES: { test: RegExp; reason: string; hint?: string }[] = [
+const RULES: { test: RegExp; reason: string; hint?: string; recovery?: FailureInfo["recovery"] }[] = [
   { test: /fish[_\s-]?audio|FISH_AUDIO_API_KEY/i, reason: "Fish Audio key / credits missing", hint: "Add or top up fish-audio in the vault." },
   { test: /PEXELS_API_KEY|pexels/i, reason: "Pexels API key missing", hint: "Add pexels/PEXELS_API_KEY to the vault." },
   { test: /mureka|MUREKA_API_KEY/i, reason: "Mureka music key / credits missing", hint: "Check mureka credits in the vault." },
@@ -20,7 +22,12 @@ const RULES: { test: RegExp; reason: string; hint?: string }[] = [
   { test: /GEMINI_API_KEY|GOOGLE_API_KEY|\bgemini\b/i, reason: "Gemini API key missing/invalid", hint: "Check gemini key in the vault." },
   { test: /OPENROUTER_API_KEY|openrouter/i, reason: "OpenRouter creative-text key missing/invalid" },
   { test: /R2_|cloudflare|S3|bucket/i, reason: "Storage (R2) credentials issue" },
-  { test: /YOUTUBE|invalidTags|youtube\.upload|refresh token/i, reason: "YouTube upload rejected", hint: "Re-check tags or the YouTube OAuth token." },
+  {
+    test: /YOUTUBE|invalidTags|youtube\.upload|refresh token/i,
+    reason: "YouTube upload rejected",
+    hint: "Re-check tags or the YouTube OAuth token.",
+    recovery: "youtube_connection",
+  },
   { test: /OOM|KILLED|out of memory|TASK_PROCESS_OOM/i, reason: "Render ran out of memory", hint: "Heavy encode — shorten the video or bump the machine." },
   { test: /\b(?:ffprobe|ffmpeg)\b.*\b(?:exited|spawn failed|could not inspect|invalid data|no such file)\b/i, reason: "Render media validation failed", hint: "Inspect the retained output and retry the failed stage." },
   { test: /length_check|minSeconds|maxSeconds|outside|too short|too long/i, reason: "Video length outside the allowed range" },
@@ -41,7 +48,12 @@ export function failureReason(error?: string | null): FailureInfo {
   // Block id is usually the "<block_id>: message" prefix the blocks throw with.
   const block = raw.match(/(?:^|[(\s])([a-z][a-z0-9_]+_[a-z0-9_]+):/)?.[1];
   for (const r of RULES) {
-    if (r.test.test(raw)) return { block, reason: r.reason, hint: r.hint };
+    if (r.test.test(raw)) return {
+      block,
+      reason: r.reason,
+      ...(r.hint ? { hint: r.hint } : {}),
+      ...(r.recovery ? { recovery: r.recovery } : {}),
+    };
   }
   // Fallback: first sentence/line of the raw error, trimmed.
   const first = raw
