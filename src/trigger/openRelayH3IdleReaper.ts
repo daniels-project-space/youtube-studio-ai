@@ -31,7 +31,7 @@ export const openRelayH3IdleReaper = schedules.task({
     const id = required("MINIMAX_H3_OPENRELAY_VM_ID", 36);
     const vm = await client.getVm(id);
     if (vm.name !== OPENRELAY_H3_VM_NAME || vm.public || vm.gpuCount !== 1 || !vm.gpuModelName.includes("A100") || vm.diskSizeGb !== OPENRELAY_H3_DISK_SIZE_GB) {
-      throw new Error("refusing to manage an OpenRelay VM outside the pinned private H3 A100 / 100 GB identity");
+      throw new Error("refusing to manage an OpenRelay VM outside the pinned private H3 A100 / 150 GB identity");
     }
     if (vm.status !== "running") return { action: "noop", reason: `vm_${vm.status}` };
     const health = await fetchOpenRelayH3Health();

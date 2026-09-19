@@ -10,15 +10,17 @@ const saved = { ...process.env };
 process.env.OPENRELAY_API_KEY = "openrelay-test-key-that-is-longer-than-thirty-two-characters";
 process.env.MINIMAX_H3_OPENRELAY_VM_ID = "11111111-1111-4111-8111-111111111111";
 process.env.MINIMAX_H3_OPENRELAY_WORKER_TOKEN = "h3-test-token-that-is-longer-than-thirty-two-characters";
-process.env.MINIMAX_H3_OPENRELAY_WORKER_URL = "https://yt-minimax-h3-a100-fallback.run.openrelay.inc/v1/videos";
+process.env.MINIMAX_H3_OPENRELAY_WORKER_URL = "https://yt-minimax-h3-a100-persistent-mu7qosm1.run.openrelay.inc/v1/videos";
+process.env.MINIMAX_H3_OPENRELAY_QUALIFIED = "1";
+process.env.MINIMAX_H3_OPENRELAY_QUALIFICATION_RECEIPT_SHA256 = "e".repeat(64);
 
 let status = "stopped";
 const vm = () => ({
   id: process.env.MINIMAX_H3_OPENRELAY_VM_ID,
   organizationId: "22222222-2222-4222-8222-222222222222",
-  name: "yt-minimax-h3-a100-fallback",
+  name: "yt-minimax-h3-a100-persistent",
   status,
-  endpointUrl: "yt-minimax-h3-a100-fallback.run.openrelay.inc",
+  endpointUrl: "yt-minimax-h3-a100-persistent-mu7qosm1.run.openrelay.inc",
   public: false,
   gpuModelId: "33333333-3333-4333-8333-333333333333",
   gpuModelName: "NVIDIA A100",
