@@ -18,6 +18,7 @@ import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation
 import { assertRunExecutionWriteFence, RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { sha256Hex } from "../src/lib/sha256";
 import { runCostFloor } from "./runCostAccounting";
+import { verifiedWorkerDeploymentFields, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 
 const MAX_FACTUAL_REVIEW_RESUME_ENQUEUE_ATTEMPTS = 2;
 // The continuation shares its channel-level Trigger queue with long-form
@@ -585,6 +586,7 @@ export const listPendingResumes = query({
       checkpointFingerprint: string;
       approvalFingerprint: string;
       attempt: number;
+      workerDeployment?: WorkerDeploymentFields["workerDeployment"];
       scheduledPlan?: {
         planItemId: string;
         topic: string;
@@ -607,6 +609,12 @@ export const listPendingResumes = query({
       }
       const attempt = run.factualReviewResumeAttempts ?? 0;
       if (attempt >= MAX_FACTUAL_REVIEW_RESUME_ENQUEUE_ATTEMPTS) continue;
+      let workerDeployment: WorkerDeploymentFields;
+      try {
+        workerDeployment = verifiedWorkerDeploymentFields(run);
+      } catch {
+        continue;
+      }
       let preparation: { version: string; manifestKey: string; manifestSha256: string } | undefined;
       const hasPreparation = [
         run.plannedPreparationVersion,
@@ -646,6 +654,7 @@ export const listPendingResumes = query({
         checkpointFingerprint: run.factualReviewCheckpointFingerprint,
         approvalFingerprint: run.factualReviewApprovalFingerprint,
         attempt,
+        ...workerDeployment,
         ...(scheduledPlan ? { scheduledPlan } : {}),
       });
       if (pending.length >= limit) break;

@@ -8,6 +8,7 @@ import {
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 as hashPipelineInvocation } from "@/lib/pipelineInvocationHash";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 export const PUBLISH_DISPATCH_TASK_ID = "dispatch-publish-intent" as const;
 export const RUN_PIPELINE_TASK_ID = "run-pipeline" as const;
@@ -88,6 +89,7 @@ export interface PublishPipelineResumeTriggerRequest {
     scheduledPlan?: ScheduledPlanRunPayload;
   };
   options: {
+    version?: string;
     idempotencyKey: string;
     idempotencyKeyTTL: typeof PUBLISH_RETRY_IDEMPOTENCY_TTL;
     concurrencyKey: string;
@@ -169,6 +171,7 @@ export function publishRetryTriggerRequest(
 export function publishPipelineResumeTriggerRequest(
   intent: UploadedPublishIntentForPipelineResume,
   run: DurablePipelineRunForPublishResume | null | undefined,
+  dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">,
 ): PublishPipelineResumeTriggerRequest | undefined {
   if (intent.runId === undefined) return undefined;
   const intentId = intent._id.trim();
@@ -239,6 +242,10 @@ export function publishPipelineResumeTriggerRequest(
   ) {
     throw new Error("failed pipeline run durable invocation snapshot identity/hash mismatch");
   }
+  if (invocation.workerDeployment) {
+    if (!dispatchContext) throw new Error("bound publish resume requires verified dispatch project/environment");
+    assertPipelineWorkerDeployment(invocation.workerDeployment, { ...dispatchContext, version: invocation.workerDeployment.version });
+  }
 
   const hasPlanItem = run.planItemId !== undefined;
   const hasPlanSnapshot = [
@@ -294,6 +301,7 @@ export function publishPipelineResumeTriggerRequest(
       ...(scheduledPlan ? { scheduledPlan } : {}),
     },
     options: {
+      ...pipelineWorkerDeploymentDispatchOptions(invocation.workerDeployment),
       idempotencyKey: `publish-resume:${intentId}:run:${runId}:snapshot:${invocationSha256}:video:${videoId}:attempt:${enqueueAttempt}`,
       idempotencyKeyTTL: PUBLISH_RETRY_IDEMPOTENCY_TTL,
       concurrencyKey: channelId,

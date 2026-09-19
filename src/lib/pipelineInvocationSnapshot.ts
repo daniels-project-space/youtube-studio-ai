@@ -1,5 +1,9 @@
 import type { PipelineEntry } from "@/engine/types";
 import { stableJson } from "@/lib/publishingPolicy";
+import {
+  normalizePipelineWorkerDeployment,
+  type PipelineWorkerDeployment,
+} from "@/lib/pipelineWorkerDeployment";
 
 export const PIPELINE_INVOCATION_SNAPSHOT_VERSION = 1 as const;
 export const MAX_PIPELINE_INVOCATION_SNAPSHOT_BYTES = 750_000;
@@ -105,6 +109,8 @@ export interface PipelineInvocationSnapshot {
    */
   programRouteFingerprint?: string;
   budgetAdmission?: PipelineInvocationBudgetAdmission;
+  /** Absent only for historical invocations without an explicit worker binding. */
+  workerDeployment?: PipelineWorkerDeployment;
 }
 
 /**
@@ -155,6 +161,10 @@ function record(value: unknown, label: string): Record<string, unknown> {
 export function normalizePipelineInvocationSnapshot(
   value: PipelineInvocationSnapshot,
 ): PipelineInvocationSnapshot {
+  // Validate before JSON cloning can discard a malformed supplied binding.
+  const workerDeployment = value.workerDeployment === undefined
+    ? undefined
+    : normalizePipelineWorkerDeployment(value.workerDeployment);
   const snapshot = jsonClone(value);
   if (snapshot.version !== PIPELINE_INVOCATION_SNAPSHOT_VERSION) {
     throw new Error(`unsupported pipeline invocation snapshot version: ${String(snapshot.version)}`);
@@ -331,6 +341,7 @@ export function normalizePipelineInvocationSnapshot(
     ...(showProfileFingerprint ? { showProfileFingerprint } : {}),
     ...(programRouteFingerprint ? { programRouteFingerprint } : {}),
     ...(budgetAdmission ? { budgetAdmission } : {}),
+    ...(workerDeployment === undefined ? {} : { workerDeployment }),
   };
 }
 

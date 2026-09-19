@@ -16,6 +16,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 import { creativeTextJson } from "@/lib/creativeText";
 import { putObject } from "@/lib/storage";
 import { sendMessage } from "@/lib/telegram";
@@ -173,7 +174,7 @@ async function recoverPendingPublishContinuations(
   return queued;
 }
 
-async function sweep(ownerId: string, log: (m: string) => void) {
+async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">) {
   await bootstrapSecrets(log);
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
@@ -403,6 +404,11 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       });
       if (claim.state !== "queued") continue;
       try {
+        const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(claim.workerDeployment);
+        if (claim.workerDeployment) {
+          if (!dispatchContext) throw new Error("bound automatic resume requires verified dispatch project/environment");
+          assertPipelineWorkerDeployment(claim.workerDeployment, { ...dispatchContext, version: claim.workerDeployment.version });
+        }
         const idempotencyKey = await idempotencyKeys.create(
           `automatic-resume:${ownerId}:${String(candidate._id)}:attempt:${claim.attempts}`,
           { scope: "global" },
@@ -425,6 +431,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
           runId: candidate._id,
           ...(scheduledPlan ? { scheduledPlan } : {}),
         }, {
+          ...deploymentOptions,
           concurrencyKey: String(candidate.channelId),
           idempotencyKey,
         });
@@ -470,6 +477,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       convex,
       ownerId,
       log,
+      dispatchContext,
     })).triggered;
   } catch (error) {
     log(
@@ -483,6 +491,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       convex,
       ownerId,
       log,
+      dispatchContext,
     })).triggered;
   } catch (error) {
     log(
@@ -625,13 +634,15 @@ export const pipelineDoctorSchedule = schedules.task({
   // defect class it exists to catch (advisory rot, grounding gaps, heal
   // treadmills) accumulated unseen. Daily, after learning-refresh (07:00).
   cron: "30 7 * * *",
-  run: async () => sweep(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`)),
+  run: async (_payload, options) => sweep(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`),
+    options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined),
 });
 
 /** Manual / on-demand sweep (same logic, operator-invokable). */
 export const pipelineDoctorTask = task({
   id: "pipeline-doctor-now",
   maxDuration: 900,
-  run: async (payload: { ownerId?: string }) =>
-    sweep(payload.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`)),
+  run: async (payload: { ownerId?: string }, options) =>
+    sweep(payload.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`),
+      options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined),
 });

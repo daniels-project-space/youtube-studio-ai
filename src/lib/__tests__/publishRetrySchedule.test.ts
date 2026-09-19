@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { taskContext } from "@trigger.dev/core/v3";
 import {
   publishPipelineResumeTriggerRequest,
   publishPipelineResumeEnqueueAttempt,
@@ -179,6 +180,26 @@ assert.equal(
   cadenceResume.options.idempotencyKey,
 );
 assert.equal(cadenceResume.enqueueAttempt, 1);
+{
+  const workerDeployment = { version: "worker-a", projectId: "project-a", environmentId: "environment-a" };
+  const snapshot = { ...INVOCATION_SNAPSHOT, workerDeployment };
+  const hash = pipelineInvocationSha256(snapshot);
+  const run = failedRun({ pipelineInvocationSnapshot: snapshot, pipelineInvocationSha256: hash });
+  const dispatchContext = { projectId: workerDeployment.projectId, environmentId: workerDeployment.environmentId };
+  const pinned = publishPipelineResumeTriggerRequest(uploadedIntent(), run, dispatchContext)!;
+  assert.equal(pinned.options.version, "worker-a");
+  assert.equal(pinned.options.idempotencyKey, `publish-resume:intent-a:run:run-a:snapshot:${hash}:video:yt-video-a:attempt:1`);
+  assert.equal(pinned.options.concurrencyKey, cadenceResume.options.concurrencyKey);
+  assert.equal(pinned.options.idempotencyKeyTTL, cadenceResume.options.idempotencyKeyTTL);
+  assert.throws(() => publishPipelineResumeTriggerRequest(uploadedIntent(), run), /verified dispatch/);
+  for (const wrong of [{ ...dispatchContext, projectId: "foreign-project" }, { ...dispatchContext, environmentId: "foreign-environment" }]) {
+    assert.throws(() => publishPipelineResumeTriggerRequest(uploadedIntent(), run, wrong), /worker deployment.*mismatch/);
+  }
+  assert.throws(() => publishPipelineResumeTriggerRequest(uploadedIntent(), {
+    ...run, pipelineInvocationSnapshot: { ...snapshot, workerDeployment: { ...workerDeployment, version: "worker-forged" } },
+  }, dispatchContext), /snapshot identity\/hash mismatch/);
+  assert.equal(cadenceResume.options.version, undefined, "historical snapshots are never rewritten to a current worker");
+}
 const reissuedResume = publishPipelineResumeTriggerRequest(
   uploadedIntent(),
   failedRun({ publishContinuationAttempts: 1 }),
@@ -377,6 +398,53 @@ async function enqueueContract(): Promise<void> {
   );
   assert.equal(skipped, undefined);
   assert.equal(nonFailedTriggerCalls, 0);
+
+  const workerDeployment = { version: "worker-a", projectId: "project-a", environmentId: "environment-a" };
+  const snapshot = { ...INVOCATION_SNAPSHOT, workerDeployment };
+  const snapshotHash = pipelineInvocationSha256(snapshot);
+  const boundRun = failedRun({ pipelineInvocationSnapshot: snapshot, pipelineInvocationSha256: snapshotHash });
+  const context = {
+    project: { id: workerDeployment.projectId },
+    environment: { id: workerDeployment.environmentId },
+    run: { version: "worker-b" },
+  };
+  let activeContext: typeof context | undefined = context;
+  const previousContext = Object.getOwnPropertyDescriptor(taskContext, "ctx");
+  Object.defineProperty(taskContext, "ctx", { configurable: true, get: () => activeContext });
+  try {
+    const dispatched: unknown[][] = [];
+    const trigger = async (...args: Parameters<NonNullable<Parameters<typeof enqueueFailedPipelineResume>[2]>>) => {
+      dispatched.push(args);
+      return { id: "bound-resume-a" };
+    };
+    const result = await enqueueFailedPipelineResume(uploadedIntent(), boundRun, trigger);
+    const expectedKey = `publish-resume:intent-a:run:run-a:snapshot:${snapshotHash}:video:yt-video-a:attempt:1`;
+    assert.deepEqual(result, { runId: "bound-resume-a", idempotencyKey: expectedKey, enqueueAttempt: 1 });
+    assert.deepEqual(dispatched, [["run-pipeline", {
+      channelId: "channel-a", runId: "run-a", invocationSha256: snapshotHash,
+      publishResume: { intentId: "intent-a", videoArtifactId: VIDEO_ARTIFACT_ID, youtubeVideoId: "yt-video-a" },
+    }, { version: "worker-a", idempotencyKey: expectedKey, idempotencyKeyTTL: "30d", concurrencyKey: "channel-a" }]]);
+    for (const invalidContext of [
+      undefined,
+      { ...context, project: { id: "foreign-project" } },
+      { ...context, environment: { id: "foreign-environment" } },
+    ]) {
+      activeContext = invalidContext;
+      dispatched.length = 0;
+      await assert.rejects(
+        enqueueFailedPipelineResume(uploadedIntent(), boundRun, trigger),
+        /worker deployment|verified dispatch project\/environment/,
+      );
+      assert.equal(dispatched.length, 0, "unverified scope must fail before dispatch");
+    }
+    activeContext = undefined;
+    await enqueueFailedPipelineResume(uploadedIntent(), failedRun(), trigger);
+    assert.equal(dispatched.length, 1, "historical unbound resumes still work without task context");
+    assert.deepEqual(dispatched[0][2], cadenceResumeOptions);
+  } finally {
+    if (previousContext) Object.defineProperty(taskContext, "ctx", previousContext);
+    else Reflect.deleteProperty(taskContext, "ctx");
+  }
 }
 
 void enqueueContract().then(() => console.log("publish retry scheduling tests passed"));

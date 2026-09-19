@@ -15,6 +15,8 @@
  * that key.
  */
 import { task, idempotencyKeys, tasks } from "@trigger.dev/sdk";
+import { assertFrozenPipelineWorkerDeployment, currentPipelineWorkerDeployment } from "./pipelineWorkerRuntime";
+import { pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -418,6 +420,7 @@ async function enqueueSerializedProgramEpisodeBusyRetry(input: {
   readonly payload: RunPipelineInput;
   readonly retryAt: number;
   readonly attempt: number;
+  readonly workerDeployment?: PipelineWorkerDeployment;
 }): Promise<void> {
   const request = serializedProgramEpisodeBusyRetrySchedule({
     payload: input.payload,
@@ -434,6 +437,7 @@ async function enqueueSerializedProgramEpisodeBusyRetry(input: {
     scope: "global",
   });
   await tasks.trigger("run-pipeline", request.payload, {
+    ...pipelineWorkerDeploymentDispatchOptions(input.workerDeployment),
     delay: new Date(request.retryAt),
     concurrencyKey: request.concurrencyKey,
     idempotencyKey,
@@ -554,6 +558,7 @@ export const runPipelineTask = task({
       );
     }
     let durableInvocation: PipelineInvocationSnapshot | undefined;
+    let workerDeployment: PipelineWorkerDeployment | undefined;
     try {
       if (durableRun.pipelineInvocationSnapshot !== undefined) {
         durableInvocation = normalizePipelineInvocationSnapshot(
@@ -568,6 +573,10 @@ export const runPipelineTask = task({
         ) {
           throw new Error("durable pipeline invocation identity/hash mismatch");
         }
+        assertFrozenPipelineWorkerDeployment(durableInvocation, ctx);
+        workerDeployment = durableInvocation.workerDeployment;
+      } else {
+        workerDeployment = currentPipelineWorkerDeployment(ctx);
       }
     } catch (error) {
       throwForTaskRetryPolicy(error);
@@ -2175,6 +2184,7 @@ export const runPipelineTask = task({
 
       const invocationCandidate = durableInvocation ?? normalizePipelineInvocationSnapshot({
         version: 1,
+        workerDeployment,
         ownerId,
         runId: payload.runId,
         channelId: payload.channelId,
@@ -2772,6 +2782,7 @@ export const runPipelineTask = task({
           try {
             await enqueueSerializedProgramEpisodeBusyRetry({
               payload,
+              workerDeployment: invocation.workerDeployment,
               retryAt: deferred.retryAt,
               attempt: deferred.attempt,
             });

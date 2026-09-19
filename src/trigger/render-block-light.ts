@@ -42,5 +42,6 @@ export const renderBlockLightTask = task({
     executeRenderBlock(payload, {
       taskLabel: "render-block-light", machineClass: "offloaded",
       taskRunId: ctx.run.id, attemptNumber: ctx.attempt.number,
+      workerContext: ctx,
     }),
 });

@@ -7,6 +7,7 @@ import {
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { ScheduledPlanRunPayload } from "@/lib/scheduledPlanRuntime";
 import type { RunPipelineInput } from "./runPipeline";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 const SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT = 50;
 
@@ -17,6 +18,7 @@ type DueRetryReceipt = {
   retryAt: number;
   attempt: number;
   scheduledPlan?: ScheduledPlanRunPayload;
+  workerDeployment?: PipelineWorkerDeployment;
 };
 
 /**
@@ -28,6 +30,7 @@ type DueRetryReceipt = {
 export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
   ownerId?: string;
   now?: number;
+  dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">;
 }): Promise<{ due: number; triggered: number }> {
   await bootstrapSecrets((message) =>
     console.log(`[serialized-program-episode-retry-dispatcher] ${message}`),
@@ -44,6 +47,11 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
 
   let triggered = 0;
   for (const receipt of due.slice(0, SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT)) {
+    const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(receipt.workerDeployment);
+    if (receipt.workerDeployment) {
+      if (!input?.dispatchContext) throw new Error("bound serialized resume requires verified dispatch project/environment");
+      assertPipelineWorkerDeployment(receipt.workerDeployment, { ...input.dispatchContext, version: receipt.workerDeployment.version });
+    }
     const payload: RunPipelineInput = {
       channelId: receipt.channelId,
       runId: receipt.runId,
@@ -64,6 +72,7 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
       scope: "global",
     });
     await tasks.trigger("run-pipeline", request.payload, {
+      ...deploymentOptions,
       // Mirror the original durable enqueue's not-before fence. Even a clock
       // edge must never let this global receipt complete successfully early.
       delay: new Date(request.retryAt),
@@ -80,5 +89,7 @@ export const serializedProgramEpisodeRetryDispatcher = schedules.task({
   // A durable outbox retry must recover well before the queued-run lease can
   // expire. This performs only one indexed Convex read when no receipt exists.
   cron: "* * * * *",
-  run: async () => dispatchDueSerializedProgramEpisodeRetries(),
+  run: async (_payload, options) => dispatchDueSerializedProgramEpisodeRetries({
+    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+  }),
 });

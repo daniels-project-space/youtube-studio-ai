@@ -20,6 +20,7 @@ import {
   studioAutomationGate,
 } from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions } from "@/lib/pipelineWorkerDeployment";
 import type { ChannelSchedulePolicy } from "@/lib/publishingPolicy";
 import { parsePlanGenerationLeadMs } from "@/lib/scheduledPlanRuntime";
 import { researchCase } from "@/engine/casefileCaseResearcher";
@@ -113,7 +114,7 @@ export const generationScheduler = schedules.task({
   // claimed run instead of waiting for the next hourly tick. Convex run
   // fences and Trigger idempotency keys prevent duplicate video work.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
-  run: async () => {
+  run: async (_payload, options) => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
     if (!gate.enabled) return gate;
 
@@ -352,6 +353,17 @@ export const generationScheduler = schedules.task({
       }
 
       const runId = admitted.runId;
+      // Recovery can select an older worker, but never a sibling project/env.
+      // Validate before entering the scheduler's pre-dispatch research path.
+      const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(admitted.workerDeployment);
+      if (admitted.workerDeployment) {
+        if (!options?.ctx) throw new Error("bound scheduler resume requires verified dispatch project/environment");
+        assertPipelineWorkerDeployment(admitted.workerDeployment, {
+          version: admitted.workerDeployment.version,
+          projectId: options.ctx.project.id,
+          environmentId: options.ctx.environment.id,
+        });
+      }
       const scheduledPlan = admitted.state === "claimed"
         ? {
             planItemId: String(admitted.planItemId),
@@ -414,7 +426,7 @@ export const generationScheduler = schedules.task({
                   ...(narrativeSeriesSelector === undefined ? {} : { narrativeSeriesSelector }),
                   casefileSourcePacketInput,
                 },
-                { concurrencyKey: String(ch._id), idempotencyKey },
+                { ...deploymentOptions, concurrencyKey: String(ch._id), idempotencyKey },
               );
             },
             log: (message) => console.log(`[scheduler] ${message}`),
@@ -478,7 +490,7 @@ export const generationScheduler = schedules.task({
             ...(scheduledPlan ? { scheduledPlan } : {}),
             ...(narrativeSeriesSelector === undefined ? {} : { narrativeSeriesSelector }),
           },
-          { concurrencyKey: String(ch._id), idempotencyKey },
+          { ...deploymentOptions, concurrencyKey: String(ch._id), idempotencyKey },
         );
       }
       if ("recoveryDispatch" in admitted && admitted.recoveryDispatch === true) {

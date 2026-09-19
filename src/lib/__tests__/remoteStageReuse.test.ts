@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as crypto from "node:crypto";
+import { mock } from "node:test";
+import { taskContext, TaskRunContext } from "@trigger.dev/core/v3";
 import ts from "typescript";
 import * as artifactSchemas from "@/engine/artifactSchemas";
 import { manifestFromBlock } from "@/engine/moduleManifest";
@@ -21,6 +23,7 @@ import { selectRehydrationSubset } from "@/lib/rehydrate";
 import * as costTransport from "@/trigger/remoteChildCostTransport";
 import * as retryPolicy from "@/trigger/taskRetryPolicy";
 import type { RenderBlockInput, RenderBlockRunnerOptions } from "@/trigger/renderBlockRunner";
+import * as pipelineWorkerRuntime from "@/trigger/pipelineWorkerRuntime";
 
 /**
  * Execute the complete current remote worker body, not a copied restore loop.
@@ -45,12 +48,25 @@ const options: RenderBlockRunnerOptions = {
   taskLabel: "remote-reuse-test", machineClass: "heavy", taskRunId: "child-test", attemptNumber: 1,
 };
 const noUpstreamExecution = async () => { throw new Error("cached upstream must not execute"); };
+const workerVersion = "20260919.1";
+const receiverContext = TaskRunContext.parse({
+  task: { id: "render-block", filePath: "src/trigger/render-block.ts" },
+  attempt: { number: 1, startedAt: new Date(0) },
+  run: { id: "child-test", tags: [], isTest: true, createdAt: new Date(0), version: workerVersion },
+  queue: { id: "queue_fixture", name: "fixture" },
+  environment: { id: "env_fixture", slug: "staging", type: "STAGING" },
+  project: { id: "proj_fixture", ref: "fixture", slug: "fixture", name: "Fixture" },
+  organization: { id: "org_fixture", slug: "fixture", name: "Fixture" },
+  machine: { name: "small-1x", cpu: 1, memory: 1, centsPerMs: 0 },
+  deployment: { id: "dep_fixture", shortCode: "fixture", version: workerVersion, runtime: "node", runtimeVersion: "22" },
+});
 
 type Mutation = "seed" | "output" | "missing-receipt" | "params" | "module" | "restoration" | "missing-second-receipt" | "missing-outputs" | "missing-stage" | "failed-stage" | "input-mutation";
 type VersionCase = "v2" | "missing-v2" | "fingerprint-drift" | "historical-v1";
-function harness(mutation?: Mutation, versionCase?: VersionCase) {
+type WorkerMutation = "wrong-version" | "missing-actual" | "missing-context" | "project" | "environment" | "run-version" | "deployment-version" | "missing-binding";
+function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?: WorkerMutation) {
   const calls = { stages: 0, bootstrap: 0, rehydrate: 0, paid: 0, begin: 0, finish: 0, artifactQueries: 0,
-    defaultExecution: 0, alternateExecution: 0 };
+    defaultExecution: 0, alternateExecution: 0, reconstruction: 0 };
   const writtenArtifacts: NonNullable<Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0]>[] = [];
   let observedStore: Record<string, unknown> | undefined;
   let acceptedCost: number | undefined;
@@ -96,6 +112,9 @@ function harness(mutation?: Mutation, versionCase?: VersionCase) {
     remoteBlocks: [renderer.id], defaultRetries: 1,
     compilationFingerprint: "b".repeat(64), compilationPolicyId: "fixture-only",
     compilationPolicyVersion: "1.0.0", compilationModules: [], compilationCapabilities: [], reservedMaxCostUsd: 1,
+    ...(versionCase && versionCase !== "historical-v1" ? { workerDeployment: {
+      version: workerVersion, projectId: receiverContext.project.id, environmentId: receiverContext.environment.id,
+    } } : {}),
   };
   let reconstructed: ReturnType<typeof reconstructFrozenRemoteChildPipeline> | undefined;
   let legacyCompilation: ReturnType<typeof compilePipeline> | undefined;
@@ -142,6 +161,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase) {
     }
     if (versionCase === "fingerprint-drift") entries[2]!.version = legacy.version;
   }
+  if (workerMutation === "missing-binding") delete snapshot.workerDeployment;
   const rawStore: Record<string, unknown> = { ...seedStore };
   const refs: Record<string, ArtifactRef> = {};
   for (const [key, value] of Object.entries(rawStore)) {
@@ -244,11 +264,15 @@ function harness(mutation?: Mutation, versionCase?: VersionCase) {
     "@/trigger/taskRetryPolicy": retryPolicy,
     "@/lib/renderBlockAdmission": renderAdmission,
     "@/lib/pipelineInvocationSnapshot": invocationSnapshots,
+    "./pipelineWorkerRuntime": pipelineWorkerRuntime,
     "@/lib/remoteChildBudgetAdmission": {
       admitFrozenRemoteChildStage,
-      reconstructFrozenRemoteChildPipeline: versionCase ? reconstructFrozenRemoteChildPipeline : () => ({ resolved: {
-        entries, manifests, blocks: manifests.map((manifest) => manifest.block), producedKeys: [],
-      } }),
+      reconstructFrozenRemoteChildPipeline: (frozen: invocationSnapshots.PipelineInvocationSnapshot) => {
+        calls.reconstruction++;
+        return versionCase ? reconstructFrozenRemoteChildPipeline(frozen) : { resolved: {
+          entries, manifests, blocks: manifests.map((manifest) => manifest.block), producedKeys: [],
+        } };
+      },
     },
     "../../convex/_generated/api": { api: fakeApi },
     "@/engine/runtimeCapability": versionCase ? runtimeCapability : { assertPipelineVideoRuntimeReady() {} },
@@ -262,10 +286,31 @@ function harness(mutation?: Mutation, versionCase?: VersionCase) {
       return modules[name];
     }, loaded, loaded.exports, { env: { NEXT_PUBLIC_CONVEX_URL: "https://never-used.invalid" } },
   );
-  const run = () => loaded.exports.executeRenderBlock({
-    ...scope, leaseOwner: "parent", executionLeaseToken: 1, dispatchKey: "child-dispatch",
-    blockId: renderer.id, params: entries[2]!.params ?? {}, budgetUsd: snapshot.budgetUsd, seedStore: snapshot.seedStore,
-  }, options);
+  const run = async () => {
+    const ctx = structuredClone(receiverContext);
+    const worker = { id: "worker_fixture", version: workerVersion, contentHash: "fixture" };
+    if (workerMutation === "wrong-version") {
+      worker.version = "20260919.99";
+      ctx.run.version = worker.version;
+      ctx.deployment!.version = worker.version;
+    }
+    if (workerMutation === "project") ctx.project.id = "other_project";
+    if (workerMutation === "environment") ctx.environment.id = "other_environment";
+    if (workerMutation === "run-version") ctx.run.version = "20260919.98";
+    if (workerMutation === "deployment-version") ctx.deployment!.version = "20260919.97";
+    taskContext.setGlobalTaskContext({ ctx, worker });
+    const missingActual = workerMutation === "missing-actual"
+      ? mock.getter(taskContext, "worker", () => undefined) : undefined;
+    try {
+      return await loaded.exports.executeRenderBlock({
+        ...scope, leaseOwner: "parent", executionLeaseToken: 1, dispatchKey: "child-dispatch",
+        blockId: renderer.id, params: entries[2]!.params ?? {}, budgetUsd: snapshot.budgetUsd, seedStore: snapshot.seedStore,
+      }, { ...options, ...(versionCase && versionCase !== "historical-v1" && workerMutation !== "missing-context"
+        ? { workerContext: ctx } : {}) });
+    } finally {
+      missingActual?.mock.restore();
+    }
+  };
   return { run, calls, rows, savedRowsBefore, expectedLineage, writtenArtifacts, snapshot, reconstructed, legacyCompilation,
     observedStore: () => observedStore, acceptedCost: () => acceptedCost, observedStageBudget: () => observedStageBudget };
 }
@@ -320,6 +365,7 @@ async function main() {
         assert.equal(compilation.fingerprint, candidate.legacyCompilation!.fingerprint);
       }
       const output = await candidate.run();
+      assert.equal(candidate.calls.reconstruction, 1, "matching binding reaches the actual reconstruction once");
       assert.equal(output.patch.videoKey, "owners/remote-reuse/final.mp4");
       assert.equal(output.patch.__costUsd, 0.2, "fake observed cost survives real cost transport");
       assert.equal(candidate.calls.defaultExecution, versionCase === "v2" ? 0 : 1);
@@ -343,11 +389,32 @@ async function main() {
       assert.equal(candidate.writtenArtifacts.length, 0);
       assert.deepEqual(candidate.rows, candidate.savedRowsBefore);
     }
+    const workerRefusals: Array<[WorkerMutation, RegExp]> = [
+      ["wrong-version", /pipeline worker deployment version mismatch/],
+      ["missing-actual", /pipeline worker deployment version must be/],
+      ["missing-context", /bound pipeline requires executing worker context/],
+      ["project", /pipeline worker deployment projectId mismatch/],
+      ["environment", /pipeline worker deployment environmentId mismatch/],
+      ["run-version", /pipeline worker deployment runVersion mismatch/],
+      ["deployment-version", /pipeline worker deployment deploymentVersion mismatch/],
+      ["missing-binding", /versioned pipeline requires a frozen worker deployment/],
+    ];
+    for (const [mutation, expected] of workerRefusals) {
+      const candidate = harness(undefined, "v2", mutation);
+      await assert.rejects(candidate.run(), expected);
+      for (const [key, value] of Object.entries(candidate.calls)) {
+        assert.equal(value, 0, `${mutation}: refuse before ${key}, including compilation/reconstruction`);
+      }
+      assert.equal(candidate.writtenArtifacts.length, 0);
+      assert.equal(candidate.acceptedCost(), undefined);
+      assert.deepEqual(candidate.rows, candidate.savedRowsBefore);
+    }
   } finally {
     _clear();
   }
   console.log("REMOTE STAGE REUSE PASS — twelve actual-worker cases, ten pre-spend refusals, post-execution cost retained");
   console.log("REMOTE VERSION DISPATCH PASS - four real frozen-reconstruction/compiler/worker cases; CPU fake blocks, no provider calls");
+  console.log("REMOTE WORKER BINDING PASS - matching deployment, historical unbound compatibility, eight pre-reconstruction refusals");
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

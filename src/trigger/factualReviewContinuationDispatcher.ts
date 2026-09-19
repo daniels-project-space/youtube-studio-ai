@@ -5,6 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { factualReviewResumeSchedule } from "@/lib/factualReviewResume";
 import type { ScheduledPlanRunPayload } from "@/lib/scheduledPlanRuntime";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 const FACTUAL_REVIEW_CONTINUATION_LIMIT = 25;
 
@@ -17,6 +18,7 @@ type PendingFactualReviewResume = {
   approvalFingerprint: string;
   attempt: number;
   scheduledPlan?: ScheduledPlanRunPayload;
+  workerDeployment?: PipelineWorkerDeployment;
 };
 
 const factualReviewCheckpointsApi = (api as unknown as {
@@ -37,6 +39,7 @@ export async function dispatchPendingFactualReviewContinuations(input?: {
   ownerId?: string;
   convex?: ConvexHttpClient;
   log?: (message: string) => void;
+  dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">;
 }): Promise<{ pending: number; triggered: number }> {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const log = input?.log ?? ((message: string) => console.log(`[factual-review-continuation-dispatcher] ${message}`));
@@ -76,8 +79,14 @@ export async function dispatchPendingFactualReviewContinuations(input?: {
       { deliveryAttempt: receipt.attempt + 1 },
     );
     try {
+      const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(receipt.workerDeployment);
+      if (receipt.workerDeployment) {
+        if (!input?.dispatchContext) throw new Error("bound factual resume requires verified dispatch project/environment");
+        assertPipelineWorkerDeployment(receipt.workerDeployment, { ...input.dispatchContext, version: receipt.workerDeployment.version });
+      }
       const idempotencyKey = await idempotencyKeys.create(request.idempotencySeed, { scope: "global" });
       const triggeredRun = await tasks.trigger("run-pipeline", request.payload, {
+        ...deploymentOptions,
         concurrencyKey: request.concurrencyKey,
         idempotencyKey,
       });
@@ -142,5 +151,7 @@ export const factualReviewContinuationDispatcher = schedules.task({
   cron: "* * * * *",
   maxDuration: 120,
   retry: { maxAttempts: 1 },
-  run: async () => dispatchPendingFactualReviewContinuations(),
+  run: async (_payload, options) => dispatchPendingFactualReviewContinuations({
+    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+  }),
 });

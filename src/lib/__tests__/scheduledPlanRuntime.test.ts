@@ -7,6 +7,8 @@ import {
   listPlanByOwner,
 } from "../../../convex/contentPlan";
 import { createNarrativeSeriesRunSelector } from "@/lib/narrativeSeriesRunAdmission";
+import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
+import type { PipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapshot";
 import { topicSelect } from "@/trigger/blocks/lofiBlocks";
 import {
   assertScheduledPlanPayloadMatches,
@@ -757,6 +759,14 @@ async function main() {
     scheduledRunId: resumeRun,
     scheduledClaimedAt: Date.now() - RUN_EXECUTION_LEASE_MS,
   });
+  const resumeInvocation: PipelineInvocationSnapshot = {
+    version: 1, ownerId: "owner-test", channelId: resumeChannel, runId: resumeRun,
+    source: "channel", entries: [{ block: "topic_select" }], seedStore: {}, budgetUsd: 5,
+    keyPrefix: "owner/owner-test/channel/test/", remoteBlocks: [], defaultRetries: 2,
+    compilationFingerprint: "a".repeat(64), compilationPolicyId: "production-contract",
+    compilationPolicyVersion: "2", compilationModules: [{ id: "topic_select", version: "1.0.0" }],
+    compilationCapabilities: [], reservedMaxCostUsd: 5,
+  };
   resumeDb.seed("runs", {
     ownerId: "owner-test",
     channelId: resumeChannel,
@@ -766,8 +776,8 @@ async function main() {
     leaseExpiresAt: Date.now() - 5_000,
     leaseOwner: "dead-trigger",
     costTotal: 0.7,
-    pipelineInvocationSnapshot: { runId: resumeRun },
-    pipelineInvocationSha256: "a".repeat(64),
+    pipelineInvocationSnapshot: resumeInvocation,
+    pipelineInvocationSha256: pipelineInvocationSha256(resumeInvocation),
     planItemId: resumeItem,
     plannedTopic: "Topic 0",
     plannedTitle: "Title 0",

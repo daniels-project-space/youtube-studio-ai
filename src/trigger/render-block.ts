@@ -48,5 +48,6 @@ export const renderBlockTask = task({
     executeRenderBlock(payload, {
       taskLabel: "render-block", machineClass: "heavy",
       taskRunId: ctx.run.id, attemptNumber: ctx.attempt.number,
+      workerContext: ctx,
     }),
 });

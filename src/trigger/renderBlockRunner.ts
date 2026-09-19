@@ -15,6 +15,7 @@
  * `machine`, and which block class they accept.
  */
 import { logger } from "@trigger.dev/sdk/v3";
+import { assertFrozenPipelineWorkerDeployment } from "./pipelineWorkerRuntime";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
@@ -72,6 +73,7 @@ export interface RenderBlockRunnerOptions {
   machineClass: RenderBlockMachineClass;
   taskRunId: string;
   attemptNumber: number;
+  workerContext?: import("./pipelineWorkerRuntime").PipelineWorkerContext;
 }
 
 function stableJson(value: unknown): string {
@@ -222,6 +224,7 @@ export async function executeRenderBlock(
       seedStore: payload.seedStore,
     },
   });
+  assertFrozenPipelineWorkerDeployment(frozenInvocation, options.workerContext);
 
   // A child has a separate process and module registry. Rebuild the exact
   // signed route on THIS worker, then re-run compilation + preflight before it

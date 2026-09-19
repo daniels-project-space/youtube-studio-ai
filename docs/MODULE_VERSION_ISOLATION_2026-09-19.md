@@ -127,12 +127,18 @@ as `lockToVersion`. Plain triggers do not automatically inherit their parent
 worker; `triggerAndWait` does inherit `taskContext.worker.version`. Local source
 inspection does not establish remote retention or unavailable-version behavior.
 
-The immutable invocation currently lacks worker deployment identity. Same-run
-serialized-episode retries, publish resumes, factual-review and music-audition
-continuations, automatic doctor resumes, and scheduler reattachments need a
-verified frozen binding and exact dispatch pin. Receiver admission must reject
-a mismatched worker before provider work. Preserve existing global idempotency
-keys; never stamp historical snapshots with the current worker retrospectively.
+The development branch now binds fresh immutable invocations to the actual
+worker version, project ID and environment ID. Same-run serialized-episode
+retries, publish resumes, factual-review and music-audition continuations,
+automatic doctor resumes, and scheduler reattachments carry the verified
+binding into an exact dispatch pin. Pipeline and render-child admission reject
+a mismatched worker before provider execution or artifact rehydration. Existing
+idempotency seeds and scopes remain unchanged.
+
+Historical snapshots without a binding retain their original serialized shape
+and hash. Unversioned historical execution retains its previous behavior; it
+is not certified isolated. An explicit module pin without a worker binding
+refuses execution. Never retrospectively stamp history with the current worker.
 
 The actual worker identity is `taskContext.worker.version`; optional
 `ctx.run.version` and `ctx.deployment.version` must agree when present. An
@@ -140,6 +146,42 @@ environment variable is not proof of the executing deployment. Older deployed
 code also contains an unpinned retry path, so merely retaining that deployment
 does not yet establish legacy isolation. Convex and mutable external settings
 remain separate boundaries even when a worker is pinned.
+
+Inception probe reattachment still uses `triggerAndWait`, whose child worker
+must match its parent. A bound probe resumed from a different parent deployment
+will be refused by child admission; selecting a different frozen deployment
+through that awaited path remains unqualified. This change is not permission
+to deploy replacement helpers over live legacy channels. Remote deployment
+retention and actual routing must still be qualified, and legacy root dispatch
+must be explicitly preserved before activation.
+
+Worker-binding evidence is local and provider-free:
+
+- `pipelineWorkerDeployment.test.ts`: strict normalization, opaque exact
+  versions, immutable binding hashes and unchanged historical hashes.
+- `pipelineWorkerRuntime.test.ts`: 20 actual parent callback cases and three
+  actual inline enqueue calls, including refusal before provider/lease work
+  and preserved global idempotency for the frozen worker.
+- `pipelineWorkerDeploymentTransport.test.ts`: actual Convex handlers with
+  fixture persistence, verified snapshot projections, immutable claims,
+  historical omission, and rejection of tampered/foreign identities.
+- `sameRunWorkerDispatch.test.ts` and `publishRetrySchedule.test.ts`: actual
+  dispatcher/enqueue paths pin worker A from worker B in the same scope;
+  foreign scopes refuse, keys remain unchanged, and scheduler rejection
+  precedes research.
+- `remoteStageReuse.test.ts`: matching bound execution and eight additional
+  refusals before remote reconstruction; historical unbound compatibility
+  stays separate from isolation evidence.
+- `triggerVersionTransport.test.ts`: four installed-SDK cases with intercepted
+  HTTP, including explicit pin transmission, parent inheritance and rejection
+  without an unpinned resubmission. No remote scheduler was exercised.
+
+Final local gates for worker binding: all 837 direct readiness tests passed,
+the production build including TypeScript passed, scoped ESLint passed, and
+the structural audit reported no regressions against its existing baseline.
+The code graph was refreshed. The production health endpoint still reported
+`722facc4f5aaad004dcd9f96de3be7a29951a520`; no production deployment or channel
+mutation was performed for this batch.
 
 ### Activation gates
 

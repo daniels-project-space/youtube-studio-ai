@@ -4,12 +4,14 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { musicAuditionResumeSchedule } from "@/lib/musicAuditionResume";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 const MUSIC_AUDITION_CONTINUATION_LIMIT = 25;
 
 type PendingMusicAuditionResume = {
   runId: string; channelId: string; invocationSha256: string; checkpointId: string;
   checkpointFingerprint: string; qualityReceiptFingerprint: string; approvalFingerprint: string; attempt: number;
+  workerDeployment?: PipelineWorkerDeployment;
 };
 
 const musicAuditionCheckpointsApi = (api as unknown as {
@@ -24,6 +26,7 @@ const musicAuditionCheckpointsApi = (api as unknown as {
  * to the normal run worker and records its bounded delivery state. */
 export async function dispatchPendingMusicAuditionContinuations(input?: {
   ownerId?: string; convex?: ConvexHttpClient; log?: (message: string) => void;
+  dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">;
 }): Promise<{ pending: number; triggered: number }> {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const log = input?.log ?? (message => console.log(`[music-audition-continuation-dispatcher] ${message}`));
@@ -48,8 +51,13 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
       },
     }, { deliveryAttempt: receipt.attempt + 1 });
     try {
+      const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(receipt.workerDeployment);
+      if (receipt.workerDeployment) {
+        if (!input?.dispatchContext) throw new Error("bound music resume requires verified dispatch project/environment");
+        assertPipelineWorkerDeployment(receipt.workerDeployment, { ...input.dispatchContext, version: receipt.workerDeployment.version });
+      }
       const idempotencyKey = await idempotencyKeys.create(request.idempotencySeed, { scope: "global" });
-      const triggeredRun = await tasks.trigger("run-pipeline", request.payload, { concurrencyKey: request.concurrencyKey, idempotencyKey });
+      const triggeredRun = await tasks.trigger("run-pipeline", request.payload, { ...deploymentOptions, concurrencyKey: request.concurrencyKey, idempotencyKey });
       const triggerRunId = typeof (triggeredRun as { id?: unknown }).id === "string"
         ? (triggeredRun as { id: string }).id : request.idempotencySeed;
       try {
@@ -83,5 +91,7 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
 
 export const musicAuditionContinuationDispatcher = schedules.task({
   id: "music-audition-continuation-dispatcher", cron: "* * * * *", maxDuration: 120, retry: { maxAttempts: 1 },
-  run: async () => dispatchPendingMusicAuditionContinuations(),
+  run: async (_payload, options) => dispatchPendingMusicAuditionContinuations({
+    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+  }),
 });

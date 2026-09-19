@@ -1,4 +1,5 @@
 import { tasks } from "@trigger.dev/sdk";
+import { taskContext } from "@trigger.dev/core/v3";
 import {
   publishPipelineResumeTriggerRequest,
   publishRetryTriggerRequest,
@@ -46,7 +47,11 @@ export async function enqueueFailedPipelineResume(
   trigger: PublishPipelineResumeTrigger = async (taskId, payload, options) =>
     await tasks.trigger(taskId, payload, options),
 ): Promise<{ runId: string; idempotencyKey: string; enqueueAttempt: number } | undefined> {
-  const request = publishPipelineResumeTriggerRequest(intent, run);
+  const ctx = taskContext.ctx;
+  const request = publishPipelineResumeTriggerRequest(intent, run, ctx ? {
+    projectId: ctx.project.id,
+    environmentId: ctx.environment.id,
+  } : undefined);
   if (!request) return undefined;
   const handle = await trigger(
     request.taskId,

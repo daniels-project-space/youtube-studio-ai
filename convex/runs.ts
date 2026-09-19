@@ -11,6 +11,7 @@ import {
   type PipelineInvocationSnapshot,
 } from "../src/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "../src/lib/pipelineInvocationHash";
+import { verifiedWorkerDeploymentFields, workerDeploymentValidator, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 import { frozenRunPipelinePresentation } from "../src/lib/runPipelinePresentation";
 import { summarizeRunStageProgress } from "../src/lib/runStageProgress";
 import {
@@ -1608,6 +1609,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
       invocationSha256: v.string(),
       retryAt: v.number(),
       attempt: v.number(),
+      workerDeployment: v.optional(workerDeploymentValidator),
       scheduledPlan: v.optional(
         v.object({
           planItemId: v.string(),
@@ -1660,6 +1662,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
       invocationSha256: string;
       retryAt: number;
       attempt: number;
+      workerDeployment?: WorkerDeploymentFields["workerDeployment"];
       scheduledPlan?: {
         planItemId: string;
         topic: string;
@@ -1773,6 +1776,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
           runId: run._id,
           channelId: run.channelId,
           invocationSha256: run.pipelineInvocationSha256,
+          ...verifiedWorkerDeploymentFields(run),
           retryAt,
           attempt,
           ...(scheduledPlan ? { scheduledPlan } : {}),
@@ -3000,7 +3004,13 @@ export const listPendingPublishContinuations = query({
         q.eq("ownerId", args.ownerId).eq("publishContinuationState", "pending"),
       )
       .take(limit);
-    return rows.filter((run) => run.status === "failed");
+    return rows.filter((run) => run.status === "failed")
+      .map((run) => {
+        const binding = verifiedWorkerDeploymentFields(run);
+        const result = { ...run, ...binding };
+        if (binding.workerDeployment === undefined) delete result.workerDeployment;
+        return result;
+      });
   },
 });
 
@@ -3033,6 +3043,7 @@ export const listAutomaticResumeCandidates = query({
         _id: run._id,
         ownerId: run.ownerId,
         channelId: run.channelId,
+        ...verifiedWorkerDeploymentFields(run),
         planItemId: run.planItemId,
         plannedTopic: run.plannedTopic,
         plannedTitle: run.plannedTitle,
@@ -3050,17 +3061,18 @@ export const listAutomaticResumeCandidates = query({
 /** Claim one exact frozen run before the Doctor enqueues it. */
 export const claimAutomaticResume = mutation({
   args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), now: v.number() },
-  returns: v.object({ state: v.union(v.literal("queued"), v.literal("blocked")), attempts: v.number(), reused: v.boolean() }),
+  returns: v.object({ state: v.union(v.literal("queued"), v.literal("blocked")), attempts: v.number(), reused: v.boolean(), workerDeployment: v.optional(workerDeploymentValidator) }),
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "automatic resume claim");
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId) throw new Error("automatic resume ownership mismatch");
     if (run.automaticResumeState === "queued" || run.automaticResumeState === "running") {
-      return { state: run.automaticResumeState === "queued" ? "queued" as const : "blocked" as const, attempts: run.automaticResumeAttempts ?? 0, reused: true };
+      return { state: run.automaticResumeState === "queued" ? "queued" as const : "blocked" as const, attempts: run.automaticResumeAttempts ?? 0, reused: true, ...verifiedWorkerDeploymentFields(run) };
     }
     if (run.status !== "failed" || run.pipelineInvocationSnapshot === undefined || typeof run.pipelineInvocationSha256 !== "string") {
       return { state: "blocked" as const, attempts: run.automaticResumeAttempts ?? 0, reused: false };
     }
+    const workerDeployment = verifiedWorkerDeploymentFields(run);
     const attempts = run.automaticResumeAttempts ?? 0;
     if (attempts >= 2 || (run.automaticResumeNextAt ?? 0) > args.now) {
       await ctx.db.patch(run._id, { automaticResumeState: "blocked", automaticResumeUpdatedAt: args.now, automaticResumeLastError: "automatic resume bound reached or not yet due" });
@@ -3073,7 +3085,7 @@ export const claimAutomaticResume = mutation({
       automaticResumeUpdatedAt: args.now,
       automaticResumeLastError: undefined,
     });
-    return { state: "queued" as const, attempts: attempts + 1, reused: false };
+    return { state: "queued" as const, attempts: attempts + 1, reused: false, ...workerDeployment };
   },
 });
 

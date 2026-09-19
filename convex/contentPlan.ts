@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { verifiedWorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 import { mutation, query } from "./studioFunctions";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
@@ -2110,6 +2111,7 @@ export const claimNextPlanRun = mutation({
           state: "cadence" as const,
           reused: true,
           runId: queued._id,
+          ...verifiedWorkerDeploymentFields(queued),
           narrativeSeriesSelector: queuedSelector,
         };
       }
@@ -2129,10 +2131,11 @@ export const claimNextPlanRun = mutation({
           state: "claimed" as const,
           reused: true,
           runId: queued._id,
+          ...verifiedWorkerDeploymentFields(queued),
           ...scheduledRunPayload(queued),
         };
       }
-      return { state: "cadence" as const, reused: true, runId: queued._id };
+      return { state: "cadence" as const, reused: true, runId: queued._id, ...verifiedWorkerDeploymentFields(queued) };
     }
 
     // The lease reaper only sets this marker when the run has a complete,
@@ -2160,6 +2163,7 @@ export const claimNextPlanRun = mutation({
           reused: true,
           recoveryDispatch: true,
           runId: lastRun._id,
+          ...verifiedWorkerDeploymentFields(lastRun),
           ...payload,
         };
       }
@@ -2177,6 +2181,7 @@ export const claimNextPlanRun = mutation({
           reused: true,
           recoveryDispatch: true,
           runId: lastRun._id,
+          ...verifiedWorkerDeploymentFields(lastRun),
           narrativeSeriesSelector: recoveredSelector,
         };
       }
@@ -2192,6 +2197,7 @@ export const claimNextPlanRun = mutation({
         reused: true,
         recoveryDispatch: true,
         runId: lastRun._id,
+        ...verifiedWorkerDeploymentFields(lastRun),
       };
     }
 
@@ -2394,6 +2400,7 @@ export const claimNextPlanRun = mutation({
       if (!priorRun || priorRun.ownerId !== args.ownerId || priorRun.channelId !== args.channelId || priorRun.planItemId !== item._id) {
         return { state: "blocked" as const, reason: "scheduled plan run fence is orphaned" };
       }
+      const workerDeployment = verifiedWorkerDeploymentFields(priorRun);
       assertScheduledPlanPayloadMatches(payload, scheduledRunPayload(priorRun));
       if (priorRun.status === "ok") {
         const priorTopic = await ctx.db
@@ -2416,7 +2423,7 @@ export const claimNextPlanRun = mutation({
         return { state: "finalized" as const, runId: priorRun._id, planItemId: item._id };
       }
       if (priorRun.status === "queued") {
-        return { state: "claimed" as const, reused: true, runId: priorRun._id, ...payload };
+        return { state: "claimed" as const, reused: true, runId: priorRun._id, ...workerDeployment, ...payload };
       }
       if (priorRun.status === "running") return { state: "busy" as const, runId: priorRun._id };
       return {

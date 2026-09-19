@@ -9,6 +9,7 @@ import {
 } from "../src/engine/musicAuditionCheckpoint";
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
+import { verifiedWorkerDeploymentFields, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 
 const MAX_MUSIC_AUDITION_RESUME_ENQUEUE_ATTEMPTS = 2;
 const MUSIC_AUDITION_RESUME_QUEUE_LEASE_MS = RUN_QUEUE_LEASE_MS;
@@ -338,6 +339,7 @@ export const listPendingResumes = query({
       runId: Id<"runs">; channelId: Id<"channels">; invocationSha256: string;
       checkpointId: Id<"musicAuditionCheckpoints">; checkpointFingerprint: string;
       qualityReceiptFingerprint: string; approvalFingerprint: string; attempt: number;
+      workerDeployment?: WorkerDeploymentFields["workerDeployment"];
     }> = [];
     for (const run of runs) {
       if (run.status !== "awaiting_music_audition" || run.musicAuditionState !== "approved") continue;
@@ -347,7 +349,9 @@ export const listPendingResumes = query({
         !run.musicAuditionCheckpointId || !run.musicAuditionCheckpointFingerprint ||
         !run.musicAuditionQualityReceiptFingerprint || !run.musicAuditionApprovalFingerprint
       ) continue;
+      let workerDeployment: WorkerDeploymentFields;
       try {
+        workerDeployment = verifiedWorkerDeploymentFields(run);
         await assertApprovedMusicAuditionResume(ctx, {
           ownerId: args.ownerId, channelId: run.channelId, runId: run._id,
           checkpointId: run.musicAuditionCheckpointId,
@@ -362,6 +366,7 @@ export const listPendingResumes = query({
         checkpointId: run.musicAuditionCheckpointId, checkpointFingerprint: run.musicAuditionCheckpointFingerprint,
         qualityReceiptFingerprint: run.musicAuditionQualityReceiptFingerprint,
         approvalFingerprint: run.musicAuditionApprovalFingerprint, attempt,
+        ...workerDeployment,
       });
       if (pending.length >= limit) break;
     }

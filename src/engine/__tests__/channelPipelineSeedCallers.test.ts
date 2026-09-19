@@ -174,11 +174,13 @@ try {
       frozenModuleConfig: undefined, narrativeSeriesAdmission: undefined, scheduledPlan: undefined,
       weeklyPreparation: undefined, durableInvocation: undefined, probeBudgetAdmission: undefined,
       routeQualificationBenchmarkAdmission: undefined, privateInvocationContext: undefined, log: () => {},
+      workerDeployment: { version: "worker-fixture", projectId: "project-fixture", environmentId: "environment-fixture" },
     };
     const boundary = (overrides: Scope = {}) => evaluate<BoundaryResult>(runtimeCode, { ...runtimeImports, ...scope, ...overrides });
     const fresh = pass(`${family}: actual fresh runtime boundary`, () => boundary());
     const snapshot = pass(`${family}: actual invocation snapshot expression`, () =>
       evaluate<PipelineInvocationSnapshot>(candidateCode, { ...candidateImports, ...scope, ...fresh }));
+    assert.deepEqual(snapshot.workerDeployment, scope.workerDeployment, "actual snapshot expression retains the admitted worker binding");
     pass(`${family}: actual inception certification`, () => {
       const certification = certify({ pipeline: entries, moduleConfig: {}, disabledBlocks: [], family,
         requestFingerprint: "1".repeat(64), pipelineSourceFingerprint: "2".repeat(64), showProfile: profile, programBrief: brief });
