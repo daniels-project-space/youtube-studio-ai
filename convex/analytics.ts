@@ -91,7 +91,11 @@ export const overview = query({
     // exposes real planner spend without double-counting pipeline cost.
     const currentRuns = runs.filter(hasFrozenPipelineProvenance);
     const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-    const totalCost = currentRuns.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
+    // A frozen invocation receipt determines whether a run can be presented as
+    // part of the current modular pipeline; it must not erase a recorded
+    // historical charge from financial reporting. Planner batches are separate
+    // from run rows, so this remains an exact, non-overlapping total.
+    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
     const videoCount = currentRuns.filter((r) => Boolean(r.youtubeVideoId)).length;
 
     return {
@@ -137,6 +141,12 @@ export const channelSummary = query({
       rows.push(run);
       runsByChannel.set(String(run.channelId), rows);
     }
+    const allRunsByChannel = new Map<string, typeof runs>();
+    for (const run of runs) {
+      const rows = allRunsByChannel.get(String(run.channelId)) ?? [];
+      rows.push(run);
+      allRunsByChannel.set(String(run.channelId), rows);
+    }
     const batchesByChannel = new Map<string, typeof planBatches>();
     for (const batch of planBatches) {
       const rows = batchesByChannel.get(String(batch.channelId)) ?? [];
@@ -148,10 +158,11 @@ export const channelSummary = query({
       channels.map(async (ch) => {
         const latest = await latestChannelDay(ctx, ch._id);
         const channelRuns = runsByChannel.get(String(ch._id)) ?? [];
+        const channelCostRuns = allRunsByChannel.get(String(ch._id)) ?? [];
         const channelBatches = batchesByChannel.get(String(ch._id)) ?? [];
         const planningCost = channelBatches
           .reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-        const costTotal = channelRuns.reduce((s, r) => s + (r.costTotal ?? 0), 0) + planningCost;
+        const costTotal = channelCostRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
         const videoCount = channelRuns.filter((r) => Boolean(r.youtubeVideoId)).length;
         return {
           channelId: ch._id,
@@ -268,6 +279,12 @@ export const dashboardSnapshot = query({
       rows.push(run);
       runsByChannel.set(String(run.channelId), rows);
     }
+    const allRunsByChannel = new Map<string, typeof runs>();
+    for (const run of runs) {
+      const rows = allRunsByChannel.get(String(run.channelId)) ?? [];
+      rows.push(run);
+      allRunsByChannel.set(String(run.channelId), rows);
+    }
     const batchesByChannel = new Map<string, typeof planBatches>();
     for (const batch of planBatches) {
       const rows = batchesByChannel.get(String(batch.channelId)) ?? [];
@@ -287,10 +304,13 @@ export const dashboardSnapshot = query({
       }
     }
     const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-    const totalCost = currentRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
+    // Keep spend complete even when an imported historical run is intentionally
+    // excluded from current-pipeline counts and release presentation.
+    const totalCost = runs.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
 
     const summary = channels.map((channel) => {
       const channelRuns = runsByChannel.get(String(channel._id)) ?? [];
+      const channelCostRuns = allRunsByChannel.get(String(channel._id)) ?? [];
       const channelBatches = batchesByChannel.get(String(channel._id)) ?? [];
       const channelPlanningCost = channelBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
       const latest = latestByChannel.get(channel._id);
@@ -302,7 +322,7 @@ export const dashboardSnapshot = query({
         subscriberCount: latest?.subscriberCount ?? 0,
         totalViews: latest?.totalViews ?? 0,
         videoCount: channelRuns.filter((run) => Boolean(run.youtubeVideoId)).length,
-        costTotal: channelRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + channelPlanningCost,
+        costTotal: channelCostRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + channelPlanningCost,
         planningCost: channelPlanningCost,
       };
     });
