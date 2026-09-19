@@ -1530,7 +1530,19 @@ export default function NewChannelWizard() {
             <strong className={styles.sectionCount}>{FAMILY_KEYS.length} routes</strong>
           </header>
           {fam ? <section className={styles.selectedRoute}>
-            <div className={styles.routeIdentity}><small>Selected creator route</small><h2>{fam.label}</h2><p>{fam.description}</p></div>
+            <div className={styles.routeIdentity}>
+              <small>Selected creator route</small>
+              <h2>{fam.label}</h2>
+              <p>{fam.description}</p>
+              {supervisedAdmission && reviewHandoffHref ? (
+                <div className={styles.supervisedRouteHandoff}>
+                  <span>Review-only · no provider spend or publishing</span>
+                  <Link href={reviewHandoffHref} className={styles.supervisedRouteAction}>
+                    {reviewHrefLabel(reviewHandoffHref)}
+                  </Link>
+                </div>
+              ) : null}
+            </div>
             <div className={styles.routeFacts}>
               <span><small>Visual engine</small><strong>{fam.visualEngine}</strong></span>
               <span><small>Episode unit</small><strong>{formatFamilyDurationContract(fam.key)}</strong></span>
