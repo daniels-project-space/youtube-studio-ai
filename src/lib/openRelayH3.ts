@@ -66,6 +66,7 @@ export interface OpenRelayH3Receipt {
 }
 
 export type OpenRelayH3Reconciliation =
+  | { status: "absent" }
   | { status: "pending" }
   | { status: "complete"; receipt: OpenRelayH3Receipt };
 
@@ -169,7 +170,15 @@ function validateRenderRequest(request: OpenRelayH3RenderRequest): void {
   }
 }
 
-function asReceipt(value: unknown, request: OpenRelayH3RenderRequest): OpenRelayH3Receipt {
+/**
+ * Verifies a worker receipt against the exact immutable request that admitted
+ * it.  The durable I2V adapter also uses this when it reuses a receipt stored
+ * in R2, before it can avoid a paid provider restart.
+ */
+export function assertOpenRelayH3Receipt(
+  value: unknown,
+  request: OpenRelayH3RenderRequest,
+): OpenRelayH3Receipt {
   if (!isRecord(value) || value.schema !== "minimax-h3-worker/v1" || value.requestKey !== request.request_key ||
     typeof value.jobId !== "string" || !value.jobId || value.execution !== request.execution || !isProfile(value.profile) ||
     typeof value.promptSha256 !== "string" || !HEX_64.test(value.promptSha256) || value.seed !== request.seed ||
@@ -284,7 +293,7 @@ export async function submitOpenRelayH3Render(
   });
   if (!response.ok) throw new Error(`OpenRelay H3 render returned HTTP ${response.status}`);
   const body = await response.json() as { receipt?: unknown };
-  return asReceipt(body.receipt, request);
+  return assertOpenRelayH3Receipt(body.receipt, request);
 }
 
 /** Reconcile a gateway-timed-out request without ever submitting a second job. */
@@ -303,9 +312,10 @@ export async function reconcileOpenRelayH3Render(
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
   });
+  if (response.status === 404) return { status: "absent" };
   if (!response.ok) throw new Error(`OpenRelay H3 reconciliation returned HTTP ${response.status}`);
   const body = await response.json() as { status?: unknown; receipt?: unknown };
   if (body.status === "pending" && body.receipt === undefined) return { status: "pending" };
-  if (body.status === "complete") return { status: "complete", receipt: asReceipt(body.receipt, request) };
+  if (body.status === "complete") return { status: "complete", receipt: assertOpenRelayH3Receipt(body.receipt, request) };
   throw new Error("OpenRelay H3 reconciliation response is malformed");
 }
