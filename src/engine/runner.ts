@@ -455,6 +455,38 @@ export function assertConsumedArtifacts(
 }
 
 /**
+ * Required downstream bindings are stronger than an ordinary optional input.
+ * A producer may deliberately bind an artifact to an optional consumer so the
+ * consumer can remain reusable in unrelated routes, but once that producer is
+ * present in the same pipeline its handoff is mandatory. This check runs at
+ * the execution boundary (before cache restore or provider dispatch), closing
+ * the resume/seed-store hole where a malformed run could otherwise fall back
+ * to a generic result while claiming the specialist handoff existed.
+ */
+export function assertRequiredDownstreamHandoffs(
+  manifests: readonly ModuleManifest[],
+  consumerIndex: number,
+  store: Readonly<Record<string, unknown>>,
+): void {
+  const consumer = manifests[consumerIndex];
+  if (!consumer) throw new Error(`missing executable manifest at step ${consumerIndex}`);
+  for (let producerIndex = 0; producerIndex < consumerIndex; producerIndex++) {
+    const producer = manifests[producerIndex];
+    for (const capability of producer.requiredDownstreamCapabilities) {
+      const artifact = producer.requiredDownstreamConsumes[capability];
+      if (!consumer.capabilities.includes(capability)) continue;
+      if (!(artifact in consumer.consumes) && !(artifact in consumer.optionalConsumes)) continue;
+      if (store[artifact] === undefined || store[artifact] === null) {
+        throw new Error(
+          `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
+          `before execution; the required downstream artifact is absent`,
+        );
+      }
+    }
+  }
+}
+
+/**
  * VERIFIED parallel groups: contiguous pipeline blocks proven (by reading their
  * store access, not just `consumes`) to never read each other's products. These
  * are the ONLY blocks the runner co-schedules — everything else stays strictly
@@ -816,6 +848,9 @@ export async function runPipeline(
         `resolved pipeline alignment mismatch at step ${blockIndex}: block=${block.id}, manifest=${manifest.id}`,
       );
     }
+    // Run this before reuse/rehydration as well as before provider dispatch: a
+    // cached downstream stage must not hide a missing required handoff.
+    assertRequiredDownstreamHandoffs(resolved.manifests, blockIndex, store);
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
     const priorStage = priorStageMap.get(block.id);
     const refuseUnverifiedReuse = async (reason: string) => {
