@@ -2,6 +2,7 @@ import type { QueryCtx } from "./_generated/server";
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 import { observedVideoReleaseProvenanceFromRecord } from "../src/lib/videoReleaseProvenanceIntegrity";
+import { hasFrozenPipelineProvenance } from "../src/lib/runPipelineProvenance";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -88,9 +89,10 @@ export const overview = query({
       .collect();
     // Plan batches never create run rows, so adding their idempotent batch total
     // exposes real planner spend without double-counting pipeline cost.
+    const currentRuns = runs.filter(hasFrozenPipelineProvenance);
     const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
-    const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
+    const totalCost = currentRuns.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
+    const videoCount = currentRuns.filter((r) => Boolean(r.youtubeVideoId)).length;
 
     return {
       totalSubscribers,
@@ -128,8 +130,9 @@ export const channelSummary = query({
         .collect(),
     ]);
 
-    const runsByChannel = new Map<string, typeof runs>();
-    for (const run of runs) {
+    const currentRuns = runs.filter(hasFrozenPipelineProvenance);
+    const runsByChannel = new Map<string, typeof currentRuns>();
+    for (const run of currentRuns) {
       const rows = runsByChannel.get(String(run.channelId)) ?? [];
       rows.push(run);
       runsByChannel.set(String(run.channelId), rows);
@@ -258,8 +261,9 @@ export const dashboardSnapshot = query({
     ]);
 
     const latestByChannel = new Map(channelStates.map((row) => [row.channelId, row.latest] as const));
-    const runsByChannel = new Map<string, typeof runs>();
-    for (const run of runs) {
+    const currentRuns = runs.filter(hasFrozenPipelineProvenance);
+    const runsByChannel = new Map<string, typeof currentRuns>();
+    for (const run of currentRuns) {
       const rows = runsByChannel.get(String(run.channelId)) ?? [];
       rows.push(run);
       runsByChannel.set(String(run.channelId), rows);
@@ -283,7 +287,7 @@ export const dashboardSnapshot = query({
       }
     }
     const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-    const totalCost = runs.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
+    const totalCost = currentRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
 
     const summary = channels.map((channel) => {
       const channelRuns = runsByChannel.get(String(channel._id)) ?? [];
@@ -337,7 +341,7 @@ export const dashboardSnapshot = query({
         totalViews,
         totalCost,
         planningCost,
-        videoCount: runs.filter((run) => Boolean(run.youtubeVideoId)).length,
+        videoCount: currentRuns.filter((run) => Boolean(run.youtubeVideoId)).length,
         channelCount: channels.length,
       },
       summary,

@@ -11,6 +11,8 @@ assert.doesNotMatch(page, /useQuery\(api\.analytics\.(overview|channelSummary|re
   "Analytics must not keep three overlapping fleet subscriptions");
 assert.match(snapshot, /ctx\.db\.query\("runs"\)[\s\S]*?withIndex\("by_owner"/);
 assert.match(snapshot, /ctx\.db\.query\("planBatches"\)[\s\S]*?withIndex\("by_owner"/);
+assert.match(snapshot, /const currentRuns = runs\.filter\(hasFrozenPipelineProvenance\)/,
+  "current analytics must exclude legacy rows without a frozen pipeline receipt");
 assert.match(snapshot, /ctx\.db\.query\("youtubeAuth"\)[\s\S]*?withIndex\("by_channel"[\s\S]*?\.unique\(\)/);
 assert.match(snapshot, /ctx\.db\.query\("analyticsRefreshCursors"\)[\s\S]*?withIndex\("by_owner_channel"[\s\S]*?\.unique\(\)/);
 assert.doesNotMatch(snapshot, /ctx\.db\.query\("youtubeAuth"\)[^;]*withIndex\("by_owner"[^;]*\.collect\(\)/,
