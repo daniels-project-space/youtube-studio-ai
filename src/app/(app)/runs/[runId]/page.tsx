@@ -108,6 +108,11 @@ export default function RunDetailPage({
       ? channel.pipeline.map((p: { block: string }) => p.block)
       : [...LOFI_BLOCK_IDS];
   const planSource = run.pipeline ? "frozen" : "legacy";
+  // Old rows have no immutable invocation or stage ledger. Projecting today's
+  // channel plan into a long empty workbench makes a historical record look
+  // actionable, then repeats "waiting" across the page. Keep that evidence
+  // visible in the summary, but do not manufacture a pipeline UI from it.
+  const compactLegacyRecord = planSource === "legacy" && stages !== undefined && stages.length === 0;
 
   const stageByBlock = new Map<string, PipelineStage>();
   for (const s of stages ?? []) stageByBlock.set(s.block, s);
@@ -164,23 +169,29 @@ export default function RunDetailPage({
             <p>
               <span className={styles.runId}>{run._id}</span>
               <i aria-hidden="true" />
-              <span>{planSource === "frozen" ? "Frozen invocation" : "Legacy inferred plan"}</span>
+              <span>{planSource === "frozen" ? "Frozen invocation" : compactLegacyRecord ? "Legacy record" : "Legacy inferred plan"}</span>
               {run.finishedAt && <><i aria-hidden="true" /><span>Finished {fmtDateTime(run.finishedAt)}</span></>}
             </p>
           </div>
-          <div className={styles.heroProgress} data-live={live ? "true" : undefined}>
+          <div className={styles.heroProgress} data-live={live && !compactLegacyRecord ? "true" : undefined}>
             <div><small>Receipt coverage</small><strong>{receiptProgress}%</strong></div>
             <div className={styles.progressTrack} style={{ "--receipt-progress": `${receiptProgress}%` } as React.CSSProperties}><i /></div>
-            <span>{activeStage ? `Working now · ${blockLabel(activeStage.block)}` : `${reportedStages} of ${nodes.length} planned stages reported`}</span>
+            <span>{compactLegacyRecord
+              ? "No stage ledger was saved for this older record"
+              : activeStage
+                ? `Working now · ${blockLabel(activeStage.block)}`
+                : `${reportedStages} of ${nodes.length} planned stages reported`}</span>
           </div>
         </div>
       </header>
 
-      <nav className={styles.runMap} aria-label="Run record areas">
-        <a href="#recorded-work"><span>01</span><strong>Recorded work</strong><small>Saved media bytes</small></a>
-        <a href="#pipeline-route"><span>02</span><strong>Pipeline route</strong><small>Stage receipts</small></a>
-        <a href="#run-console"><span>03</span><strong>Console</strong><small>Reactive log tail</small></a>
-      </nav>
+      {!compactLegacyRecord ? (
+        <nav className={styles.runMap} aria-label="Run record areas">
+          <a href="#recorded-work"><span>01</span><strong>Recorded work</strong><small>Saved media bytes</small></a>
+          <a href="#pipeline-route"><span>02</span><strong>Pipeline route</strong><small>Stage receipts</small></a>
+          <a href="#run-console"><span>03</span><strong>Console</strong><small>Reactive log tail</small></a>
+        </nav>
+      ) : null}
 
       <section className={styles.summarySection} aria-label="Run summary">
         <div className={styles.summaryGrid} data-run-status={run.status}>
@@ -192,7 +203,7 @@ export default function RunDetailPage({
             }
           />
           <Field label="Cost" value={fmtUsd(run.costTotal)} mono />
-          <Field label="Stage ledger" value={`${reportedStages}/${nodes.length} reported`} mono />
+          <Field label="Stage ledger" value={compactLegacyRecord ? "Not recorded" : `${reportedStages}/${nodes.length} reported`} mono />
           <Field
             label="Release evidence"
             value={<ReleaseEvidenceBadge status={run.releaseEvidenceStatus} compact />}
@@ -230,31 +241,41 @@ export default function RunDetailPage({
         )}
       </section>
 
-      <ArtifactRetentionStrip retention={artifactRetention} legacy={planSource === "legacy"} />
+      {!compactLegacyRecord ? <ArtifactRetentionStrip retention={artifactRetention} legacy={planSource === "legacy"} /> : null}
 
-      <RunPackageShelf
-        runId={run._id}
-        runStatus={run.status}
-        stages={stages}
-        assets={assets}
-        currentThumbnail={currentThumbnail}
-      />
+      {!compactLegacyRecord ? (
+        <RunPackageShelf
+          runId={run._id}
+          runStatus={run.status}
+          stages={stages}
+          assets={assets}
+          currentThumbnail={currentThumbnail}
+        />
+      ) : null}
 
       {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
         <FactualReviewPanel runId={String(run._id)} />
       )}
       {run.status === "awaiting_music_audition" && <MusicAuditionPanel runId={String(run._id)} />}
 
-      <div id="recorded-work" className={styles.anchorTarget}>
-        <RunMediaWorkbench
-          key={runId}
-          assets={assets}
-          stages={stages}
-          runStatus={run.status}
-          selectedVideoAssetId={run.videoAssetId ? String(run.videoAssetId) : undefined}
-          currentThumbnail={currentThumbnail}
+      {compactLegacyRecord ? (
+        <LegacyRecordShelf
+          assetCount={assets?.length}
+          channelSlug={channelSlug}
+          hasCurrentThumbnail={Boolean(currentThumbnail?.thumbnailKey)}
         />
-      </div>
+      ) : (
+        <div id="recorded-work" className={styles.anchorTarget}>
+          <RunMediaWorkbench
+            key={runId}
+            assets={assets}
+            stages={stages}
+            runStatus={run.status}
+            selectedVideoAssetId={run.videoAssetId ? String(run.videoAssetId) : undefined}
+            currentThumbnail={currentThumbnail}
+          />
+        </div>
+      )}
 
       {run.youtubeVideoId && (
         <section className={styles.publishedSection}>
@@ -281,24 +302,52 @@ export default function RunDetailPage({
         </section>
       )}
 
-      <section id="pipeline-route" className={`${styles.pipelineSection} ${styles.anchorTarget}`}>
-        <header className={styles.sectionHeader}><span>02 / pipeline route</span><h2>What reported, in production order</h2><p>The map advances only from persisted stage rows. Queued means no stage receipt exists yet.</p></header>
-        {stages === undefined || (run && channel === undefined) ? (
-          <SkeletonList rows={5} />
-        ) : nodes.length > 0 ? (
-          <LivePipeline nodes={nodes} planSource={planSource} />
-        ) : (
-          <EmptyState
-            title="No pipeline blocks"
-            description="This run has no planned blocks and no stages recorded yet."
-          />
-        )}
-      </section>
+      {!compactLegacyRecord ? (
+        <>
+          <section id="pipeline-route" className={`${styles.pipelineSection} ${styles.anchorTarget}`}>
+            <header className={styles.sectionHeader}><span>02 / pipeline route</span><h2>What reported, in production order</h2><p>The map advances only from persisted stage rows. Queued means no stage receipt exists yet.</p></header>
+            {stages === undefined || (run && channel === undefined) ? (
+              <SkeletonList rows={5} />
+            ) : nodes.length > 0 ? (
+              <LivePipeline nodes={nodes} planSource={planSource} />
+            ) : (
+              <EmptyState
+                title="No pipeline blocks"
+                description="This run has no planned blocks and no stages recorded yet."
+              />
+            )}
+          </section>
 
-      <section id="run-console" className={`${styles.consoleSection} ${styles.anchorTarget}`}>
-        <LogConsole runId={run._id} runStatus={run.status} />
-      </section>
+          <section id="run-console" className={`${styles.consoleSection} ${styles.anchorTarget}`}>
+            <LogConsole runId={run._id} runStatus={run.status} />
+          </section>
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function LegacyRecordShelf({
+  assetCount,
+  channelSlug,
+  hasCurrentThumbnail,
+}: {
+  assetCount?: number;
+  channelSlug?: string;
+  hasCurrentThumbnail: boolean;
+}) {
+  return (
+    <section className={styles.legacyRecordShelf} aria-label="Legacy record scope">
+      <span className={styles.legacyRecordGlyph} aria-hidden="true">◇</span>
+      <div>
+        <small>Historical record</small>
+        <strong>No pipeline receipt is available</strong>
+        <p>{assetCount === undefined
+          ? "Checking retained media…"
+          : `${assetCount} retained ${assetCount === 1 ? "asset" : "assets"}${hasCurrentThumbnail ? " · current thumbnail recorded" : ""}.`}</p>
+      </div>
+      {channelSlug ? <Link className="btn-secondary" href={`/channels/${channelSlug}?tab=library`}>Open channel library</Link> : null}
+    </section>
   );
 }
 

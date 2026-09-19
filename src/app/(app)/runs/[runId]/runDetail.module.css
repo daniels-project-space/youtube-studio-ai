@@ -153,6 +153,15 @@
 .sectionHeader p { margin: 0; color: var(--color-faint); font-size: 0.68rem; line-height: 1.5; }
 .consoleSection { margin-top: 1.7rem; }
 
+/* A legacy row is historical evidence, not an empty modern workbench. */
+.legacyRecordShelf { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: .72rem; min-height: 74px; padding: .72rem .84rem; border: 1px solid var(--color-border); border-radius: 13px; background: linear-gradient(105deg,rgba(131,169,255,.055),transparent 38%),rgba(12,16,27,.52); }
+.legacyRecordGlyph { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid rgba(131,169,255,.24); border-radius: 9px; color: var(--color-blueprint); background: rgba(131,169,255,.055); }
+.legacyRecordShelf > div { display: grid; min-width: 0; gap: .14rem; }
+.legacyRecordShelf small { color: var(--color-blueprint); font: 700 .53rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.legacyRecordShelf strong { overflow: hidden; color: var(--color-fg); font: 650 .84rem/1.2 var(--font-display); text-overflow: ellipsis; white-space: nowrap; }
+.legacyRecordShelf p { margin: 0; color: var(--color-faint); font-size: .66rem; line-height: 1.35; }
+.legacyRecordShelf :global(.btn-secondary) { min-height: 34px; white-space: nowrap; }
+
 @keyframes receipt-scan { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
 @keyframes retention-load { 0% { background-position: 100% 0; } 100% { background-position: -120% 0; } }
 @keyframes package-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
@@ -176,6 +185,8 @@
   .packageDetailGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .packageScript { grid-column: 1 / -1; }
   .packageShotList { grid-template-columns: 1fr; }
+  .legacyRecordShelf { grid-template-columns: auto minmax(0,1fr); }
+  .legacyRecordShelf :global(.btn-secondary) { grid-column: 1 / -1; width: fit-content; }
 }
 
 @media (max-width: 540px) {
@@ -199,6 +210,7 @@
   .packageDetailGrid { grid-template-columns: 1fr; }
   .packageScript { grid-column: auto; }
   .packageArtifacts { grid-template-columns: 1fr; }
+  .legacyRecordShelf :global(.btn-secondary) { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
