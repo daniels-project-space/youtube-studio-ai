@@ -14,10 +14,9 @@ assert.match(page, /<section className=\{styles\.vault\}/);
 assert.match(page, /<VideoGrid\s+videos=\{page\.visible\}/);
 assert.match(page, /density="library"/,
   "the vault must use its compact, space-efficient review treatment rather than channel-detail cards");
-assert.match(page, /<LibraryMetric label="Visible"/);
-assert.match(page, /<LibraryMetric label="Channels"/);
-assert.match(page, /<LibraryMetric label="Legacy review"/,
-  "the summary metric must identify retained rows that require release-proof review");
+assert.match(page, /<section className=\{styles\.collectionBar\} aria-label="Library collections">/);
+assert.match(page, /<span>Legacy review<\/span><strong>\{loading \? "—" : legacyCount\}<\/strong>/,
+  "the collection switcher remains the one concise, actionable legacy-review count");
 assert.doesNotMatch(page, /ArtifactWorkRail|Recent masters/,
   "the Library must not render the same masters once in a recent rail and again in the vault");
 assert.equal(
@@ -44,8 +43,11 @@ assert.match(page, /Review legacy \{legacyCount\}/,
 assert.match(page, /defaultThumbnailReviewOpen/,
   "when verified masters are empty, the saved thumbnail work must be surfaced once instead of leaving the Library looking blank");
 assert.match(page, /currentCount === 0\s*&&\s*legacyCount > 0/);
-assert.match(css, /\.libraryDashboard/);
-assert.match(css, /\.libraryMetrics/);
+assert.match(css, /\.collectionBar/);
+assert.doesNotMatch(css, /\.libraryDashboard/,
+  "the Library must not repeat collection counts in a decorative dashboard rail");
+assert.doesNotMatch(css, /\.libraryMetrics/,
+  "the collection switcher is the canonical summary rather than a second metrics block");
 assert.match(css, /\.vault \{/);
 assert.match(css, /\.video-grid\[data-density="library"\]/);
 assert.doesNotMatch(css, /\.latestRail\s*\{/);

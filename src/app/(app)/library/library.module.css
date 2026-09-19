@@ -16,13 +16,6 @@
 :global(.video-card[data-density="library"] .video-card-footer > span) { display: none; }
 :global(.video-card[data-density="library"] .video-card-library-action) { min-height: 24px; margin-left: auto; padding: .25rem .42rem; }
 
-.libraryDashboard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  gap: .55rem;
-}
-
 .collectionBar {
   min-width: 0;
   display: flex;
@@ -65,24 +58,8 @@
 .collectionTabs button[aria-selected="true"] { border-color: var(--color-border); color: var(--color-fg); background: var(--color-surface-raised); }
 .collectionTabs span { font-size: .72rem; font-weight: 650; }
 .collectionTabs strong { min-width: 1.4rem; color: var(--color-accent); font: .68rem/1 var(--font-mono); text-align: right; }
-.evidenceNote { display: flex; align-items: center; gap: .4rem; color: var(--color-faint); font-size: .68rem; line-height: 1.25; }
+.evidenceNote { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--color-border); border-radius: 50%; }
 .evidenceNote i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--color-secondary); box-shadow: 0 0 0 4px rgba(182,223,98,.07); }
-
-.libraryMetrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(58px, 1fr));
-  gap: 1px;
-  margin: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 13px;
-  background: var(--color-border);
-}
-.libraryMetrics > div { display: grid; align-content: center; gap: .14rem; min-height: 54px; padding: .42rem .58rem; background: rgba(12,16,27,.76); }
-.libraryMetrics dt { color: var(--color-faint); font: 700 .59rem/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
-.libraryMetrics dd { margin: 0; color: var(--color-fg); font: 560 1.08rem/1 var(--font-display); }
-.libraryMetrics [data-tone="attention"] dd { color: var(--color-failed); }
-.libraryMetrics [data-tone="ready"] dd { color: var(--color-ok); }
 
 .packagingWorkshop { overflow: hidden; }
 .packagingWorkshop > summary { min-height: 58px; display: grid; grid-template-columns: auto minmax(150px, auto) minmax(180px, 1fr) auto; align-items: center; gap: .65rem; padding: .6rem .72rem; cursor: pointer; list-style: none; }
@@ -137,8 +114,6 @@
 }
 
 @media (max-width: 900px) {
-  .libraryDashboard { grid-template-columns: minmax(0, 1fr); }
-  .libraryMetrics { grid-template-columns: repeat(auto-fit, minmax(min(5rem, 100%), 1fr)); }
   .packagingWorkshop > summary { grid-template-columns: auto minmax(0,1fr) auto; }
   .packagingWorkshop > summary p { grid-column: 2 / 3; }
 }
@@ -148,7 +123,6 @@
   .collectionBar { align-items: stretch; flex-direction: column; }
   .collectionTabs { width: 100%; }
   .collectionTabs button { flex: 1 1 6rem; justify-content: space-between; }
-  .evidenceNote { justify-content: center; }
   .packagingWorkshop > summary { grid-template-columns: auto minmax(0,1fr) auto; }
   .packagingWorkshop > summary p { display: none; }
   .vault { padding: .62rem; }

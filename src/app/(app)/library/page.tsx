@@ -127,7 +127,6 @@ export default function LibraryPage() {
   // channel containers. Channel remains a first-class filter and each card
   // keeps its channel identity, but matching masters share one dense grid.
   const page = pageLibraryGroup(filtered, visibleLimit);
-  const matchingChannelCount = new Set(filtered.map((video) => video.channelSlug)).size;
   const lightboxVideos = lightbox ? filtered : [];
 
   const openLightbox = (video: VideoRow) => {
@@ -249,8 +248,7 @@ export default function LibraryPage() {
         subtitle="Review, archive, and restore saved masters."
       />
 
-      <div className={styles.libraryDashboard}>
-        <section className={styles.collectionBar} aria-label="Library collections">
+      <section className={styles.collectionBar} aria-label="Library collections">
           <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
             <button type="button" role="tab" aria-selected={collection === "current"} onClick={() => selectCollection("current")}>
               <span>Current masters</span><strong>{loading ? "—" : currentCount}</strong>
@@ -268,15 +266,8 @@ export default function LibraryPage() {
             aria-label="Current masters have a recorded final-master release proof"
           >
             <i aria-hidden="true" />
-            Release-proof status
           </span>
-        </section>
-        <dl className={styles.libraryMetrics} aria-label="Current library summary">
-          <LibraryMetric label="Visible" value={loading ? "—" : String(filtered.length)} />
-          <LibraryMetric label="Channels" value={loading ? "—" : String(matchingChannelCount)} />
-          <LibraryMetric label="Legacy review" value={loading ? "—" : String(legacyCount)} tone={legacyCount ? "attention" : "ready"} />
-        </dl>
-      </div>
+      </section>
 
       {collection !== "archived" ? (
         <details
@@ -423,8 +414,4 @@ export default function LibraryPage() {
       ) : null}
     </div>
   );
-}
-
-function LibraryMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "attention" | "ready" }) {
-  return <div data-tone={tone}><dt>{label}</dt><dd>{value}</dd></div>;
 }
