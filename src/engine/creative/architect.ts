@@ -31,6 +31,7 @@ import { agentJson } from "@/agents/mastra";
 import { registerAllBlocks } from "@/engine/blocks";
 import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
+import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
 import type { PipelineEntry } from "@/engine/types";
 import {
   assertPipelineMatchesContentLane,
@@ -707,7 +708,24 @@ function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
         })
         .join("\n");
       const caps = [t.addable ? "addable" : "", t.removable ? "removable" : "core"].filter(Boolean).join(", ");
-      return `  ${t.block} (${caps}) — ${t.purpose}\n    WHEN: ${t.whenToUse}${params ? `\n${params}` : ""}`;
+      const contract = MODULE_CONTRACTS[t.block];
+      const contractLine = contract
+        ? [
+            (contract.requiredConsumes ?? []).length
+              ? `requires ${(contract.requiredConsumes ?? []).join(", ")}`
+              : "requires none",
+            (contract.optionalConsumes ?? []).length
+              ? `accepts ${(contract.optionalConsumes ?? []).join(", ")}`
+              : "accepts no optional handoffs",
+            contract.capabilities.length
+              ? `provides ${(contract.capabilities ?? []).join(", ")}`
+              : "provides no capability",
+            (contract.requiredDownstreamCapabilities ?? []).length
+              ? `hands off to ${(contract.requiredDownstreamCapabilities ?? []).join(", ")}`
+              : "no required downstream handoff",
+          ].join("; ")
+        : "ABI UNREGISTERED — do not add this tool until its typed contract is registered";
+      return `  ${t.block} (${caps}) — ${t.purpose}\n    WHEN: ${t.whenToUse}\n    ABI: ${contractLine}${params ? `\n${params}` : ""}`;
     })
     .join("\n");
 }
