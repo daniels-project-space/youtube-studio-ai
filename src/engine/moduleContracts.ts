@@ -446,7 +446,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicQualityReceiptKey",
+      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicNativeWavKey", "musicQualityReceiptKey",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
         // Last-hop package-art verification for a current fictional scenario.
         "topic", "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure",
@@ -511,7 +511,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
 
   metadata: contract(["package.metadata"], {
     optionalConsumes: [
-      "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona",
+      "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona", "planItemId",
       "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
@@ -655,7 +655,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: ["topic", "beatManifest"],
     // The lane can only LOWER the engine's verifier refine-round cap; it is read
     // for spend tuning, never as an ambient content input.
-    optionalConsumes: ["contentLane"],
+    optionalConsumes: ["contentLane", "channelName", "styleDNA", "styleGrammar", "visualStyle"],
     providerProfiles: [managed, local],
     maxCostUsd: 25,
     qualityRequired: true,
@@ -1210,7 +1210,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief", "preparedImages"],
+    optionalConsumes: ["visualBrief", "preparedImages", "visualMatterReferenceAssets"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
     // A default 300-second H3 cinematic plan has 60 five-second edits. Every
     // shot may be identity-critical, so reserve two still candidates per shot
@@ -1263,7 +1263,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.h3_r2_pinned"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief"],
+    optionalConsumes: ["visualBrief", "visualMatterReferenceAssets"],
     providerProfiles: [minimaxH3],
     maxCostUsd: 35,
     maxCostUsdFor: (params, context) =>

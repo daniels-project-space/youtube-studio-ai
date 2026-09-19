@@ -1,7 +1,7 @@
 {
   "audit-json-contract-ceilings": 0,
   "audit-fail-open-gates": 1,
-  "audit-silent-degradation": 12,
+  "audit-silent-degradation": 11,
   "audit-inert-inputs": 2,
   "audit-inert-consumes": 6,
   "audit-dead-capability-gates": 11,
@@ -10,5 +10,5 @@
   "audit-unchecked-number-clamps": 3,
   "audit-contract-consumes-drift": 0,
   "audit-unproducible-consumes": 4,
-  "audit-undeclared-store-reads": 4
+  "audit-undeclared-store-reads": 0
 }
