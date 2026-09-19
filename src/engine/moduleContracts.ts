@@ -561,7 +561,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Also gone: f1Url/f1Key/f1ThumbnailBaseProvenance, loopUnitResolution,
       // videoDurationSec, styleGrammar, nicheIntel, healHints,
       // plannedThumbnailKey.
-      "channelName", "topic", "loopUnitKey",
+      "channelName", "loopUnitKey",
       "videoKey", "videoLocalPath", "styleDNA", "family", "persona",
       "niche", "seoDatabank", "competitors",
       "narrationText", "thumbnailPlaybook", "script", "quizPlan",

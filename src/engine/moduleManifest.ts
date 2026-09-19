@@ -117,7 +117,14 @@ export function manifestFromBlock(
 ): ModuleManifest {
   const requiredKeys = override?.requiredConsumes ?? block.consumes;
   const required = new Set(requiredKeys);
-  const optionalConsumes = (override?.optionalConsumes ?? []).filter((key) => !required.has(key));
+  const declaredOptionalConsumes = override?.optionalConsumes ?? [];
+  const inputOverlap = declaredOptionalConsumes.filter((key) => required.has(key));
+  if (inputOverlap.length) {
+    throw new Error(
+      `module ${block.id} declares required/optional input overlap: ${[...new Set(inputOverlap)].join(", ")}`,
+    );
+  }
+  const optionalConsumes = declaredOptionalConsumes;
   const optionalOutputKeys = new Set(override?.optionalProduces ?? []);
   const requiredOutputKeys = block.produces.filter((key) => !optionalOutputKeys.has(key));
   const effects = new Set<ModuleSideEffect>(override?.sideEffects ?? []);

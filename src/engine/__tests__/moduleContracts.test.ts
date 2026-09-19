@@ -162,6 +162,20 @@ function directContractAudit(): void {
   assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared literal store reads");
 }
 
+function contractInputDeclarationsAreUnambiguous(): void {
+  const overlaps = Object.entries(MODULE_CONTRACTS)
+    .flatMap(([id, contract]) => {
+      const required = new Set(contract.requiredConsumes ?? []);
+      const overlap = (contract.optionalConsumes ?? []).filter((key) => required.has(key));
+      return overlap.length ? [`${id}: ${[...new Set(overlap)].join(", ")}`] : [];
+    });
+  assert.deepEqual(
+    overlaps,
+    [],
+    "every module must declare each input as required or optional, never both",
+  );
+}
+
 function compileRepresentativeFamilies(): void {
   for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
     const design = designPipeline({
@@ -747,6 +761,7 @@ function main(): void {
     "production registry must not contain implicit legacy manifests",
   );
   directContractAudit();
+  contractInputDeclarationsAreUnambiguous();
   compileRepresentativeFamilies();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
