@@ -3489,6 +3489,12 @@ export const listRecent = query({
       limited.map(async (run) => {
         const channel = await getChannel(run.channelId);
         const live = run.status === "queued" || run.status === "running";
+        // Keep the compact history surface honest as well as the Overview:
+        // route-less historical rows remain viewable, but are never presented
+        // as current recoverable production work.
+        const pipelineSource = run.pipelineInvocationSnapshot && run.pipelineInvocationSha256
+          ? "frozen" as const
+          : "legacy_inferred" as const;
         const pipeline = live
           ? frozenRunPipelinePresentation({
               snapshot: run.pipelineInvocationSnapshot,
@@ -3520,6 +3526,7 @@ export const listRecent = query({
           automaticResumeLastError: run.automaticResumeLastError,
           channelName: channel?.name ?? "(unknown)",
           channelSlug: channel?.slug ?? "",
+          pipelineSource,
           ...(live
             ? {
                 stageProgress: summarizeRunStageProgress({

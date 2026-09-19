@@ -101,7 +101,11 @@ async function invoke<T>(definition: unknown, handlerContext: unknown, args: unk
 
 async function main(): Promise<void> {
   const fixture = context();
-  const recent = await invoke<Array<{ _id: string; channelName: string }>>(listRecent, fixture.handlerContext, {
+  const recent = await invoke<Array<{
+    _id: string;
+    channelName: string;
+    pipelineSource: "frozen" | "legacy_inferred";
+  }>>(listRecent, fixture.handlerContext, {
     ownerId: OWNER,
     limit: 6,
   });
@@ -114,6 +118,16 @@ async function main(): Promise<void> {
     ["runs:recent-b-1", "Beta"],
   ]);
   assert.equal(fixture.channelGets(), 2, "recent enrichment should read each channel once, even when runs repeat it");
+  assert.equal(
+    recent.find((run) => run._id === "runs:recent-a-1")?.pipelineSource,
+    "frozen",
+    "run history exposes a durable frozen route to distinguish current operations from historic evidence",
+  );
+  assert.equal(
+    recent.find((run) => run._id === "runs:recent-a-2")?.pipelineSource,
+    "legacy_inferred",
+    "run history explicitly marks a route-less record as legacy instead of letting the UI infer recovery authority",
+  );
 
   fixture.resetReads();
   const active = await invoke<Array<{ _id: string; channelName: string }>>(listActive, fixture.handlerContext, {
