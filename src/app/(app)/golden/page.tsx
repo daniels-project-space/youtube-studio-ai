@@ -718,6 +718,7 @@ function ModuleContract({ contract }: { contract: ModuleContractSurface }) {
   const outputs = [...contract.outputs, ...contract.optionalOutputs.map((key) => `optional · ${key}`)];
   const handoffs = contract.requiredDownstreamCapabilities;
   const handoffArtifacts = contract.requiredDownstreamConsumes;
+  const handoffContracts = contract.downstreamContracts;
   const missing = contract.missingExecutableIds;
   return (
     <section className={styles.moduleContract} aria-label="Executable module contract">
@@ -731,7 +732,9 @@ function ModuleContract({ contract }: { contract: ModuleContractSurface }) {
         <ContractLane
           label="Hands off"
           values={handoffs.map((capability) =>
-            handoffArtifacts[capability] ? `${capability} ← ${handoffArtifacts[capability]}` : capability,
+            handoffArtifacts[capability]
+              ? `${capability} ← ${handoffArtifacts[capability]}${handoffContracts[capability] ? ` · ${handoffContracts[capability].type} ${handoffContracts[capability].version} · ${handoffContracts[capability].persist}` : ""}`
+              : capability,
           )}
           tone="handoff"
           empty="No specialist handoff required"
