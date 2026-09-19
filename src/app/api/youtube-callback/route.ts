@@ -215,13 +215,22 @@ export async function GET(request: NextRequest) {
       status: "paused",
     });
 
-    // Auto-apply the app channel's details to the YouTube channel (description,
-    // country, language, banner) via the native API. Fire-and-forget.
+    // A newly connected channel should not look disconnected until the next
+    // six-hour cadence. Queue one bounded, owner-scoped refresh now; its
+    // durable cursor still prevents duplicate provider calls if the schedule
+    // is already working on the same channel.
+    //
+    // Branding and analytics are non-authoritative follow-ups to a successful
+    // connector write. A queue outage must never turn a completed Google
+    // consent flow into a false failure or weaken the explicit publish gate.
     if (process.env.TRIGGER_SECRET_KEY) {
       try {
         const { tasks } = await import("@trigger.dev/sdk");
-        await tasks.trigger("wire-youtube-branding", { channelId });
-      } catch { /* branding is best-effort; the link itself succeeded */ }
+        await Promise.all([
+          tasks.trigger("wire-youtube-branding", { channelId }),
+          tasks.trigger("stats-refresh", { ownerId }),
+        ]);
+      } catch { /* follow-up automation is best-effort; the link itself succeeded */ }
     }
 
     return redirectAndClearNonce(`${BASE}/channels/${slug}?yt=connected`);
