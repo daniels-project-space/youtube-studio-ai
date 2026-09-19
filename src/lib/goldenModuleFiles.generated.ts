@@ -237,6 +237,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "description": "visual · A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified MiniMax H3 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     "paths": [
       "src/engine/__tests__/stageBudget.test.ts",
+      "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/lofiBlocks.ts"
     ]
   },
@@ -326,6 +327,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "description": "intel · Topicraft — evidence-cited topic BETS (outlier bank + Reddit + autocomplete + competitor gaps), judge-gated portfolio",
     "paths": [
       "src/lib/__tests__/pipelineInvocationSnapshot.test.ts",
+      "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/documentaryCollageShortBlocks.ts",
       "src/trigger/blocks/intelligenceBlocks.ts",
       "src/trigger/blocks/lofiBlocks.ts"
@@ -393,7 +395,9 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "sound · Channel-scoped multi-track score with bounded provider routing and exact usage accounting",
     "paths": [
-      "src/trigger/blocks/lofiBlocks.ts"
+      "src/trigger/blocks/blockContext.ts",
+      "src/trigger/blocks/lofiBlocks.ts",
+      "src/trigger/blocks/musicBlocks.ts"
     ]
   },
   {
@@ -561,6 +565,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "paths": [
       "src/lib/__tests__/pipelineInvocationSnapshot.test.ts",
       "src/lib/__tests__/publishRetrySchedule.test.ts",
+      "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/bundleBlocks.ts",
       "src/trigger/blocks/growthBlocks.ts",
       "src/trigger/blocks/lofiBlocks.ts"
@@ -581,6 +586,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "visual · 9:16 short-form archetype (template D; families.ts visualEngine label \"shorts_cuts\" is a designer-internal switch, not a registered block) + long-form → Short repurposer (shorts_spinoff / documentary_short_candidates)",
     "paths": [
+      "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/documentaryCollageShortBlocks.ts",
       "src/trigger/blocks/lofiBlocks.ts"
     ]

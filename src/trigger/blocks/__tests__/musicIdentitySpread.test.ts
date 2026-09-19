@@ -25,7 +25,7 @@ import { join } from "node:path";
 
 import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
 
-const MUSIC = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8")
+const MUSIC = readFileSync(join(process.cwd(), "src/trigger/blocks/musicBlocks.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 const ARCHETYPES = readFileSync(join(process.cwd(), "src/engine/archetypes.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");

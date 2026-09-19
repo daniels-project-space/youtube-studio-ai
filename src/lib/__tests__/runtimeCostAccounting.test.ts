@@ -34,7 +34,7 @@ import {
   whiteboardTtsBillableCharacterCeiling,
   whiteboardTtsProviderCallCeiling,
 } from "@/lib/whiteboardSync";
-import { music } from "@/trigger/blocks/lofiBlocks";
+import { music } from "@/trigger/blocks/musicBlocks";
 import { qaVisual } from "@/trigger/blocks/narratedBlocks";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import { synthNarration, TtsError } from "@/lib/tts";

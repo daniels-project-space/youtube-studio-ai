@@ -5,6 +5,7 @@
  */
 import { register, _clear } from "./registry";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
+import { music } from "@/trigger/blocks/musicBlocks";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
@@ -51,6 +52,8 @@ export function registerAllBlocks(): void {
   // Template C (Lofi) blocks. metadata + thumbnail_gen come from the
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
+  // Shared music generation and prepared-track reuse for all channel families.
+  register(music);
   // Route-owned, provider-free bridge from a completed serialized Topic Select
   // receipt to the shared script/crew/QA consumers. Registration alone cannot
   // admit a route; the designer only materializes it for serialized_program/v1.

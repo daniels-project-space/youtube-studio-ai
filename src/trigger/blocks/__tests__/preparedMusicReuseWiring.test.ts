@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("../lofiBlocks.ts", import.meta.url), "utf8");
+const source = readFileSync(new URL("../musicBlocks.ts", import.meta.url), "utf8");
 const start = source.indexOf("export const music: Block =");
-const end = source.indexOf("export const assemble: Block =", start);
-const music = source.slice(start, end);
+assert.ok(start >= 0, "shared music must own the executable block");
+const music = source.slice(start);
 
 const prepared = music.indexOf('const preparedMusic = ctx.store["preparedMusic"]');
 const providerPrompt = music.indexOf("const providerPrompt = provider === \"minimax_music3\"");

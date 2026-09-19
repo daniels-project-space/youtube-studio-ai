@@ -21,6 +21,7 @@ import {
   serializedProgramEpisodeMemoryKey,
 } from "@/lib/serializedProgramEpisode";
 import { lofiBlocks, persistTopicAfterRouteValidation } from "../lofiBlocks";
+import { music as sharedMusic } from "../musicBlocks";
 import { narratedBlocks } from "../narratedBlocks";
 import { quizPlanningBlocks } from "../quizPlanningBlocks";
 import { syntheticScenarioBlocks } from "../syntheticScenarioBlocks";
@@ -105,7 +106,7 @@ const serializedNarratedContext = createSerializedProgramEpisodeContext({
 const topicSelect = runnable(lofiBlocks, "topic_select");
 const musicProgramPlan = runnable(lofiBlocks, "music_program_plan");
 const scenePlanner = runnable(lofiBlocks, "scene_planner");
-const music = runnable(lofiBlocks, "music");
+const music = sharedMusic.run;
 const loopClips = runnable(lofiBlocks, "loop_clips");
 const scriptGen = runnable(narratedBlocks, "script_gen");
 const qaScript = runnable(narratedBlocks, "qa_script");

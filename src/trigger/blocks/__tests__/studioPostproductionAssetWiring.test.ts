@@ -13,7 +13,7 @@ async function main(): Promise<void> {
     source("src/trigger/blocks/studioAssetLibraryBlocks.ts"),
     source("src/trigger/blocks/narratedBlocks.ts"),
     source("src/trigger/blocks/insertBlocks.ts"),
-    source("src/trigger/blocks/lofiBlocks.ts"),
+    source("src/trigger/blocks/musicBlocks.ts"),
     source("src/lib/remotionRender.ts"),
     source("src/remotion/QuoteOverlay.tsx"),
     source("src/remotion/DataInsert.tsx"),
