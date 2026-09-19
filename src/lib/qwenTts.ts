@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { ensureOpenRelayQwenReady } from "@/lib/openRelayQwen";
+import { ensureOpenRelayQwenReady, OPENRELAY_QWEN_WORKER_HOST } from "@/lib/openRelayQwen";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
@@ -463,6 +463,12 @@ function workerUrl(): string {
   }
   if (url.username || url.password || url.hash) {
     throw new QwenTtsError("QWEN3_TTS_WORKER_URL must not contain embedded credentials or a fragment");
+  }
+  if (
+    qwenTtsRuntimeProfile().provider === "openrelay" &&
+    (url.hostname !== OPENRELAY_QWEN_WORKER_HOST || url.pathname !== "/synthesize" || url.search)
+  ) {
+    throw new QwenTtsError("QWEN3_TTS_WORKER_URL must be the pinned private OpenRelay Qwen /synthesize endpoint");
   }
   return url.toString();
 }

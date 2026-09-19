@@ -24,7 +24,7 @@ const vm = {
 process.env.OPENRELAY_API_KEY = "openrelay-test-token-that-is-longer-than-thirty-two-characters";
 process.env.QWEN3_TTS_WORKER_TOKEN = "qwen-test-token-that-is-longer-than-thirty-two-characters";
 process.env.OPENRELAY_QWEN_VM_ID = vm.id;
-process.env.QWEN3_TTS_WORKER_URL = "https://yt-qwen3-tts-3090-primary.run.openrelay.inc/synthesize";
+process.env.QWEN3_TTS_WORKER_URL = "https://yt-qwen3-tts-3090-primary-mu7djbzr.run.openrelay.inc/synthesize";
 
 const health = {
   schema: "qwen3-tts-worker/v2",
@@ -63,6 +63,14 @@ async function main() {
   const drainCall = calls.find((call) => call.url.endsWith("/control/drain"));
   assert.equal(drainCall?.headers.get("authorization"), null);
   assert.equal(drainCall?.headers.get("x-worker-authorization"), `Bearer ${process.env.QWEN3_TTS_WORKER_TOKEN}`);
+
+  process.env.QWEN3_TTS_WORKER_URL = "https://wrong-worker.example/synthesize";
+  const callsBeforeBadUrl = calls.length;
+  await assert.rejects(
+    () => ensureOpenRelayQwenReady({ fetchImpl, wait: async () => {} }),
+    /pinned private HTTPS Qwen/i,
+  );
+  assert.equal(calls.length, callsBeforeBadUrl, "an unpinned endpoint must be rejected before a provider restart");
   console.log("OPENRELAY QWEN LIFECYCLE CONTRACT PASS");
 }
 

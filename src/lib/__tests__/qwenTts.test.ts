@@ -107,6 +107,13 @@ async function main(): Promise<void> {
     "weekly narration must retain both its frozen brief and the channel Style DNA",
   );
 
+  process.env.QWEN3_TTS_RUNTIME_PROFILE = "openrelay-3090-persistent";
+  process.env.QWEN3_TTS_WORKER_URL = "https://yt-qwen3-tts-3090-primary-mu7djbzr.run.openrelay.inc/synthesize";
+  assert.equal(hasQualifiedQwenTts(), true, "the admitted OpenRelay profile must accept only its pinned worker");
+  process.env.QWEN3_TTS_WORKER_URL = "https://wrong-worker.example/synthesize";
+  assert.equal(qwenTtsReadiness().configured, false, "an unpinned OpenRelay URL must not be considered runnable");
+  process.env.QWEN3_TTS_WORKER_URL = "https://yt-qwen3-tts-3090-primary-mu7djbzr.run.openrelay.inc/synthesize";
+
   const audio = new Uint8Array(2_048).fill(23);
   audio.set([0x49, 0x44, 0x33], 0);
   let requests = 0;

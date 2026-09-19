@@ -1,6 +1,9 @@
 import { OpenRelayVmClient, type OpenRelayVm } from "@/lib/openRelay";
 
 export const OPENRELAY_QWEN_VM_NAME = "yt-qwen3-tts-3090-primary" as const;
+/** The one private worker endpoint bound to the managed Qwen 3090 VM. */
+export const OPENRELAY_QWEN_WORKER_HOST =
+  "yt-qwen3-tts-3090-primary-mu7djbzr.run.openrelay.inc" as const;
 export const OPENRELAY_QWEN_IDLE_SECONDS = 300 as const;
 
 export interface OpenRelayQwenHealth {
@@ -40,8 +43,11 @@ function synthesisUrl(): URL {
   } catch {
     throw new Error("QWEN3_TTS_WORKER_URL is missing or invalid");
   }
-  if (url.protocol !== "https:" || url.pathname !== "/synthesize") {
-    throw new Error("QWEN3_TTS_WORKER_URL must be the private HTTPS /synthesize endpoint");
+  if (
+    url.protocol !== "https:" || url.hostname !== OPENRELAY_QWEN_WORKER_HOST ||
+    url.pathname !== "/synthesize" || url.search || url.username || url.password || url.hash
+  ) {
+    throw new Error("QWEN3_TTS_WORKER_URL must be the pinned private HTTPS Qwen /synthesize endpoint");
   }
   return url;
 }
@@ -124,6 +130,9 @@ export async function ensureOpenRelayQwenReady(args?: {
   wait?: (milliseconds: number) => Promise<void>;
   timeoutMs?: number;
 }): Promise<OpenRelayQwenHealth> {
+  // Validate the pinned destination before a provider restart. A malformed or
+  // redirected URL must not turn a configuration typo into GPU billing.
+  synthesisUrl();
   const fetchImpl = args?.fetchImpl ?? fetch;
   const wait = args?.wait ?? sleep;
   const client = new OpenRelayVmClient({ apiKey: providerKey(), fetchImpl });
