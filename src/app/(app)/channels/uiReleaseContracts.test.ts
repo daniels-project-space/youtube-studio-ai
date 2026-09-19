@@ -20,6 +20,8 @@ const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "ut
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const golden = readFileSync(join(root, "src/app/(app)/golden/page.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
+const runDetailCss = readFileSync(join(root, "src/app/(app)/runs/[runId]/runDetail.module.css"), "utf8");
+const channelHubCss = readFileSync(join(root, "src/app/(app)/channels/[slug]/channelHub.module.css"), "utf8");
 const designer = [
   readFileSync(join(root, "src/engine/designer.ts"), "utf8"),
   readFileSync(join(root, "src/engine/designerCore.ts"), "utf8"),
@@ -192,6 +194,14 @@ assert.match(wizardCss, /\.showMoreNiches/);
 assert.match(wizardCss, /\.buildWorkspace/);
 assert.match(wizardCss, /@media \(max-width: 680px\)/);
 assert.match(wizardCss, /prefers-reduced-motion/);
+// Small decorative text must not make a real navigation, recovery, or
+// disclosure control hard to hit. Preserve compact visual copy with a stable
+// 32px interaction target across the post-release audit's affected surfaces.
+assert.match(scheduleCss, /\.bulkH3Link \{ min-height: 32px;/);
+assert.match(runDetailCss, /\.backLink \{ min-height: 32px;/);
+assert.match(runDetailCss, /\.errorAction \{ min-height: 32px;/);
+assert.match(runDetailCss, /\.errorTechnical summary \{ min-height: 32px;/);
+assert.match(channelHubCss, /\.youtubeNote summary \{ min-height: 32px;/);
 
 // Creator choice must expose the family-specific, mechanics-only quality bar
 // that production review will enforce. This is original craft calibration, not
