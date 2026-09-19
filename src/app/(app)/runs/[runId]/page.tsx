@@ -108,11 +108,14 @@ export default function RunDetailPage({
       ? channel.pipeline.map((p: { block: string }) => p.block)
       : [...LOFI_BLOCK_IDS];
   const planSource = run.pipeline ? "frozen" : "legacy";
-  // Old rows have no immutable invocation or stage ledger. Projecting today's
-  // channel plan into a long empty workbench makes a historical record look
-  // actionable, then repeats "waiting" across the page. Keep that evidence
-  // visible in the summary, but do not manufacture a pipeline UI from it.
-  const compactLegacyRecord = planSource === "legacy" && stages !== undefined && stages.length === 0;
+  // Old rows have no immutable invocation. Projecting today's channel plan
+  // into their workbench invents work that this run never planned — including
+  // a long list of "waiting" stages after a historical failure. Keep only the
+  // persisted failure / saved artifacts in the compact historical record.
+  // Every current run carries a frozen invocation, so this never suppresses
+  // live progress or a retryable modern run.
+  const compactLegacyRecord = planSource === "legacy" && stages !== undefined;
+  const legacyReceiptCount = stages?.length ?? 0;
 
   const stageByBlock = new Map<string, PipelineStage>();
   for (const s of stages ?? []) stageByBlock.set(s.block, s);
@@ -174,10 +177,12 @@ export default function RunDetailPage({
             </p>
           </div>
           <div className={styles.heroProgress} data-live={live && !compactLegacyRecord ? "true" : undefined}>
-            <div><small>Receipt coverage</small><strong>{receiptProgress}%</strong></div>
-            <div className={styles.progressTrack} style={{ "--receipt-progress": `${receiptProgress}%` } as React.CSSProperties}><i /></div>
+            <div><small>{compactLegacyRecord ? "Record type" : "Receipt coverage"}</small><strong>{compactLegacyRecord ? "Legacy" : `${receiptProgress}%`}</strong></div>
+            {!compactLegacyRecord && <div className={styles.progressTrack} style={{ "--receipt-progress": `${receiptProgress}%` } as React.CSSProperties}><i /></div>}
             <span>{compactLegacyRecord
-              ? "No stage ledger was saved for this older record"
+              ? legacyReceiptCount
+                ? `${legacyReceiptCount} saved stage receipt${legacyReceiptCount === 1 ? "" : "s"}; no frozen pipeline was saved`
+                : "No stage ledger or frozen pipeline was saved for this older record"
               : activeStage
                 ? `Working now · ${blockLabel(activeStage.block)}`
                 : `${reportedStages} of ${nodes.length} planned stages reported`}</span>
@@ -203,7 +208,7 @@ export default function RunDetailPage({
             }
           />
           <Field label="Cost" value={fmtUsd(run.costTotal)} mono />
-          <Field label="Stage ledger" value={compactLegacyRecord ? "Not recorded" : `${reportedStages}/${nodes.length} reported`} mono />
+          <Field label="Stage ledger" value={compactLegacyRecord ? legacyReceiptCount ? `${legacyReceiptCount} saved` : "Not recorded" : `${reportedStages}/${nodes.length} reported`} mono />
           <Field
             label="Release evidence"
             value={<ReleaseEvidenceBadge status={run.releaseEvidenceStatus} compact />}
