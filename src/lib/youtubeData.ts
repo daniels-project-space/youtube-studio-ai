@@ -107,6 +107,12 @@ export function hasYouTubeDataAccess(): boolean {
 }
 
 export interface YouTubeDataAccess {
+  /**
+   * A short-lived channel-bound grant that a caller has already verified.
+   * Supplying it avoids a second refresh-token exchange for every Data API
+   * request in the same bounded operation.
+   */
+  accessToken?: string;
   /** Exact channel-bound connector token; preferred whenever supplied. */
   refreshToken?: string;
   /** Refuse API-key/global fallbacks for tenant-owned data. */
@@ -121,7 +127,10 @@ async function get<T>(
   const apiKey = process.env.YOUTUBE_DATA_API_KEY;
   let url: string;
   const headers: Record<string, string> = {};
-  if (access.refreshToken) {
+  if (access.accessToken) {
+    headers.Authorization = `Bearer ${access.accessToken}`;
+    url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
+  } else if (access.refreshToken) {
     const { getAccessToken } = await import("@/lib/youtube");
     headers.Authorization = `Bearer ${await getAccessToken(access.refreshToken)}`;
     url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;

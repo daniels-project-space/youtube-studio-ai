@@ -18,6 +18,12 @@ import {
   fetchVideoStats,
 } from "@/lib/youtubeData";
 import {
+  getChannelMine,
+  refreshAccessTokenGrant,
+  YT_SCOPES,
+  YouTubeError,
+} from "@/lib/youtube";
+import {
   DeterministicYouTubeConnectorError,
   requireInternalQuerySecret,
   requireYouTubeConnector,
@@ -85,6 +91,14 @@ type StatsRefreshWorker = {
   workerToken: string;
 };
 
+const CONNECTOR_REVALIDATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const REQUIRED_CONNECTOR_SCOPES = YT_SCOPES.split(" ").filter(Boolean);
+
+type LiveConnectorCheck =
+  | { action: "ready"; accessToken: string }
+  | { action: "reconnect_required"; reason: string }
+  | { action: "retry_later"; reason: string };
+
 type RunHistoryPage = {
   page: Array<{ youtubeVideoId?: string | null }>;
   isDone: boolean;
@@ -103,6 +117,114 @@ function utcDate(now = Date.now()): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Google uses invalid_grant specifically when a refresh grant is no longer usable. */
+export function isRevokedYouTubeRefreshGrant(error: unknown): boolean {
+  return error instanceof YouTubeError && /token refresh failed:\s*invalid_grant\b/iu.test(error.message);
+}
+
+export function connectorScopeHealth(scopes: readonly string[]): "healthy" | "partial" | "unknown" {
+  const normalized = [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
+  if (!normalized.length) return "unknown";
+  return REQUIRED_CONNECTOR_SCOPES.every((scope) => normalized.includes(scope))
+    ? "healthy"
+    : "partial";
+}
+
+export function connectorNeedsLiveRevalidation(input: {
+  readonly scopeHealth: "healthy" | "partial" | "unknown";
+  readonly validatedAt?: number;
+  readonly now: number;
+}): boolean {
+  return input.scopeHealth !== "healthy" ||
+    !Number.isFinite(input.validatedAt) ||
+    (input.now - Number(input.validatedAt)) >= CONNECTOR_REVALIDATION_INTERVAL_MS;
+}
+
+/**
+ * Confirm that the exact persisted connector can still mint a grant and, when
+ * due, still belongs to its sealed YouTube destination.  This is deliberately
+ * bounded to the analytics cadence and returns the same short-lived token for
+ * the two Data API reads below, rather than refreshing it again per request.
+ */
+async function validateStatsConnector(args: {
+  readonly convex: ConvexHttpClient;
+  readonly secret: string;
+  readonly ownerId: string;
+  readonly channelId: Id<"channels">;
+  readonly connector: Awaited<ReturnType<typeof requireYouTubeConnector>>;
+  readonly now: number;
+}): Promise<LiveConnectorCheck> {
+  try {
+    const grant = await refreshAccessTokenGrant(args.connector.refreshToken);
+    if (!connectorNeedsLiveRevalidation({
+      scopeHealth: args.connector.scopeHealth,
+      validatedAt: args.connector.validatedAt,
+      now: args.now,
+    })) {
+      return { action: "ready", accessToken: grant.accessToken };
+    }
+
+    const selected = await getChannelMine(grant.accessToken);
+    if (!selected?.id || selected.id !== args.connector.ytChannelId) {
+      const reason = "live YouTube destination no longer matches this channel-bound connector";
+      await args.convex.mutation(api.youtubeAuth.validate, {
+        secret: args.secret,
+        ownerId: args.ownerId,
+        channelId: args.channelId,
+        grantedScopes: args.connector.grantedScopes,
+        scopeHealth: "unknown",
+        validatedAt: args.now,
+        lastError: reason,
+      });
+      return { action: "reconnect_required", reason };
+    }
+
+    // A refresh response normally repeats the grant scopes, but Google may
+    // omit them when they have not changed. Preserve the stored consent record
+    // in that case; an empty response is not evidence that scopes vanished.
+    const grantedScopes = grant.grantedScopes.length
+      ? grant.grantedScopes
+      : args.connector.grantedScopes;
+    const scopeHealth = connectorScopeHealth(grantedScopes);
+    await args.convex.mutation(api.youtubeAuth.validate, {
+      secret: args.secret,
+      ownerId: args.ownerId,
+      channelId: args.channelId,
+      grantedScopes,
+      scopeHealth,
+      validatedAt: args.now,
+      ...(scopeHealth === "healthy"
+        ? {}
+        : { lastError: "live connector is missing one or more required YouTube scopes" }),
+    });
+    return scopeHealth === "healthy"
+      ? { action: "ready", accessToken: grant.accessToken }
+      : { action: "reconnect_required", reason: "live connector is missing one or more required YouTube scopes" };
+  } catch (error) {
+    const reason = errorMessage(error);
+    if (!isRevokedYouTubeRefreshGrant(error)) {
+      return { action: "retry_later", reason };
+    }
+    try {
+      await args.convex.mutation(api.youtubeAuth.validate, {
+        secret: args.secret,
+        ownerId: args.ownerId,
+        channelId: args.channelId,
+        grantedScopes: args.connector.grantedScopes,
+        scopeHealth: "unknown",
+        validatedAt: args.now,
+        lastError: reason,
+      });
+    } catch (recordError) {
+      return {
+        action: "retry_later",
+        reason: `${reason}; connector failure could not be recorded: ${errorMessage(recordError)}`,
+      };
+    }
+    return { action: "reconnect_required", reason };
+  }
 }
 
 async function admitOrResumeStatsRefreshBatch(args: {
@@ -242,7 +364,7 @@ async function resolveBatchVideoStats(args: {
   worker: StatsRefreshWorker;
   batch: StatsRefreshBatch;
   expectedYouTubeChannelId: string;
-  refreshToken: string;
+  accessToken: string;
   log: Logger;
 }): Promise<
   | { action: "ready"; stats: StatsRefreshVideoStat[] }
@@ -281,7 +403,7 @@ async function resolveBatchVideoStats(args: {
   let fetched: StatsRefreshVideoStat[] | undefined;
   try {
     fetched = await fetchVideoStats(args.batch.videoIds, {
-      refreshToken: args.refreshToken,
+      accessToken: args.accessToken,
       requireConnector: true,
     });
     const crossedAccount = fetched.find((row) => row.channelId !== args.expectedYouTubeChannelId);
@@ -343,7 +465,7 @@ async function resolveBatchChannelRollup(args: {
   worker: StatsRefreshWorker;
   batch: StatsRefreshBatch;
   expectedYouTubeChannelId: string;
-  refreshToken: string;
+  accessToken: string;
   log: Logger;
 }): Promise<
   | { action: "ready"; rollup: StatsRefreshChannelRollup }
@@ -386,7 +508,7 @@ async function resolveBatchChannelRollup(args: {
   let rollup: StatsRefreshChannelRollup | undefined;
   try {
     const rows = await fetchChannelStats([args.expectedYouTubeChannelId], {
-      refreshToken: args.refreshToken,
+      accessToken: args.accessToken,
       requireConnector: true,
     });
     const row = rows.find((candidate) => candidate.channelId === args.expectedYouTubeChannelId);
@@ -517,14 +639,10 @@ export async function statsRefreshCore(
     const channelId = channel._id as Id<"channels">;
     let connector: Awaited<ReturnType<typeof requireYouTubeConnector>>;
     try {
-      connector = await requireYouTubeConnector(convex, {
-        channelId,
-        ownerId,
-        requiredScopes: [
-          "https://www.googleapis.com/auth/youtube",
-          "https://www.googleapis.com/auth/youtube.readonly",
-        ],
-      });
+      // Scope freshness is proven by validateStatsConnector below. Requiring
+      // the stale stored list here made an otherwise-valid older connector
+      // permanently impossible to revalidate or heal.
+      connector = await requireYouTubeConnector(convex, { channelId, ownerId });
       if (!connector.ytChannelId) {
         throw new DeterministicYouTubeConnectorError(
           "missing_youtube_channel_id",
@@ -571,6 +689,22 @@ export async function statsRefreshCore(
       connectorId: connector.connectorId,
       connectorVersion: connector.tokenVersion,
     };
+    const liveConnector = await validateStatsConnector({
+      convex,
+      secret,
+      ownerId,
+      channelId,
+      connector,
+      now: Date.now(),
+    });
+    if (liveConnector.action !== "ready") {
+      connectorsMissing++;
+      log(
+        `stats refresh connector ${liveConnector.action === "reconnect_required" ? "requires reconnect" : "validation deferred"} for \"${channel.name}\"`,
+        { error: liveConnector.reason },
+      );
+      continue;
+    }
     let admitted:
       | { action: "batch"; batch: StatsRefreshBatch }
       | { action: "cadence_completed" }
@@ -631,7 +765,7 @@ export async function statsRefreshCore(
       worker,
       batch: worker.batch,
       expectedYouTubeChannelId: connector.ytChannelId,
-      refreshToken: connector.refreshToken,
+      accessToken: liveConnector.accessToken,
       log,
     });
     if (video.action !== "ready") {
@@ -649,7 +783,7 @@ export async function statsRefreshCore(
       worker,
       batch: worker.batch,
       expectedYouTubeChannelId: connector.ytChannelId,
-      refreshToken: connector.refreshToken,
+      accessToken: liveConnector.accessToken,
       log,
     });
     if (rollup.action !== "ready") {

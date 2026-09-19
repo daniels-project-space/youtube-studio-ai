@@ -15,6 +15,8 @@ export interface YouTubeConnectorCredential {
   ytTitle?: string;
   grantedScopes: string[];
   scopeHealth: "healthy" | "partial" | "unknown";
+  /** Last successful live connector validation, never merely a storage write. */
+  validatedAt?: number;
   storage: "encrypted" | "legacy-plaintext";
 }
 
@@ -126,6 +128,7 @@ export async function requireYouTubeConnector(
       ytTitle: auth.ytTitle,
       grantedScopes,
       scopeHealth: auth.scopeHealth ?? "unknown",
+      ...(typeof auth.validatedAt === "number" ? { validatedAt: auth.validatedAt } : {}),
       storage: "encrypted",
     };
   }
@@ -142,6 +145,7 @@ export async function requireYouTubeConnector(
       ytTitle: auth.ytTitle,
       grantedScopes,
       scopeHealth: auth.scopeHealth ?? "unknown",
+      ...(typeof auth.validatedAt === "number" ? { validatedAt: auth.validatedAt } : {}),
       storage: "legacy-plaintext",
     };
   }
