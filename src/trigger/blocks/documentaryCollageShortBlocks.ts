@@ -45,6 +45,35 @@ import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { PRICE } from "@/engine/pricing";
 
+function cleanVisualText(value: unknown, max = 180): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, max) : null;
+}
+
+/**
+ * Converts persisted channel identity into one bounded prompt contract for
+ * DocuMotion. Documentary style remains a rendering grammar; this adds the
+ * channel-specific world that makes two history/finance channels recognizably
+ * different without letting a run invent a new identity mid-series.
+ */
+export function documentaryChannelWorld(store: StageContext["store"]): string | undefined {
+  const dna = store["styleDNA"] as Partial<import("@/engine/creative/types").StyleDNA> | undefined;
+  const clauses = [
+    cleanVisualText(store["channelName"]),
+    cleanVisualText(store["styleGrammar"], 260),
+    cleanVisualText(store["visualStyle"], 220),
+    cleanVisualText(dna?.recurringSubject, 180) && `recurring subject: ${cleanVisualText(dna?.recurringSubject, 180)}`,
+    cleanVisualText(dna?.setting, 220) && `world: ${cleanVisualText(dna?.setting, 220)}`,
+    cleanVisualText(dna?.composition, 180) && `composition: ${cleanVisualText(dna?.composition, 180)}`,
+    cleanVisualText(dna?.colorGrade, 160) && `grade: ${cleanVisualText(dna?.colorGrade, 160)}`,
+    Array.isArray(dna?.palette) && dna.palette.length ? `palette: ${dna.palette.filter((value): value is string => typeof value === "string").slice(0, 5).join(", ")}` : null,
+    Array.isArray(dna?.motifs) && dna.motifs.length ? `motifs: ${dna.motifs.filter((value): value is string => typeof value === "string").slice(0, 5).join("; ")}` : null,
+    Array.isArray(dna?.visualAvoid) && dna.visualAvoid.length ? `avoid: ${dna.visualAvoid.filter((value): value is string => typeof value === "string").slice(0, 5).join("; ")}` : null,
+  ].filter((value): value is string => Boolean(value));
+  return clauses.length ? clauses.join(" · ").slice(0, 900) : undefined;
+}
+
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
@@ -360,6 +389,7 @@ export const documotionShort: Block = {
     const manifest = parseShortStrategyManifest(ctx.store["beatManifest"]);
     const styleId = typeof ctx.params["styleId"] === "string" ? ctx.params["styleId"] : "archival_collage";
     const plan = docuPlanForDocumentaryCollageShort(manifest, styleId);
+    const channelWorld = documentaryChannelWorld(ctx.store);
     const generatedAssetCallCeiling = plan.shots.reduce(
       (total, shot) => total + (shot.assets?.length ?? 0) * 2,
       0,
@@ -410,6 +440,7 @@ export const documotionShort: Block = {
     const result = await craftDocuMotion({
       topic,
       style: styleId,
+      channelWorld,
       durationSec: targetDurationSec,
       runDir,
       outPath,

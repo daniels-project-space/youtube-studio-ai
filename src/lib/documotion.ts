@@ -737,10 +737,12 @@ export async function planDocu(args: {
   topic: string;
   style: DocuStyleDef;
   referenceNotes?: string;
+  /** Stable channel-specific visual direction, separate from the renderer's genre style. */
+  channelWorld?: string;
   durationSec: number;
   log?: Logger;
 }): Promise<DocuPlan> {
-  const { topic, style, referenceNotes, durationSec, log } = args;
+  const { topic, style, referenceNotes, channelWorld, durationSec, log } = args;
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
   // ~2.3 words/sec at documentary pace — the narration LENGTH sets the video
   // length now, so this must fill the target duration (not under-write it).
@@ -748,6 +750,7 @@ export async function planDocu(args: {
   const base =
     `You are the writer + director of ${style.worldDescription}\n` +
     `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
+    (channelWorld ? `CHANNEL IDENTITY (apply this to every shot; it must not be replaced by generic genre imagery): ${channelWorld}\n` : "") +
     `Make the first ${durationSec} seconds of a documentary about: ${topic}.\n` +
     (referenceNotes ? `REFERENCE (beats + visual grammar to honour): ${referenceNotes}\n` : "") +
     `WORK IN THIS ORDER:\n` +
@@ -872,7 +875,13 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
  * briefs stand. (Doctrine in src/lib/visualDirection.ts is reusable by other
  * narrated engines.)
  */
-export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, topic: string, log?: Logger): Promise<void> {
+export async function directDocuVisuals(
+  plan: DocuPlan,
+  style: DocuStyleDef,
+  topic: string,
+  log?: Logger,
+  channelWorld?: string,
+): Promise<void> {
   const arc = plan.shots.map((s, i) => `${i}. ${s.narration}`).join("\n");
   const shotReqs = plan.shots
     .map((s, i) => {
@@ -887,7 +896,9 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
     }>({
       prompt:
         `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
-        `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n\n` +
+        `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n` +
+        (channelWorld ? `CHANNEL IDENTITY (every generated asset must retain it): ${channelWorld}\n` : "") +
+        "\n" +
         `THE NARRATION ARC (keep the SAME figures/places consistent across shots):\n${arc}\n\n` +
         `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote, but its optional bg brief MUST describe only a text-free atmospheric picture plate with negative space; NEVER copy the quote/attribution into an asset brief.\n\n` +
         `SOURCE — set "source" per asset. PREFER "generate" for almost everything: a composed, period-accurate GENERATED image is more faithful to the line and on-style. Use "archival" ONLY for a genuinely iconic, UNAMBIGUOUS public-domain photograph, with a precise "query" — and NEVER for a person/thing whose name also matches a DIFFERENT subject (e.g. "Ferdinand de Lesseps" also returns Panama Canal material → GENERATE him instead). When in doubt, generate.\n\n` +
@@ -1123,6 +1134,7 @@ export async function generateDocuAssets(
   fixNotes?: Record<string, string>,
   format: DocuFormat = "long",
   generateImage?: DocuImageGenerator,
+  channelWorld?: string,
 ): Promise<DocuAssetFile[]> {
   await mkdir(assetsDir, { recursive: true });
   const jobs: AssetJob[] = [];
@@ -1139,13 +1151,14 @@ export async function generateDocuAssets(
         ? `Atmospheric closing background plate with calm negative space, visually expressing: ${(shot.visualCues ?? []).join("; ") || shot.beat || "a restrained documentary conclusion"}`
         : a.brief;
     const framing = getDocuRoleFraming(style, a.role, format);
+    const worldHint = channelWorld ? `${style.label}; channel identity: ${channelWorld}` : style.label;
     if (existsSync(finalPath) && !externalFix) {
       if (await hasCurrentAssetApproval(finalPath)) {
         return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256: await assetDigest(finalPath) };
       }
       // Legacy caches predate the proof sidecar. Verify once, persist the
       // content hash, then future resumes remain zero-provider and tamper-safe.
-      const cachedGate = await gateAsset(finalPath, a.role, pictureBrief, style.label);
+      const cachedGate = await gateAsset(finalPath, a.role, pictureBrief, worldHint);
       if (!cachedGate.verdictValid) {
         throw new Error(`documotion asset s${i}/${a.id}: ${cachedGate.fix}; refusing image spend without a working gate`);
       }
@@ -1168,7 +1181,7 @@ export async function generateDocuAssets(
         const url = await searchWikimediaImageUrl(a.query);
         if (url) {
           await downloadTo(url, rawPath);
-          const archivalGate = await gateAsset(rawPath, a.role, a.brief, style.label);
+          const archivalGate = await gateAsset(rawPath, a.role, a.brief, worldHint);
           if (!archivalGate.verdictValid) {
             throw new Error(`documotion asset s${i}/${a.id}: ${archivalGate.fix}; refusing fallback image spend`);
           }
@@ -1206,9 +1219,9 @@ export async function generateDocuAssets(
       for (let attempt = 0; attempt < 2; attempt++) {
         const prompt = buildDocuAssetPrompt({
           framingPrefix: framing.prefix,
-          pictureBrief: needsAlpha
+          pictureBrief: `${needsAlpha
             ? `${pictureBrief}. ISOLATED CUTOUT SOURCE: place the one complete subject against a perfectly flat solid chroma green #00FF00 background, edge to edge, with no floor, scenery, shadow, gradient, spill, or green clothing`
-            : pictureBrief,
+            : pictureBrief}${channelWorld ? `. CHANNEL IDENTITY — retain these stable visual anchors while depicting this exact beat: ${channelWorld}` : ""}`,
           stillStyle: style.stillStyle,
           quality: QUALITY,
           focus,
@@ -1223,7 +1236,7 @@ export async function generateDocuAssets(
           seed: 41_000 + i * 1_000 + attempt * 101 + a.id.length,
         });
         await writeFile(rawPath, bytes);
-        const gate = await gateAsset(rawPath, a.role, pictureBrief, style.label);
+        const gate = await gateAsset(rawPath, a.role, pictureBrief, worldHint);
         if (!gate.verdictValid) {
           throw new Error(`documotion asset s${i}/${a.id}: ${gate.fix}; refusing a second image submission`);
         }
@@ -1581,6 +1594,8 @@ export interface CraftDocuArgs {
   /** Channel world id (src/remotion/docuStyles.ts). Default archival_collage. */
   style?: string;
   referenceNotes?: string;
+  /** Persisted identity direction: keeps this channel's visual world distinct inside a shared genre renderer. */
+  channelWorld?: string;
   durationSec?: number;
   runDir: string;
   outPath?: string;
@@ -1649,6 +1664,13 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   const runDir = args.runDir;
   const maxRounds = args.maxRefineRounds ?? 2;
   const style = getStyle(args.style);
+  // This is a bounded rendering instruction, never an unconstrained second
+  // planning brief. The same frozen channel world goes to planning, art, and
+  // review so one shared documentary renderer cannot flatten every channel
+  // into the default archival-collage look.
+  const channelWorld = typeof args.channelWorld === "string"
+    ? args.channelWorld.replace(/\s+/g, " ").trim().slice(0, 900)
+    : "";
   // Render children do not inherit the parent runner's async-local usage
   // scopes. Keep an explicit local scope so their real provider spend returns
   // with the patch and the parent can enforce the frozen run budget.
@@ -1679,7 +1701,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     }
     log(`documotion: plan loaded from cache (${plan.shots.length} shots, style ${plan.styleId})`);
   } else {
-    plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });
+    plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, channelWorld, durationSec, log });
   }
   // Every entry route receives visual direction plus label review exactly once
   // per run and exact base plan. The claim is durable before either provider
@@ -1718,7 +1740,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     }
     const usageBefore = modelUsageScope.snapshot();
     if (plan.shots.some((s) => !s.visualCues)) {
-      await directDocuVisuals(plan, style, args.topic, log);
+      await directDocuVisuals(plan, style, args.topic, log, channelWorld);
     }
     const outcome = await lintLabels(plan, style, log);
     const usageAfter = modelUsageScope.snapshot();
@@ -1751,7 +1773,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
   let assets = await imageUsageScope.run(() =>
-    generateDocuAssets(plan, style, join(runDir, "assets"), log, undefined, geometry.format, args.generateImage),
+    generateDocuAssets(plan, style, join(runDir, "assets"), log, undefined, geometry.format, args.generateImage, channelWorld),
   );
   const geoByShot: Record<number, CityGeo> = {};
   for (const [i, s] of plan.shots.entries()) {
@@ -1796,7 +1818,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   for (let round = 1; round <= maxRounds + 1; round++) {
     const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, fixedDursSec);
     const { framePaths, labels } = await renderVerifySet({ plan, specs, style, geometry, framesDir: join(runDir, `verify_r${round}`), log });
-    verdict = await verifyDocu({ framePaths, labels, worldHint: style.label, log });
+    verdict = await verifyDocu({ framePaths, labels, worldHint: channelWorld ? `${style.label}; channel identity: ${channelWorld}` : style.label, log });
     rounds = round;
     if (verdict.pass || round > maxRounds || !verdict.actions?.length) break;
     const applied = applyActions(verdict.actions, overrides, log);
@@ -1804,7 +1826,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     await writeFile(overridesPath, JSON.stringify(overrides, null, 2), "utf8");
     if (Object.keys(applied.assetFixes).length) {
       assets = await imageUsageScope.run(() =>
-        generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes, geometry.format, args.generateImage),
+        generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes, geometry.format, args.generateImage, channelWorld),
       );
     }
   }
