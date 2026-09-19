@@ -26,14 +26,19 @@ export interface TitleProfile {
 }
 
 export const TITLE_PROFILES: Record<TitleProfileId, TitleProfile> = {
-  browse_long: { id: "browse_long", hardMinChars: 25, hardMaxChars: 76, targetMinChars: 40, targetMaxChars: 70, targetMinWords: 5, targetMaxWords: 12, discovery: "hybrid", guidance: "Lead with the subject, then one clear tension or consequence." },
-  searchable_long: { id: "searchable_long", hardMinChars: 28, hardMaxChars: 76, targetMinChars: 38, targetMaxChars: 68, targetMinWords: 5, targetMaxWords: 11, discovery: "searchable", guidance: "Put the exact subject or problem first; add one differentiated payoff." },
-  serialized_lore: { id: "serialized_lore", hardMinChars: 25, hardMaxChars: 74, targetMinChars: 36, targetMaxChars: 66, targetMinWords: 5, targetMaxWords: 11, discovery: "hybrid", guidance: "Name the canon subject first and tease one specific revelation; avoid episode filler." },
-  motivational: { id: "motivational", hardMinChars: 24, hardMaxChars: 72, targetMinChars: 34, targetMaxChars: 64, targetMinWords: 4, targetMaxWords: 10, discovery: "intriguing", guidance: "State the emotional or behavioural turn plainly; promise a usable shift, not hype." },
-  children_quiz: { id: "children_quiz", hardMinChars: 22, hardMaxChars: 72, targetMinChars: 30, targetMaxChars: 62, targetMinWords: 4, targetMaxWords: 10, discovery: "searchable", guidance: "Make the question or learning outcome obvious in the opening words." },
-  music_loop: { id: "music_loop", hardMinChars: 20, hardMaxChars: 76, targetMinChars: 28, targetMaxChars: 60, targetMinWords: 4, targetMaxWords: 10, discovery: "searchable", guidance: "Lead with the mood/use case and keep duration or format suffixes at the end." },
-  short_form: { id: "short_form", hardMinChars: 18, hardMaxChars: 65, targetMinChars: 24, targetMaxChars: 52, targetMinWords: 3, targetMaxWords: 9, discovery: "intriguing", guidance: "Deliver the subject and turn in one compact phrase; omit setup." },
-  general: { id: "general", hardMinChars: 25, hardMaxChars: 76, targetMinChars: 40, targetMaxChars: 70, targetMinWords: 5, targetMaxWords: 12, discovery: "hybrid", guidance: "Be accurate, concise and immediately legible to a new viewer." },
+  // These are acceptance limits, not a claim that one length predicts CTR.
+  // The profile keeps the title useful in the first mobile browse fold while
+  // retaining enough room for a specific subject and a single honest payoff.
+  browse_long: { id: "browse_long", hardMinChars: 25, hardMaxChars: 66, targetMinChars: 34, targetMaxChars: 58, targetMinWords: 5, targetMaxWords: 10, discovery: "hybrid", guidance: "Lead with the subject, then one clear tension or consequence." },
+  searchable_long: { id: "searchable_long", hardMinChars: 28, hardMaxChars: 66, targetMinChars: 30, targetMaxChars: 58, targetMinWords: 5, targetMaxWords: 10, discovery: "searchable", guidance: "Put the exact subject or problem first; add one differentiated payoff." },
+  serialized_lore: { id: "serialized_lore", hardMinChars: 25, hardMaxChars: 68, targetMinChars: 32, targetMaxChars: 60, targetMinWords: 5, targetMaxWords: 10, discovery: "hybrid", guidance: "Name the canon subject first and tease one specific revelation; avoid episode filler." },
+  motivational: { id: "motivational", hardMinChars: 24, hardMaxChars: 60, targetMinChars: 28, targetMaxChars: 52, targetMinWords: 4, targetMaxWords: 9, discovery: "intriguing", guidance: "State the emotional or behavioural turn plainly; promise a usable shift, not hype." },
+  children_quiz: { id: "children_quiz", hardMinChars: 22, hardMaxChars: 60, targetMinChars: 28, targetMaxChars: 52, targetMinWords: 4, targetMaxWords: 9, discovery: "searchable", guidance: "Make the question or learning outcome obvious in the opening words." },
+  // Music may legitimately need an explicit duration or format suffix, so it
+  // remains the widest profile without inheriting a blanket long-title rule.
+  music_loop: { id: "music_loop", hardMinChars: 20, hardMaxChars: 70, targetMinChars: 24, targetMaxChars: 56, targetMinWords: 4, targetMaxWords: 9, discovery: "searchable", guidance: "Lead with the mood/use case and keep duration or format suffixes at the end." },
+  short_form: { id: "short_form", hardMinChars: 18, hardMaxChars: 58, targetMinChars: 22, targetMaxChars: 46, targetMinWords: 3, targetMaxWords: 8, discovery: "intriguing", guidance: "Deliver the subject and turn in one compact phrase; omit setup." },
+  general: { id: "general", hardMinChars: 25, hardMaxChars: 66, targetMinChars: 34, targetMaxChars: 58, targetMinWords: 5, targetMaxWords: 10, discovery: "hybrid", guidance: "Be accurate, concise and immediately legible to a new viewer." },
 };
 
 /** Resolve a profile from an explicit route setting, then durable lane/family. */

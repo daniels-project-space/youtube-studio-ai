@@ -523,11 +523,10 @@ export function lintTitle(
   const t = title.trim();
   const profile = profileFor(o.profile);
   if (!t) return { pass: false, issues: ["empty title"] };
-  // 85 was far outside the module's own 40-70 doctrine, so the target was
-  // advice and only the extreme was a gate. Measured across the real content
-  // plan that produced a median of 73 characters with 70% past the point browse
-  // truncates. 76 keeps slack for a genuinely long proper noun while ending the
-  // drift; the generator is still asked for 40-70.
+  // The prior ceiling still admitted titles past a practical mobile browse
+  // window, making the compact target advisory rather than real. Per-format
+  // caps now make the concise subject-plus-payoff shape enforceable without
+  // applying one blanket character count to music, lore, or short-form work.
   if (t.length > profile.hardMaxChars) issues.push(`${t.length} chars > ${profile.hardMaxChars} — shorter and more to the point (aim ${profile.targetMinChars}-${profile.targetMaxChars})`);
   if (t.length < profile.hardMinChars) issues.push(`${t.length} chars — too short (aim ${profile.targetMinChars}-${profile.targetMaxChars})`);
   if (FILLER_START.test(t)) issues.push("filler start — front-load the payoff, not throat-clearing");

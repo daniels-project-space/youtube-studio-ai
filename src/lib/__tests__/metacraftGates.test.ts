@@ -141,23 +141,21 @@ import { lintTitle, validateTitleJudgeResponse } from "@/lib/metacraft";
 
 /* ---------------------------- other lint gates ---------------------------- */
 
-// Length bounds (25-76 chars).
+// Length bounds (25-66 chars for the default browse profile).
 //
-// The ceiling was 85 while the doctrine, the prompt and this module's own docs
-// all said 40-70 — so the target was advice and only the extreme was a gate.
-// Measured across the real content plan that produced a median of 73 characters
-// with 70% of titles running past the point a mobile browse row truncates.
+// The target must be enforceable rather than a polite suggestion; the profile
+// preserves format-specific room elsewhere (notably music-loop duration).
 {
   const short = lintTitle("Too Short");
   assert.ok(short.issues.some((i) => i.includes("too short")), "under-25-char title must fail length gate");
   const long = lintTitle("x".repeat(90));
-  assert.ok(long.issues.some((i) => i.includes("> 76")), "over-76-char title must fail length gate");
+  assert.ok(long.issues.some((i) => i.includes("> 66")), "over-66-char browse title must fail length gate");
 
-  // The band the old ceiling waved through. This is the tightening itself, so
-  // it is pinned: an 80-character title used to be perfectly acceptable.
-  const eighty = lintTitle("Why The Roman Empire Collapsed Faster Than Anyone Alive At The Time Expected It");
-  assert.equal(eighty.pass, false, "an 80-char title must no longer pass");
-  assert.ok(eighty.issues.some((i) => i.includes("> 76")), `expected a length issue; got ${JSON.stringify(eighty.issues)}`);
+  // The visible-plan failure: the old ceiling admitted a 69-character
+  // explainer title that loses its payoff in a compact browse row.
+  const legacyLength = lintTitle("How to Turn $10,000 Into $1,000/Month Passive Income — The Exact Math", { profile: "searchable_long" });
+  assert.equal(legacyLength.pass, false, "a 69-char searchable title must be repackaged rather than pass by default");
+  assert.ok(legacyLength.issues.some((i) => i.includes("> 66")), `expected a length issue; got ${JSON.stringify(legacyLength.issues)}`);
 }
 
 // Mobile truncation, generalised beyond digits: a title whose every specific

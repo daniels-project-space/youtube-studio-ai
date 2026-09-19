@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleFrameDiversity, titleOpeningSignal, titleQualitySignal } from "@/lib/metacraft";
+import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, TITLE_PROFILES, titleFrameDiversity, titleOpeningSignal, titleQualitySignal } from "@/lib/metacraft";
 
 const grounding = "Chernobyl failed one safety test and the ignored warning changed the outcome.";
 const concrete = titleQualitySignal("Chernobyl Failed One Safety Test", grounding);
@@ -36,7 +36,7 @@ const fallback = deterministicTitleFallback(
   "A very long topic with a concrete promise that should stop cleanly at a word boundary for mobile viewers",
   "short_form",
 );
-assert.ok(fallback.length <= 65, "deterministic fallback must obey the selected hard envelope");
+assert.ok(fallback.length <= 58, "deterministic fallback must obey the selected hard envelope");
 assert.equal(fallback, "A very long topic with a concrete promise that should stop", "fallback should clip at a word boundary");
 
 const shortTitle = "Morning Habit Changes Your Routine";
@@ -46,8 +46,33 @@ assert.equal(shortProfile.inTargetBand, true);
 assert.ok(shortProfile.frontLoadedTerms >= 2, "a short title should expose grounded terms immediately");
 assert.ok(
   lintTitle("A Very Long Short Form Title That Keeps Adding Unneeded Context For Every Viewer", { profile: "short_form" }).issues
-    .some((issue) => issue.includes("> 65")),
+    .some((issue) => issue.includes("> 58")),
   "short-form profile must enforce its own hard ceiling",
+);
+
+// Compactness cannot turn into a single generic cap: each format has a real
+// enforceable limit, and music retains the one deliberate allowance for a
+// useful duration/format suffix.
+const profileCeilings = {
+  browse_long: 66,
+  searchable_long: 66,
+  serialized_lore: 68,
+  motivational: 60,
+  children_quiz: 60,
+  music_loop: 70,
+  short_form: 58,
+  general: 66,
+} as const;
+for (const [profile, hardMaxChars] of Object.entries(profileCeilings)) {
+  const issues = lintTitle("x".repeat(hardMaxChars + 1), { profile: profile as keyof typeof profileCeilings }).issues;
+  assert.ok(
+    issues.some((issue) => issue.includes(`> ${hardMaxChars}`)),
+    `${profile} must enforce its own ${hardMaxChars}-character ceiling`,
+  );
+}
+assert.ok(
+  TITLE_PROFILES.music_loop.hardMaxChars > TITLE_PROFILES.motivational.hardMaxChars,
+  "music-loop format space must remain deliberate rather than inheriting motivational compactness",
 );
 
 // The title must begin paying off in the first spoken beat. This is a lexical

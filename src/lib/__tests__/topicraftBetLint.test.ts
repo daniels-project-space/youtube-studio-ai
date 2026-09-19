@@ -183,12 +183,12 @@ const lintOpts = {
 // browse envelope still accepts it; this catches a profile option that is
 // accepted by the type but silently dropped before lintTitle().
 {
-  const longButValidBrowseTitle = "Bridge collapse in 1907 changed safety laws after warnings spread worldwide";
+  const longButValidBrowseTitle = "Bridge collapse in 1907 changed safety laws after warnings spread";
   const browse = lintBet(baseBet({ provisionalTitle: longButValidBrowseTitle }), lintOpts);
-  assert.equal(browse.pass, true, `the 75-character title is inside the browse envelope; issues=${JSON.stringify(browse.issues)}`);
+  assert.equal(browse.pass, true, `the compact browse title is inside the browse envelope; issues=${JSON.stringify(browse.issues)}`);
   const short = lintBet(baseBet({ provisionalTitle: longButValidBrowseTitle }), { ...lintOpts, titleProfile: "short_form" });
   assert.equal(short.pass, false, "the same title must fail the short-form hard maximum");
-  assert.ok(short.issues.some((i) => i.includes("> 65")), "short-form failure must identify its profile-specific 65-character maximum");
+  assert.ok(short.issues.some((i) => i.includes("> 58")), "short-form failure must identify its profile-specific 58-character maximum");
 }
 
 console.log("topicraftBetLint.test.ts: lintBet() citation + dedupe logic verified against realistic bets/evidence");
