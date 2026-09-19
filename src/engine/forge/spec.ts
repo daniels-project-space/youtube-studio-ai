@@ -85,6 +85,12 @@ export const forgedModuleSchema = z.object({
     "topic", "script", "narrationText", "sentenceTimings", "styleDNA",
     "visualBrief", "structure", "introSec", "narrationDurationSec", "title",
   ])).min(1).max(6),
+  /** Capability dependencies use the same ABI as built-in modules. */
+  requiredCapabilities: z.array(z.string().min(1).max(120)).max(8).optional(),
+  /** A forged handoff must name the specialist that will consume it. */
+  requiredDownstreamCapabilities: z.array(z.string().min(1).max(120)).min(1).max(8),
+  /** Capabilities this module provides to later modules. */
+  capabilities: z.array(z.string().min(1).max(120)).max(8).optional(),
   /**
    * What it produces: forged modules may ONLY produce overlay specs
    * (extraOverlays, appended not replaced) — generation is open, mutation of

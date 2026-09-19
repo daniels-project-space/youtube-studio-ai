@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { forgedSpecUsesI2V, makeForgedBlock } from "@/engine/forge/runtime";
+import { forgedSpecUsesI2V, makeForgedBlock, registerForgedSpecs } from "@/engine/forge/runtime";
+import { _clear, getManifest } from "@/engine/registry";
 import type { ForgedModuleSpec } from "@/engine/forge/spec";
 import type { StageContext } from "@/engine/types";
 
@@ -9,6 +10,7 @@ const nestedI2vSpec = {
   description: "A bounded proof that a nested I2V primitive is detected before execution.",
   whenToUse: "Only when a motion overlay is explicitly required.",
   consumes: ["topic"],
+  requiredDownstreamCapabilities: ["master.assembled"],
   produces: "extraOverlays",
   anchorAfter: ["visual_inserts"],
   params: [],
@@ -72,6 +74,20 @@ async function assertions(): Promise<void> {
     makeForgedBlock(imageOnlySpec).run({} as StageContext),
     /requires a positive compiler-admitted stage budget before paid execution/,
   );
+
+  // Forged modules are first-class ABI participants: registration preserves
+  // capability requirements instead of silently creating a legacy manifest.
+  _clear();
+  registerForgedSpecs([{
+    ...imageOnlySpec,
+    capabilities: ["visuals.forged_overlay"],
+    requiredDownstreamCapabilities: ["master.assembled"],
+  }]);
+  const manifest = getManifest("forged_image_only");
+  assert(manifest);
+  assert.deepEqual(manifest.capabilities, ["visuals.forged_overlay"]);
+  assert.deepEqual(manifest.requiredDownstreamCapabilities, ["master.assembled"]);
+  assert.equal(manifest.certification.status, "contract");
 }
 
 void assertions().then(() => {

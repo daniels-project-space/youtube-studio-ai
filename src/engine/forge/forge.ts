@@ -13,6 +13,9 @@ SPEC FORMAT (JSON):
 {
  "id": "forged_<slug>", "label": "...", "description": "...", "whenToUse": "...",
  "consumes": [<store keys you read: "topic"|"script"|"narrationText"|"sentenceTimings"|"styleDNA"|"visualBrief"|"structure"|"introSec"|"narrationDurationSec"|"title">],
+ "requiredCapabilities": [<upstream capabilities, if any>],
+ "requiredDownstreamCapabilities": [<later specialist capabilities that must consume this handoff>],
+ "capabilities": [<capabilities this module provides>],
  "produces": "extraOverlays",
  "anchorAfter": ["visual_inserts","quote_overlays","intro_card","narration_tts"],
  "params": [{"key","min","max","default","describe"}] (numbers only, ≤4),

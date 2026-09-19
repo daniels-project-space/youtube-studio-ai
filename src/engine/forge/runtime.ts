@@ -9,7 +9,8 @@
 import { join } from "node:path";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
-import { register as registerBlock, get as getRegistered } from "@/engine/registry";
+import { get as getRegistered, registerManifest } from "@/engine/registry";
+import { manifestFromBlock } from "@/engine/moduleManifest";
 import { makeRunTempDir, readBytes, writeBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -248,7 +249,27 @@ async function runStep(
 export function registerForgedSpecs(specs: ForgedModuleSpec[]): void {
   for (const spec of specs) {
     if (getRegistered(spec.id)) continue;
-    registerBlock(makeForgedBlock(spec));
+    if (!spec.requiredDownstreamCapabilities?.length) {
+      throw new Error(`forged module ${spec.id} must declare at least one downstream specialist capability`);
+    }
+    const block = makeForgedBlock(spec);
+    registerManifest(manifestFromBlock(block, {
+      version: "1.0.0-forged",
+      capabilities: [...(spec.capabilities ?? [])],
+      requiredCapabilities: [...(spec.requiredCapabilities ?? [])],
+      requiredDownstreamCapabilities: [...(spec.requiredDownstreamCapabilities ?? [])],
+      providerProfiles: [{
+        id: "novita-forged-primitives",
+        provider: "novita",
+        quality: "production",
+        allowFallback: false,
+      }],
+      sideEffects: ["paid_compute"],
+      certification: "contract",
+      certificationEvidence: "validated forged module ABI v1",
+      maxCostUsd: spec.maxCostUsd,
+      qualityRequired: true,
+    }));
   }
 }
 
