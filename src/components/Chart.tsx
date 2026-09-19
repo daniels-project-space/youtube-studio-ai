@@ -74,6 +74,7 @@ export function Chart({
     { length: bands + 1 },
     (_, i) => lo + ((hi - lo) / bands) * i,
   );
+  const gridLabels = chartAxisLabels(gridVals, formatValue);
 
   // Sparse x-axis ticks (first, middle, last) from the longest series labels.
   const labelSeries =
@@ -135,7 +136,7 @@ export function Chart({
                 fill="var(--color-faint)"
                 fontFamily="var(--font-mono)"
               >
-                {formatValue(gv)}
+                {gridLabels[i]}
               </text>
             </g>
           );
@@ -229,6 +230,38 @@ export function chartDomain(points: readonly ChartPoint[]): { lo: number; hi: nu
 
   const span = max - min;
   return { lo: min - span * 0.08, hi: max + span * 0.08 };
+}
+
+/**
+ * Axis bands are often much closer together than the chart values themselves.
+ * A rounded money or count formatter can consequently print five identical
+ * labels, making a real chart look broken. Preserve the caller's familiar
+ * formatter when it is distinct; otherwise increase only axis precision until
+ * every band has a unique, legible value.
+ */
+export function chartAxisLabels(
+  values: readonly number[],
+  formatValue: (value: number) => string = compact,
+): string[] {
+  const formatted = values.map(formatValue);
+  if (new Set(formatted).size === formatted.length) return formatted;
+
+  const money = /^\$/.test(formatValue(0));
+  for (let decimals = 1; decimals <= 6; decimals++) {
+    const candidate = values.map((value) => `${money ? "$" : ""}${preciseCompact(value, decimals)}`);
+    if (new Set(candidate).size === candidate.length) return candidate;
+  }
+  // A pathological floating-point range should remain intelligible rather
+  // than silently collapse into duplicate labels.
+  return values.map((value) => `${money ? "$" : ""}${value.toExponential(2)}`);
+}
+
+function preciseCompact(value: number, decimals: number): string {
+  const abs = Math.abs(value);
+  const unit = abs >= 1e9 ? 1e9 : abs >= 1e6 ? 1e6 : abs >= 1e3 ? 1e3 : 1;
+  const suffix = unit === 1e9 ? "B" : unit === 1e6 ? "M" : unit === 1e3 ? "K" : "";
+  const rendered = (value / unit).toFixed(decimals);
+  return `${rendered.replace(/(?:\.0+|(?:(\.\d*?[1-9]))0+)$/, "$1")}${suffix}`;
 }
 
 function ChartTitle({

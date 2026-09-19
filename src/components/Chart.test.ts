@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { Chart, chartDomain, type ChartPoint } from "./Chart";
+import { Chart, chartAxisLabels, chartDomain, type ChartPoint } from "./Chart";
 
 const points = (...values: number[]): ChartPoint[] =>
   values.map((value, index) => ({ label: String(index), value }));
@@ -20,6 +20,17 @@ assert.equal(nonPositive.hi, 0, "negative-only deltas end at the honest zero bas
 
 const mixed = chartDomain(points(-4, 0, 10));
 assert.ok(mixed.lo < -4 && mixed.hi > 10, "mixed deltas retain padding on both sides");
+
+assert.deepEqual(
+  chartAxisLabels([0, 0.0025, 0.005, 0.0075, 0.01], (value) => `$${value.toFixed(2)}`),
+  ["$0", "$0.003", "$0.005", "$0.007", "$0.01"],
+  "a fine-grained money chart must never render duplicate tick labels",
+);
+assert.deepEqual(
+  chartAxisLabels([0, 0.27, 0.54, 0.81, 1.08], (value) => String(Math.round(value))),
+  ["0", "0.3", "0.5", "0.8", "1.1"],
+  "small count ranges retain a readable, distinct axis",
+);
 
 const markup = renderToStaticMarkup(
   createElement(Chart, {
