@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Block } from "../types";
+import type { ArtifactRef, Block } from "../types";
 import { _clear, registerManifest } from "../registry";
 import { manifestFromBlock } from "../moduleManifest";
 import { assertRequiredDownstreamHandoffs } from "../runner";
@@ -88,6 +88,34 @@ try {
       { handoffArtifact: { ok: true } },
     ),
     "a present handoff may cross the reusable optional input boundary",
+  );
+  const validRef: ArtifactRef = {
+    artifactId: "run:handoff_binding_producer:handoffArtifact:hash",
+    key: "handoffArtifact",
+    type: "LegacyArtifact<handoffArtifact>",
+    schemaVersion: "1.0.0-migration",
+    producerModule: "handoff_binding_producer",
+    producerVersion: "1.0.0-migration",
+    payloadHash: "hash",
+  };
+  assert.throws(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+      { handoffArtifact: { ...validRef, producerModule: "$seed" } },
+    ),
+    /received artifact lineage from "\$seed"/,
+    "a seeded same-shaped artifact must not satisfy a producer-bound handoff",
+  );
+  assert.doesNotThrow(
+    () => assertRequiredDownstreamHandoffs(
+      [producerManifest, optionalConsumerManifest],
+      1,
+      { handoffArtifact: { ok: true } },
+      { handoffArtifact: validRef },
+    ),
+    "the producer-bound artifact lineage must satisfy the handoff",
   );
 } finally {
   _clear();

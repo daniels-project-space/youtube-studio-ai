@@ -467,6 +467,7 @@ export function assertRequiredDownstreamHandoffs(
   manifests: readonly ModuleManifest[],
   consumerIndex: number,
   store: Readonly<Record<string, unknown>>,
+  artifactRefs?: Readonly<Record<string, ArtifactRef>>,
 ): void {
   const consumer = manifests[consumerIndex];
   if (!consumer) throw new Error(`missing executable manifest at step ${consumerIndex}`);
@@ -480,6 +481,13 @@ export function assertRequiredDownstreamHandoffs(
         throw new Error(
           `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
           `before execution; the required downstream artifact is absent`,
+        );
+      }
+      const reference = artifactRefs?.[artifact];
+      if (reference && reference.producerModule !== producer.id) {
+        throw new Error(
+          `module "${consumer.id}" requires handoff "${artifact}" from "${producer.id}" ` +
+          `before execution; received artifact lineage from "${reference.producerModule}"`,
         );
       }
     }
@@ -850,7 +858,7 @@ export async function runPipeline(
     }
     // Run this before reuse/rehydration as well as before provider dispatch: a
     // cached downstream stage must not hide a missing required handoff.
-    assertRequiredDownstreamHandoffs(resolved.manifests, blockIndex, store);
+    assertRequiredDownstreamHandoffs(resolved.manifests, blockIndex, store, artifactRefs);
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
     const priorStage = priorStageMap.get(block.id);
     const refuseUnverifiedReuse = async (reason: string) => {
