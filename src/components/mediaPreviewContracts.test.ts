@@ -21,6 +21,12 @@ assert.match(preview, /useAssetUrlState/);
 assert.match(preview, /selectMediaPreview/);
 assert.match(preview, /probe=1/,
   "preview probes use a non-error availability response");
+assert.match(preview, /PREVIEW_AVAILABILITY_TIMEOUT_MS = 12_000/,
+  "a preview probe that stalls in transit has a finite browser-side deadline");
+assert.equal((preview.match(/window\.setTimeout\(\(\) => controller\.abort\(\), PREVIEW_AVAILABILITY_TIMEOUT_MS\)/g) ?? []).length, 2,
+  "both retained-video and private-image preview probes share the finite deadline");
+assert.equal((preview.match(/window\.clearTimeout\(timeout\)/g) ?? []).length, 2,
+  "both preview paths clear their deadline when the card is replaced or unmounted");
 assert.match(preview, /one server-side proof wave/,
   "compact cards must ask the server for one complete retained-preview proof");
 assert.doesNotMatch(preview, /warmupRange|stableProbe/,

@@ -8,6 +8,12 @@ import {
 } from "@/lib/mediaPreview";
 import styles from "./MediaPreview.module.css";
 
+// The delivery routes already retry transient R2 edge misses server-side.
+// This is the client-side upper bound for a request that never settles at
+// all, so a stalled private object becomes an honest unavailable preview
+// rather than leaving a Library card on its loading skeleton indefinitely.
+const PREVIEW_AVAILABILITY_TIMEOUT_MS = 12_000;
+
 function joinClassNames(...names: Array<string | undefined>) {
   return names.filter(Boolean).join(" ");
 }
@@ -149,6 +155,7 @@ export function MediaPreview({
     }
     const src = selection.src;
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), PREVIEW_AVAILABILITY_TIMEOUT_MS);
     let cancelled = false;
     const verifyRetainedPreview = async (): Promise<void> => {
       const response = await fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
@@ -168,6 +175,7 @@ export function MediaPreview({
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       controller.abort();
     };
   }, [showingVideoStill, selection.src, sourceVideoStillKey]);
@@ -193,6 +201,7 @@ export function MediaPreview({
     if (!showingPrivateImage || !selection.src || !assetKey) return;
     const src = selection.src;
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), PREVIEW_AVAILABILITY_TIMEOUT_MS);
     let cancelled = false;
     fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, { signal: controller.signal, cache: "no-store" })
       .then((response) => {
@@ -208,6 +217,7 @@ export function MediaPreview({
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       controller.abort();
     };
   }, [showingPrivateImage, selection.src, assetKey]);
