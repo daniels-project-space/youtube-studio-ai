@@ -72,6 +72,7 @@ import {
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
+import { ExecutionError } from "@/engine/executionErrors";
 import { hasVisionKey } from "@/lib/vision";
 import type { AutomaticFrameStrategy } from "@/lib/automaticVideoPlan";
 import {
@@ -557,6 +558,14 @@ export const metadataOptimized: Block = {
     // no legacy path may publish a title that never received the current judge.
     try {
       const m = await craftMetadata({
+        beforePurchase: async () => {
+          if (!ctx.assertInlinePaidExecutionLease) {
+            throw new ExecutionError("INLINE_PAID_EXECUTION_LEASE_REQUIRED: no local execution authority was supplied", {
+              code: "INLINE_PAID_EXECUTION_LEASE_REQUIRED", retryable: false,
+            });
+          }
+          await ctx.assertInlinePaidExecutionLease();
+        },
         topic,
         channelName,
         niche,
@@ -649,6 +658,7 @@ export const metadataOptimized: Block = {
       // Preserve explicit no-replay metadata. Wrapping a paid ambiguous 503 in
       // a plain Error lets the engine mistake it for a safe transient failure.
       if (e instanceof OpenRouterGenerationOutcomeUnknownError) throw e;
+      if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
       throw new Error(`metadata: title gate failed; no unjudged fallback: ${detail}`, { cause: e });
     }
 

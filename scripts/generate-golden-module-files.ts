@@ -29,6 +29,16 @@ const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".l
 
 /** Hand-worked blast radii that no automatic rule would reproduce. */
 const CURATED: Record<string, readonly string[]> = {
+  metadata: [
+    "convex/runExecutionAdmission.ts",
+    "src/engine/runner.ts",
+    "src/engine/types.ts",
+    "src/lib/creativeText.ts",
+    "src/lib/metacraft.ts",
+    "src/lib/openRouter.ts",
+    "src/trigger/inlinePaidExecutionLease.ts",
+    "src/trigger/runPipeline.ts",
+  ],
   // These owners previously protected the shared helpers inside lofiBlocks.
   // Music's executable file is discovered separately from its block id.
   music: ["src/trigger/blocks/blockContext.ts"],

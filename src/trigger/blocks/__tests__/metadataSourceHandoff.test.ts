@@ -53,6 +53,7 @@ async function main() {
     return metadataOptimized.run({
       ownerId: 'owner-fixture', runId: 'run-fixture', channelId: 'channel-fixture',
       keyPrefix: 'test/metadata-source/', params: { language: 'en' },
+      assertInlinePaidExecutionLease: async () => {},
       store: { ...baseStore, ...store }, log: () => {},
     } as never);
   }

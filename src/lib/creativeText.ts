@@ -39,6 +39,8 @@ export async function creativeTextJson<T = unknown>(args: {
   temperature?: number;
   log?: (message: string) => void;
   signal?: AbortSignal;
+  /** Admission for a new provider dispatch, never for an already cached response. */
+  beforeDispatch?: () => Promise<void>;
   /** An outer, schema-aware caller owns response reuse for this request. */
   memoize?: boolean;
 }): Promise<T> {
@@ -69,6 +71,7 @@ export async function creativeTextJson<T = unknown>(args: {
     temperature: args.temperature,
     log: args.log,
     signal: args.signal,
+    beforeDispatch: args.beforeDispatch,
   }), {
     memoize: args.memoize,
     // A caller-owned deadline must never abort a response that another sibling

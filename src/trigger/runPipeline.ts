@@ -63,6 +63,7 @@ import {
   runPipeline as runEngine,
 } from "@/engine/runner";
 import { ExecutionError } from "@/engine/executionErrors";
+import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
 import { mergeRuntimeModuleConfig } from "@/engine/runtimeModuleConfig";
 import { renderBlockTask } from "@/trigger/render-block";
 import { renderBlockLightTask } from "@/trigger/render-block-light";
@@ -2405,6 +2406,9 @@ export const runPipelineTask = task({
         channelId: payload.channelId,
         executionLease,
         keyPrefix: invocation.keyPrefix,
+        assertInlinePaidExecutionLease: createInlinePaidExecutionLeaseCheck(convex, {
+          ownerId, channelId: payload.channelId, runId: payload.runId, ...executionLease,
+        }),
         budgetUsd: invocation.budgetUsd,
         paramsByBlock,
         sink,

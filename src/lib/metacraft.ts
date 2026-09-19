@@ -32,6 +32,7 @@
  */
 import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
+import { ExecutionError } from "@/engine/executionErrors";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
@@ -797,6 +798,8 @@ export interface MetaCraftArgs {
   contentLane?: string;
   /** Bounded persisted titles from this channel, newest/queued first. */
   recentChannelTitles?: readonly string[];
+  /** Caller-owned admission; denial must bypass provider retry/fallback handling. */
+  beforePurchase?: () => Promise<void>;
   log?: (m: string) => void;
 }
 
@@ -1000,6 +1003,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   // reasons depends on the prompt, and simpler prompts clear 700 comfortably.
   // What makes the class survivable is the logging below, not the number.
   const makePinnedComment = (): Promise<string> => creativeTextJson<{ comment?: string }>({
+    beforeDispatch: a.beforePurchase,
     prompt:
       `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
       `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
@@ -1013,6 +1017,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     // `.catch(() => "")` said nothing, which is how a feature stayed dead in
     // production indefinitely. Degrade quietly in behaviour, never in the log.
     .catch((error: unknown) => {
+      if (error instanceof ExecutionError && error.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw error;
       a.log?.(`metacraft: pinned comment failed, shipping without one: ${error instanceof Error ? error.message : String(error)}`);
       return "";
     });
@@ -1025,6 +1030,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     let gen: { candidates?: { frame?: string; title?: string }[] };
     try {
       gen = await creativeTextJson<typeof gen>({
+        beforeDispatch: a.beforePurchase,
         prompt: [
           `Write SEVEN distinct YouTube TITLE candidates for a video about "${a.topic}" on "${a.channelName ?? "this channel"}".`,
           videoContext,
@@ -1071,6 +1077,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         temperature: 0.85,
       });
     } catch (e) {
+      if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
       if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
       lastIssues = [`generator returned invalid JSON (${e instanceof Error ? e.message.slice(0, 80) : e})`];
       a.log?.(`metacraft: attempt ${attempt + 1} gen failed (${lastIssues[0]}) -> ${attempt === 0 ? "retrying" : "FAILING LOUD"}`);
@@ -1172,6 +1179,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           winner?: number;
           runnerUp?: number;
         }>({
+          beforeDispatch: a.beforePurchase,
           prompt: [
             `You are a YouTube CTR strategist judging a real feed. Topic: "${a.topic}".`,
             videoContext,
@@ -1281,6 +1289,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           continue;
         }
       } catch (e) {
+        if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
         if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         // A transport/provider exception is not a score. Do not silently turn
         // it into a lint-only title: retry the bounded title attempt and fail
@@ -1305,6 +1314,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       let packageFallback = false;
       try {
         const pkg = await creativeTextJson<{ description?: string; tagsCsv?: string }>({
+          beforeDispatch: a.beforePurchase,
           prompt: [
             `Write the YouTube description + tags for this video.`,
             ancillaryVideoContext,
@@ -1336,6 +1346,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         // different. Silently substituting here makes a later healer retry
         // look harmless even though it may buy the same package twice. Preserve
         // the provider's ambiguity for the execution ledger/recovery policy.
+        if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
         if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         // The title decision is already complete. Do not throw it away and
         // re-enter legacy title selection; retain it with a truthful package

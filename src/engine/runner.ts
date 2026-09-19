@@ -44,6 +44,7 @@ export interface RunPipelineOptions {
   channelId: string;
   /** Active generation required by Trigger-originated durable side effects. */
   executionLease?: RunExecutionLeaseFence;
+  assertInlinePaidExecutionLease?: StageContext["assertInlinePaidExecutionLease"];
   keyPrefix: string;
   budgetUsd: number;
   /** Per-block params keyed by block id (from pipeline entries). */
@@ -1259,6 +1260,7 @@ export async function runPipeline(
       runId: opts.runId,
       channelId: opts.channelId,
       ...(opts.executionLease ? { executionLease: opts.executionLease } : {}),
+      ...(opts.assertInlinePaidExecutionLease ? { assertInlinePaidExecutionLease: opts.assertInlinePaidExecutionLease } : {}),
       keyPrefix: opts.keyPrefix,
       params,
       store: declaredArtifactStore(manifest, store, optionalFallbacks, log),

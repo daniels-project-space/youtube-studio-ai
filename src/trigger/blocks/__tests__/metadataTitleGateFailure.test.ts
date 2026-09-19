@@ -50,6 +50,7 @@ try {
       persona: "documentary narrator",
     },
     budgetUsd: 5,
+    assertInlinePaidExecutionLease: async () => {},
     log: (message: string) => logs.push(message),
   } as never;
 

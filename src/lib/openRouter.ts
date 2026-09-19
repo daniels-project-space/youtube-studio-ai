@@ -224,12 +224,16 @@ export async function openRouterChat(args: {
   log?: (message: string) => void;
   /** Optional caller cancellation, composed with the route's hard deadlines. */
   signal?: AbortSignal;
+  beforeDispatch?: () => Promise<void>;
 }): Promise<string> {
   assertNoOpenAiModel(args.model);
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OpenRouter requires OPENROUTER_API_KEY");
   const provider = PROVIDERS[args.model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${args.model}`);
+  // Admission failures precede dispatch and must not be classified as an
+  // ambiguous paid transport outcome. There is no async preparation after this.
+  if (args.beforeDispatch) await args.beforeDispatch();
   const controller = new AbortController();
   const callerSignal = args.signal;
   const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
@@ -373,6 +377,7 @@ export async function openRouterJson<T>(args: {
   temperature?: number;
   log?: (message: string) => void;
   signal?: AbortSignal;
+  beforeDispatch?: () => Promise<void>;
 }): Promise<T> {
   const model = args.model?.trim() || openRouterModel(args.tier === "pro" ? "creative" : "intelligence");
   return parseJson<T>(await openRouterChat({
@@ -386,6 +391,7 @@ export async function openRouterJson<T>(args: {
     json: true,
     log: args.log,
     signal: args.signal,
+    beforeDispatch: args.beforeDispatch,
   }));
 }
 

@@ -49,6 +49,8 @@ export interface StageContext {
   channelId: string;
   /** Exact active execution generation for fenced durable side effects. */
   executionLease?: RunExecutionLeaseFence;
+  /** Fresh service/server-time admission for each inline metadata purchase. */
+  assertInlinePaidExecutionLease?: () => Promise<void>;
   /** Per-channel R2 key prefix, e.g. `owner/<ownerId>/channel/<slug>/`. */
   keyPrefix: string;
   /** Block params from the channel's pipeline entry. */

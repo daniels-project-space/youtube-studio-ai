@@ -505,8 +505,16 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "package · Metacraft — autocomplete-grounded candidates + claims lint + feed judge",
     "paths": [
+      "convex/runExecutionAdmission.ts",
+      "src/engine/runner.ts",
+      "src/engine/types.ts",
       "src/lib/__tests__/runCurrentThumbnail.test.ts",
-      "src/trigger/blocks/intelligenceBlocks.ts"
+      "src/lib/creativeText.ts",
+      "src/lib/metacraft.ts",
+      "src/lib/openRouter.ts",
+      "src/trigger/blocks/intelligenceBlocks.ts",
+      "src/trigger/inlinePaidExecutionLease.ts",
+      "src/trigger/runPipeline.ts"
     ]
   },
   {

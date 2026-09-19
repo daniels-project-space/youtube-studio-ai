@@ -16,7 +16,14 @@ licensing is not authorized by that confirmation.
 
 ## MVP acceptance
 
-- A real channel brief reaches the architect, declared executable modules,
+- Owner clarification: every channel is different. One successful video or
+  family contract does not qualify the whole Studio or another channel.
+  Shared modules must honor each channel's own executable contract, audience,
+  format, voice, pacing, visual grammar, music needs and quality criteria.
+  Evidence must name the exact channel, route and retained output; channels
+  without current evidence remain explicitly unverified.
+- For each channel included in the MVP, its real brief reaches the architect,
+  its declared executable modules,
   script, narration, visuals, shared music where required, assembly, captions,
   thumbnail and metadata without manual creative substitution.
 - The exact retained master passes independent quality checks and complete
@@ -76,13 +83,41 @@ production build (including TypeScript), 31.02-second real hermetic assembly,
 29 Python worker tests, structural audits and defect-proof checks pass. Full
 lint reports zero errors and 31 existing warnings; the production dependency
 audit has no high/critical findings and reports four moderate findings. The
-code graph was updated. Production deployment is a separate remaining gate.
+code graph was updated. Commit `5f147442` passed cloud CI run `35467414925`.
+The exact Vercel production alias reports that revision, canonical Convex
+`astute-camel-689` was deployed, and Trigger production version `20260919.25`
+was deployed successfully. This proves deployment, not finished-video quality.
 
 The isolated `/home/ubuntu/youtube-studio-music-runtime` evaluation runner has
 30 passing CPU tests with explicitly fake heavy inference APIs, a built Python
 package, pinned official source/model/VAE identities, immutable artifact
 receipts, and personal-creator scope. This is not live GPU or audio-quality
 evidence. It is not yet connected as Studio's production provider.
+
+## Recovered execution safety
+
+The skipped recovery commit contained useful pre-purchase execution ownership
+checks. These are selectively restored against the newer runtime: a service-only
+Convex query checks the exact owner/channel/run/worker generation using server
+time. Every new metadata provider dispatch obtains a fresh, nonmemoized check;
+already-paid cached responses remain reusable. A stale or denied check is
+nonretryable, is not classified as an ambiguous paid request, and cannot be
+swallowed by the optional comment or package fallback. This is admission before
+dispatch, not atomic cancellation of a provider request already in flight.
+
+Three focused suites pass through the real runner, metadata block, provider
+client and authenticated handler with intercepted network calls. They cover
+revocation between all four metadata purchases, generator/judge retries,
+expiry, foreign identities, grant expiry in transit, cache reuse and existing
+ambiguous-outcome no-replay behavior. No paid provider request was made.
+All 822 direct readiness tests pass for this batch, along with the production
+build including TypeScript, focused lint, structural audits and defect-proof
+checks. The code graph is current. Deployment of this second batch remains
+pending; the verified first release above does not include this fence yet.
+
+An existing no-key metadata fallback emits a null title-decision receipt that
+the runner refuses. The fence does not change this behavior or bypass the
+receipt contract. Live metadata must use the approved configured provider.
 
 ## Work order
 
@@ -96,8 +131,11 @@ evidence. It is not yet connected as Studio's production provider.
 3. Qualify the isolated YuE 2 runtime and connect it to the real shared music
    caller, preparation, recovery and admission paths. Do not advertise the
    switch as complete before real instrumental output and listening evidence.
-4. Run a bounded real channel-to-private-video proof, fix shared root causes,
-   and resume at valid artifact boundaries. Keep exact failure evidence.
+4. Establish the channel-specific MVP verification matrix from current channel
+   contracts. Run bounded real channel-to-private-video proofs for the included
+   channels, fix shared root causes, and resume at valid artifact boundaries.
+   Keep exact failure evidence. Family coverage helps prioritize tests but is
+   not a substitute for channel-specific quality qualification.
 5. Verify the operating workflow and release. Then expand family qualification
    and return to the remaining backlog in impact order.
 
