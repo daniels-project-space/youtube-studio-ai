@@ -29,7 +29,7 @@ export type ChannelInceptionModuleKey = (typeof CHANNEL_INCEPTION_MODULE_KEYS)[n
 export const CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD = 3;
 /**
  * Two independent 60-second cinematic probes currently reserve $25.11 each
- * (locked keyframes, asset QA, LTX shots, and shot QA). This cap preserves a
+ * (locked keyframes, asset QA, MiniMax H3 shots, and shot QA). This cap preserves a
  * bounded retry without pretending that a $3 probe can validate the Novita
  * chain. It is still spent only after the explicit proof-render approval.
  */

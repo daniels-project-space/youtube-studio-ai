@@ -8,9 +8,9 @@ assert.deepEqual(
     perVideoBudgetUsd: 5,
   }),
   {
-    setupCapUsd: 5.22,
+    setupCapUsd: 6.15,
     validationCapUsd: 3,
-    combinedSetupAndValidationCapUsd: 8.22,
+    combinedSetupAndValidationCapUsd: 9.15,
     perVideoProductionBudgetUsd: 5,
   },
 );
@@ -21,9 +21,9 @@ assert.deepEqual(
     perVideoBudgetUsd: 1.5,
   }),
   {
-    setupCapUsd: 5.22,
+    setupCapUsd: 6.15,
     validationCapUsd: 1.5,
-    combinedSetupAndValidationCapUsd: 6.72,
+    combinedSetupAndValidationCapUsd: 7.65,
     perVideoProductionBudgetUsd: 1.5,
   },
 );
@@ -44,9 +44,9 @@ assert.deepEqual(
     family: "cinematic",
   }),
   {
-    setupCapUsd: 5.22,
+    setupCapUsd: 6.15,
     validationCapUsd: 55,
-    combinedSetupAndValidationCapUsd: 60.22,
+    combinedSetupAndValidationCapUsd: 61.15,
     perVideoProductionBudgetUsd: 130,
   },
 );
