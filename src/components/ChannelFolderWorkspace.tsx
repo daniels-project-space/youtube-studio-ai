@@ -167,6 +167,7 @@ export function ChannelFolderWorkspace({
           type="button"
           className={styles.allRoom}
           aria-pressed={selectedFolder === null}
+          aria-label={`Main channels: ${standaloneCount} standalone`}
           data-drag-over={dragOver === "__all" ? "true" : undefined}
           onClick={() => onSelect(null)}
           onDragOver={(event) => { event.preventDefault(); setDragOver("__all"); }}
@@ -199,7 +200,13 @@ export function ChannelFolderWorkspace({
                 </form>
               ) : (
                 <>
-                  <button type="button" className={styles.roomMain} onClick={() => onSelect(selectedFolder === folder.name ? null : folder.name)} aria-pressed={selectedFolder === folder.name}>
+                  <button
+                    type="button"
+                    className={styles.roomMain}
+                    onClick={() => onSelect(selectedFolder === folder.name ? null : folder.name)}
+                    aria-pressed={selectedFolder === folder.name}
+                    aria-label={`${folder.name}: ${roomChannels.length} ${roomChannels.length === 1 ? "channel" : "channels"}`}
+                  >
                     <span className={styles.folderMark} aria-hidden="true"><FolderGlyph /></span>
                     <span className={styles.roomCopy}><strong>{folder.name}</strong><small>{roomChannels.length || "Empty"}</small></span>
                     <span className={styles.avatars} aria-hidden="true">
