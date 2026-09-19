@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { OWNER_ID } from "@/lib/config";
-import { authorizeStudioRoute, requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
+import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { buildPlanWeekBulkOrder } from "@/lib/planWeekBulk";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../../../convex/_generated/api";
@@ -92,8 +91,15 @@ export async function GET(request: Request) {
  * each child plan-week-ahead task and is never performed by this HTTP handler.
  */
 export async function POST(request: Request) {
-  const authFailure = await authorizeStudioRoute(request);
-  if (authFailure) return authFailure;
+  let actor;
+  try {
+    actor = await requireStudioActor(request);
+  } catch (error) {
+    if (error instanceof StudioAuthError) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    }
+    return NextResponse.json({ ok: false, error: "studio authorization unavailable" }, { status: 500 });
+  }
   let input: unknown;
   try {
     input = await request.json();
@@ -106,12 +112,28 @@ export async function POST(request: Request) {
     }
     const body = input as Record<string, unknown>;
     const order = buildPlanWeekBulkOrder({
-      ownerId: OWNER_ID,
+      ownerId: actor.ownerId,
       channelIds: body.channelIds as string[],
       count: body.count as number,
       requestKey: body.requestKey as string,
       ...(body.budgetCapUsd === undefined ? {} : { budgetCapUsd: body.budgetCapUsd as number }),
     });
+    // The worker independently re-checks this fence, but rejecting an
+    // unowned/mistyped channel before Trigger receives the job avoids a doomed
+    // queue entry and makes the browser's response immediately actionable.
+    const channels = await convexClient().query(api.channels.listChannels, {
+      ownerId: actor.ownerId,
+    });
+    const known = new Set(channels.map((channel) => String(channel._id)));
+    const unknown = order.channels
+      .map((channel) => channel.channelId)
+      .filter((channelId) => !known.has(channelId));
+    if (unknown.length) {
+      return NextResponse.json(
+        { ok: false, error: `channel access denied: ${unknown.join(", ")}` },
+        { status: 422 },
+      );
+    }
     if (!process.env.TRIGGER_SECRET_KEY) {
       return NextResponse.json(
         { ok: false, error: "Planner not activated (no TRIGGER_SECRET_KEY).", inactive: true },
