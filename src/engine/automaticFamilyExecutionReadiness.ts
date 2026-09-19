@@ -120,7 +120,7 @@ export function assessAutomaticFamilyExecutionReadiness(
     blockers.push("automatic execution requires at least one configured stock-footage provider");
   }
   if (MUSIC_FAMILIES.has(family) && !capabilities.musicReady()) {
-    blockers.push("automatic execution requires a configured Mureka or Suno music provider");
+    blockers.push("automatic execution requires a qualified MiniMax Music 3, Mureka, or Suno music provider");
   }
   if (family === "whiteboard" && !capabilities.whiteboardReady()) {
     blockers.push(

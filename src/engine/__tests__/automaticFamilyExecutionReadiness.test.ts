@@ -91,6 +91,13 @@ assert.equal(
   false,
   "a compiled music lane must not defer a missing music provider until after channel setup",
 );
+assert.ok(
+  assessAutomaticFamilyExecutionReadiness("quizyear", {
+    ...allReady,
+    musicReady: () => false,
+  }).blockers.some((blocker) => blocker.includes("qualified MiniMax Music 3")),
+  "the operator-facing music blocker must name the qualified MiniMax route that the live readiness reader accepts",
+);
 
 for (const family of FAMILY_KEYS.filter((key) => certifiedFamilyAdmission(key).automatic)) {
   assert.equal(
