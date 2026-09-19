@@ -1210,7 +1210,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief", "preparedImages", "visualMatterReferenceAssets"],
+    optionalConsumes: ["visualBrief", "preparedImages"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
     // A default 300-second H3 cinematic plan has 60 five-second edits. Every
     // shot may be identity-critical, so reserve two still candidates per shot
@@ -1263,7 +1263,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.h3_r2_pinned"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief", "visualMatterReferenceAssets"],
+    optionalConsumes: ["visualBrief"],
     providerProfiles: [minimaxH3],
     maxCostUsd: 35,
     maxCostUsdFor: (params, context) =>

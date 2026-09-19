@@ -38,7 +38,7 @@
  * channel fetches with store reads without declaring them. The crew briefs are
  * in eleven of twelve families.
  *
- * THE BASELINE IS 2, AND BOTH ARE FALSE POSITIVES THAT MUST STAY:
+ * TWO READS ARE PROVABLY UNREACHABLE FOR THEIR CALLERS:
  *
  *   novita_render_images.visualMatterReferenceAssets
  *   novita_render_video.visualMatterReferenceAssets
@@ -49,7 +49,8 @@
  * unreachable for one caller. Declaring the key would satisfy this audit and
  * BREAK visualMatterReferenceAssets.test, which asserts the opposite on purpose:
  * "reference R2 pixels must not be declared as primary keyframe-generator
- * input". A bulk fix did exactly that and the test caught it. Leave them.
+ * input". A bulk fix did exactly that and the test caught it. Keep this
+ * caller/key policy here rather than hiding it in the numeric baseline.
  */
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests } from "@/engine/registry";
@@ -62,6 +63,18 @@ import { blockScopes } from "./audit-inert-consumes";
  */
 const AMBIENT = new Set<string>([
   "__cost", // COST_PATCH_KEY
+]);
+
+/**
+ * Helper traversal deliberately follows `requireVisualMatter` into the branch
+ * that reads comparison pixels. These two production renderers invoke that
+ * helper with its default (false) option, while only QA callers enable the
+ * branch. Declaring this input would make QA evidence generator conditioning,
+ * which is forbidden and covered by visualMatterReferenceAssets.test.
+ */
+const PROVEN_UNREACHABLE_READS = new Set([
+  "novita_render_images:visualMatterReferenceAssets",
+  "novita_render_video:visualMatterReferenceAssets",
 ]);
 
 interface Finding { block: string; file: string; line: number; key: string; paid: boolean }
@@ -89,7 +102,7 @@ function main(): void {
 
     for (const key of scope.reads) {
       readsChecked++;
-      if (declared.has(key) || AMBIENT.has(key)) continue;
+      if (declared.has(key) || AMBIENT.has(key) || PROVEN_UNREACHABLE_READS.has(`${manifest.id}:${key}`)) continue;
       findings.push({
         block: manifest.id,
         file: scope.file,
