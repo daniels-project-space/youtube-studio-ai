@@ -142,6 +142,10 @@ assert.match(livePipeline, /aria-pressed=\{inspectionPhase === summary\.phase\}/
 assert.match(livePipeline, /Select a phase to inspect its recorded stage receipts\./);
 assert.doesNotMatch(livePipeline, /render stream/i);
 assert.match(livePipelineCss, /\.phaseStrip/);
+assert.match(livePipelineCss, /grid-auto-flow: column/,
+  "narrow live progress must remain a one-row stage rail instead of becoming a tall grid");
+assert.match(livePipelineCss, /scroll-snap-type: inline proximity/,
+  "the compact phase rail should preserve discoverable, touch-friendly inspection targets");
 assert.doesNotMatch(livePipelineCss, /\.receiptMeter/);
 assert.doesNotMatch(livePipelineCss, /\.activeStage/);
 assert.match(livePipelineCss, /prefers-reduced-motion/);

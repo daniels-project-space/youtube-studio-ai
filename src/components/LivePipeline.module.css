@@ -84,7 +84,21 @@
   .summary { align-items: flex-start; flex-direction: column; }
   .summaryMetrics { width: 100%; justify-content: flex-start; padding-left: 1.45rem; }
   .summaryMetrics > span { text-align: left; }
-  .phaseStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* A two-column phase grid turns an eight-phase run into four rows on a
+   * phone—the opposite of a compact live workbench. Retain each useful phase
+   * as a comfortably tappable card, but keep the progress journey on one
+   * horizontal rail. The visible edge and native scrollbar make the extra
+   * stages discoverable without inventing a condensed status. */
+  .phaseStrip {
+    grid-auto-columns: minmax(126px, 42%);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
+  }
+  .phase { scroll-snap-align: start; }
 }
 
 @media (max-width: 520px) {
