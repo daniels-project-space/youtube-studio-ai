@@ -1135,8 +1135,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "styleDNA",
       "visualBrief",
-      // A persisted, previously selected LTX treatment wins on retry; fresh
-      // runs deterministically derive one from the sealed channel identity.
+      // A persisted H3 treatment wins on retry; fresh runs deterministically
+      // derive one from sealed channel identity. The LTX-labelled key is a
+      // read-only migration input for frozen historical retries.
+      "h3VisualTreatmentId",
       "ltxStyleId",
       "narrationDurationSec",
       "timedScript",

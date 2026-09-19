@@ -490,8 +490,13 @@ assert.match(
 );
 assert.match(
   phase18Source,
-  /ltxStyleId: ltxStyleSelection\.styleId/,
-  "the treatment used for pixels must be retained for final assembly and retry",
+  /h3VisualTreatmentId: h3VisualTreatmentSelection\.styleId/,
+  "the treatment used for pixels must be retained under an H3-owned receipt key",
+);
+assert.match(
+  phase18Source,
+  /explicitStyleId: ctx\.store\["h3VisualTreatmentId"\] \?\? ctx\.store\["ltxStyleId"\]/,
+  "new H3 runs must write H3 treatment provenance while only legacy frozen retries may read the retired LTX key",
 );
 // The generated-clip download call must still be present unconditionally
 // (as the fallback / default path) even after the real-image-insert branch

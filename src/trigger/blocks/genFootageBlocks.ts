@@ -1115,8 +1115,8 @@ export const genFootage: Block = {
     "generatedFootageSceneManifest",
     "footageOnScreenTextCues",
     "footageRenderer",
-    "ltxStyleId",
-    "ltxStyleSelection",
+    "h3VisualTreatmentId",
+    "h3VisualTreatmentSelection",
   ],
   paid: true,
   run: async (ctx) => {
@@ -1129,8 +1129,11 @@ export const genFootage: Block = {
       motifs?: string[];
       motionDiscipline?: string;
     } | null;
-    const ltxStyleSelection = selectLtxStyleForChannel({
-      explicitStyleId: ctx.store["ltxStyleId"],
+    // New H3 renders persist their exact visual treatment under an H3-owned
+    // key. The LTX-labelled key is read only as a migration fallback for a
+    // frozen historical retry; no new H3 run emits it.
+    const h3VisualTreatmentSelection = selectLtxStyleForChannel({
+      explicitStyleId: ctx.store["h3VisualTreatmentId"] ?? ctx.store["ltxStyleId"],
       familyDefaultStyleId: FAMILIES.cinematic.styleId,
       styleDNA: dna,
       visualBrief: ctx.store["visualBrief"] as {
@@ -1140,16 +1143,16 @@ export const genFootage: Block = {
         world?: string;
       } | null | undefined,
     });
-    const selectedVisualTreatment = getLtxStyle(ltxStyleSelection.styleId).promptGuidance;
+    const selectedVisualTreatment = getLtxStyle(h3VisualTreatmentSelection.styleId).promptGuidance;
     const h3VisualTreatment = [
       selectedVisualTreatment.appearance,
       selectedVisualTreatment.lightingColor,
       selectedVisualTreatment.cameraDoctrine,
     ].join(" ");
     ctx.log(
-      `gen_footage: visual treatment ${ltxStyleSelection.styleId} (${ltxStyleSelection.source})` +
-      (ltxStyleSelection.matchedSignals.length
-        ? ` from ${ltxStyleSelection.matchedSignals.length} sealed channel-identity signal(s)`
+      `gen_footage: H3 visual treatment ${h3VisualTreatmentSelection.styleId} (${h3VisualTreatmentSelection.source})` +
+      (h3VisualTreatmentSelection.matchedSignals.length
+        ? ` from ${h3VisualTreatmentSelection.matchedSignals.length} sealed channel-identity signal(s)`
         : ""),
     );
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
@@ -1248,8 +1251,8 @@ export const genFootage: Block = {
           },
           // This field is a visual-treatment style ABI used by downstream
           // editor code; the explicit renderer identity lives on the receipt.
-          ltxStyleId: ltxStyleSelection.styleId,
-          ltxStyleSelection,
+          h3VisualTreatmentId: h3VisualTreatmentSelection.styleId,
+          h3VisualTreatmentSelection,
           [COST_PATCH_KEY]: 0,
         };
       }
@@ -1576,9 +1579,9 @@ export const genFootage: Block = {
     // Theme-consistent accent color for the name-card overlay below: the
     // channel's own locked Style DNA palette/color-grade, the same source
     // storySpine.ts already reads for its `styleLock` prompt clause. Neither
-    // ltxStylePresets.ts's getLtxStyle nor docuStyles.ts's DocuTheme carry a
+    // the cinematic visual-treatment registry nor docuStyles.ts's DocuTheme carry a
     // live per-channel id anywhere in this pipeline today (grep-verified: no
-    // block ever writes ctx.store["ltxStyleId"] or a "docuStyleId" key), so
+    // block ever writes a dedicated accent-color key or a "docuStyleId" key), so
     // resolving through either here would always just return their hardcoded
     // defaults — not an actually "consistent" per-channel color. Style DNA is
     // the real signal already available at this exact call site.
@@ -1824,8 +1827,8 @@ export const genFootage: Block = {
         generatedFootageSceneManifest,
         footageOnScreenTextCues: footageTextCues,
         footageRenderer: renderer,
-        ltxStyleId: ltxStyleSelection.styleId,
-        ltxStyleSelection,
+        h3VisualTreatmentId: h3VisualTreatmentSelection.styleId,
+        h3VisualTreatmentSelection,
         [COST_PATCH_KEY]: rendered.costUsd,
       };
     } catch (error) {

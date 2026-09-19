@@ -349,6 +349,15 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     ],
   },
   {
+    block: "curriculum_episode_seed",
+    label: "Children · Curriculum Seed",
+    description: "Binds one age-banded, child-editor-approved learning objective and curriculum evidence before story planning.",
+    optional: false,
+    // This is intentionally not an editable prompt surface. The approved
+    // private-review packet is the only source for these fields.
+    params: [],
+  },
+  {
     block: "episode_graph",
     label: "Episode Graph",
     description: "Locks causal beats, continuity, sources, and a deterministic scene manifest before rendering.",
@@ -360,6 +369,15 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     label: "Learning Contract",
     description: "Locks the learning objective, source-linked demonstration beats, retrieval prompt, and human-review checklist.",
     optional: false,
+    params: [],
+  },
+  {
+    block: "children_show_bible",
+    label: "Children · Show Bible",
+    description: "Locks an original guide, world, participation pattern, and recall against the approved lesson before rendering.",
+    optional: false,
+    // Identity and learning inputs come from the child-editor-reviewed packet,
+    // never from generic channel-module overrides.
     params: [],
   },
   {
