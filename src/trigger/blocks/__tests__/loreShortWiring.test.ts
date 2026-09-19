@@ -208,6 +208,10 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
     "the engine's budget lane must still be the free ffmpeg path the block pins");
   assert.equal(LORESHORT_PATHS.budget.model, "h3",
     "the budget lane must use the current H3 renderer rather than a retired LTX path");
+  assert.match(block, /visualDirection: visualIdentity \|\| undefined/,
+    "the live Lore Short block must carry frozen channel identity into its visual engine");
+  assert.match(engineSource, /CHANNEL IDENTITY \(retain across every scene\)/,
+    "every Lore Short scene prompt must retain the channel-specific world rather than only a generic sub-style");
 
   // Critique-loop cost safety: text-only production, capped iterations, frozen
   // checkpoint, and a fail-closed outage gate before any paid rendering.

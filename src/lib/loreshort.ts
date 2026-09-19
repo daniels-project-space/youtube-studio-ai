@@ -57,6 +57,8 @@ export interface LoreShortCfg {
   narrator: string;
   nScenes?: number;
   subStyle?: string;
+  /** Frozen channel world applied to every generated scene, separate from the shared lore sub-style. */
+  visualDirection?: string;
   voiceId?: string;
   narrationSpeed?: number; // TTS speaking-rate multiplier (<1 = slower/graver); default 0.96
   /** H3 is the production route; Seedance/Wan remain explicit non-production experiments. */
@@ -411,6 +413,9 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   });
   const approvedPlan = approved.plan as LorePlan | undefined;
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
+  const visualDirection = typeof cfg.visualDirection === "string"
+    ? cfg.visualDirection.replace(/\s+/g, " ").trim().slice(0, 900)
+    : "";
   if (!deps.generateImage) {
     throw new Error("loreshort: an explicit attested image generator is required");
   }
@@ -469,7 +474,9 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   async function genArt(i: number) {
     const out = rd(`scene_${i}.png`);
     if (existsSync(out)) return;
-    const text = `${scenes[i].shot ? scenes[i].shot.toUpperCase() + " SHOT. " : ""}${style.art}\nCompose in THREE clear depth layers (close foreground / midground subject / deep background). SCENE: ${scenes[i].visual}`;
+    const text = `${scenes[i].shot ? scenes[i].shot.toUpperCase() + " SHOT. " : ""}${style.art}\n` +
+      `${visualDirection ? `CHANNEL IDENTITY (retain across every scene): ${visualDirection}\n` : ""}` +
+      `Compose in THREE clear depth layers (close foreground / midground subject / deep background). SCENE: ${scenes[i].visual}`;
     try {
       const bytes = await generateImage({ id: `${cfg.slug}-scene-${i}`, index: i, prompt: text });
       await writeFile(out, Buffer.from(bytes));

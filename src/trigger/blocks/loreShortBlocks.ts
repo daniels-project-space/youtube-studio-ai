@@ -424,6 +424,16 @@ export const loreShort: Block = {
     }
 
     const visualBrief = getVisualBrief(ctx.store);
+    const styleDNA = ctx.store["styleDNA"] as { recurringSubject?: unknown; setting?: unknown; composition?: unknown; colorGrade?: unknown; motifs?: unknown; visualAvoid?: unknown } | null;
+    const visualIdentity = [
+      visualBrief?.promptStyle,
+      typeof styleDNA?.recurringSubject === "string" ? `recurring subject: ${styleDNA.recurringSubject}` : "",
+      typeof styleDNA?.setting === "string" ? `world: ${styleDNA.setting}` : "",
+      typeof styleDNA?.composition === "string" ? `composition: ${styleDNA.composition}` : "",
+      typeof styleDNA?.colorGrade === "string" ? `grade: ${styleDNA.colorGrade}` : "",
+      Array.isArray(styleDNA?.motifs) ? `motifs: ${styleDNA.motifs.filter((value): value is string => typeof value === "string").slice(0, 5).join("; ")}` : "",
+      Array.isArray(styleDNA?.visualAvoid) ? `avoid: ${styleDNA.visualAvoid.filter((value): value is string => typeof value === "string").slice(0, 5).join("; ")}` : "",
+    ].filter(Boolean).join(" · ").slice(0, 900);
     const subStyle = String(ctx.params["subStyle"] ?? "cinematic");
     if (!SUB_STYLES[subStyle]) {
       throw new Error(`lore_short: unknown subStyle ${JSON.stringify(subStyle)} (have: ${Object.keys(SUB_STYLES).join(", ")})`);
@@ -524,6 +534,7 @@ export const loreShort: Block = {
         narrator,
         nScenes,
         subStyle,
+        visualDirection: visualIdentity || undefined,
         // BUDGET LANE, deliberately: H3 clips + the engine's FREE ffmpeg
         // lanczos+unsharp 2K finish. Real-ESRGAN would add a paid upscale per
         // clip for a resolution nobody asked for.
