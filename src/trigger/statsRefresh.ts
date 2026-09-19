@@ -10,8 +10,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
-  STUDIO_AUTOMATION_GATES,
-  studioAutomationGate,
+  studioAnalyticsRefreshGate,
 } from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
@@ -740,7 +739,7 @@ export const statsRefreshSchedule = schedules.task({
   maxDuration: 1800,
   retry: { maxAttempts: 1 },
   run: async () => {
-    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    const gate = studioAnalyticsRefreshGate();
     if (!gate.enabled) return gate;
     const log: Logger = (message, extra) => console.log(`[stats-refresh-6h] ${message}`, extra ?? "");
     await bootstrapSecrets(log);

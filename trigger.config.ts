@@ -165,12 +165,11 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
  *    fal FLUX; strict thumbnail generation deliberately ignores this switch,
  *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
  *  - GROQ_API_KEY           — frees the vision chain's free tier when present.
- *  - STUDIO_AUTOPILOT / STUDIO_INSIGHTS_AUTOMATION — the fail-closed scheduled
- *    automation gates (src/lib/automationGate.ts). Only the exact value "on"
- *    enables a schedule. These MUST be forwarded: without them the gate reads
- *    `undefined` inside the Trigger runtime, so scheduled automation stays off
- *    in the cloud no matter what the operator configured. Forwarding is inert
- *    until the deploy machine actually sets them (syncEnvVars skips unset vars).
+ *  - STUDIO_AUTOPILOT — fail-closed scheduled generation/publishing gate. Only
+ *    the exact value "on" enables that work.
+ *  - STUDIO_INSIGHTS_AUTOMATION — optional analytics read-refresh kill switch;
+ *    it runs by default and only the exact value "off" pauses it. It is still
+ *    forwarded so an operator can stop dashboard reconciliation without a redeploy.
  *  - VAULT_URL              — override for the project-hub vault base URL used
  *    by bootstrapSecrets (src/lib/vault.ts). Its partner VAULT_ACCESS_TOKEN was
  *    already forwarded; without VAULT_URL a relocated vault silently keeps

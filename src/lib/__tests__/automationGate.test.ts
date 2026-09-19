@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   STUDIO_AUTOMATION_GATES,
+  studioAnalyticsRefreshGate,
   studioAutomationGate,
   type StudioAutomationGate,
 } from "@/lib/automationGate";
@@ -26,6 +27,21 @@ for (const gate of gates) {
   }
 }
 
+assert.deepEqual(studioAnalyticsRefreshGate({}), {
+  enabled: true,
+  gate: STUDIO_AUTOMATION_GATES.insights,
+}, "analytics refresh is read-only and should keep connected dashboards current by default");
+assert.deepEqual(studioAnalyticsRefreshGate({ STUDIO_INSIGHTS_AUTOMATION: "on" }), {
+  enabled: true,
+  gate: STUDIO_AUTOMATION_GATES.insights,
+});
+assert.deepEqual(studioAnalyticsRefreshGate({ STUDIO_INSIGHTS_AUTOMATION: "off" }), {
+  disabled: true,
+  enabled: false,
+  gate: STUDIO_AUTOMATION_GATES.insights,
+  requiredValue: "not_off",
+});
+
 type ScheduleContract = {
   file: string;
   exportName: string;
@@ -36,6 +52,7 @@ type ScheduleContract = {
    */
   cron: string | null;
   gate: StudioAutomationGate;
+  gateCall?: string;
   hazardousCall: string;
 };
 
@@ -59,6 +76,7 @@ const scheduleContracts: ScheduleContract[] = [
     exportName: "statsRefreshSchedule",
     cron: "0 */6 * * *",
     gate: STUDIO_AUTOMATION_GATES.insights,
+    gateCall: "studioAnalyticsRefreshGate()",
     hazardousCall: "await bootstrapSecrets",
   },
   {
@@ -111,7 +129,7 @@ for (const contract of scheduleContracts) {
 
   const gateKey =
     contract.gate === STUDIO_AUTOMATION_GATES.autopilot ? "autopilot" : "insights";
-  const gateCall = `studioAutomationGate(STUDIO_AUTOMATION_GATES.${gateKey})`;
+  const gateCall = contract.gateCall ?? `studioAutomationGate(STUDIO_AUTOMATION_GATES.${gateKey})`;
   const gateIndex = schedule.indexOf(gateCall);
   const earlyReturnIndex = schedule.indexOf("if (!gate.enabled) return gate;");
   const hazardousIndex = schedule.indexOf(contract.hazardousCall);
