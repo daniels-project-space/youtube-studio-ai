@@ -36,6 +36,10 @@ export type ModuleCostEnvelope = (
 
 export interface ModuleContractOverride {
   version?: string;
+  /** Capabilities that an upstream module must have declared before this one may run. */
+  requiredCapabilities?: string[];
+  /** Capabilities a later specialist module must provide to complete this module's handoff. */
+  requiredDownstreamCapabilities?: string[];
   capabilities: string[];
   requiredConsumes?: string[];
   optionalConsumes?: string[];
@@ -59,6 +63,10 @@ export interface ModuleContractOverride {
 export interface ModuleManifest {
   id: string;
   version: string;
+  /** Explicit cross-module dependency contract. Artifact keys carry the payloads. */
+  requiredCapabilities: readonly string[];
+  /** Required specialist consumers; prevents an emitted handoff becoming dead configuration. */
+  requiredDownstreamCapabilities: readonly string[];
   capabilities: readonly string[];
   consumes: Readonly<Record<string, ArtifactContract>>;
   optionalConsumes: Readonly<Record<string, ArtifactContract>>;
@@ -122,6 +130,8 @@ export function manifestFromBlock(
   return {
     id: block.id,
     version: override?.version ?? "1.0.0-migration",
+    requiredCapabilities: override?.requiredCapabilities ?? [],
+    requiredDownstreamCapabilities: override?.requiredDownstreamCapabilities ?? [],
     capabilities: override?.capabilities ?? [],
     consumes: keyedContracts(requiredKeys),
     optionalConsumes: keyedContracts(optionalConsumes),
@@ -209,6 +219,15 @@ export function assertExecutableManifest(manifest: ModuleManifest): void {
   }
   if (!/^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(manifest.version)) {
     throw new Error(`manifest ${manifest.id} has invalid version ${manifest.version}`);
+  }
+  if (new Set(manifest.requiredCapabilities).size !== manifest.requiredCapabilities.length) {
+    throw new Error(`manifest ${manifest.id} declares duplicate required capabilities`);
+  }
+  if (new Set(manifest.requiredDownstreamCapabilities).size !== manifest.requiredDownstreamCapabilities.length) {
+    throw new Error(`manifest ${manifest.id} declares duplicate downstream capabilities`);
+  }
+  if (new Set(manifest.capabilities).size !== manifest.capabilities.length) {
+    throw new Error(`manifest ${manifest.id} declares duplicate capabilities`);
   }
   if (manifest.costAndLatency.paid && manifest.idempotency.scope === "none") {
     throw new Error(`paid manifest ${manifest.id} must declare idempotency`);

@@ -15,6 +15,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
+import { childrenThumbnailDirection } from "@/engine/childrenVideoTreatment";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
   assertThumbnailGate,
@@ -706,6 +707,12 @@ export const thumbnailGen: Block = {
       family: ctx.store["family"],
       contentLane: ctx.store["contentLane"],
     });
+    // Domain modules supply typed visual intent. The thumbnail module remains
+    // the only owner of typography, Nano Banana generation, image QA, and
+    // thumbnail evidence; this is an input contract, not a second thumbnail
+    // implementation embedded in a children pipeline.
+    const childrenDirection = childrenThumbnailDirection(ctx.store["childrenVideoTreatment"]);
+    const thumbnailSceneSeed = [thumbnailDescription, childrenDirection].filter(Boolean).join("\n\n");
     // Package art is a separately generated, publishable visual asset. Bind it
     // before checkpoint admission so a malformed/missing fictional treatment
     // can neither reuse a generic candidate nor begin provider work.
@@ -1259,7 +1266,7 @@ export const thumbnailGen: Block = {
             ? "thumbnail-gen-checkpoint-v6-fal-nano-banana-pro-native-scenario-treatment"
             : "thumbnail-gen-checkpoint-v5-fal-nano-banana-pro-native",
           title,
-          thumbnailDescription,
+          thumbnailDescription: thumbnailSceneSeed,
           packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
           scriptHint,
           sceneMandate: dnaThumb?.subject,
@@ -1350,7 +1357,7 @@ export const thumbnailGen: Block = {
             pattern,
             title,
             scriptHint,
-            sceneSeed: thumbnailDescription,
+            sceneSeed: thumbnailSceneSeed,
             channelName: learningChannel,
             playbook: effectivePlaybook,
             outJpg,
@@ -1611,7 +1618,7 @@ export const thumbnailGen: Block = {
       // effectively dead in production even once they were passed in.
       try {
         const [fingerprint, palette] = await Promise.all([
-          fingerprintThumbnail({ imagePath: outJpg, heroProp: thumbnailDescription }),
+          fingerprintThumbnail({ imagePath: outJpg, heroProp: thumbnailSceneSeed }),
           readThumbnailPalette(outJpg),
         ]);
         await recordRecentRender({

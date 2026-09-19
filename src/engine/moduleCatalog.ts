@@ -351,7 +351,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "curriculum_episode_seed",
     label: "Children · Curriculum Seed",
-    description: "Binds one age-banded, child-editor-approved learning objective and curriculum evidence before story planning.",
+    description: "Accepts one child-editor-approved, age-banded lesson intent. It does not write, render, or publish an episode.",
     optional: false,
     // This is intentionally not an editable prompt surface. The approved
     // private-review packet is the only source for these fields.
@@ -374,16 +374,23 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "children_show_bible",
     label: "Children · Show Bible",
-    description: "Locks an original guide, world, participation pattern, and recall against the approved lesson before rendering.",
+    description: "Checks the reviewed series identity and participation pattern against an already-approved lesson. It does not choose curriculum, write, render, or publish.",
     optional: false,
     // Identity and learning inputs come from the child-editor-reviewed packet,
     // never from generic channel-module overrides.
     params: [],
   },
   {
+    block: "children_video_treatment",
+    label: "Children · Video Treatment",
+    description: "Sends the approved guide, world, learning action, and calm-motion rules to visual and thumbnail modules. It does not render, assess safety, or publish.",
+    optional: false,
+    params: [],
+  },
+  {
     block: "child_content_safety",
     label: "Children’s Safety Review",
-    description: "Requires curriculum evidence, child-safe language, and a human-reviewed private draft for children-learning channels.",
+    description: "Reviews the completed lesson plan and scene manifest for a private human-review draft. It never changes identity, curriculum, or publishing state.",
     optional: false,
     params: [],
   },

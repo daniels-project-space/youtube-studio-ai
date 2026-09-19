@@ -158,19 +158,12 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     ]
   },
   {
-    "id": "children-learning-studio",
-    "label": "Children’s Learning Studio — Safe Lesson Pipeline",
+    "id": "children-video-treatment",
+    "label": "Children’s Video Treatment — Lesson to Visual Handoff",
     "kind": "module",
-    "description": "brief · Private curriculum intake + Learning Contract + Children’s Show Bible + deterministic Scene Compiler + child-editor safety review",
+    "description": "brief · Approved Episode Graph + Learning Contract + Children’s Show Bible → typed Ernie, MiniMax H3, and thumbnail direction",
     "paths": [
-      "src/app/(app)/children-review/page.tsx",
-      "src/engine/childrenShowBible.ts",
-      "src/engine/learningContract.ts",
-      "src/lib/childrenReviewIntake.ts",
-      "src/trigger/blocks/childrenSafetyBlocks.ts",
-      "src/trigger/blocks/childrenShowBibleBlocks.ts",
-      "src/trigger/blocks/curriculumEpisodeSeedBlocks.ts",
-      "src/trigger/blocks/sceneCompilerBlocks.ts"
+      "src/trigger/blocks/childrenVideoTreatmentBlocks.ts"
     ]
   },
   {
@@ -207,7 +200,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "id": "loreshort",
     "label": "Lore Short — Loreshort Engine",
     "kind": "module",
-    "description": "visual · Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
+    "description": "visual · Loreshort — OpenRouter first-person lore script + attested Novita stills + per-line cast-voice TTS + sealed MiniMax H3 image-to-video camera moves + free FFmpeg 2K finish",
     "paths": [
       "src/engine/blocks.ts",
       "src/lib/loreshort.ts",
@@ -218,7 +211,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "id": "novita-render-farm",
     "label": "Novita Render Farm",
     "kind": "module",
-    "description": "visual · Direct Trigger-controlled Novita RTX 4090 spot workers — Z-Image keyframes followed by sealed LTX-2.5 image-to-video, one exact shot job per worker, durable R2 manifests, and verified worker teardown",
+    "description": "visual · Direct Trigger-controlled Novita route — Z-Image keyframes followed by sealed MiniMax H3 image-to-video, immutable R2 model evidence, native-byte QA, and bounded repairs",
     "paths": [
       "src/trigger/blocks/novitaRenderBlocks.ts"
     ]
@@ -232,16 +225,16 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
   },
   {
     "id": "videocraft-novita",
-    "label": "Videocraft (Novita LTX-2.5 x2)",
+    "label": "Videocraft — Retired Route Record",
     "kind": "module",
-    "description": "visual · Videocraft — LTX-2.5 distilled image-to-video on an exact RTX 4090 spot profile: 640×352 stage one → native latent-space x2 refinement → 1280×704 final output, FP8-cast + CPU offload, with no model or hardware fallback.",
+    "description": "visual · Historical image-to-video receipts only. New Studio footage is owned by the sealed MiniMax H3 Novita route.",
     "paths": []
   },
   {
     "id": "lofi",
     "label": "Lofi Loop — Novita Ambient Engine",
     "kind": "module",
-    "description": "visual · A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified Novita LTX-2.5 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
+    "description": "visual · A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified MiniMax H3 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     "paths": [
       "src/engine/__tests__/stageBudget.test.ts",
       "src/trigger/blocks/lofiBlocks.ts"
@@ -368,7 +361,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "id": "script",
     "label": "Script + Hook",
     "kind": "module",
-    "description": "write · Hookcraft cold-open engine + latest Gemini Pro narration (gemini-3.1-pro-preview)",
+    "description": "write · Hookcraft cold-open engine + pinned OpenRouter creative-text narration",
     "paths": [
       "src/trigger/blocks/narratedBlocks.ts"
     ]
@@ -506,7 +499,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "id": "metadata",
     "label": "SEO Metadata",
     "kind": "module",
-    "description": "package · Metacraft — autocomplete-grounded candidates (latest Gemini Pro) + claims lint + feed judge",
+    "description": "package · Metacraft — autocomplete-grounded candidates + claims lint + feed judge",
     "paths": [
       "src/lib/__tests__/runCurrentThumbnail.test.ts",
       "src/trigger/blocks/intelligenceBlocks.ts"
@@ -544,6 +537,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "visual · whiteboardSync — route-sealed non-Google storyboard + bounded attested Novita still scenes + Fish narration, Whisper-aligned and drawn in time with the voice.",
     "paths": [
+      "src/engine/__tests__/healerPolicy.test.ts",
       "src/trigger/blocks/whiteboardScribeBlocks.ts"
     ]
   },

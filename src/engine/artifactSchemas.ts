@@ -47,6 +47,7 @@ import {
   ChildrenShowBibleInputSchema,
   ChildrenShowBibleSchema,
 } from "./childrenShowBible";
+import { ChildrenVideoTreatmentSchema } from "./childrenVideoTreatment";
 import {
   CurriculumEpisodeSeedApprovalReceiptSchema,
   CurriculumEpisodeSeedInputSchema,
@@ -378,6 +379,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   childrenShowBibleApproval: {
     type: "ChildrenShowBibleApprovalReceipt",
     schema: ChildrenShowBibleApprovalReceiptSchema,
+    persist: "reference",
+  },
+  childrenVideoTreatment: {
+    type: "ChildrenVideoTreatment",
+    schema: ChildrenVideoTreatmentSchema,
     persist: "reference",
   },
   casefileSourcePacketInput: {

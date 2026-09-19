@@ -64,6 +64,8 @@ export function validatePipeline(
   const blocks: Block[] = [];
   const manifests: ModuleManifest[] = [];
   const available = new Set<string>(seeds);
+  const availableCapabilities = new Set<string>();
+  const capabilityProducedAt = new Map<string, number>();
   const producedKeys: string[] = [];
   const producerOf = new Map<string, string>();
 
@@ -76,6 +78,18 @@ export function validatePipeline(
       );
     }
     const block = manifest.block;
+
+    // A module may require a capability as well as the concrete artifact keys
+    // it consumes. This prevents a look-alike patch from satisfying a key
+    // name while skipping the upstream module that owns its policy/quality
+    // contract. Payload transfer remains explicit below through `consumes`.
+    for (const capability of manifest.requiredCapabilities) {
+      if (!availableCapabilities.has(capability)) {
+        throw new PipelineValidationError(
+          `block "${block.id}" (step ${i}) requires upstream capability "${capability}"`,
+        );
+      }
+    }
 
     // Every consumed key must be produced upstream (or be a seed).
     for (const need of Object.keys(manifest.consumes)) {
@@ -109,6 +123,24 @@ export function validatePipeline(
 
     blocks.push(block);
     manifests.push(manifest);
+    for (const capability of manifest.capabilities) {
+      availableCapabilities.add(capability);
+      capabilityProducedAt.set(capability, i);
+    }
+  }
+
+  // An output handoff is not allowed to become inert configuration. When a
+  // module says its job requires a specialised later consumer, the exact
+  // consumer capability must appear after it in the same compiled graph.
+  for (const [index, manifest] of manifests.entries()) {
+    for (const capability of manifest.requiredDownstreamCapabilities) {
+      const consumerIndex = capabilityProducedAt.get(capability);
+      if (consumerIndex === undefined || consumerIndex <= index) {
+        throw new PipelineValidationError(
+          `block "${manifest.id}" (step ${index}) requires downstream capability "${capability}"`,
+        );
+      }
+    }
   }
 
   return { blocks, manifests, entries, producedKeys };

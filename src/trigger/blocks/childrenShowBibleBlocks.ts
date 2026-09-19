@@ -2,9 +2,10 @@ import { assertChildrenShowBible } from "@/engine/childrenShowBible";
 import type { Block } from "@/engine/types";
 
 /**
- * Operator-supplied, provider-free children-show admission. It is intentionally
- * standalone: future supervised children render lanes can consume this durable
- * continuity receipt, while the existing family remains private-review-only.
+ * Provider-free, standalone series-identity validator. It accepts an already
+ * approved curriculum seed plus a completed generic learning plan and emits a
+ * durable continuity receipt. It neither selects a curriculum objective nor
+ * invokes a script, renderer, safety gate, or delivery module.
  */
 const childrenShowBible: Block = {
   id: "children_show_bible",

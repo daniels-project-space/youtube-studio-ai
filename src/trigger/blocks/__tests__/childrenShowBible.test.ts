@@ -19,6 +19,12 @@ import { contentLaneForFamily } from "@/engine/contentLane";
 import { buildLearningContract } from "@/engine/learningContract";
 import { assertChildContentSafety } from "@/trigger/blocks/childrenSafetyBlocks";
 import { childrenShowBibleBlocks } from "../childrenShowBibleBlocks";
+import { childrenVideoTreatmentBlocks } from "../childrenVideoTreatmentBlocks";
+import {
+  assertChildrenVideoTreatmentForRender,
+  buildChildrenVideoTreatment,
+  childrenThumbnailDirection,
+} from "@/engine/childrenVideoTreatment";
 
 const NOW = new Date();
 const lane = contentLaneForFamily("children_learning");
@@ -347,6 +353,44 @@ async function main(): Promise<void> {
   });
   assert.equal(childSafety.allowedPublishMode, "draft");
   assert.equal(childSafety.childrenShowBibleFingerprint, admitted.bible.contentFingerprint);
+
+  // The video-treatment module is a narrow, provider-free handoff. It gives
+  // thumbnail/render modules the approved lesson identity, but never executes
+  // those modules or absorbs the separate safety gate.
+  const videoTreatment = buildChildrenVideoTreatment({
+    episodeGraph: graph,
+    lessonContract,
+    childrenShowBible: admitted.bible,
+    contentLane: lane,
+  });
+  assert.equal(videoTreatment.format.primarySurface, "shorts");
+  assert.match(childrenThumbnailDirection(videoTreatment) ?? "", /Tavi/);
+  assert.doesNotThrow(() => assertChildrenVideoTreatmentForRender({
+    treatment: videoTreatment,
+    audience: "children",
+    durationSec: graph.durationSec,
+    aspect: "9:16",
+  }));
+  assert.throws(
+    () => assertChildrenVideoTreatmentForRender({
+      treatment: videoTreatment,
+      audience: "children",
+      durationSec: graph.durationSec,
+      aspect: "16:9",
+    }),
+    /geometry or duration/,
+  );
+  const treatmentPatch = await childrenVideoTreatmentBlocks[0].run({
+    ownerId: "owner-test",
+    runId: "run-children-video-treatment",
+    channelId: "channel-test",
+    keyPrefix: "owner/owner-test/channel/channel-test/",
+    params: {},
+    store: { episodeGraph: graph, lessonContract, childrenShowBible: admitted.bible, contentLane: lane },
+    budgetUsd: 0,
+    log: () => undefined,
+  });
+  assert.deepEqual(treatmentPatch.childrenVideoTreatment, videoTreatment);
 
   // A signed prompt in the Show Bible is not sufficient: the final safety
   // gate rechecks the actual timed graph/scene plan, even if a structurally

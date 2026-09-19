@@ -101,10 +101,10 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
     promise: "Make every episode teach something measurable.",
     bullets: ["One clear objective", "Built-in recall practice"],
   },
-  "children-learning-studio": {
-    title: "Children’s Learning Studio",
-    promise: "Build age-fit lessons with a safe human handoff.",
-    bullets: ["Objective-led episodes", "Editor approval before release"],
+  "children-video-treatment": {
+    title: "Children’s Video Treatment",
+    promise: "Give every specialist module the exact child-video direction it needs.",
+    bullets: ["One approved visual identity", "Renderer and thumbnail handoffs"],
   },
   "children-show-bible": {
     title: "Children’s Show Bible",

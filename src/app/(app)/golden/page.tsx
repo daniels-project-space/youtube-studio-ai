@@ -177,7 +177,7 @@ const SHORTS_PROOFS: TextProof[] = [
 /* ============================ categories ============================= */
 
 const CATEGORY: Record<string, string> = {
-  "channel-planner": "Pre-production", "topic-intel": "Pre-production", "show-bible": "Pre-production", script: "Pre-production", guard: "Pre-production", "chess-replay-private-review": "Pre-production", "children-learning-studio": "Pre-production",
+  "channel-planner": "Pre-production", "topic-intel": "Pre-production", "show-bible": "Pre-production", script: "Pre-production", guard: "Pre-production", "chess-replay-private-review": "Pre-production", "children-video-treatment": "Pre-production",
   loreshort: "Video Engines", lofi: "Video Engines", quiz: "Video Engines", cinematic: "Video Engines", documotion: "Video Engines", "speech-tv": "Video Engines", whiteboard: "Video Engines", comic: "Video Engines", shorts: "Video Engines", "videocraft-novita": "Video Engines",
   thumbnail: "Visual", "package-opening-proof": "Visual", visuals: "Visual", "studio-assets": "Visual", motioncraft: "Visual", inserts: "Visual", "imagecraft-novita": "Visual",
   narration: "Audio",
@@ -202,7 +202,7 @@ const MODULE_DESTINATIONS: Readonly<Record<string, ModuleDestination>> = {
   "casefile-evidence-shot-map": { href: "/casefile", label: "Open Casefile desk" },
   "editorial-evidence-packet": { href: "/editorial-evidence", label: "Open evidence desk" },
   "source-bound-story-spine": { href: "/editorial-evidence", label: "Open evidence desk" },
-  "children-learning-studio": { href: "/children-review", label: "Open children review desk" },
+  "children-video-treatment": { href: "/children-review", label: "Open children review desk" },
   "topic-intel": { href: "/seo", label: "Open packaging research" },
   metadata: { href: "/seo", label: "Open packaging research" },
 };
@@ -277,7 +277,7 @@ const MODULE_MOTIFS: Readonly<Record<string, ChannelMotionMotif>> = {
   verify: "health",
   "editorial-evidence-packet": "casefile",
   "source-bound-story-spine": "book",
-  "children-learning-studio": "storybook",
+  "children-video-treatment": "storybook",
   metadata: "ledger",
   narration: "mind",
   lofi: "lofi",

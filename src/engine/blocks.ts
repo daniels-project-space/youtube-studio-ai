@@ -31,6 +31,7 @@ import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
 import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
 import { childrenShowBibleBlocks } from "@/trigger/blocks/childrenShowBibleBlocks";
+import { childrenVideoTreatmentBlocks } from "@/trigger/blocks/childrenVideoTreatmentBlocks";
 import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
 import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacketBlocks";
 import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
@@ -83,6 +84,9 @@ export function registerAllBlocks(): void {
   // provider path and remains a private child-editor-review receipt, not a
   // switch that admits the children family to autonomous publishing.
   for (const b of childrenShowBibleBlocks) register(b);
+  // Renderer-neutral child-video direction. It only supplies typed handoffs to
+  // specialist visual, motion, and thumbnail modules.
+  for (const b of childrenVideoTreatmentBlocks) register(b);
   // Children can make a review candidate, never self-authorize publication.
   for (const b of childContentSafetyBlocks) register(b);
   // Source-first documentary admission is provider-free and only emits a

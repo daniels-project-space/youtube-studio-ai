@@ -322,7 +322,7 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
 // bypass the causal scene plan, deterministic renderer, or draft-only release.
 const childrenLearning = designPipeline({ family: "children_learning", publishMode: "public" });
 const childrenBlocks = childrenLearning.pipeline.map((entry) => entry.block);
-for (const block of ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler"]) {
+for (const block of ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "children_video_treatment", "child_content_safety", "scene_compiler"]) {
   assert(childrenBlocks.includes(block), `children-learning must include ${block}`);
 }
 assert(
@@ -330,7 +330,8 @@ assert(
     childrenBlocks.indexOf("story_spine") < childrenBlocks.indexOf("episode_graph") &&
     childrenBlocks.indexOf("episode_graph") < childrenBlocks.indexOf("learning_contract") &&
     childrenBlocks.indexOf("learning_contract") < childrenBlocks.indexOf("children_show_bible") &&
-    childrenBlocks.indexOf("children_show_bible") < childrenBlocks.indexOf("child_content_safety") &&
+    childrenBlocks.indexOf("children_show_bible") < childrenBlocks.indexOf("children_video_treatment") &&
+    childrenBlocks.indexOf("children_video_treatment") < childrenBlocks.indexOf("child_content_safety") &&
     childrenBlocks.indexOf("child_content_safety") < childrenBlocks.indexOf("scene_compiler"),
   "children-learning must bind a current child-editor packet before safety review and rendering",
 );
@@ -342,6 +343,14 @@ assert.throws(
 assert.doesNotThrow(
   () => validatePipeline(childrenLearning.pipeline, ["contentLane", "curriculumEpisodeSeedInput", "childrenShowBibleInput"]),
   "the approved packet is a deliberate per-run seed, not a missing automatic planner output",
+);
+assert.throws(
+  () => validatePipeline(
+    childrenLearning.pipeline.slice(0, childrenBlocks.indexOf("children_video_treatment") + 1),
+    ["contentLane", "curriculumEpisodeSeedInput", "childrenShowBibleInput"],
+  ),
+  /children_video_treatment.*downstream capability/,
+  "a domain module may require its specialist consumer; it must not embed a competing thumbnail path",
 );
 assert.throws(
   () => assertPipelineMatchesContentLane(

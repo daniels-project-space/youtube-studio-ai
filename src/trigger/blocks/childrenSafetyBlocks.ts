@@ -1,6 +1,8 @@
 /**
  * A deterministic safety/release boundary for child-directed originals.
- * It permits creation of a private review candidate, never autonomous public
+ * It inspects immutable outputs from the curriculum, show-identity, learning,
+ * planning, and render-planning modules; it owns none of those concerns. It
+ * permits creation of a private review candidate, never autonomous public
  * release. The graph itself contains the full timed text and visual plan, so
  * the gate has no hidden model dependency.
  */

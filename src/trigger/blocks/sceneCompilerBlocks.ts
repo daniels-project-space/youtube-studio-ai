@@ -7,6 +7,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertSceneManifest, type SceneManifest } from "@/engine/episodeGraph";
+import { assertChildrenVideoTreatmentForRender } from "@/engine/childrenVideoTreatment";
 import {
   resolveScenarioVisualTreatmentForRoute,
   type ScenarioVisualTreatment,
@@ -69,6 +70,7 @@ export function assertSceneCompilerAdmission(args: {
   manifest: unknown;
   narrationDurationSec: unknown;
   aspect?: unknown;
+  childrenVideoTreatment?: unknown;
 }): SceneManifest {
   resolveDimensions(args.aspect);
   const manifest = assertSceneManifest(args.manifest);
@@ -84,6 +86,12 @@ export function assertSceneCompilerAdmission(args: {
   if (manifest.renderer !== "deterministic-scene/v1" || manifest.externalProviderCalls !== 0) {
     throw new Error("scene_compiler: manifest must be produced by the zero-provider deterministic scene compiler");
   }
+  assertChildrenVideoTreatmentForRender({
+    treatment: args.childrenVideoTreatment,
+    audience: manifest.audience,
+    durationSec: manifest.durationSec,
+    aspect: args.aspect ?? "16:9",
+  });
   return manifest;
 }
 
@@ -144,6 +152,7 @@ const sceneCompiler: Block = {
       manifest: ctx.store["sceneManifest"],
       narrationDurationSec: ctx.store["narrationDurationSec"],
       aspect: ctx.params["aspect"],
+      childrenVideoTreatment: ctx.store["childrenVideoTreatment"],
     });
     const syntheticScenario = ctx.store["syntheticScenario"] === undefined
       ? undefined

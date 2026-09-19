@@ -16,11 +16,10 @@ function main(): void {
   assert.equal(privateRelease.state, "private-review-only");
   assert.match(privateRelease.detail, /no owner-facing intake/i);
 
-  const children = catalogExecutionAvailability(catalogExecutionBinding("children-learning-studio"));
-  assert.equal(catalogExecutionBinding("children-learning-studio").kind, "supervised-pathway");
-  assert.equal(children.state, "private-review-only");
-  assert.equal(children.label, "SUPERVISED · PRIVATE REVIEW");
-  assert.match(children.detail, /owner-facing supervised pathway/i);
+  const children = catalogExecutionAvailability(catalogExecutionBinding("children-video-treatment"));
+  assert.equal(catalogExecutionBinding("children-video-treatment").kind, "pipeline-module");
+  assert.equal(children.state, "composition-gated");
+  assert.match(children.detail, /does not grant automatic channel admission/i);
 
   const externalTask = catalogExecutionAvailability(catalogExecutionBinding("channel-planner"));
   assert.equal(externalTask.state, "outside-module-abi");

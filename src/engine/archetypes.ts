@@ -160,6 +160,9 @@ const CHILDREN_LEARNING: PipelineEntry[] = [
   // This is an operator-supplied, fingerprint-bound child-editor admission.
   // It is a per-episode seed, never an automatic channel-creation shortcut.
   { block: "children_show_bible" },
+  // Creative/video direction only: hands exact identity, motion, and package
+  // constraints to the specialist renderer and thumbnail modules.
+  { block: "children_video_treatment" },
   { block: "child_content_safety" },
   { block: "scene_compiler", params: { aspect: "16:9", audience: "children" } },
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 360 } },

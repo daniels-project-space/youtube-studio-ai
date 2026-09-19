@@ -700,23 +700,21 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "reference",
   },
   {
-    key: "children-learning-studio",
+    key: "children-video-treatment",
     stage: "brief",
-    title: "Children’s Learning Studio — Safe Lesson Pipeline",
+    title: "Children’s Video Treatment — Lesson to Visual Handoff",
     engine:
-      "Private curriculum intake + Learning Contract + Children’s Show Bible + deterministic Scene Compiler + child-editor safety review",
+      "Approved Episode Graph + Learning Contract + Children’s Show Bible → typed Ernie, MiniMax H3, and thumbnail direction",
     how:
-      "The owner-facing module for children’s channels with learning content. It composes the existing supervised blocks into one " +
-      "clear handoff: age band and measurable objective first, original guide/world next, then source-linked participation and recall, " +
-      "deterministic illustration, and a fresh human child-editor review. It opens the private review desk for the operator’s draft and " +
-      "never turns a child-directed channel into an automatic public or scheduled release.",
+      "One standalone creative-direction module for child-directed videos. It reads the already-approved lesson and show identity, then " +
+      "hands specialist consumers the exact guide/world/action, calm image rules, H3 motion rules, and thumbnail subject/composition. " +
+      "It has no renderer, safety, thumbnail, metadata, promotion, or publishing implementation; those remain independently owned modules.",
     gates: [
-      "bounded toddler / preschool / early-primary audience and one observable learning objective",
-      "curriculum evidence, original recurring guide/world, and five-stage participation pattern",
-      "Learning Contract and Show Bible fingerprints agree with the Episode Graph",
-      "deterministic Scene Compiler is the only admitted visual renderer",
-      "fresh human child-editor approval is required before even a private review candidate",
-      "public and scheduled publishing remain unavailable on this supervised path",
+      "requires a children Episode Graph, Learning Contract, and current Show Bible with matching fingerprints",
+      "emits only renderer-neutral Ernie, H3, and thumbnail handoff parameters — no provider calls",
+      "requires an actual renderer and the shared thumbnail module downstream; dead handoffs fail pipeline validation",
+      "thumbnail generation owns typography, Nano Banana calls, QA, and evidence; the treatment only supplies episode truth",
+      "safety and publication remain separate modules and cannot be altered here",
     ],
     status: "reference",
   },

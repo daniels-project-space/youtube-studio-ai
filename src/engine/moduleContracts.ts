@@ -572,6 +572,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure", "scenarioVisualTreatment",
       // Per-channel critique grounding for the produce→critique→regenerate loop.
       "criticDoctrine", "contentLane",
+      // A domain module may send typed image direction, but thumbnail_gen is
+      // still the sole owner of package-art generation, typography, QA, and
+      // publishing evidence.
+      "childrenVideoTreatment",
     ],
     optionalProduces: ["thumbnailScenarioVisualTreatmentProvenance"],
     providerProfiles: [managed],
@@ -907,6 +911,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     "children.curriculum_continuity_locked",
     "publish.private_only",
   ], {
+    requiredCapabilities: [
+      "children.curriculum_episode_seed_admitted",
+      "story.episode_graph_locked",
+      "learning.contract_locked",
+    ],
     requiredConsumes: [
       "childrenShowBibleInput", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
       "episodeGraph", "lessonContract", "contentLane",
@@ -915,7 +924,32 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  // Visual/video direction only. It converts the approved child-learning
+  // artifacts into renderer-neutral Ernie/H3 handoffs; it cannot create
+  // images/video, change a safety decision, package a video, or publish.
+  children_video_treatment: contract([
+    "children.video_treatment_ready",
+    "render.children_identity_pinned",
+  ], {
+    requiredCapabilities: [
+      "children.show_bible_admitted",
+      "learning.contract_locked",
+      "story.episode_graph_locked",
+    ],
+    requiredConsumes: ["episodeGraph", "lessonContract", "childrenShowBible", "contentLane"],
+    requiredDownstreamCapabilities: ["visuals.scene_compiled", "package.thumbnail"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+
   child_content_safety: contract(["safety.child_content_review_required", "publish.private_only"], {
+    requiredCapabilities: [
+      "children.curriculum_episode_seed_admitted",
+      "children.show_bible_admitted",
+      "learning.contract_locked",
+      "story.episode_graph_locked",
+    ],
     requiredConsumes: [
       "episodeGraph", "sceneManifest", "lessonContract", "contentLane",
       "childrenShowBible", "childrenShowBibleApproval",
@@ -1032,7 +1066,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
 
   scene_compiler: contract(["visuals.scene_compiled", "master.assembled"], {
     requiredConsumes: ["sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
-    optionalConsumes: ["musicKey", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment"],
+    optionalConsumes: ["musicKey", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment", "childrenVideoTreatment"],
     providerProfiles: [local],
     maxCostUsd: 0,
     qualityRequired: true,
