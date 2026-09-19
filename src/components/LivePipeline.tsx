@@ -58,7 +58,6 @@ export function LivePipeline({
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<LivePipelinePhase | null>(null);
-  const [inspectionDismissed, setInspectionDismissed] = useState(false);
   const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
   const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
   const active = nodes.find((node) => nodeStatus(node) === "running");
@@ -67,13 +66,11 @@ export function LivePipeline({
   const overallState = livePipelineOverallState(nodes);
   const hasPlan = nodes.length > 0;
   const recordedCost = nodes.reduce((sum, node) => sum + (node.stage?.cost ?? 0), 0);
-  const blockedNode = nodes.find((node) => nodeStatus(node) === "failed");
-  // A current stage is already visible in the live strip. Opening its whole
-  // phase by default made every active run a long wall of receipts. Failures
-  // remain opened automatically because their recorded evidence is actionable.
-  const inspectionPhase = selectedPhase ?? (!inspectionDismissed && blockedNode
-    ? livePipelinePhaseForBlock(blockedNode.block)
-    : null);
+  // The run summary already surfaces an actionable failure and its recovery
+  // link. Expanding every queued sibling in that phase by default turned one
+  // failed receipt into a tall, misleading workbench. Keep the exact phase
+  // ledger one deliberate click away instead.
+  const inspectionPhase = selectedPhase;
   const inspectionNodes = inspectionPhase
     ? nodes.filter((node) => livePipelinePhaseForBlock(node.block) === inspectionPhase)
     : [];
@@ -140,11 +137,9 @@ export function LivePipeline({
             onClick={() => {
               if (inspectionPhase === summary.phase) {
                 setSelectedPhase(null);
-                setInspectionDismissed(true);
                 return;
               }
               setSelectedPhase(summary.phase);
-              setInspectionDismissed(false);
             }}
           >
             <div className={styles.phaseTopline}>

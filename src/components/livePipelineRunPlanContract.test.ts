@@ -19,10 +19,10 @@ assert.match(pipeline, /aria-live="polite"/,
   "active stage receipt changes must remain announced without a decorative duplicate panel");
 assert.doesNotMatch(pipeline, /receiptPercent|role="progressbar"|activeStage/,
   "stage and phase receipt counts are the one truthful progress surface; do not reintroduce redundant meters/panels");
-assert.match(pipeline, /selectedPhase \?\? \(!inspectionDismissed && blockedNode/,
-  "an active stage is already shown in the compact header; only a blocked phase should auto-open its receipt shelf");
-assert.match(pipeline, /const \[inspectionDismissed, setInspectionDismissed\]/,
-  "an operator must be able to collapse an automatically opened blocked-phase shelf");
+assert.match(pipeline, /const inspectionPhase = selectedPhase;/,
+  "phase receipts must remain explicitly inspect-on-demand rather than auto-expanding queued siblings after one failure");
+assert.doesNotMatch(pipeline, /inspectionDismissed|blockedNode/,
+  "the compact live workbench must not retain a hidden auto-open failure phase");
 
 assert.match(runDetail, /api\.runs\.getRunPresentation/);
 assert.match(runDetail, /run\.pipeline\?\.entries\.length/);
