@@ -1357,7 +1357,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   lore_short: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["visualBrief", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
+      // The self-contained lore renderer bakes the channel's visual DNA into
+      // every generated beat. It is optional for frozen legacy invocations,
+      // but must be declared whenever a current channel supplies it so the
+      // guarded stage store can admit the read.
+      optionalConsumes: ["visualBrief", "styleDNA", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
       providerProfiles: [managed, local],
       maxCostUsd: 30,
       maxCostUsdFor: (params, context) => loreShortCostCeiling(params, context),
