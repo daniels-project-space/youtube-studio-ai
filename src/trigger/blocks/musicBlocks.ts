@@ -117,7 +117,7 @@ export const music: Block = {
     const a = dna?.audio;
     const dnaPrompt = a?.genre?.trim()
       ? [
-          `${a.genre} instrumental to study and relax to, evoking "${topic}".`,
+          `${a.genre} instrumental, evoking "${topic}".`,
           a.instrumentation?.length ? `Instrumentation: ${a.instrumentation.join(", ")}.` : "",
           a.textures?.length ? `Texture: ${a.textures.join(", ")}.` : "",
           // Neither Mureka nor Suno exposes a structural/section parameter
@@ -128,7 +128,7 @@ export const music: Block = {
           // track, so carry the DNA's full mood-arc sentence (not just its
           // first clause) — an author who wrote "opens tense, resolves
           // warmer" wants that shift reaching the model, not truncated away.
-          a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim().slice(0, 240)}.` : "",
+          a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim()}.` : "",
           `${a.bpmRange?.[0] ?? 70}-${a.bpmRange?.[1] ?? 88} BPM, ${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
         ].filter(Boolean).join(" ")
       : "";
@@ -137,7 +137,7 @@ export const music: Block = {
     // arc. DNA-only made every video's score near-identical — the staleness
     // the composer crew existed to prevent.
     const arcNote = composerPrompt?.trim()
-      ? ` This video's emotional direction: ${composerPrompt.trim().slice(0, 220)}`
+      ? ` This video's emotional direction: ${composerPrompt.trim()}`
       : "";
     // LAST RESORT, AND IT USED TO BE ONE GENRE.
     //
@@ -162,7 +162,7 @@ export const music: Block = {
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||
-      (ctx.params.prompt as string) ||
+      (typeof ctx.params.prompt === "string" ? ctx.params.prompt.trim() : "") ||
       lastResort;
     const prompt = [
       musicProgram?.audio.direction,
@@ -193,7 +193,14 @@ export const music: Block = {
       textures: a?.textures,
       bpmRange: a?.bpmRange,
       moodArc: a?.moodArc,
-      composerDirection: [composerPrompt, studioAudioDirection].filter(Boolean).join(" ") || undefined,
+      // DNA is already represented by the structured identity fields. Carry
+      // its episode nuance, or the selected non-DNA prompt, without duplicating it.
+      composerDirection: [
+        musicProgram?.audio.direction,
+        dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+        dnaPrompt ? arcNote : basePrompt,
+        studioAudioDirection,
+      ].filter(Boolean).join(" ") || undefined,
       targetLufs: Number(a?.loudnessLufs ?? -16),
       bodyMusicVol: 1,
     });

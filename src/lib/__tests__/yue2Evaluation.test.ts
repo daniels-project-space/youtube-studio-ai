@@ -1,0 +1,358 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  assertYuE2Manifest, createYuE2EvaluationRequest, validateYuE2Endpoint, validateYuE2EvaluationRequest,
+  verifyYuE2Audio, verifyYuE2Completion, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
+  YUE2_RUNTIME_MANIFEST_SHA256, YUE2_WORKER_CONTRACT, YuE2EvaluationClient, YuE2EvaluationError,
+  type YuE2SealedReceipt,
+} from "@/lib/yue2Evaluation";
+import { executeYuE2Evaluation, probeYuE2NativeWav, runYuE2EvaluationCli } from "@/scripts/evaluate-yue2-music";
+
+const execute = promisify(execFile);
+const program = createChannelMusicProgram({
+  channelId: "fixture-channel-not-production", channelIdentityFingerprint: "a".repeat(64),
+  family: "music_loop", contentLaneKey: "lofi", topic: "Explicit fixture evaluation",
+  genre: "gentle lofi", instrumentation: ["felt piano", "soft drums"],
+});
+const style = "Gentle lofi, felt piano and soft drums; slow movement, instrumental intent.";
+const request = createYuE2EvaluationRequest({ program, style, seed: 42, personalCreatorAcknowledged: true });
+const clone = <T>(value: T): T => structuredClone(value);
+const token = "fixture-bearer-never-log-this-secret-123456";
+
+// These HTTP fixtures explicitly simulate transport and runtime receipts. FFmpeg
+// creates synthetic test audio; ffprobe and all production parsers run unchanged.
+function seal(payload: unknown): YuE2SealedReceipt {
+  const payload_json = `${canonicalJson(payload)}\n`;
+  return { payload_json, sha256: yue2Sha256(payload_json) };
+}
+function health() {
+  return { contract: YUE2_WORKER_CONTRACT, manifest: clone(YUE2_MANIFEST),
+    manifest_sha256: YUE2_RUNTIME_MANIFEST_SHA256, qualification: YUE2_QUALIFICATION,
+    queue_capacity: 1, worker_state: "ready", error: null,
+    readiness_scope: "queue_idle_only_not_gpu_qualification" };
+}
+function absent() {
+  return Response.json({ contract: YUE2_WORKER_CONTRACT, state: "refused", error: "job_not_found" }, { status: 404 });
+}
+function pending(job = request.job, state = "accepted") {
+  return { contract: YUE2_WORKER_CONTRACT, job_id: job.job_id, state, job };
+}
+function completed(audio: Uint8Array, req = request, attempt = 1) {
+  const job = seal(req.job);
+  const config = seal({ schema_version: 1, manifest: YUE2_MANIFEST, cache_dir: "/explicit-test-cache",
+    device: "cuda:0", local_files_only: true, candidate_count: 1,
+    exports: ["official_pcm24_flac", "native_float32_wav", "native_float32_npy"] });
+  const started = seal({ schema_version: 1, job_id: req.job.job_id, attempt, started_at: "2026-09-19T00:00:00Z",
+    pid: 1, job_sha256: job.sha256, config_sha256: config.sha256, environment: { backend: "explicitly_fake_cpu_test" } });
+  const receipt = { schema_version: 1, job_id: req.job.job_id, attempt, finished_at: "2026-09-19T00:00:01Z",
+    status: "completed", started_sha256: started.sha256, error: null, qualification: YUE2_QUALIFICATION,
+    result: { status: "complete", truncated: { abc: false, semantic: false }, sample_rate: 48000, channels: 2,
+      frames: 4800, audio_seconds: 0.1, official_identity: "b".repeat(64),
+      timing: { load: { seconds: 1, phases: [0.1, { seconds: 0.2 }] }, plan: { nested: { elapsed: 2 } } },
+      native_audio: "audio-native.wav", official_result: "song/result.json" },
+    artifacts: { "audio-native.wav": { sha256: yue2Sha256(audio), bytes: audio.length },
+      "song/result.json": { sha256: "c".repeat(64), bytes: 23 },
+      "empty-evidence.txt": { sha256: yue2Sha256(""), bytes: 0 } },
+  };
+  const terminal = seal(receipt);
+  // Deliberately retain Python's 1.0 spelling: parsing then JSON.stringify differs.
+  terminal.payload_json = terminal.payload_json.replace('"seconds":1}', '"seconds":1.0}');
+  terminal.sha256 = yue2Sha256(terminal.payload_json);
+  return { contract: YUE2_WORKER_CONTRACT, job_id: req.job.job_id, state: "completed", job: req.job,
+    job_sha256: job.sha256, config_sha256: config.sha256, accepted_sha256: "d".repeat(64),
+    qualification: YUE2_QUALIFICATION, progress: { phase: "terminal", receipt: "terminal.json" },
+    receipt, receipt_payloads: { job, config, started, terminal }, error: null,
+    artifacts: { "audio-native.wav": `/v1/jobs/${req.job.job_id}/artifacts/audio-native.wav` } };
+}
+
+function stub(handler: (path: string, init: RequestInit) => Response | Promise<Response>) {
+  const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+  const fetcher: typeof fetch = async (input, init = {}) => {
+    const path = new URL(String(input)).pathname;
+    assert.equal(init.redirect, "error");
+    assert.ok(init.signal);
+    assert.equal(new Headers(init.headers).get("Authorization"), `Bearer ${token}`);
+    calls.push({ path, method: init.method ?? "GET", ...(init.body ? { body: JSON.parse(String(init.body)) } : {}) });
+    return handler(path, init);
+  };
+  return { calls, fetcher, client: new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token, fetch: fetcher, timeoutMs: 100 }) };
+}
+async function rejected(operation: Promise<unknown>): Promise<void> {
+  await assert.rejects(operation, (error: unknown) => {
+    assert.ok(error instanceof YuE2EvaluationError);
+    assert.equal(error.retryable, false);
+    assert.equal(error.safeToFallback, false);
+    assert.equal(error.jobId, request.job.job_id);
+    assert.ok(!error.message.includes(token));
+    assert.match(error.message, /recover only with GET/);
+    return true;
+  });
+}
+
+async function main(): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "yue2-evaluation-unit-"));
+  const originalFetch = globalThis.fetch;
+  let passed = 0;
+  async function test(name: string, run: () => void | Promise<void>) {
+    await run(); passed += 1; console.log(`PASS ${name}`);
+  }
+  try {
+    const audioPath = join(directory, "fixture.wav");
+    await execute("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "0.1", "-c:a", "pcm_f32le", audioPath]);
+    const audio = await readFile(audioPath);
+    const wire = completed(audio);
+    await test("stable ID binds admitted program, exact style, seed, manifest and explicit licence", () => {
+      assert.equal(request.job.lyrics, "");
+      assert.equal(request.job.style, style);
+      assert.equal(request.job.job_id, createYuE2EvaluationRequest({ program, style, seed: 42, personalCreatorAcknowledged: true }).job.job_id);
+      for (const variation of [{ style: `${style} `, seed: 42 }, { style, seed: 43 }]) {
+        assert.notEqual(request.job.job_id, createYuE2EvaluationRequest({ program, ...variation, personalCreatorAcknowledged: true }).job.job_id);
+      }
+      const other = createChannelMusicProgram({ channelId: "other", channelIdentityFingerprint: "e".repeat(64), family: "sleep", contentLaneKey: "meditation", topic: "fixture" });
+      assert.notEqual(request.job.job_id, createYuE2EvaluationRequest({ program: other, style, seed: 42, personalCreatorAcknowledged: true }).job.job_id);
+      assert.throws(() => createYuE2EvaluationRequest({ program, style, seed: 42, personalCreatorAcknowledged: false }));
+      assert.throws(() => createYuE2EvaluationRequest({ program: { ...program, fingerprint: "0".repeat(64) }, style, seed: 42, personalCreatorAcknowledged: true }));
+      for (const seed of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) {
+        assert.throws(() => createYuE2EvaluationRequest({ program, style, seed, personalCreatorAcknowledged: true }));
+      }
+      assert.throws(() => validateYuE2EvaluationRequest({ ...request, manifestSha256: "0".repeat(64) }));
+      assert.throws(() => validateYuE2EvaluationRequest({ ...request, job: { ...request.job, style: "changed" } }));
+      assert.throws(() => validateYuE2EvaluationRequest({ ...request, job: { ...request.job, lyrics: program.generation.lyricsControl } }));
+      assert.throws(() => createYuE2EvaluationRequest({ program, style: "\u00e9".repeat(16001), seed: 1, personalCreatorAcknowledged: true }));
+    });
+    await test("endpoint scheme, credentials, queries, fragments and path restrictions", () => {
+      for (const url of ["http://example.org", "https://user:secret@example.org", "https://example.org?", "https://example.org?q=x", "https://example.org/#fragment", "https://example.org/base", "file:///tmp/a", "http://127.0.0.1.evil.invalid", "https://example.org\\oops"]) {
+        assert.throws(() => validateYuE2Endpoint(url));
+      }
+      for (const url of ["https://worker.example", "http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"]) assert.ok(validateYuE2Endpoint(url));
+    });
+    await test("bearer exactly matches worker URL-safe 32..512 character contract", () => {
+      for (const bearerToken of ["a", "a".repeat(31), "a".repeat(513), "a".repeat(31) + ".", "a".repeat(31) + "/", "a".repeat(31) + "=", "a".repeat(31) + "\n"]) {
+        assert.throws(() => new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken }));
+      }
+      for (const bearerToken of ["a".repeat(32), "_".repeat(512), "-".repeat(32)]) {
+        assert.ok(new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken }));
+      }
+    });
+    await test("Python lexical floats, nested timings, zero-byte evidence and explicit prior attempt", async () => {
+      assert.notEqual(seal(wire.receipt).sha256, wire.receipt_payloads.terminal.sha256);
+      const parsed = verifyYuE2Completion(request, wire);
+      verifyYuE2Audio(parsed, audio);
+      await probeYuE2NativeWav(audioPath, parsed.result, audio.length);
+      assert.equal(parsed.qualification.production_approved, false);
+      assert.equal(verifyYuE2Completion(request, completed(audio, request, 2)).result.frames, 4800);
+    });
+    await test("native format checked by ffprobe, not trusted from receipt", async () => {
+      for (const [rate, channels, codec] of [[44100, 2, "pcm_f32le"], [48000, 1, "pcm_f32le"], [48000, 2, "pcm_s16le"]] as const) {
+        const file = join(directory, `${rate}-${channels}-${codec}.wav`);
+        await execute("ffmpeg", ["-v", "error", "-i", audioPath, "-ar", String(rate), "-ac", String(channels), "-c:a", codec, file]);
+        await assert.rejects(probeYuE2NativeWav(file, verifyYuE2Completion(request, wire).result, (await stat(file)).size));
+      }
+      await assert.rejects(probeYuE2NativeWav(audioPath, { ...verifyYuE2Completion(request, wire).result, frames: 4799 }, audio.length));
+    });
+    for (const field of ["source", "model", "vae", "preset", "packages", "qualification", "license"] as const) {
+      await test(`wrong ${field} pins fail before any POST`, async () => {
+        const changed = health();
+        Object.assign(changed.manifest, { [field]: {} });
+        assert.throws(() => assertYuE2Manifest(changed.manifest));
+        const fixture = stub(() => Response.json(changed));
+        await rejected(fixture.client.evaluate(request, { submit: true }));
+        assert.equal(fixture.calls.length, 1);
+      });
+    }
+    await test("health Python manifest digest is independent of Studio canonical JSON", async () => {
+      assert.notEqual(YUE2_RUNTIME_MANIFEST_SHA256, yue2Sha256(canonicalJson(YUE2_MANIFEST)));
+      const fixture = stub(() => Response.json({ ...health(), manifest_sha256: "0".repeat(64) }));
+      await rejected(fixture.client.evaluate(request, { submit: true }));
+      assert.equal(fixture.calls.length, 1);
+    });
+    await test("GET existing completed job downloads fixed native path without POST", async () => {
+      const hostileUrls = { ...wire, artifacts: { "audio-native.wav": "https://attacker.invalid/steal" } };
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? new Response(audio) : Response.json(hostileUrls));
+      const outcome = await fixture.client.evaluate(request, { submit: true });
+      assert.equal(outcome.status, "completed");
+      assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 0);
+      assert.equal(fixture.calls.at(-1)?.path, `/v1/jobs/${request.job.job_id}/artifacts/audio-native.wav`);
+    });
+    await test("GET missing then at most one exact POST; subsequent GET reuse", async () => {
+      let admitted = false;
+      const fixture = stub((path, init) => {
+        if (path.endsWith("/health")) return Response.json(health());
+        if (init.method === "POST") { admitted = true; return Response.json(pending(), { status: 202 }); }
+        return admitted ? Response.json(pending()) : absent();
+      });
+      assert.equal((await fixture.client.evaluate(request, { submit: true })).status, "pending");
+      assert.equal((await fixture.client.evaluate(request, { submit: true })).status, "pending");
+      assert.deepEqual(fixture.calls.find((call) => call.method === "POST")?.body, request.job);
+      assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
+    });
+    for (const failure of ["throw", "http", "malformed", "mismatched", "timeout"] as const) {
+      await test(`ambiguous POST ${failure} never replays even if recovery GET says missing`, async () => {
+        const fixture = stub((path, init) => {
+          if (path.endsWith("/health")) return Response.json(health());
+          if (init.method !== "POST") return absent();
+          if (failure === "throw") throw new Error(token);
+          if (failure === "http") return Response.json({ error: token }, { status: 500 });
+          if (failure === "malformed") return new Response("invalid");
+          if (failure === "mismatched") return Response.json(pending({ ...request.job, seed: 10 }));
+          return new Promise<Response>(() => undefined);
+        });
+        await rejected(fixture.client.evaluate(request, { submit: true }));
+        await rejected(fixture.client.evaluate(request, { submit: true }));
+        assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
+      });
+    }
+    await test("ambiguous submission recovers same ID by GET when result becomes available", async () => {
+      let recover = false;
+      const fixture = stub((path, init) => {
+        if (path.endsWith("/health")) return Response.json(health());
+        if (path.endsWith(".wav")) return new Response(audio);
+        if (init.method === "POST") throw new Error("simulated connection loss");
+        return recover ? Response.json(wire) : absent();
+      });
+      await rejected(fixture.client.evaluate(request, { submit: true }));
+      recover = true;
+      assert.equal((await fixture.client.evaluate(request, { submit: true })).status, "completed");
+      assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
+    });
+    for (const state of ["failed", "ambiguous", "refused"]) {
+      await test(`existing ${state} is never resubmitted`, async () => {
+        const fixture = stub((path) => Response.json(path.endsWith("/health") ? health() : pending(request.job, state)));
+        await rejected(fixture.client.evaluate(request, { submit: true }));
+        assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 0);
+      });
+    }
+    await test("missing-job refusal, explicit recovery and busy health never POST", async () => {
+      for (const options of [{}, { submit: true, recoverOnly: true }, { submit: true, beforeSubmit: async () => false }]) {
+        const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : absent());
+        await rejected(fixture.client.evaluate(request, options));
+        assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 0);
+      }
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json({ ...health(), worker_state: "busy" }) : absent());
+      await rejected(fixture.client.evaluate(request, { submit: true }));
+      assert.equal(fixture.calls.length, 2);
+    });
+    await test("unrecognized 404 does not authorize POST", async () => {
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : new Response("not found", { status: 404 }));
+      await rejected(fixture.client.evaluate(request, { submit: true }));
+      assert.equal(fixture.calls.length, 2);
+    });
+    await test("concurrent callers share an in-memory at-most-once reservation", async () => {
+      const fixture = stub((path, init) => path.endsWith("/health") ? Response.json(health()) : init.method === "POST" ? Response.json(pending()) : absent());
+      const outcomes = await Promise.allSettled([
+        fixture.client.evaluate(request, { submit: true, beforeSubmit: async () => { await new Promise((done) => setTimeout(done, 10)); return true; } }),
+        fixture.client.evaluate(request, { submit: true }),
+      ]);
+      assert.equal(outcomes.filter((value) => value.status === "fulfilled").length, 1);
+      assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
+    });
+    for (const mutation of ["job", "hash", "chain", "terminal", "attempt", "qualification", "truncated", "length", "config"] as const) {
+      await test(`reject ${mutation} mismatch in completed receipt`, () => {
+        const altered = clone(wire);
+        if (mutation === "job") altered.job = { ...altered.job, seed: 7 };
+        if (mutation === "hash") altered.receipt_payloads.terminal.sha256 = "0".repeat(64);
+        if (mutation === "chain") altered.receipt.started_sha256 = "0".repeat(64);
+        if (mutation === "terminal") altered.receipt.result.frames += 1;
+        if (mutation === "attempt") altered.receipt.attempt = 2;
+        if (mutation === "qualification") Object.assign(altered.receipt.qualification, { production_approved: true });
+        if (mutation === "truncated") altered.receipt.result.truncated.abc = true;
+        if (mutation === "length") altered.receipt.result.audio_seconds = 99;
+        if (mutation === "config") {
+          const payload = JSON.parse(altered.receipt_payloads.config.payload_json);
+          payload.manifest.vae.repository = "wrong-decoder";
+          altered.receipt_payloads.config = seal(payload);
+        }
+        if (!["hash", "config"].includes(mutation)) altered.receipt_payloads.terminal = seal(altered.receipt);
+        assert.throws(() => verifyYuE2Completion(request, altered));
+      });
+    }
+    await test("tampered bytes and declared native length fail before success", async () => {
+      for (const corrupt of [Buffer.concat([audio, Buffer.from([0])]), Buffer.from(audio)]) {
+        corrupt[100] ^= 1;
+        const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? new Response(corrupt) : Response.json(wire));
+        await rejected(fixture.client.evaluate(request));
+      }
+    });
+    for (const kind of ["declared", "streamed", "stalled-fetch", "stalled-body", "redirect"] as const) {
+      await test(`bounded response ${kind} fails closed`, async () => {
+        const fixture = stub(() => {
+          if (kind === "declared") return new Response("{}", { headers: { "content-length": "9999999" } });
+          if (kind === "streamed") return new Response("x".repeat(300));
+          if (kind === "stalled-fetch") return new Promise<Response>(() => undefined);
+          if (kind === "stalled-body") return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([123])); } }));
+          return Response.redirect("https://attacker.invalid/", 302);
+        });
+        const client = new YuE2EvaluationClient({ endpoint: "https://worker.example", bearerToken: token, fetch: fixture.fetcher, timeoutMs: 15, maxResponseBytes: 256 });
+        await rejected(client.evaluate(request, { submit: true }));
+        assert.equal(fixture.calls.length, 1);
+      });
+    }
+    await test("audio byte limit is enforced before download", async () => {
+      const fixture = stub((path) => Response.json(path.endsWith("/health") ? health() : wire));
+      const client = new YuE2EvaluationClient({ endpoint: "https://worker.example", bearerToken: token, fetch: fixture.fetcher, maxAudioBytes: 100 });
+      await rejected(client.evaluate(request));
+      assert.equal(fixture.calls.length, 2);
+    });
+    await test("CLI defaults to validation with explicit source files and no network or output artifacts", async () => {
+      const programPath = join(directory, "program.json");
+      const stylePath = join(directory, "style.txt");
+      await writeFile(programPath, JSON.stringify(program));
+      await writeFile(stylePath, style);
+      globalThis.fetch = async () => { assert.fail("dry run must not use network"); };
+      const logs: string[] = [];
+      const log = console.log;
+      console.log = (value: string) => { logs.push(value); };
+      try {
+        await runYuE2EvaluationCli(["--program", programPath, "--style-file", stylePath, "--seed", "42", "--personal-creator", "--out", join(directory, "unused")], {});
+      } finally { console.log = log; }
+      assert.equal(JSON.parse(logs[0]).mode, "validate_only");
+      assert.equal(JSON.parse(logs[0]).request.job.job_id, request.job.job_id);
+      await assert.rejects(stat(join(directory, "unused")), { code: "ENOENT" });
+      await assert.rejects(runYuE2EvaluationCli(["--program", programPath, "--style-file", stylePath, "--seed", "42"], {}));
+    });
+    await test("CLI persists immutable unqualified candidate; cache reuse revalidates bytes and real format without network", async () => {
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? new Response(audio) : Response.json(wire));
+      globalThis.fetch = fixture.fetcher;
+      const input = { request, outputRoot: join(directory, "cache"), endpoint: "http://127.0.0.1:8787", bearerToken: token };
+      const first = await executeYuE2Evaluation(input);
+      const candidatePath = join(first.directory, "candidate.json");
+      const candidate = JSON.parse(await readFile(candidatePath, "utf8"));
+      assert.equal(candidate.qualified, false);
+      assert.equal(candidate.manualAudition, "pending");
+      assert.equal(candidate.costStatus, "not_measured");
+      assert.equal((await stat(candidatePath)).mode & 0o222, 0);
+      globalThis.fetch = async () => { assert.fail("verified immutable cache uses no network"); };
+      assert.equal((await executeYuE2Evaluation(input)).reused, true);
+      const storedAudio = join(first.directory, "audio-native.wav");
+      await chmod(storedAudio, 0o600);
+      const corrupt = Buffer.from(audio); corrupt[100] ^= 1;
+      await writeFile(storedAudio, corrupt);
+      await assert.rejects(executeYuE2Evaluation(input));
+    });
+    await test("durable CLI marker prevents a new client POST after ambiguous response", async () => {
+      const fixture = stub((path, init) => {
+        if (path.endsWith("/health")) return Response.json(health());
+        if (init.method === "POST") throw new Error(token);
+        return absent();
+      });
+      globalThis.fetch = fixture.fetcher;
+      const input = { request, outputRoot: join(directory, "ambiguous"), endpoint: "http://127.0.0.1:8787", bearerToken: token };
+      await rejected(executeYuE2Evaluation(input));
+      await rejected(executeYuE2Evaluation(input));
+      assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
+      assert.equal((await stat(join(input.outputRoot, request.job.job_id, "submission-attempt.json"))).mode & 0o222, 0);
+    });
+    console.log(`YUE2 EVALUATION PASS: ${passed} checks; synthetic audio and stubbed HTTP only; no GPU or quality qualification`);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+void main().catch((error: unknown) => { console.error(error); process.exitCode = 1; });

@@ -25,6 +25,9 @@ import {
 } from "@/lib/planWeekPreparation";
 import { ChannelMusicProgramSchema, createChannelMusicProgram, type ChannelMusicProgram } from "@/engine/channelMusicProgram";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { getMusicBrief } from "@/engine/creative/brief";
+import { assertOriginalMusicProgramPlanBinding } from "@/engine/originalMusicProgram";
+import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -144,6 +147,18 @@ function programFor(manifest: PlanWeekPreparationManifest, provider: MusicProvid
   const audio = styleAudio(manifest);
   const config = moduleConfig(manifest);
   const styleDNA = seed.styleDNA ?? null;
+  const composerDirection = getMusicBrief(seed)?.musicPrompt?.trim() ||
+    (typeof config.composerDirection === "string" ? config.composerDirection.trim() : "") ||
+    (typeof config.musicPrompt === "string" ? config.musicPrompt.trim() : "");
+  const explicitDirection = typeof config.prompt === "string" ? config.prompt.trim() : "";
+  const hasDna = typeof audio.genre === "string" && Boolean(audio.genre.trim());
+  const sealedProgram = seed.musicProgramPlan !== undefined && route?.requiredBlocks.includes("music_program_plan")
+    ? assertOriginalMusicProgramPlanBinding({ plan: seed.musicProgramPlan, route, topic: manifest.plan.topic })
+    : undefined;
+  const studioAudioRecipe = studioPostproductionRecipeProjectionFromUnknown(seed.studioAudioRecipeProjection, "audio_recipe");
+  const studioDirection = studioAudioRecipe.promptAddenda.length
+    ? `Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
+    : "";
   const channelName = seed.channelName ?? null;
   const routeFingerprint = route?.routeFingerprint ?? null;
   const channelIdentityFingerprint = sha256Hex(canonicalJson({
@@ -152,7 +167,7 @@ function programFor(manifest: PlanWeekPreparationManifest, provider: MusicProvid
     channelName,
     routeFingerprint,
     styleDNA,
-    musicBrief: null,
+    musicBrief: getMusicBrief(seed) ?? null,
   }));
   const family = route?.family ?? (typeof seed.family === "string" ? seed.family : "narrated_stock");
   const contentLaneKey = route?.contentLaneKey ?? (typeof seed.contentLane === "object" && seed.contentLane && !Array.isArray(seed.contentLane)
@@ -175,9 +190,12 @@ function programFor(manifest: PlanWeekPreparationManifest, provider: MusicProvid
     textures: Array.isArray(audio.textures) ? audio.textures.filter((value): value is string => typeof value === "string") : undefined,
     bpmRange,
     moodArc: typeof audio.moodArc === "string" ? audio.moodArc : undefined,
-    composerDirection: typeof config.composerDirection === "string"
-      ? config.composerDirection
-      : typeof config.musicPrompt === "string" ? config.musicPrompt : undefined,
+    composerDirection: [
+      sealedProgram?.audio.direction,
+      hasDna ? (audio.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+      composerDirection || (!hasDna ? explicitDirection : ""),
+      studioDirection,
+    ].filter(Boolean).join(" ") || undefined,
     targetLufs: finiteNumber(audio.loudnessLufs, -16, -23, -12),
     bodyMusicVol: 1,
   }));

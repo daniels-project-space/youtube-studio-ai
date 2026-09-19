@@ -8,6 +8,14 @@ isolated format refinements. This changes delivery order, not the quality bar
 or the scope of the 163-item additive backlog. Do not declare the whole goal
 complete when only the MVP passes.
 
+Latest owner decision: leave every current channel and pipeline as a legacy
+baseline. Do not migrate, re-template, repair, or replace those channel records
+as this work's objective. Focus effort on reusable modules for automatic future
+pipeline creation. Each module must fulfill its specific responsibility, accept
+explicit upstream contracts, and avoid taking over or contradicting another
+module's work. Once the module system is ready, create new pipelines from the
+same requirements and compare their retained results with the legacy baseline.
+
 The latest music requirement is a separate YuE 2 runtime on an OpenRelay RTX
 3090, shared by Lo-Fi, background scores, sleep and meditation. Lo-Fi supplies
 its sound requirements to the shared music module rather than owning music
@@ -22,12 +30,27 @@ licensing is not authorized by that confirmation.
   format, voice, pacing, visual grammar, music needs and quality criteria.
   Evidence must name the exact channel, route and retained output; channels
   without current evidence remain explicitly unverified.
-- For each channel included in the MVP, its real brief reaches the architect,
-  its declared executable modules,
+- New test pipelines start from distinct real briefs and reach the architect,
+  their declared executable modules,
   script, narration, visuals, shared music where required, assembly, captions,
   thumbnail and metadata without manual creative substitution.
 - The exact retained master passes independent quality checks and complete
   visual/audio inspection; a successful compile is not output qualification.
+- Module tests establish responsibility and handoff boundaries as well as
+  isolated behavior. Composition tests vary the brief and module arrangement;
+  a module must not silently replace another module's accepted decisions or
+  smuggle in undeclared planning/generation/publishing work.
+- Legacy channel definitions, pipelines, schedules and retained outputs remain
+  untouched. Before/after comparisons bind the same input requirements, exact
+  pipeline/module revisions, quality criteria and retained output evidence.
+- Unchanged channel records alone do not freeze legacy execution: shared code
+  changes can still alter their behavior. Before enabling replacement modules,
+  establish an explicit version boundary so legacy pipelines retain their known
+  implementation and new test pipelines opt into the updated module system.
+  Preserve baseline revision/configuration and available retained artifacts;
+  do not regenerate or overwrite legacy evidence to manufacture a comparison.
+  This isolation is an acceptance requirement, not a claim that the current
+  runtime already provides it.
 - The user can inspect actual progress, failure reasons, artifacts and the
   final retained video. Essential controls work against real state.
 - Retry/resume preserves accepted artifacts and cumulative cost. Stale workers
@@ -112,14 +135,52 @@ expiry, foreign identities, grant expiry in transit, cache reuse and existing
 ambiguous-outcome no-replay behavior. No paid provider request was made.
 All 822 direct readiness tests pass for this batch, along with the production
 build including TypeScript, focused lint, structural audits and defect-proof
-checks. The code graph is current. Deployment of this second batch remains
-pending; the verified first release above does not include this fence yet.
+checks. The code graph was updated. Commit `722facc4` passed cloud CI run
+`35468419619`; the exact Vercel alias reports that revision, canonical Convex
+`astute-camel-689` deployed successfully, and Trigger production version
+`20260919.26` deployed successfully. No channel records or schedules changed.
 
 An existing no-key metadata fallback emits a null title-decision receipt that
 the runner refuses. The fence does not change this behavior or bypass the
 receipt contract. Live metadata must use the approved configured provider.
 
 ## Work order
+
+### Current development batch, not activated
+
+The shared music direction patch preserves explicit source/composer/Studio
+direction in both runtime and weekly preparation; independently executed
+`sharedMusicDirection` and `channelMusicProgram` tests pass. It does not resolve
+the conflicting default arrangement identified by the
+[module ownership audit](MODULE_OWNERSHIP_AUDIT_2026-09-19.md). That audit also
+reproduces dropped composer mix directives and traces hidden comic score
+generation. The registry records versions but does not select executable
+implementations by version. Hold activation of behavior-changing replacements
+until the explicit legacy/new execution boundary is implemented and tested.
+
+The isolated YuE HTTP worker passes 63 CPU tests, and the Studio evaluation
+client passes 46 focused checks. The real cross-language integration command
+below passes through the Python HTTP worker, actual Studio CLI, immutable
+receipts and native WAV inspection with ffprobe. It verifies same-ID GET
+recovery, cache reuse and rejection of altered local audio, with exactly one
+explicitly fake inference call. It is not RTX 3090, musical-quality,
+instrumental-only or production-provider qualification. No live channel,
+schedule or provider selection was changed.
+
+All 824 direct readiness tests, the production build including TypeScript,
+standalone typecheck and focused ESLint pass for this development batch. The
+test-only deferred loader was subsequently made ESLint-compliant and its focused
+behavior check rerun successfully. No assembly implementation changed; this is
+not a new finished-video qualification or a production deployment. Runtime
+commit `ec002b3` is pushed to its separate repository. Its 63 CPU tests and
+Ruff 0.12.12 default rules (`E4,E7,E9,F`) pass; Ruff 0.16.8's broader defaults
+report style/broad-exception findings and are not claimed clean.
+
+```sh
+YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime npx tsx scripts/test-yue2-runtime-integration.ts
+```
+
+### Ordered delivery
 
 1. Preserve and reconcile the broken session's work. Aggregate `4da39dec` is
    protected by branch `recovery/studio-pre-rebase-4da39dec`. Both main and
@@ -131,11 +192,12 @@ receipt contract. Live metadata must use the approved configured provider.
 3. Qualify the isolated YuE 2 runtime and connect it to the real shared music
    caller, preparation, recovery and admission paths. Do not advertise the
    switch as complete before real instrumental output and listening evidence.
-4. Establish the channel-specific MVP verification matrix from current channel
-   contracts. Run bounded real channel-to-private-video proofs for the included
-   channels, fix shared root causes, and resume at valid artifact boundaries.
-   Keep exact failure evidence. Family coverage helps prioritize tests but is
-   not a substitute for channel-specific quality qualification.
+4. Harden module responsibility boundaries and cross-module handoffs. Test
+   automatically composed new pipelines across distinct briefs, then compare
+   their real retained outputs against the untouched legacy baseline. Fix
+   shared root causes rather than performing a channel-by-channel repair or
+   migration sweep. Keep exact failure and before/after evidence; a family
+   label or one successful output does not qualify unrelated compositions.
 5. Verify the operating workflow and release. Then expand family qualification
    and return to the remaining backlog in impact order.
 
@@ -145,6 +207,9 @@ The full five-pass UI overhaul, every specialist page refinement, new chess or
 worked-example capabilities, full-page comic experiments, and fleet-wide
 efficiency benchmarks remain requested follow-up work. None should delay a
 working core release unless it exposes a shared correctness or safety blocker.
+Existing-channel contract migration is also deferred by the latest owner
+instruction. Missing legacy brief/route fields are baseline facts, not authority
+to rewrite the channels or bypass fresh-run admission.
 
 ## YuE 2 qualification boundary
 

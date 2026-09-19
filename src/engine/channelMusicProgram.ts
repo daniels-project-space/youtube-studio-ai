@@ -422,11 +422,10 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       : "a recognizable motif deepens through real variation and returns with warmer resolution",
     600,
   );
-  const composerDirection = cleanText(
-    input.composerDirection,
-    "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.",
-    600,
-  );
+  // Preserve authored direction in full. Existing caption size/word gates
+  // reject oversized programs before purchase rather than silently cutting intent.
+  const composerDirection = input.composerDirection?.trim().replace(/\s+/gu, " ") ||
+    "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
   const exclusions = [
     "vocals or intelligible words",
     "hollow preset-only arrangement",
