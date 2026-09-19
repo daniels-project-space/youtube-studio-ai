@@ -8,6 +8,7 @@ import { createComposerAwareAssemblyManifest } from "@/trigger/blocks/composerAw
 import { createArrangementComposerManifest, musicArrangementPlan } from "@/trigger/blocks/musicArrangementBlocks";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { music } from "@/trigger/blocks/musicBlocks";
+import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
@@ -21,6 +22,7 @@ import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
 import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
+import { createSharedScoreMotionComicManifest } from "@/trigger/blocks/sharedScoreMotionComic";
 import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
 import { selfContainedStoryBlocks } from "@/trigger/blocks/selfContainedStoryBlocks";
 import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
@@ -56,6 +58,7 @@ export function registerAllBlocks(): void {
   for (const b of lofiBlocks) register(b);
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
+  registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));
   // Route-owned, provider-free bridge from a completed serialized Topic Select
   // receipt to the shared script/crew/QA consumers. Registration alone cannot
   // admit a route; the designer only materializes it for serialized_program/v1.
@@ -154,6 +157,7 @@ export function registerAllBlocks(): void {
   // DRAWN-COMIC self-contained engine (motion_comic): narrated comic page that
   // draws itself in (src/lib/motionComic.ts) — produces the final video.
   for (const b of motionComicBlocks) register(b);
+  registerManifestVersion(createSharedScoreMotionComicManifest(getManifest("motion_comic")!));
   // LORE MICRO-DOC self-contained engine (lore_short): first-person history over
   // painted art with attested Novita depth camera moves (src/lib/loreshort.ts)
   // — produces the final video.

@@ -42,6 +42,13 @@ import { sha256Hex } from "@/lib/sha256";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateMusic } from "@/lib/music";
+import {
+  muxMotionComicExternalScore,
+  MotionComicExternalScoreSchema,
+  validateMotionComicExternalScore,
+  type MotionComicExternalScore,
+  type MotionComicScoreEvidence,
+} from "@/lib/motionComicScore";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
@@ -655,6 +662,8 @@ export interface MotionComicResult {
   ttsCharactersGenerated: number;
   /** Successfully created music jobs during this invocation (zero on cache hit). */
   musicGenerations: number;
+  /** Verified external source consumption, not a quality or arrangement claim. */
+  externalScore?: MotionComicScoreEvidence;
   /** Vision-letterer requests made during this invocation (zero on cache hit). */
   visionGraderCalls: number;
   /** Durable geometry used by post-render review and layout-only repair. */
@@ -1471,6 +1480,7 @@ export async function planMotionComicStoryboard(
 
 export async function castMotionComic(args: {
   brief: MotionComicBrief;
+  externalScore?: MotionComicExternalScore;
   runDir: string;
   outPath: string;
   generateImage: MotionComicImageGenerator;
@@ -1501,6 +1511,14 @@ export async function castMotionComic(args: {
 }): Promise<MotionComicResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
+  const suppliedExternalScore = args.externalScore === undefined
+    ? undefined : MotionComicExternalScoreSchema.parse(args.externalScore);
+  if (suppliedExternalScore && (brief.music === false || brief.musicPrompt !== undefined)) {
+    throw new Error("motionComic external score conflicts with brief music/musicPrompt intent");
+  }
+  // Validate before any planner, art, or voice call. The final visual duration
+  // is only available later; the external mux checks once-playback fit then.
+  if (suppliedExternalScore) await validateMotionComicExternalScore(suppliedExternalScore);
   const approved = resolveSelfContainedStoryPlan({
     family: "comic",
     receipt: args.approvedStoryReceipt,
@@ -1816,7 +1834,7 @@ export async function castMotionComic(args: {
   // 5. MUSIC (cached, optional)
   let musicPath = "";
   let musicGenerations = 0;
-  if (brief.music !== false) {
+  if (suppliedExternalScore === undefined && brief.music !== false) {
     const file = rd("music.mp3");
     if (existsSync(file)) musicPath = file;
     else {
@@ -1908,6 +1926,16 @@ export async function castMotionComic(args: {
   });
 
   // 8. MUX narration (delayed by preroll) + ducked music → final
+  let externalScore: MotionComicScoreEvidence | undefined;
+  if (suppliedExternalScore) {
+    externalScore = await muxMotionComicExternalScore({
+      externalScore: suppliedExternalScore,
+      videoPath: silent,
+      narrationPath: narration,
+      narrationStartSec: PREROLL_MS / 1000,
+      outPath: args.outPath,
+    });
+  } else {
   const pre = `${PREROLL_MS}|${PREROLL_MS}`;
   if (musicPath) {
     // normalize=0: amix's default 1/n scaling buried BOTH voice and bed (the
@@ -1927,6 +1955,7 @@ export async function castMotionComic(args: {
     await run("ffmpeg", ["-y", "-i", norm, "-c", "copy", args.outPath], log);
     log("mix loudness-normalized to -14 LUFS");
   } catch (e) { log(`loudnorm skipped: ${e instanceof Error ? e.message : e}`); }
+  }
 
   // The page renderer adds turns and a closing hold; muxing/normalization can
   // also change the container endpoint. Only the exact final file is authority
@@ -1952,6 +1981,7 @@ export async function castMotionComic(args: {
     sentenceTimings,
     ttsCharactersGenerated,
     musicGenerations,
+    ...(externalScore ? { externalScore } : {}),
     visionGraderCalls,
     reviewTimeline,
     ...(visualAtlasExperimentPlan ? { visualAtlasExperimentPlan } : {}),

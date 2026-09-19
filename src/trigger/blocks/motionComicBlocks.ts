@@ -64,6 +64,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { fallbackComicStyle } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
+import type { MotionComicExternalScore } from "@/lib/motionComicScore";
 
 /**
  * Checks the complete primary + bounded-recovery art envelope before the
@@ -481,7 +482,15 @@ export async function planComicWithCritique(
   return outcome;
 }
 
-export const motionComicBlock: Block = {
+export interface PreparedMotionComicExternalScore {
+  externalScore: MotionComicExternalScore;
+  sourceMetadata: Record<string, unknown>;
+}
+
+export function createMotionComicBlock(
+  prepareExternalScore?: (ctx: StageContext) => Promise<PreparedMotionComicExternalScore>,
+): Block {
+  return {
   id: "motion_comic",
   consumes: ["topic"],
   produces: [
@@ -494,6 +503,17 @@ export const motionComicBlock: Block = {
   run: async (ctx) => {
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("motion_comic: no topic in store");
+    const preparedScore = await prepareExternalScore?.(ctx);
+    const assertScoreExecutionLease = async () => {
+      if (!preparedScore) return;
+      if (ctx.assertRemoteChildExecutionLease) {
+        await ctx.assertRemoteChildExecutionLease({ reason: "paid_wave" });
+      } else if (ctx.assertInlinePaidExecutionLease) {
+        await ctx.assertInlinePaidExecutionLease();
+      } else {
+        throw new Error("motion_comic shared score requires execution ownership admission");
+      }
+    };
     // Bind a supplied approved story before any capability check, cache, or
     // legacy planning branch. A receipt can never degrade into a new comic
     // storyboard if its frozen route/topic is invalid.
@@ -615,11 +635,14 @@ export const motionComicBlock: Block = {
     // QUALITY GATE — settle the storyboard with the Director FIRST, at text
     // prices. castMotionComic below is then called exactly once with the
     // accepted story, so a rejected draft never costs a second paid render.
+    await assertScoreExecutionLease();
     const storyboard = approvedStoryReceipt === undefined
       ? (await planComicWithCritique(ctx, brief)).story
       : undefined;
+    await assertScoreExecutionLease();
     const res = await castMotionComic({
       brief,
+      ...(preparedScore ? { externalScore: preparedScore.externalScore } : {}),
       ...(storyboard === undefined ? {} : { plan: storyboard }),
       ...receiptInput,
       runDir,
@@ -653,6 +676,28 @@ export const motionComicBlock: Block = {
       },
       log: (m) => ctx.log(`mc: ${m}`),
     });
+    if (preparedScore) {
+      const actual = res.externalScore;
+      const expected = preparedScore.externalScore;
+      if (res.musicGenerations !== 0 || !actual ||
+        actual.contentSha256 !== expected.contentSha256 || actual.byteLength !== expected.byteLength ||
+        actual.playback !== expected.playback || actual.gain !== expected.gain || actual.targetLufs !== expected.targetLufs ||
+        !Number.isFinite(actual.durationSec) || actual.durationSec <= 0
+      ) {
+        const visionUsage = ctx.modelUsageAccounting?.(["vision"]);
+        const pricedGraders = visionUsage ? Math.max(0, visionUsage.calls - visionUsage.unpricedCalls) : 0;
+        throw Object.assign(new Error(
+          "PAID_STAGE_RECONCILIATION_REQUIRED: motion_comic shared score consumption evidence mismatch or nested music generation",
+        ), {
+          observedCostUsd: (ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd) +
+            (ctx.modelUsageCostUsd?.() ?? 0),
+          // The runner reconciles scoped model/images first, then adds only
+          // external spend and graders not already priced in the model scope.
+          additionalObservedCostUsd: (res.ttsCharactersGenerated / 1000) * PRICE.ttsElevenPerKCharUsd +
+            res.musicGenerations * PRICE.musicTrackUsd + Math.max(0, res.visionGraderCalls - pricedGraders) * PRICE.visionGraderUsd,
+        });
+      }
+    }
     const narrationPerformanceEvidence = await preflightNarrationPerformance({
       audioPath: res.narrationPath,
       text: res.narrationText,
@@ -670,9 +715,14 @@ export const motionComicBlock: Block = {
       (res.ttsCharactersGenerated / 1000) * PRICE.ttsElevenPerKCharUsd;
     const musicCost = res.musicGenerations * PRICE.musicTrackUsd;
     const graderCost = res.visionGraderCalls * PRICE.visionGraderUsd;
+    const scoreVisionUsage = preparedScore ? ctx.modelUsageAccounting?.(["vision"]) : undefined;
+    const scorePricedGraders = scoreVisionUsage ? Math.max(0, scoreVisionUsage.calls - scoreVisionUsage.unpricedCalls) : 0;
     // Every component is invocation-local. A fully cached resume is exactly
     // zero instead of the old phantom $0.10 fallback charge.
-    const comicCost = artCost + ttsCost + musicCost + graderCost;
+    const comicCost = preparedScore
+      ? artCost + ttsCost + musicCost + (ctx.modelUsageCostUsd?.() ?? 0) +
+        Math.max(0, res.visionGraderCalls - scorePricedGraders) * PRICE.visionGraderUsd
+      : artCost + ttsCost + musicCost + graderCost;
     ctx.log(
       `motion_comic: attested Novita art $${artCost.toFixed(4)}, ` +
       `${res.ttsCharactersGenerated} TTS chars, ${res.musicGenerations} music, ` +
@@ -687,6 +737,7 @@ export const motionComicBlock: Block = {
       engine: "motion_comic",
       panels: res.panels,
       imageProvider: "novita-z-image-turbo-local",
+      ...(preparedScore ? { externalScore: { ...preparedScore.sourceMetadata, ...res.externalScore } } : {}),
     });
     ctx.log(`motion_comic ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels} panels)`);
 
@@ -708,6 +759,9 @@ export const motionComicBlock: Block = {
       [COST_PATCH_KEY]: comicCost,
     };
   },
-};
+  };
+}
+
+export const motionComicBlock = createMotionComicBlock();
 
 export const motionComicBlocks: Block[] = [motionComicBlock];

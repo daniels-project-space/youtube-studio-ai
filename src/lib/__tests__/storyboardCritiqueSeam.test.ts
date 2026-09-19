@@ -492,7 +492,7 @@ const SEAMS = [
   {
     label: "motion_comic",
     blockFile: "trigger/blocks/motionComicBlocks.ts",
-    blockMarker: "export const motionComicBlock: Block = {",
+    blockMarker: "export function createMotionComicBlock(",
     castCall: "castMotionComic({",
     engineFile: "lib/motionComic.ts",
     planFn: "export async function planMotionComicStoryboard(",

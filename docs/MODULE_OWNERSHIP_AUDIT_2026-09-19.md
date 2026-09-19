@@ -40,6 +40,9 @@ The structural `audit-inert-produces` count increases from 68 to 69 for
 evaluation evidence, consumed through the explicit CLI artifact-file handoff,
 not a downstream production block. This limitation is intentionally retained
 in the baseline; no synthetic production consumer or audit exemption is added.
+The later opt-in external-score consumer also reads this arrangement to check
+identity and playback, but does not generate from it or qualify the audio.
+The static default-manifest audit still reports the same count.
 
 ### Local verification checkpoint
 
@@ -60,6 +63,65 @@ in the baseline; no synthetic production consumer or audit exemption is added.
   and complete legacy execution isolation are still open.
 
 ## Scope and evidence
+
+### External-score consumer work
+
+The opt-in `motion_comic@2.0.0-shared-score` revision separates score supply
+from comic rendering. It requires the shared music producer's capability and
+`musicKey`, with explicit playback, gain and final-master loudness settings.
+Its selected source is owner-scoped and content-addressed locally; it must not
+fall back to the renderer's historical `music.mp3` cache or internal Suno job.
+Before paid planning, a create-only run binding pins the source digest and mix
+identity. Later attempts must match that binding even when the storage key is
+unchanged. The renderer's returned consumption evidence must agree before the
+block can persist a successful master. These checks do not certify the music.
+The default comic version and automatic designer remain legacy behavior.
+
+The integrated runner also exposed an existing producer-contract mismatch:
+Mureka/Suno return no MiniMax runtime/native receipt, but the legacy music ABI
+requires both; its raw reuse shortcut additionally omits the music program.
+The paired `music@2.0.0-provider-outputs` revision declares provider-specific
+receipt outputs while continuing to require them for MiniMax. It does not
+fabricate empty receipts or change provider generation. Raw `reuseMusicKey`
+cannot prove the original provider or review state and is refused by this new
+revision; the existing verified prepared-music path remains distinct. Neither
+legacy behavior nor a release gate is changed to make a fixture pass.
+The new comic revision also declares its planner's existing `persona` and
+`criticDoctrine` reads. The legacy runner still refuses the undeclared persona
+read; a direct legacy-control fixture separately verifies its original scoring
+behavior without claiming that its old runner contract passes.
+
+This is a consumer integration, not YuE production activation. The YuE runtime
+still lacks attributable charge evidence and a durable cross-worker submission
+and approval path in Studio. Its current evaluation output remains unqualified;
+the MiniMax-specific audition checkpoint is not reused as a YuE approval.
+
+Playback is an explicit decision: `repeat` authorizes repeating the supplied
+score, while `once` must preserve its finite ending rather than silently loop
+or truncate it. Source duration is measured from bounded decoded audio rather
+than trusted container duration. Actual comic duration is known only after rendering; a source
+that exceeds that duration must fail the final mix. Early byte/audio validation
+does not imply that every eventual duration conflict can be known before paid
+art or narration exists. Source identity proves consumption, not musical
+quality, adherence to a composer brief, or permission to publish.
+
+Batch verification: the full readiness run passed 845 of 846 direct tests.
+The remaining storyboard structural test expected the old literal block
+declaration; its marker was updated to the shared factory, and the complete
+test then passed with its planning/render separation and paid-call assertions
+unchanged. This is a full-run result plus a focused correction, not a claim
+that a second full 846-test run occurred. Focused producer/consumer handoff,
+version-resolution, source-binding, cost reconciliation and actual FFmpeg
+tests passed. Provider, artwork and voice calls in the integrated handoff test
+are fixtures; decoded audio, finite endings and video packet preservation
+are independently tested using real FFmpeg. No GPU music quality was certified.
+Scoped lint and the audit gate passed without changing audit baselines.
+The first concurrent build ended with signal exit 143 without a diagnostic;
+a standalone build subsequently passed compilation, TypeScript and all 69
+static pages. Its external-FFmpeg tracing warning was addressed with the
+existing repository annotation and the real FFmpeg test passed again. The
+final build then passed compilation, TypeScript and all 69 static pages
+without those tracing warnings.
 
 Future automatic pipeline composition only. Existing channels, pipelines,
 schedules, outputs, and baseline evidence must remain untouched. Graphify's
