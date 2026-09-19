@@ -5,6 +5,7 @@
  */
 import { register, registerManifestVersion, getManifest, _clear } from "./registry";
 import { createComposerAwareAssemblyManifest } from "@/trigger/blocks/composerAwareAssembly";
+import { createArrangementComposerManifest, musicArrangementPlan } from "@/trigger/blocks/musicArrangementBlocks";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
@@ -72,6 +73,8 @@ export function registerAllBlocks(): void {
   // Film-crew brief blocks (creative-direction layer): director_brief, dp_brief,
   // editor_brief, composer_brief, critic_spec.
   for (const b of CREW_BLOCKS) register(b);
+  registerManifestVersion(createArrangementComposerManifest(getManifest("composer_brief")!));
+  register(musicArrangementPlan);
   // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
   for (const b of STORY_SPINE_BLOCKS) register(b);
   // Provider-free Story Spine → causal Episode Graph → Scene Manifest bridge.

@@ -252,7 +252,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   narration: { kind: "pipeline-module", executableIds: ["narration_tts"] },
   music: {
     kind: "pipeline-module",
-    executableIds: ["music_program_plan", "music"],
+    executableIds: ["music_program_plan", "music_arrangement_plan", "music"],
     note: "The provider-free original-music program seal is required by the automatic music-loop route and binds its topic, channel sound, loop visual direction, and instrumental-only rule before a paid music generation can begin.",
   },
   visuals: {

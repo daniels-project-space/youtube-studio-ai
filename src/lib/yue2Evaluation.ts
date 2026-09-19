@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { AcceptedMusicArrangementSchema, projectAcceptedMusicArrangementToYuEStyle } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
 
 export const YUE2_EVALUATION_VERSION = "studio-yue2-evaluation/v1" as const;
+export const YUE2_ARRANGEMENT_EVALUATION_VERSION = "studio-yue2-arrangement-evaluation/v1" as const;
 export const YUE2_WORKER_CONTRACT = "yue2-evaluation-worker/v1" as const;
 export const YUE2_QUALIFICATION = Object.freeze({
   quality: "unqualified", rtx3090: "unqualified", exact_duration: "unqualified",
@@ -98,6 +100,16 @@ export interface YuE2EvaluationRequest {
   job: YuE2Job;
 }
 
+export interface YuE2AcceptedArrangementRequest {
+  version: typeof YUE2_ARRANGEMENT_EVALUATION_VERSION;
+  acceptedArrangement: z.infer<typeof AcceptedMusicArrangementSchema>;
+  programFingerprint: string;
+  manifestSha256: string;
+  job: YuE2Job;
+}
+
+export type YuE2BoundEvaluationRequest = YuE2EvaluationRequest | YuE2AcceptedArrangementRequest;
+
 export function createYuE2EvaluationRequest(input: {
   program: unknown; style: string; seed: number; personalCreatorAcknowledged: boolean;
 }): YuE2EvaluationRequest {
@@ -114,11 +126,46 @@ export function createYuE2EvaluationRequest(input: {
   return { ...binding, job: YuE2JobSchema.parse({ ...body, job_id }) };
 }
 
-export function validateYuE2EvaluationRequest(value: unknown): YuE2EvaluationRequest {
-  const request = z.object({
+export function createYuE2AcceptedArrangementRequest(input: {
+  arrangement: unknown; seed: number; personalCreatorAcknowledged: boolean;
+}): YuE2AcceptedArrangementRequest {
+  const parsed = z.object({
+    arrangement: AcceptedMusicArrangementSchema,
+    seed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    personalCreatorAcknowledged: z.literal(true),
+  }).strict().parse(input);
+  const acceptedArrangement = parsed.arrangement;
+  const body = {
+    schema_version: 1 as const,
+    style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
+    lyrics: "" as const,
+    seed: parsed.seed,
+    license: License.parse({ scope: "personal_creator", acknowledged: parsed.personalCreatorAcknowledged, company_commercial_authorized: false }),
+  };
+  const binding = {
+    version: YUE2_ARRANGEMENT_EVALUATION_VERSION,
+    programFingerprint: acceptedArrangement.fingerprint,
+    manifestSha256: YUE2_MANIFEST_SHA256,
+  };
+  const job_id = `yue2-eval-${yue2Sha256(canonicalJson({ ...binding, request: body }))}`;
+  return { ...binding, acceptedArrangement, job: YuE2JobSchema.parse({ ...body, job_id }) };
+}
+
+export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluationRequest {
+  const request = z.discriminatedUnion("version", [z.object({
     version: z.literal(YUE2_EVALUATION_VERSION), programFingerprint: Hash,
     manifestSha256: z.literal(YUE2_MANIFEST_SHA256), job: YuE2JobSchema,
-  }).strict().parse(value);
+  }).strict(), z.object({
+    version: z.literal(YUE2_ARRANGEMENT_EVALUATION_VERSION), programFingerprint: Hash,
+    manifestSha256: z.literal(YUE2_MANIFEST_SHA256), job: YuE2JobSchema,
+    acceptedArrangement: AcceptedMusicArrangementSchema,
+  }).strict()]).parse(value);
+  if (request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION && (
+    request.programFingerprint !== request.acceptedArrangement.fingerprint ||
+    request.job.style !== projectAcceptedMusicArrangementToYuEStyle(request.acceptedArrangement)
+  )) {
+    throw new Error("YuE2 evaluation must preserve the accepted arrangement fingerprint and exact projected style");
+  }
   const { job_id, ...body } = request.job;
   const binding = { version: request.version, programFingerprint: request.programFingerprint, manifestSha256: request.manifestSha256 };
   if (job_id !== `yue2-eval-${yue2Sha256(canonicalJson({ ...binding, request: body }))}`) {
@@ -178,7 +225,7 @@ function unseal(value: unknown): { receipt: YuE2SealedReceipt; payload: unknown 
 }
 
 export interface YuE2VerifiedCompletion {
-  request: YuE2EvaluationRequest;
+  request: YuE2BoundEvaluationRequest;
   statusResponse: unknown;
   result: YuE2CompletedResult;
   audio: z.infer<typeof Artifact>;

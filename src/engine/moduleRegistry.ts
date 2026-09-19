@@ -128,6 +128,7 @@ export const FIXED_EXECUTION_MODULES: readonly RegisteredModuleCard[] = [
   fixedModule("learning_contract", "Learning contract", "planning", "Locks the learning objective, demonstrations, and retrieval-practice checks."),
   fixedModule("motion_comic", "Motion comic", "render", "Renders the self-contained drawn-comic story engine."),
   fixedModule("music_program_plan", "Original music program", "planning", "Seals the instrumental and looping-visual direction before generation."),
+  fixedModule("music_arrangement_plan", "Accepted music arrangement", "planning", "Seals the opt-in composer's authored arrangement for evaluation; does not generate audio or activate a production route."),
   fixedModule("narrative_series_visual_controls", "Series visual controls", "planning", "Carries approved serialized continuity controls into the visual plan."),
   fixedModule("notify", "Run notification", "operations", "Records the safe operator notification after a run changes state."),
   fixedModule("novita_render_images", "Novita image render", "render", "Renders attested keyframe images for the cinematic lane."),

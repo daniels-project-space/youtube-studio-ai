@@ -8,7 +8,15 @@
  * custom goal" contract: only the agent + the doctrine differ.
  */
 import { z } from "zod";
-import { agentJson } from "@/agents/mastra";
+import { agentJson, agentJsonConfiguration } from "@/agents/mastra";
+import {
+  ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
+  assertArrangementComposerAdmission,
+  assertArrangementComposerInput,
+  type ArrangementComposerAdmission,
+} from "@/lib/arrangementComposerBudget";
+import { ExecutionError } from "@/engine/executionErrors";
+import { AcceptedMusicArrangementDraftSchema } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StructureBrief,
@@ -272,6 +280,107 @@ export async function briefComposer(
     // exactly like a run that had them.
     log(`crew/composer: BRIEF UNAVAILABLE — this video gets no music arc from the composer: ${e instanceof Error ? e.message : e}`);
     return undefined;
+  }
+}
+
+const arrangementComposerResponseSchema = z.object({
+  arrangement: AcceptedMusicArrangementDraftSchema,
+  duckDb: z.number().finite(),
+  bedLufs: z.number().finite(),
+  voiceFx: z.literal("radio").optional(),
+}).strict();
+
+export const ComposerBriefWithArrangementSchema = z.object({
+  musicPrompt: z.string().min(1),
+  audio: z.object({
+    duckDb: z.number().finite(),
+    bedLufs: z.number().finite(),
+    voiceFx: z.literal("radio").optional(),
+  }).strict(),
+  arrangement: AcceptedMusicArrangementDraftSchema,
+}).passthrough().superRefine((brief, refinement) => {
+  if (brief.musicPrompt !== brief.arrangement.direction) {
+    refinement.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "musicPrompt must equal the accepted arrangement direction",
+      path: ["musicPrompt"],
+    });
+  }
+});
+
+/** Opt-in producer: the composer authors the form; downstream modules only seal and execute it. */
+export async function briefComposerWithArrangement(
+  bible: ShowBible,
+  ctx: CrewContext,
+  admission: ArrangementComposerAdmission,
+): Promise<z.infer<typeof ComposerBriefWithArrangementSchema>> {
+  const config = agentJsonConfiguration("composer_arrangement");
+  assertArrangementComposerAdmission(config.model, admission);
+  const prompt =
+      `${header(bible, ctx)}\n\n` +
+      (bible.composerDoctrine ? `Your doctrine: ${bible.composerDoctrine}\n\n` : "") +
+      (ctx.dnaAudio ? `${ctx.dnaAudio}\n\n` : "") +
+      `Author this video's complete instrumental music arrangement. Preserve the locked channel sound, ` +
+      `operator direction, and episode nuance. You own the musical form; the generator will not invent ` +
+      `a build, drop, climax, motif, or section progression for you. A continuous flat arrangement is valid ` +
+      `when requested: its sections are review intervals, not mandatory musical changes, and may have ` +
+      `identical energy and instructions with stable texture and no development. ` +
+      `Choose role primary_music, narration_bed, meditation_bed, or short_form_bed from the supplied intent. ` +
+      `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +
+      `applicable. Explicitly unmetered drones are valid. No vocals or lyrics. ` +
+      `requestedDurationSec requests one native source piece, an integer from 10 to 300 seconds; it is ` +
+      `neither total video duration nor a promise of exact provider output length. Do not clamp an explicit ` +
+      `out-of-range source-piece request into this range. Choose form continuous, through_composed, or sectional. ` +
+      `Ending (seamless_wrap or natural_cadence) and playback (repeat or once) are independent choices: ` +
+      `preserve each supplied intent without inferring one from the other. Do not replace a natural ending with a loop. ` +
+      `Supply 4 to 8 ordered sections with unique lowercase hyphenated ids, labels, startFraction, endFraction, ` +
+      `energy (0 to 1), and instruction. Fractions must cover exactly 0 to 1 without gaps or overlaps. ` +
+      `Also give duckDb, bedLufs, and optional voiceFx (radio or omit), as in the existing audio brief. ` +
+      `Return STRICT JSON {"arrangement":{"role":string,"direction":string,"requestedDurationSec":number,` +
+      `"form":string,"ending":string,"playback":string,"sections":[{"id":string,"label":string,` +
+      `"startFraction":number,"endFraction":number,"energy":number,"instruction":string}]},` +
+      `"duckDb":number,"bedLufs":number,"voiceFx":string?}.`;
+  assertArrangementComposerInput(prompt, config.system);
+  let dispatchAdmitted = false;
+  try {
+    const raw = arrangementComposerResponseSchema.parse(await agentJson({
+      role: "composer_arrangement",
+      schema: arrangementComposerResponseSchema,
+      log: ctx.log,
+      // Eight section objects plus full direction and reasoning need more
+      // headroom than the legacy paragraph. This same bound prices admission.
+      maxTokens: ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
+      temperature: 0.8,
+      prompt,
+      beforeDispatch: async () => {
+        assertArrangementComposerInput(prompt, config.system);
+        assertArrangementComposerAdmission(config.model, admission);
+        if (!admission.beforeDispatch) {
+          throw new ExecutionError("INLINE_PAID_EXECUTION_LEASE_REQUIRED: arrangement composer has no execution authority", {
+            code: "INLINE_PAID_EXECUTION_LEASE_REQUIRED", retryable: false,
+          });
+        }
+        await admission.beforeDispatch();
+        dispatchAdmitted = true;
+      },
+    }));
+    return ComposerBriefWithArrangementSchema.parse({
+      arrangement: raw.arrangement,
+      musicPrompt: raw.arrangement.direction,
+      audio: {
+        duckDb: raw.duckDb,
+        bedLufs: raw.bedLufs,
+        ...(raw.voiceFx === undefined ? {} : { voiceFx: raw.voiceFx }),
+      },
+    });
+  } catch (error) {
+    if (!dispatchAdmitted) throw error;
+    // A schema failure can still be a consumed response. Preserve observed
+    // usage in the runner and hold this paid stage instead of buying it again.
+    throw new ExecutionError(
+      `PAID_STAGE_RECONCILIATION_REQUIRED: arrangement composer dispatched without an accepted artifact: ${error instanceof Error ? error.message : String(error)}`,
+      { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false },
+    );
   }
 }
 

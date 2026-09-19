@@ -468,25 +468,29 @@ export const editorBriefBlock: Block = {
 
 /* --------------------------- composer_brief ---------------------------- */
 
-export const composerBriefBlock: Block = {
-  id: "composer_brief",
-  consumes: ["topic"],
-  produces: ["musicBrief"],
-  run: async (ctx) => {
-    const g = await loadGrounding(ctx);
-    const bible = resolveBible(g, "composer_brief", ctx.log);
-    const rc = resolveChannelCrew(ctx, g, bible);
-    logCrewDoctrineGap(ctx, rc, "composer_brief", "composer");
-    // No equivalent knob on COMPOSER_SURFACE (musicMood/duckDepth/loudness/
-    // voiceFx) for any show-bible knob — see resolveChannelCrew's doc comment.
-    const config = resolveComposerConfig(roleProfile(ctx, "composer_brief", undefined, g.profile));
-    const directives = composerDirectives(config);
-    const out = await briefComposer(bible, crewCtx(ctx, g, { config, directives }));
-    if (!out) failLoud("composer_brief");
-    ctx.log(`composer_brief: music prompt set`);
-    return { musicBrief: { ...out, config, directives, configVersion: "composer@1.0.0" } };
-  },
-};
+export function createComposerBriefBlock(briefFn: typeof briefComposer = briefComposer): Block {
+  return {
+    id: "composer_brief",
+    consumes: ["topic"],
+    produces: ["musicBrief"],
+    run: async (ctx) => {
+      const g = await loadGrounding(ctx);
+      const bible = resolveBible(g, "composer_brief", ctx.log);
+      const rc = resolveChannelCrew(ctx, g, bible);
+      logCrewDoctrineGap(ctx, rc, "composer_brief", "composer");
+      // No equivalent knob on COMPOSER_SURFACE (musicMood/duckDepth/loudness/
+      // voiceFx) for any show-bible knob — see resolveChannelCrew's doc comment.
+      const config = resolveComposerConfig(roleProfile(ctx, "composer_brief", undefined, g.profile));
+      const directives = composerDirectives(config);
+      const out = await briefFn(bible, crewCtx(ctx, g, { config, directives }));
+      if (!out) failLoud("composer_brief");
+      ctx.log(`composer_brief: music prompt set`);
+      return { musicBrief: { ...out, config, directives, configVersion: "composer@1.0.0" } };
+    },
+  };
+}
+
+export const composerBriefBlock: Block = createComposerBriefBlock();
 
 /* ----------------------------- critic_spec ----------------------------- */
 

@@ -7,10 +7,11 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import {
-  createYuE2EvaluationRequest, validateYuE2EvaluationRequest, verifyYuE2Audio, verifyYuE2Completion, yue2Sha256,
-  YUE2_QUALIFICATION, YuE2EvaluationClient, YuE2EvaluationError,
-  type YuE2CompletedResult, type YuE2EvaluationRequest,
+  createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest, verifyYuE2Audio, verifyYuE2Completion, yue2Sha256,
+  YUE2_QUALIFICATION, YUE2_ARRANGEMENT_EVALUATION_VERSION, YuE2EvaluationClient, YuE2EvaluationError,
+  type YuE2CompletedResult, type YuE2BoundEvaluationRequest,
 } from "@/lib/yue2Evaluation";
 
 const execute = promisify(execFile);
@@ -98,9 +99,11 @@ const CandidateSchema = z.object({
   requestSha256: z.string(), provenanceSha256: z.string(), audioSha256: z.string(), audioBytes: z.number().int(),
   nativeFormatVerified: z.literal(true), qualified: z.literal(false), productionApproved: z.literal(false),
   manualAudition: z.literal("pending"), costStatus: z.literal("not_measured"), qualification: z.unknown(),
+  acceptedArrangement: AcceptedMusicArrangementSchema.optional(),
 }).strict();
 
-export async function reuseYuE2Candidate(directory: string, request: YuE2EvaluationRequest): Promise<boolean> {
+export async function reuseYuE2Candidate(directory: string, request: YuE2BoundEvaluationRequest): Promise<boolean> {
+  request = validateYuE2EvaluationRequest(request);
   const path = join(directory, "candidate.json");
   if (!await exists(path)) return false;
   const candidate = CandidateSchema.parse(parseFileJson(await readYuE2File(path, MAX_JSON)));
@@ -109,6 +112,10 @@ export async function reuseYuE2Candidate(directory: string, request: YuE2Evaluat
   const audioPath = join(directory, "audio-native.wav");
   const audio = await readYuE2File(audioPath, MAX_AUDIO);
   const saved = z.object({ version: z.literal("studio-yue2-provenance/v1"), request: z.unknown(), statusResponse: z.unknown() }).strict().parse(parseFileJson(provenance));
+  const acceptedArrangement = request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION ? request.acceptedArrangement : undefined;
+  if (canonicalJson(candidate.acceptedArrangement ?? null) !== canonicalJson(acceptedArrangement ?? null)) {
+    throw new Error("Cached YuE2 candidate accepted arrangement mismatch");
+  }
   if (canonicalJson(saved.request) !== canonicalJson(request) || !input.equals(jsonBytes(request)) ||
       candidate.jobId !== request.job.job_id || candidate.programFingerprint !== request.programFingerprint ||
       candidate.requestSha256 !== yue2Sha256(input) || candidate.provenanceSha256 !== yue2Sha256(provenance) ||
@@ -132,7 +139,7 @@ async function candidateDirectory(root: string, id: string): Promise<string> {
 }
 
 export async function executeYuE2Evaluation(input: {
-  request: YuE2EvaluationRequest; outputRoot: string; endpoint: string; bearerToken: string;
+  request: YuE2BoundEvaluationRequest; outputRoot: string; endpoint: string; bearerToken: string;
   recoverOnly?: boolean;
 }): Promise<{ status: "completed" | "pending"; directory: string; reused: boolean }> {
   input = { ...input, request: validateYuE2EvaluationRequest(input.request) };
@@ -158,6 +165,7 @@ export async function executeYuE2Evaluation(input: {
     audioSha256: result.completion.audio.sha256, audioBytes: result.audio.length,
     nativeFormatVerified: true, qualified: false, productionApproved: false, manualAudition: "pending",
     costStatus: "not_measured", qualification: YUE2_QUALIFICATION,
+    ...(input.request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION ? { acceptedArrangement: input.request.acceptedArrangement } : {}),
   });
   await immutable(join(directory, "candidate.json"), jsonBytes(candidate));
   await chmod(directory, 0o700);
@@ -168,26 +176,37 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   const values: Record<string, string> = {};
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
-    const key = argv[index];
+    const key = argv[index] === "--style" ? "--style-file" : argv[index];
     if (["--submit", "--personal-creator", "--recover-only", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
-    } else if (["--program", "--style-file", "--seed", "--out"].includes(key)) {
+    } else if (["--arrangement", "--program", "--style-file", "--seed", "--out"].includes(key)) {
       if (values[key] !== undefined || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Invalid evaluation argument");
       values[key] = argv[++index];
     } else { throw new Error("Unknown evaluation argument"); }
   }
   if (flags.has("--help")) {
-    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts --program PROGRAM.json --style-file STYLE.txt --seed INTEGER --personal-creator [--out DIRECTORY] [--submit [--recover-only]]\nDefault: local validation only. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending.");
+    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. Default: local validation only. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending.");
     return;
   }
-  if (!values["--program"] || !values["--style-file"] || !/^\d+$/u.test(values["--seed"] ?? "") || !flags.has("--personal-creator")) {
-    throw new Error("Explicit program, style file, seed and --personal-creator acknowledgement are required");
+  const arrangementMode = values["--arrangement"] !== undefined;
+  if (arrangementMode && (values["--program"] !== undefined || values["--style-file"] !== undefined)) {
+    throw new Error("--arrangement is mutually exclusive with --program and independent style files");
+  }
+  if ((!arrangementMode && (!values["--program"] || !values["--style-file"])) || !/^\d+$/u.test(values["--seed"] ?? "") || !flags.has("--personal-creator")) {
+    throw new Error("Explicit arrangement or program/style files, seed and --personal-creator acknowledgement are required");
   }
   if (flags.has("--recover-only") && !flags.has("--submit")) throw new Error("--recover-only requires explicit --submit to enable network access");
-  const program = parseFileJson(await readYuE2File(resolve(values["--program"]), 256 * 1024));
-  const style = new TextDecoder("utf-8", { fatal: true }).decode(await readYuE2File(resolve(values["--style-file"]), 32000));
-  const request = createYuE2EvaluationRequest({ program, style, seed: Number(values["--seed"]), personalCreatorAcknowledged: true });
+  const request = arrangementMode
+    ? createYuE2AcceptedArrangementRequest({
+        arrangement: parseFileJson(await readYuE2File(resolve(values["--arrangement"]), 256 * 1024)),
+        seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
+      })
+    : createYuE2EvaluationRequest({
+        program: parseFileJson(await readYuE2File(resolve(values["--program"]), 256 * 1024)),
+        style: new TextDecoder("utf-8", { fatal: true }).decode(await readYuE2File(resolve(values["--style-file"]), 32000)),
+        seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
+      });
   if (!flags.has("--submit")) {
     console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending" }, null, 2));
     return;

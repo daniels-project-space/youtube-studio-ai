@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AcceptedMusicArrangementSchema } from "./acceptedMusicArrangement";
 import {
   ContinuityLedgerSchema,
   DPVisualSpecSchema,
@@ -337,6 +338,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   musicBrief: {
     type: "ComposerCueSheet",
     schema: z.record(z.string(), jsonValue),
+  },
+  acceptedMusicArrangement: {
+    type: "AcceptedMusicArrangement",
+    schema: AcceptedMusicArrangementSchema,
+    persist: "reference",
   },
   validationSpec: {
     type: "CriticValidationSpec",

@@ -43,6 +43,7 @@ export type AgentRole =
   | "cinematographer"
   | "editor"
   | "composer"
+  | "composer_arrangement"
   | "critic";
 
 const FLASH_MODEL = openRouterModel("intelligence");
@@ -132,6 +133,20 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "instrumentation, dynamics, BPM band, and what to avoid) and the audio brief (ducking, " +
       "bed loudness, optional voice FX) for one video, true to the channel's vibe. Return " +
       "structured output only.",
+  },
+  composer_arrangement: {
+    provider: "openrouter",
+    model: FLASH_MODEL,
+    tier: "flash",
+    instructions:
+      "You are the Composer of an explicitly authored instrumental arrangement. Preserve the channel's " +
+      "locked sound and the supplied creative intent. You own form, energy, and musical changes; downstream " +
+      "generators must execute your accepted arrangement without inventing a generic dramatic progression. " +
+      "Continuous unmetered drones are valid: specify tempo only when applicable. Sections may be review " +
+      "intervals with identical energy and instructions, not compulsory changes. Requested source-piece " +
+      "duration is not total video length or a guarantee of exact output duration. Ending and playback are " +
+      "independent choices. Return the requested structured output only, with no vocals or lyrics. " +
+      "Audio mix fields are directions only; never claim narration processing or output qualification.",
   },
   critic: {
     provider: "openrouter",
@@ -361,6 +376,13 @@ export interface AgentJsonOptions<T> {
   temperature?: number;
   maxTokens?: number;
   log?: (msg: string) => void;
+  /** Fresh admission for a real dispatch; memoized responses do not purchase. */
+  beforeDispatch?: () => Promise<void>;
+}
+
+export function agentJsonConfiguration(role: AgentRole): Readonly<{ model: string; system: string }> {
+  const config = ROLE_CONFIG[role];
+  return { model: config.model, system: config.instructions };
 }
 
 /**
@@ -395,6 +417,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     if (bundle) {
       const agent = bundle.getAgent(o.role);
       let res: MastraGenerationResponse;
+      if (o.beforeDispatch) await o.beforeDispatch();
       try {
         res = await agent.generate(o.prompt, {
           structuredOutput: { schema: o.schema },
@@ -431,12 +454,14 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
       prompt: o.prompt,
       system,
       tier: cfg?.tier,
+      ...(o.role === "composer_arrangement" ? { model: cfg.model } : {}),
       maxTokens: o.maxTokens,
       temperature: o.temperature,
       // The outer memo includes the response contract and only completes after
       // this parse succeeds. A generic JSON memo here could otherwise retain a
       // response rejected by this schema and turn a retry into a stale failure.
       memoize: false,
+      beforeDispatch: o.beforeDispatch,
     });
     return o.schema.parse(out);
   });

@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { createAcceptedMusicArrangement, projectAcceptedMusicArrangementToYuEStyle } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
-  assertYuE2Manifest, createYuE2EvaluationRequest, validateYuE2Endpoint, validateYuE2EvaluationRequest,
+  assertYuE2Manifest, createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2Endpoint, validateYuE2EvaluationRequest,
   verifyYuE2Audio, verifyYuE2Completion, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
   YUE2_RUNTIME_MANIFEST_SHA256, YUE2_WORKER_CONTRACT, YuE2EvaluationClient, YuE2EvaluationError,
-  type YuE2SealedReceipt,
+  YUE2_ARRANGEMENT_EVALUATION_VERSION, type YuE2SealedReceipt, type YuE2BoundEvaluationRequest,
 } from "@/lib/yue2Evaluation";
 import { executeYuE2Evaluation, probeYuE2NativeWav, runYuE2EvaluationCli } from "@/scripts/evaluate-yue2-music";
 
@@ -22,6 +23,19 @@ const program = createChannelMusicProgram({
 });
 const style = "Gentle lofi, felt piano and soft drums; slow movement, instrumental intent.";
 const request = createYuE2EvaluationRequest({ program, style, seed: 42, personalCreatorAcknowledged: true });
+const arrangement = createAcceptedMusicArrangement({
+  ownerId: "fixture-owner", channelId: "fixture-channel-not-production", runId: "fixture-run",
+  topic: "A steady quiet piece", sourceBrief: { musicPrompt: "Keep a flat pulse and end naturally." },
+  arrangement: {
+    role: "primary_music", direction: "Keep a flat pulse; no added climax or melodic variation.",
+    requestedDurationSec: 60, form: "continuous", ending: "natural_cadence", playback: "once",
+    sections: ["opening", "first", "second", "ending"].map((id, index) => ({
+      id, label: id, startFraction: index / 4, endFraction: (index + 1) / 4, energy: 0.3,
+      instruction: index === 3 ? "Resolve once to silence." : "Preserve the same quiet pulse.",
+    })),
+  },
+});
+const arrangementRequest = createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true });
 const clone = <T>(value: T): T => structuredClone(value);
 const token = "fixture-bearer-never-log-this-secret-123456";
 
@@ -43,7 +57,7 @@ function absent() {
 function pending(job = request.job, state = "accepted") {
   return { contract: YUE2_WORKER_CONTRACT, job_id: job.job_id, state, job };
 }
-function completed(audio: Uint8Array, req = request, attempt = 1) {
+function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request, attempt = 1) {
   const job = seal(req.job);
   const config = seal({ schema_version: 1, manifest: YUE2_MANIFEST, cache_dir: "/explicit-test-cache",
     device: "cuda:0", local_files_only: true, candidate_count: 1,
@@ -83,12 +97,12 @@ function stub(handler: (path: string, init: RequestInit) => Response | Promise<R
   };
   return { calls, fetcher, client: new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token, fetch: fetcher, timeoutMs: 100 }) };
 }
-async function rejected(operation: Promise<unknown>): Promise<void> {
+async function rejected(operation: Promise<unknown>, expectedJobId = request.job.job_id): Promise<void> {
   await assert.rejects(operation, (error: unknown) => {
     assert.ok(error instanceof YuE2EvaluationError);
     assert.equal(error.retryable, false);
     assert.equal(error.safeToFallback, false);
-    assert.equal(error.jobId, request.job.job_id);
+    assert.equal(error.jobId, expectedJobId);
     assert.ok(!error.message.includes(token));
     assert.match(error.message, /recover only with GET/);
     return true;
@@ -347,6 +361,127 @@ async function main(): Promise<void> {
       await rejected(executeYuE2Evaluation(input));
       assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
       assert.equal((await stat(join(input.outputRoot, request.job.job_id, "submission-attempt.json"))).mode & 0o222, 0);
+    });
+    await test("accepted arrangement entry retains exact artifact and deterministic projected style without independent overrides", () => {
+      assert.equal(arrangementRequest.version, YUE2_ARRANGEMENT_EVALUATION_VERSION);
+      assert.equal(arrangementRequest.programFingerprint, arrangement.fingerprint);
+      assert.deepEqual(arrangementRequest.acceptedArrangement, arrangement);
+      assert.equal(arrangementRequest.job.style, projectAcceptedMusicArrangementToYuEStyle(arrangement));
+      assert.equal(arrangementRequest.job.lyrics, "");
+      assert.deepEqual(validateYuE2EvaluationRequest(arrangementRequest), arrangementRequest);
+      assert.deepEqual(createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true }), arrangementRequest);
+      assert.notEqual(createYuE2AcceptedArrangementRequest({ arrangement, seed: 43, personalCreatorAcknowledged: true }).job.job_id, arrangementRequest.job.job_id);
+      assert.throws(() => createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: false }));
+      const override = { arrangement, seed: 42, personalCreatorAcknowledged: true, style: "Replace accepted direction" };
+      assert.throws(() => createYuE2AcceptedArrangementRequest(override));
+      assert.throws(() => validateYuE2EvaluationRequest({ ...arrangementRequest, style: "Replace accepted direction" }));
+      assert.equal(request.version, "studio-yue2-evaluation/v1");
+      assert.equal(Object.hasOwn(request, "acceptedArrangement"), false);
+    });
+    await test("tampered arrangement, fingerprint and independently rehashed style fail before any HTTP or output directory", async () => {
+      const changedArtifact = clone(arrangementRequest);
+      changedArtifact.acceptedArrangement.arrangement.sections[0].energy = 0.9;
+      const changedStyle = clone(arrangementRequest);
+      changedStyle.job.style += " Add an unaccepted climax.";
+      const { job_id: previousId, ...body } = changedStyle.job;
+      assert.equal(previousId, arrangementRequest.job.job_id);
+      changedStyle.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({
+        version: changedStyle.version, programFingerprint: changedStyle.programFingerprint,
+        manifestSha256: changedStyle.manifestSha256, request: body,
+      }))}`;
+      const { acceptedArrangement: removed, ...missingArtifact } = arrangementRequest;
+      assert.deepEqual(removed, arrangement);
+      const fixture = stub(() => { assert.fail("invalid arrangement must be rejected before health GET"); });
+      for (const invalid of [changedArtifact, changedStyle, missingArtifact,
+        { ...arrangementRequest, programFingerprint: "0".repeat(64) },
+        { ...arrangementRequest, job: { ...arrangementRequest.job, job_id: request.job.job_id } },
+        { ...arrangementRequest, acceptedArrangement: { ...arrangement, unknown: "field" } },
+      ]) {
+        await assert.rejects(fixture.client.evaluate(invalid, { submit: true }));
+      }
+      assert.equal(fixture.calls.length, 0);
+      globalThis.fetch = fixture.fetcher;
+      const outputRoot = join(directory, "invalid-arrangement-output");
+      await assert.rejects(executeYuE2Evaluation({ request: changedStyle, outputRoot, endpoint: "http://127.0.0.1:8787", bearerToken: token }));
+      await assert.rejects(stat(outputRoot), { code: "ENOENT" });
+      assert.equal(fixture.calls.length, 0);
+    });
+    await test("actual CLI arrangement creation is validate-only, mutually exclusive, and refuses tampered files before HTTP", async () => {
+      const arrangementPath = join(directory, "arrangement.json");
+      const outputRoot = join(directory, "arrangement-dry-run");
+      await writeFile(arrangementPath, JSON.stringify(arrangement));
+      const args = ["--arrangement", arrangementPath, "--seed", "42", "--personal-creator", "--out", outputRoot];
+      const fixture = stub(() => { assert.fail("validate-only and invalid CLI input must not contact worker"); });
+      globalThis.fetch = fixture.fetcher;
+      const logs: string[] = [];
+      const log = console.log;
+      console.log = (value: string) => { logs.push(value); };
+      try {
+        await runYuE2EvaluationCli(args, {});
+      } finally { console.log = log; }
+      assert.deepEqual(JSON.parse(logs[0]).request, arrangementRequest);
+      assert.equal(JSON.parse(logs[0]).networkRequests, 0);
+      const cli = await execute(process.execPath, ["--import", "tsx", "src/scripts/evaluate-yue2-music.ts", ...args]);
+      assert.deepEqual(JSON.parse(cli.stdout).request, arrangementRequest);
+      assert.equal(JSON.parse(cli.stdout).mode, "validate_only");
+      await assert.rejects(stat(outputRoot), { code: "ENOENT" });
+      for (const extra of [["--program", "unused.json"], ["--style-file", "unused.txt"], ["--style", "unused.txt"], ["--recover-only"]]) {
+        await assert.rejects(runYuE2EvaluationCli([...args, ...extra], {}));
+      }
+      const changed = clone(arrangement);
+      changed.arrangement.ending = "seamless_wrap";
+      await writeFile(arrangementPath, JSON.stringify(changed));
+      await assert.rejects(runYuE2EvaluationCli([...args, "--submit"], {
+        YUE2_EVALUATION_URL: "http://127.0.0.1:8787", YUE2_EVALUATION_TOKEN: token,
+      }));
+      assert.equal(fixture.calls.length, 0);
+      await writeFile(arrangementPath, JSON.stringify(arrangement));
+    });
+    await test("arrangement CLI candidate retains artifact and native FLOAT audio; verified cache is GET-free and remains unqualified", async () => {
+      const arrangementWire = completed(audio, arrangementRequest);
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? new Response(audio) : Response.json(arrangementWire));
+      globalThis.fetch = fixture.fetcher;
+      const outputRoot = join(directory, "arrangement-candidate");
+      const args = ["--arrangement", join(directory, "arrangement.json"), "--seed", "42", "--personal-creator", "--out", outputRoot, "--submit"];
+      const environment = { YUE2_EVALUATION_URL: "http://127.0.0.1:8787", YUE2_EVALUATION_TOKEN: token };
+      const log = console.log;
+      console.log = () => undefined;
+      try {
+        await runYuE2EvaluationCli(args, environment);
+        globalThis.fetch = async () => { assert.fail("accepted-arrangement cache must not use HTTP"); };
+        await runYuE2EvaluationCli(args, environment);
+      } finally { console.log = log; }
+      const candidatePath = join(outputRoot, arrangementRequest.job.job_id, "candidate.json");
+      const candidate = JSON.parse(await readFile(candidatePath, "utf8"));
+      assert.deepEqual(candidate.acceptedArrangement, arrangement);
+      assert.equal(candidate.programFingerprint, arrangement.fingerprint);
+      assert.equal(candidate.qualified, false);
+      assert.equal(candidate.productionApproved, false);
+      assert.equal(candidate.manualAudition, "pending");
+      assert.equal(candidate.nativeFormatVerified, true);
+      assert.equal(candidate.audioSha256, yue2Sha256(audio));
+      assert.deepEqual(JSON.parse(await readFile(join(outputRoot, arrangementRequest.job.job_id, "request.json"), "utf8")), arrangementRequest);
+      await chmod(candidatePath, 0o600);
+      delete candidate.acceptedArrangement;
+      await writeFile(candidatePath, JSON.stringify(candidate));
+      await assert.rejects(executeYuE2Evaluation({ request: arrangementRequest, outputRoot, endpoint: environment.YUE2_EVALUATION_URL, bearerToken: token }), /accepted arrangement mismatch/);
+      assert.equal(fixture.calls.filter(call => call.method === "POST").length, 0);
+    });
+    await test("arrangement single-purchase worker body is unchanged and durable ambiguous recovery is GET-only", async () => {
+      const fixture = stub((path, init) => {
+        if (path.endsWith("/health")) return Response.json(health());
+        if (init.method === "POST") throw new Error("simulated lost acceptance");
+        return absent();
+      });
+      globalThis.fetch = fixture.fetcher;
+      const input = { request: arrangementRequest, outputRoot: join(directory, "arrangement-ambiguous"), endpoint: "http://127.0.0.1:8787", bearerToken: token };
+      await rejected(executeYuE2Evaluation(input), arrangementRequest.job.job_id);
+      await rejected(executeYuE2Evaluation({ ...input, recoverOnly: true }), arrangementRequest.job.job_id);
+      await rejected(executeYuE2Evaluation(input), arrangementRequest.job.job_id);
+      const posts = fixture.calls.filter(call => call.method === "POST");
+      assert.equal(posts.length, 1);
+      assert.deepEqual(posts[0].body, arrangementRequest.job);
+      assert.equal(Object.hasOwn(posts[0].body as object, "acceptedArrangement"), false);
     });
     console.log(`YUE2 EVALUATION PASS: ${passed} checks; synthetic audio and stubbed HTTP only; no GPU or quality qualification`);
   } finally {

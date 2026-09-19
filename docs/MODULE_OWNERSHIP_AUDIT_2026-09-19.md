@@ -1,5 +1,64 @@
 # Module Ownership Audit - 2026-09-19
 
+## Opt-in arrangement work
+
+The original findings below remain baseline evidence, not a description of
+every subsequent revision. `composer_brief@2.0.0-accepted-arrangement` and the
+provider-free `music_arrangement_plan` introduce an explicit handoff for the
+new YuE evaluation path. The composer authors role, full direction, requested
+source-piece duration, sections/energy, form, ending, and playback intent. The
+planner validates and seals those choices with owner/channel/run identity and
+the source brief fingerprint; it does not supply a second arrangement.
+
+Continuous, unmetered and flat-energy pieces are valid. Four to eight sections
+can be review intervals with identical instructions rather than mandatory
+musical events. Requested source duration is neither final-video length nor a
+claim that the model will produce an exact duration.
+
+The new composer revision declares its paid provider, reserves the configured
+model's bounded request cost, and checks execution authority before dispatch.
+Actual usage is accounted independently; an unsuccessful paid dispatch requires
+reconciliation. The deterministic planner neither purchases nor composes music.
+
+`--arrangement` in the YuE evaluation CLI derives conditioning from the sealed
+artifact and forbids an independent style override. The versioned request
+retains the full artifact and revalidates the projection before HTTP or cached
+reuse. Native output remains unmodified and unqualified, with manual audition
+pending. Ending and playback are distinct authored choices; this path does
+not enable loop folding, concatenation, or automatic publishing.
+
+The legacy composer, music-program builder, music generator, weekly producers,
+and existing channel definitions are not switched to this new handoff. The
+old independent-arrangement behavior remains a comparison baseline. Production
+provider integration and per-consumer playback qualification are still needed:
+current video renderers loop or truncate beds and cannot claim preservation of
+a finite natural ending. Unsupported combinations must be refused before
+purchase when this handoff is connected to those consumers.
+
+The structural `audit-inert-produces` count increases from 68 to 69 for
+`music_arrangement_plan.acceptedMusicArrangement`: it is persisted terminal
+evaluation evidence, consumed through the explicit CLI artifact-file handoff,
+not a downstream production block. This limitation is intentionally retained
+in the baseline; no synthetic production consumer or audit exemption is added.
+
+### Local verification checkpoint
+
+- The complete 841-file direct readiness run passed 839 files and identified
+  missing planner entries in the browser-safe registry and catalog spine. Both
+  entries were added with evaluation-only descriptions; both failing suites
+  then passed individually (92 executable cards, 12 family graphs). The full
+  suite was not repeated after these two catalog-data additions.
+- The accepted-arrangement, composer/planner, paid-dispatch and YuE client
+  checks passed, including 51 client checks and a real Python HTTP/TypeScript
+  CLI integration with exactly six fake inference calls. No real model ran.
+- Production build and TypeScript passed. Scoped ESLint has no errors and two
+  pre-existing unused-variable warnings in the Mastra agent file.
+- Structural audits passed after the explicitly documented terminal-artifact
+  baseline change above. Graphify was refreshed locally and remains ignored.
+- Existing channels were not mutated. The development branch remains held
+  from production; GPU qualification, listening review, production consumers
+  and complete legacy execution isolation are still open.
+
 ## Scope and evidence
 
 Future automatic pipeline composition only. Existing channels, pipelines,
