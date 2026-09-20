@@ -1,4 +1,5 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import {
@@ -85,8 +86,11 @@ export const serializedProgramEpisodeRetryDispatcher = schedules.task({
   id: "serialized-program-episode-retry-dispatcher",
   // A durable outbox retry must recover well before the queued-run lease can
   // expire. This performs only one indexed Convex read when no receipt exists.
-  cron: "* * * * *",
-  run: async (_payload, options) => dispatchDueSerializedProgramEpisodeRetries({
-    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
-  }),
+  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  run: async (_payload, options) => {
+    if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
+    return dispatchDueSerializedProgramEpisodeRetries({
+      dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+    });
+  },
 });

@@ -326,3 +326,57 @@ passed, as did repository TypeScript checking and scoped ESLint. The operator
 contract now also asserts the run-keyed LogConsole introduced in the first batch.
 No generation, deployment, or production bandwidth measurement was performed.
 Deployment order must put the new Convex query live before the web callers.
+
+## Seventh implementation batch: shared recovery schedule
+
+`src/trigger/sharedDeliveryRecovery.ts` directly invokes the six existing
+non-thumbnail delivery handlers in one scheduled task. It does not create six
+child Trigger runs. Each handler retains its existing indexed queries, approval
+checks, claims, bounded attempts, global idempotency, and worker-version logic.
+The current project/environment context is forwarded to the three handlers that
+require it. Rejected handlers do not prevent others from starting; the aggregate
+waits for all settlements, then fails with handler names rather than arbitrary
+provider error bodies. Aggregate automatic retries are disabled; durable outboxes
+remain the retry authority on the next scheduled tick.
+
+`STUDIO_DELIVERY_RECOVERY_MODE` is explicit: absent or `individual` retains the six
+existing schedules; `shared` declares only the shared schedule. Invalid values
+fail task declaration. Disabled task wrappers return before touching any outbox,
+covering stray/manual invocations of the new-version tasks. Existing running old
+versions are not cancelled and retain their original behavior and global keys.
+Thumbnail dispatchers and GPU reapers are not part of this mode.
+
+At a minute cadence, six schedules become one: 259,200 -> 43,200 starts per 30
+days, or 216,000 fewer (83.3% for these six). This does not reduce the number of
+underlying Convex calls or eliminate polling. Event-driven durable wakeups remain
+unfinished. The default remains individual and no deployment/configuration change
+has been made; no production saving is claimed.
+
+### Activation prerequisites
+
+1. Obtain deployment/activation authorization. Keep the mode consistent between
+   task indexing and runtime; do not change only a live worker environment setting.
+2. Verify realistic six-outbox batch latency, concurrent SDK calls, and transport
+   stalls in an isolated environment. Shared recovery has a 120-second task ceiling.
+   In particular, serialized recovery previously inherited the longer project
+   default: do not activate if its legitimate batches cannot fit the shared ceiling.
+   Promise settlement isolates rejection, not CPU hangs or process termination.
+3. Deploy with the intended mode and inspect the live schedule inventory. Trigger
+   synchronizes declarative cron additions/removals on deployment; separately
+   reconcile any manually created schedules. Confirm exactly one active shared
+   schedule and zero active individual schedules for these six task IDs. An old
+   schedule producing no-op runs is not a cost reduction.
+4. Verify approved deliveries, expired-queue recovery, worker pins, and queue age
+   from actual receipts. No new generation or publication may be admitted merely
+   to benchmark the dispatcher. Compare scheduled starts and compute separately.
+5. Roll back by deploying consistent `individual` mode, verifying all six old
+   schedules and no shared schedule. Never merely disable every recovery schedule.
+
+Local tests cover declarations in both modes, disabled-wrapper zero-work behavior,
+invalid-mode rejection, context transport, six-handler invocation, synchronous
+failure isolation, waiting for unfinished handlers, and aggregate error redaction.
+Existing individual delivery, review, serialized, benchmark, and worker-pin checks
+also passed. TypeScript and scoped ESLint passed. Provider synchronization, load,
+and production behavior remain unverified.
+
+Provider schedule semantics: https://trigger.dev/docs/tasks/scheduled

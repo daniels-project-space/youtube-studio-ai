@@ -1,4 +1,5 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -102,7 +103,10 @@ export const bundleFanoutDispatcher = schedules.task({
   id: "bundle-fanout-dispatcher",
   // Recovery happens well inside the bounded outbox deadline. Empty ticks are
   // one indexed read and never admit a fresh render.
-  cron: "* * * * *",
+  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,
-  run: async () => dispatchDueBundleFanouts(),
+  run: async () => {
+    if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
+    return dispatchDueBundleFanouts();
+  },
 });

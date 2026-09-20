@@ -1,4 +1,5 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -148,10 +149,13 @@ export const factualReviewContinuationDispatcher = schedules.task({
   id: "factual-review-continuation-dispatcher",
   // Empty ticks are an indexed owner-scoped outbox read. This does not admit
   // fresh work and does not call a model/browser/render provider.
-  cron: "* * * * *",
+  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
-  run: async (_payload, options) => dispatchPendingFactualReviewContinuations({
-    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
-  }),
+  run: async (_payload, options) => {
+    if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
+    return dispatchPendingFactualReviewContinuations({
+      dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+    });
+  },
 });

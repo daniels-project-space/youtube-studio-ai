@@ -1,4 +1,5 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -90,8 +91,13 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
 }
 
 export const musicAuditionContinuationDispatcher = schedules.task({
-  id: "music-audition-continuation-dispatcher", cron: "* * * * *", maxDuration: 120, retry: { maxAttempts: 1 },
-  run: async (_payload, options) => dispatchPendingMusicAuditionContinuations({
-    dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
-  }),
+  id: "music-audition-continuation-dispatcher",
+  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  maxDuration: 120, retry: { maxAttempts: 1 },
+  run: async (_payload, options) => {
+    if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
+    return dispatchPendingMusicAuditionContinuations({
+      dispatchContext: options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined,
+    });
+  },
 });
