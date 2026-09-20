@@ -331,7 +331,7 @@ export default function RunDetailPage({
           </section>
 
           <section id="run-console" className={`${styles.consoleSection} ${styles.anchorTarget}`}>
-            <LogConsole runId={run._id} runStatus={run.status} />
+            <LogConsole key={run._id} runId={run._id} runStatus={run.status} />
           </section>
         </>
       ) : null}

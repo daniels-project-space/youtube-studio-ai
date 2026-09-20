@@ -17,6 +17,8 @@ for (const status of ["ok", "canceled", "awaiting_factual_review", undefined]) {
 }
 
 assert.equal(completedLogSummary({ loading: true, lines: 0, warnings: 0, errors: 0 }), "Reading receipt");
+assert.equal(completedLogSummary({ subscribed: false, loading: true, lines: 0, warnings: 0, errors: 0 }), "Log feed paused");
+assert.equal(completedLogSummary({ subscribed: false, loading: false, lines: 92, warnings: 1, errors: 2 }), "Log feed paused");
 assert.equal(completedLogSummary({ loading: false, lines: 1, warnings: 0, errors: 0 }), "1 line · clean");
 assert.equal(completedLogSummary({ loading: false, lines: 92, warnings: 1, errors: 2 }), "92 lines · 1W · 2E");
 

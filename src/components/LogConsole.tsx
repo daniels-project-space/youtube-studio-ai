@@ -34,10 +34,10 @@ function fmtClock(ts: number): string {
 export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: string }) {
   const [open, setOpen] = useState(() => runConsoleStartsOpen(runStatus));
   const [following, setFollowing] = useState(true);
-  const logs = useQuery(api.runLogs.listRunLogs, {
+  const logs = useQuery(api.runLogs.listRunLogs, open ? {
     runId: runId as Id<"runs">,
     limit: TAIL_LIMIT,
-  }) as LogLine[] | undefined;
+  } : "skip") as LogLine[] | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const live = isLiveRunStatus(runStatus);
@@ -85,6 +85,7 @@ export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: st
   const feedLabel = live
     ? (following ? "Following tail" : "Review paused")
     : completedLogSummary({
+        subscribed: open,
         loading: logs === undefined,
         lines: count,
         warnings: counts.warn,
@@ -108,7 +109,7 @@ export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: st
           </span>
         </div>
         <div className={styles.headerActions}>
-          <span className={styles.feedState} data-following={live && following ? "true" : undefined} aria-live={live ? "polite" : undefined}><i />{feedLabel}</span>
+          <span className={styles.feedState} data-following={open && live && following ? "true" : undefined} aria-live={open && live ? "polite" : undefined}><i />{open ? feedLabel : "Log feed paused"}</span>
           <button type="button" className={styles.collapse} onClick={toggleOpen} aria-expanded={open} aria-controls="run-console-body">
             {open ? "Collapse" : "Review log"}<IconChevron width={14} height={14} data-open={open ? "true" : undefined} />
           </button>

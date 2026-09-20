@@ -180,3 +180,17 @@ Keep legacy pipeline outputs unchanged for later before/after comparison.
 - Convex dependency tracking and caching: https://stack.convex.dev/queries-that-scale
 - Vercel cache eligibility: https://vercel.com/docs/caching/cdn-cache
 - Vercel transfer usage: https://vercel.com/docs/manage-cdn-usage
+
+## First implementation batch
+
+Closed `LogConsole` instances now pass Convex's `skip` sentinel instead of
+subscribing to 500 persisted lines. Opening restores the subscription. Closed
+headers explicitly say `Log feed paused`, without asserting clean or zero logs;
+live-follow indicators are disabled while closed. Failed and blocked runs retain
+their existing initially-open behavior. The run-detail caller keys the console by
+run ID so disclosure state cannot carry across different runs.
+
+Full persisted log storage and the open console's warning/error counts are
+unchanged. A compact closed-state count record remains future work. Presentation
+regression cases were added but not executed while testing is paused. This batch
+is not deployed; production savings and browser behavior remain unverified.
