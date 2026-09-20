@@ -16,7 +16,7 @@ assert.ok(
 );
 for (const required of [
   "preparedMusic.musicProgram.fingerprint !== channelMusicProgram.fingerprint",
-  "getObjectBytes(preparedMusic.musicKey)",
+  "getObjectBytes(preparedMusic.musicKey, undefined,",
   "sha256BytesHex(masterBytes)",
   "preparedMusic.musicDurationSec",
   "assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, channelMusicProgram)",

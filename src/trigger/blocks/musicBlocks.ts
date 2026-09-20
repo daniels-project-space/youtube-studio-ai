@@ -53,6 +53,7 @@ import {
 // their output transfer bounded so a stalled provider body reaches this block's
 // existing cost-carrying terminal catch instead of the whole-task timeout.
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
+const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
 
 export const music: Block = {
   id: "music",
@@ -89,6 +90,11 @@ export const music: Block = {
       preparedProgram = ChannelMusicProgramSchema.parse(preparedMusic.musicProgram);
       if (preparedProgram.channelId !== String(ctx.channelId) || preparedProgram.topic !== topic) {
         throw new Error("music: prepared weekly sound program does not match the current channel and topic");
+      }
+      if (!Number.isSafeInteger(preparedMusic.audioByteLength) || preparedMusic.audioByteLength < 1_000 ||
+        preparedMusic.audioByteLength > 250_000_000 || typeof preparedMusic.audioSha256 !== "string" || !/^[a-f0-9]{64}$/.test(preparedMusic.audioSha256) ||
+        !Number.isFinite(preparedMusic.musicDurationSec) || preparedMusic.musicDurationSec < 1.5 || preparedMusic.musicDurationSec > 86_400) {
+        throw new Error("music: prepared weekly audio bounds are invalid");
       }
     }
     if (
@@ -250,7 +256,9 @@ export const music: Block = {
       if (preparedMusic.musicProgram.fingerprint !== channelMusicProgram.fingerprint) {
         throw new Error("music: prepared weekly music does not match the frozen channel sound program");
       }
-      const masterBytes = await getObjectBytes(preparedMusic.musicKey);
+      const masterBytes = await getObjectBytes(preparedMusic.musicKey, undefined, {
+        maxBytes: preparedMusic.audioByteLength, timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+      });
       if (
         masterBytes.byteLength !== preparedMusic.audioByteLength ||
         sha256BytesHex(masterBytes) !== preparedMusic.audioSha256
@@ -280,10 +288,9 @@ export const music: Block = {
         if (ctx.store["musicQualityReceiptKey"] !== minimax.qualityReceiptKey) {
           throw new Error("music: prepared MiniMax quality receipt is not bound to the scheduled invocation");
         }
-        const [nativeWavBytes, runtimeReceiptBytes, qualityReceiptBytes] = await Promise.all([
-          getObjectBytes(minimax.nativeWavKey),
-          getObjectBytes(minimax.runtimeReceiptKey),
-          getObjectBytes(minimax.qualityReceiptKey),
+        const [runtimeReceiptBytes, qualityReceiptBytes] = await Promise.all([
+          getObjectBytes(minimax.runtimeReceiptKey, undefined, { maxBytes: PREPARED_MUSIC_EVIDENCE_MAX_BYTES, timeoutMs: 30_000 }),
+          getObjectBytes(minimax.qualityReceiptKey, undefined, { maxBytes: PREPARED_MUSIC_EVIDENCE_MAX_BYTES, timeoutMs: 30_000 }),
         ]);
         let runtimeReceipt: unknown;
         let qualityReceipt: unknown;
@@ -307,6 +314,10 @@ export const music: Block = {
         ) {
           throw new Error("music: prepared MiniMax quality receipt is not bound to the exact native worker WAV");
         }
+        // Validate the small receipts before transferring another full native WAV.
+        const nativeWavBytes = await getObjectBytes(minimax.nativeWavKey, undefined, {
+          maxBytes: runtime.output.byteLength, timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+        });
         assertMusicAuditionNativeBytes({ expected: runtime.output, bytes: nativeWavBytes });
         musicNativeWavKey =
           `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;

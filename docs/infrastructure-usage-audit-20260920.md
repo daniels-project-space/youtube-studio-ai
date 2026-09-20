@@ -452,3 +452,23 @@ delivering the valid sibling. These prove concurrency and rejection isolation,
 not production latency or billing savings. Hung calls can still occupy slots;
 repeated poison receipts can still consume batch capacity. Durable retry backoff,
 transport cancellation, and actual six-handler load verification remain open.
+
+## Implementation Batch 11: Bound Prepared Music Transfers
+
+The shared music executor validates prepared master size, digest type and duration
+before storage I/O. Its master read now enforces the exact sealed byte length
+during transfer, with the existing five-minute music-output download allowance.
+The size ceiling matches the weekly receipt contract's 250,000,000-byte limit;
+valid audio is not trimmed, recompressed, or replaced.
+
+For the legacy MiniMax prepared route, runtime and quality JSON are each bounded
+to 2 MiB/30 seconds and verified before fetching the additional native WAV. That
+WAV transfer is then capped at the verified runtime receipt's exact byte length.
+The existing provider pin, quality receipt, exact native hash, and release gates
+remain enforced. Failed or corrupt reuse does not authorize new generation.
+
+Actual shared-handler checks cover invalid bounds before I/O, exact transport
+options, malformed receipts avoiding the native download, successful legacy reuse,
+and corrupt-master refusal. The separate shared-storage tests exercise real stream
+size/deadline cancellation. These are bounded resource-use guarantees and early
+rejection improvements, not measured production bandwidth or billing savings.
