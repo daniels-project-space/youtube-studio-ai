@@ -186,6 +186,50 @@ async function main() {
     assert.deepEqual(changed.arrangement, arrangement);
   }
 
+  for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
+    const musicIntent = { role, requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
+    const arrangement = { ...flat, ...musicIntent };
+    response = { arrangement, duckDb: -15, bedLufs: -20 };
+    const result = await runPipeline(validatePipeline([
+      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent, family: "music_loop" } },
+      { block: "music_arrangement_plan" },
+    ], Object.keys(seedStore)), { ...stageContext(), seedStore, defaultRetries: 0, sink: { upsert: async () => {} } });
+    assert.equal(result.ok, true, result.error);
+    const accepted = AcceptedMusicArrangementSchema.parse(result.store.acceptedMusicArrangement);
+    assert.deepEqual(accepted.musicIntent, musicIntent);
+    assert.deepEqual(accepted.arrangement, arrangement, "family cannot overwrite explicit intent, including independent ending/playback");
+    assert.ok(accepted.reviewContext!.promptContext.includes(JSON.stringify(accepted.musicIntent)));
+    assert.ok(calls.at(-1)!.prompt.includes("required exact values, not suggestions"));
+  }
+  for (const musicIntent of [{ role: "invented" }, { requestedDurationSec: 301 }, { requestedDurationSec: "90" },
+    { playback: "loop" }, { ending: "fade" }, { form: "verse" }, { voiceFx: "radio" }, { role: undefined }, null]) {
+    const before = calls.length;
+    assert.equal(selected.configSchema.safeParse({ musicIntent }).success, false);
+    await assert.rejects(selected.execute({ ...stageContext(), params: { musicIntent } }));
+    assert.equal(calls.length, before, "invalid explicit intent cannot purchase a composer response");
+  }
+  for (const musicIntent of [{ role: "narration_bed" }, { requestedDurationSec: 90 },
+    { form: "sectional" }, { ending: "natural_cadence" }, { playback: "once" }]) {
+    response = { arrangement: flat, duckDb: -15, bedLufs: -20 };
+    const before = calls.length;
+    await assert.rejects(selected.execute({ ...stageContext(), params: { musicIntent } }),
+      /PAID_STAGE_RECONCILIATION_REQUIRED[\s\S]*conflicts with explicit music intent/);
+    assert.equal(calls.length, before + 1, "a conflicting paid output must not trigger another purchase");
+    await assert.rejects(musicArrangementPlan.run(stageContext({ topic: seedStore.topic, musicBrief: {
+      musicPrompt: flat.direction, audio: { duckDb: -15, bedLufs: -20 }, arrangement: flat, musicIntent,
+    } })), /conflicts with explicit music intent/, "planner also checks restored briefs independently");
+  }
+  fixtureChargeUsd = 0.07;
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20 };
+  const drifted = await runPipeline(validatePipeline([
+    { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent: { role: "narration_bed" } } },
+    { block: "music_arrangement_plan" },
+  ], Object.keys(seedStore)), { ...stageContext(), seedStore, defaultRetries: 3, sink: { upsert: async () => {} } });
+  assert.equal(drifted.ok, false);
+  assert.equal(drifted.costTotal, fixtureChargeUsd, "rejected intent drift retains the one observed paid charge");
+  assert.equal(drifted.store.acceptedMusicArrangement, undefined);
+  fixtureChargeUsd = undefined;
+
   const malformed: unknown[] = [
     undefined,
     { ...flat, requestedDurationSec: 301 },

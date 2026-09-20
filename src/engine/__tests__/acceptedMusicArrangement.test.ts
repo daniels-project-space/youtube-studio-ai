@@ -260,6 +260,27 @@ function retainedReviewContext(): void {
     "retaining review context does not silently rewrite the composer's accepted direction");
 }
 
+function explicitIntent(): void {
+  const musicIntent = { role: "meditation_bed", requestedDurationSec: 120, playback: "once", ending: "natural_cadence", form: "continuous" };
+  const accepted = createAcceptedMusicArrangement({ ...input, sourceBrief: { ...input.sourceBrief, musicIntent }, arrangement: draft() });
+  assert.deepEqual(accepted.musicIntent, musicIntent);
+  assert.notEqual(accepted.fingerprint, make().fingerprint);
+  assert.notEqual(accepted.sourceBriefFingerprint, make().sourceBriefFingerprint);
+  assert.deepEqual(AcceptedMusicArrangementSchema.parse(JSON.parse(JSON.stringify(accepted))), accepted);
+  const changes = { role: "primary_music", requestedDurationSec: 90, playback: "repeat", ending: "seamless_wrap", form: "sectional" };
+  for (const [key, value] of Object.entries(changes)) {
+    const { fingerprint: _fingerprint, ...body } = accepted;
+    assert.equal(_fingerprint, digest(body));
+    const changed = { ...body, arrangement: { ...body.arrangement, [key]: value } };
+    assert.throws(() => AcceptedMusicArrangementSchema.parse({ ...changed, fingerprint: digest(changed) }),
+      /conflicts with explicit music intent/, "a valid new hash alone cannot legitimize intent drift");
+  }
+  const partial = createAcceptedMusicArrangement({ ...input, sourceBrief: { musicIntent: { role: "meditation_bed" } }, arrangement: draft() });
+  assert.deepEqual(partial.musicIntent, { role: "meditation_bed" }, "unspecified controls must not acquire defaults");
+  assert.equal(Object.hasOwn(make(), "musicIntent"), false, "legacy artifacts retain their exact shape");
+}
+
+explicitIntent();
 retainedReviewContext();
 validation();
 fingerprints();

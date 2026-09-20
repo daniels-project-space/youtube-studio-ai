@@ -44,13 +44,26 @@ export const AcceptedMusicArrangementSectionSchema = z.object({
 });
 export type AcceptedMusicArrangementSection = z.infer<typeof AcceptedMusicArrangementSectionSchema>;
 
-export const AcceptedMusicArrangementDraftSchema = z.object({
+const arrangementControls = {
   role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
-  direction: nonblankText(8_000),
   requestedDurationSec: z.number().finite().int().min(10).max(300),
   form: z.enum(["continuous", "through_composed", "sectional"]),
   ending: z.enum(["seamless_wrap", "natural_cadence"]),
   playback: z.enum(["repeat", "once"]),
+} as const;
+
+/** Explicit caller constraints, not defaults inferred from the channel family. */
+export const MusicArrangementIntentSchema = z.object(arrangementControls).partial().strict().superRefine((intent, issue) => {
+  for (const [key, value] of Object.entries(intent)) {
+    if (value === undefined) issue.addIssue({ code: z.ZodIssueCode.custom, path: [key],
+      message: "omit unspecified music intent fields instead of supplying undefined" });
+  }
+});
+export type MusicArrangementIntent = z.infer<typeof MusicArrangementIntentSchema>;
+
+export const AcceptedMusicArrangementDraftSchema = z.object({
+  ...arrangementControls,
+  direction: nonblankText(8_000),
   sections: z.array(AcceptedMusicArrangementSectionSchema).min(4).max(8),
 }).strict().superRefine((draft, issue) => {
   const sections = draft.sections;
@@ -70,6 +83,18 @@ export const AcceptedMusicArrangementDraftSchema = z.object({
 });
 export type AcceptedMusicArrangementDraft = z.infer<typeof AcceptedMusicArrangementDraftSchema>;
 
+export function refineMusicArrangementIntent(
+  value: { arrangement: AcceptedMusicArrangementDraft; musicIntent?: MusicArrangementIntent },
+  issue: z.RefinementCtx,
+): void {
+  for (const [key, expected] of Object.entries(value.musicIntent ?? {})) {
+    if (expected !== undefined && value.arrangement[key as keyof MusicArrangementIntent] !== expected) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, path: ["arrangement", key],
+        message: `arrangement ${key} conflicts with explicit music intent` });
+    }
+  }
+}
+
 const AcceptedMusicArrangementBodySchema = z.object({
   version: z.literal(ACCEPTED_MUSIC_ARRANGEMENT_VERSION),
   ownerId: nonblankText(),
@@ -78,12 +103,14 @@ const AcceptedMusicArrangementBodySchema = z.object({
   topic: nonblankText(),
   sourceBriefFingerprint: fingerprint,
   arrangement: AcceptedMusicArrangementDraftSchema,
+  musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
 }).strict();
 
 export const AcceptedMusicArrangementSchema = AcceptedMusicArrangementBodySchema.extend({
   fingerprint,
 }).strict().superRefine((artifact, issue) => {
+  refineMusicArrangementIntent(artifact, issue);
   if (artifact.reviewContext && artifact.reviewContext.topic !== artifact.topic) {
     issue.addIssue({ code: z.ZodIssueCode.custom, path: ["reviewContext"], message: "music review context belongs to another topic" });
   }
@@ -138,6 +165,9 @@ export function createAcceptedMusicArrangement(input: {
   const reviewContext = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
     Object.hasOwn(input.sourceBrief, "reviewContext")
     ? MusicReviewContextSchema.parse((input.sourceBrief as Record<string, unknown>).reviewContext) : undefined;
+  const musicIntent = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
+    Object.hasOwn(input.sourceBrief, "musicIntent")
+    ? MusicArrangementIntentSchema.parse((input.sourceBrief as Record<string, unknown>).musicIntent) : undefined;
   const body = AcceptedMusicArrangementBodySchema.parse({
     version: ACCEPTED_MUSIC_ARRANGEMENT_VERSION,
     ownerId: input.ownerId,
@@ -146,6 +176,7 @@ export function createAcceptedMusicArrangement(input: {
     topic: input.topic,
     sourceBriefFingerprint: briefFingerprint,
     arrangement: input.arrangement,
+    ...(musicIntent ? { musicIntent } : {}),
     ...(reviewContext ? { reviewContext } : {}),
   });
   return AcceptedMusicArrangementSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });

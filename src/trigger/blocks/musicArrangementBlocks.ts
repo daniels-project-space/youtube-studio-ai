@@ -1,6 +1,8 @@
 import {
   createAcceptedMusicArrangement,
+  MusicArrangementIntentSchema,
 } from "@/engine/acceptedMusicArrangement";
+import { z } from "zod";
 import {
   briefComposerWithArrangement,
   ComposerBriefWithArrangementSchema,
@@ -22,13 +24,14 @@ export function createArrangementComposerManifest(legacy: ModuleManifest): Modul
     ...producer,
     paid: true,
     run: async (ctx) => {
+      const musicIntent = ctx.params.musicIntent === undefined ? undefined : MusicArrangementIntentSchema.parse(ctx.params.musicIntent);
       const admission = {
         budgetUsd: ctx.budgetUsd, stageBudgetUsd: ctx.stageBudgetUsd,
         beforeDispatch: ctx.assertInlinePaidExecutionLease,
       };
       assertArrangementComposerAdmission(agentJsonConfiguration("composer_arrangement").model, admission);
       const boundProducer = createComposerBriefBlock((bible, crewContext) =>
-        briefComposerWithArrangement(bible, crewContext, admission));
+        briefComposerWithArrangement(bible, { ...crewContext, ...(musicIntent ? { musicIntent } : {}) }, admission));
       const patch = await boundProducer.run(ctx);
       const brief = patch.musicBrief as { directives: ComposerDirectives };
       const { voiceFx, ...directives } = brief.directives;
@@ -43,6 +46,7 @@ export function createArrangementComposerManifest(legacy: ModuleManifest): Modul
   return {
     ...legacy,
     version: ARRANGEMENT_COMPOSER_VERSION,
+    configSchema: legacy.configSchema.and(z.object({ musicIntent: MusicArrangementIntentSchema.optional() }).passthrough()),
     capabilities: [...legacy.capabilities, "crew.accepted_music_arrangement"],
     providerProfiles: [{
       id: agentJsonConfiguration("composer_arrangement").model,

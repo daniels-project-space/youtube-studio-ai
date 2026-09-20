@@ -16,7 +16,8 @@ import {
   type ArrangementComposerAdmission,
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
-import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema } from "@/engine/acceptedMusicArrangement";
+import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema,
+  MusicArrangementIntentSchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StyleDNA,
@@ -46,6 +47,8 @@ export interface CrewContext {
   sourceAudioDna?: Partial<StyleDNA["audio"]> | null;
   /** Resolved per-channel role controls; must influence the actual brief. */
   roleDirectives?: string;
+  /** Only the opt-in arrangement composer uses these explicit, typed constraints. */
+  musicIntent?: MusicArrangementIntent;
   /** Bounded, immutable serial-episode continuity (when the route owns one). */
   serializedEpisodeContext?: string;
   log?: Logger;
@@ -297,6 +300,7 @@ const arrangementComposerResponseSchema = z.object({
 
 export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
+  musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
   audio: z.object({
     duckDb: z.number().finite(),
@@ -305,6 +309,7 @@ export const ComposerBriefWithArrangementSchema = z.object({
   }).strict(),
   arrangement: AcceptedMusicArrangementDraftSchema,
 }).passthrough().superRefine((brief, refinement) => {
+  refineMusicArrangementIntent(brief, refinement);
   if (brief.musicPrompt !== brief.arrangement.direction) {
     refinement.addIssue({
       code: z.ZodIssueCode.custom,
@@ -320,10 +325,12 @@ export async function briefComposerWithArrangement(
   ctx: CrewContext,
   admission: ArrangementComposerAdmission,
 ): Promise<z.infer<typeof ComposerBriefWithArrangementSchema>> {
+  const musicIntent = ctx.musicIntent === undefined ? undefined : MusicArrangementIntentSchema.parse(ctx.musicIntent);
   const config = agentJsonConfiguration("composer_arrangement");
   assertArrangementComposerAdmission(config.model, admission);
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
+    musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",
     ctx.persona ? `Channel persona: ${ctx.persona}` : "",
     ctx.styleGrammar ? `Channel style grammar: ${ctx.styleGrammar}` : "",
     bible.composerDoctrine ? `Your doctrine: ${bible.composerDoctrine}` : "",
@@ -381,6 +388,7 @@ export async function briefComposerWithArrangement(
     }));
     return ComposerBriefWithArrangementSchema.parse({
       reviewContext,
+      ...(musicIntent ? { musicIntent } : {}),
       arrangement: raw.arrangement,
       musicPrompt: raw.arrangement.direction,
       audio: {

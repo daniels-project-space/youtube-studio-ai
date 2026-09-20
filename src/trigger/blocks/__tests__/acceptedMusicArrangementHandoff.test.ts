@@ -134,6 +134,13 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     assert.equal(llmCalls, 0, "incompatible versions fail at compilation admission before the agent");
     assert.equal(httpCalls, 0, "incompatible versions cannot reach the worker");
     assert.equal(leaseChecks, 0);
+    for (const musicIntent of [{ role: "invented" }, { requestedDurationSec: 301 }, { playback: "loop" }]) {
+      assert.throws(() => compilePipeline(validatePipeline([
+        { block: "composer_brief", version: composerVersion, params: { musicIntent } },
+        { block: "music_arrangement_plan" },
+      ], Object.keys(seedStore)), policy));
+    }
+    assert.equal(llmCalls, 0, "invalid explicit controls fail actual compilation before paid dispatch");
 
     const execute = async (entries: PipelineEntry[], runId: string, lease: "allowed" | "missing" | "denied" = "allowed") => {
       const local = localSink();
@@ -159,12 +166,15 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       draft("narration_bed", true),
     ].entries()) {
       response = { arrangement, duckDb: -12, bedLufs: -22 };
-      const compilation = compilePipeline(validatePipeline(entries, Object.keys(seedStore)), policy);
+      const { role, requestedDurationSec, form, ending, playback } = arrangement;
+      const musicIntent = { role, requestedDurationSec, form, ending, playback };
+      const intentEntries = entries.map(entry => entry.block === "composer_brief" ? { ...entry, params: { musicIntent } } : entry);
+      const compilation = compilePipeline(validatePipeline(intentEntries, Object.keys(seedStore)), policy);
       assert.ok(compilation.reservedMaxCostUsd > 0);
       const callsBefore: number = llmCalls;
       const leasesBefore: number = leaseChecks;
       const dispatchesBefore: number = dispatchChecks;
-      const f = await execute(entries, `arrangement-${index}`);
+      const f = await execute(intentEntries, `arrangement-${index}`);
       assert.equal(f.result.ok, true, f.result.error);
       assert.equal(llmCalls, callsBefore + 1, "planner and projection cannot call an LLM");
       assert.equal(dispatchChecks, dispatchesBefore + 1, "the fake agent must exercise the real dispatch gate");
@@ -173,6 +183,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       assert.equal(compilation.modules[0].version, composerVersion);
       assert.equal(compilation.modules[1].id, "music_arrangement_plan");
       const artifact = AcceptedMusicArrangementSchema.parse(f.result.store.acceptedMusicArrangement);
+      assert.deepEqual(artifact.musicIntent, musicIntent);
       const producedBrief = f.result.store.musicBrief as {
         config: { voiceFx: string }; directives: Record<string, unknown>;
       };
