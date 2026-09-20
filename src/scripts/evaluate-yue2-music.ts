@@ -1,20 +1,19 @@
 import { constants } from "node:fs";
 import { chmod, link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
+import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
+export { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
 import {
   createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest, verifyYuE2Audio, verifyYuE2Completion, yue2Sha256,
   YUE2_QUALIFICATION, YUE2_ARRANGEMENT_EVALUATION_VERSION, YuE2EvaluationClient, YuE2EvaluationError,
-  type YuE2CompletedResult, type YuE2BoundEvaluationRequest,
+  type YuE2BoundEvaluationRequest,
 } from "@/lib/yue2Evaluation";
 
-const execute = promisify(execFile);
 const MAX_JSON = 4 * 1024 * 1024;
 const MAX_AUDIO = 256 * 1024 * 1024;
 
@@ -71,28 +70,6 @@ async function immutable(path: string, bytes: Uint8Array): Promise<boolean> {
 }
 
 function jsonBytes(value: unknown): Buffer { return Buffer.from(`${canonicalJson(value)}\n`); }
-
-export async function probeYuE2NativeWav(path: string, result: YuE2CompletedResult, expectedBytes: number): Promise<void> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execute("ffprobe", [
-      "-v", "error", "-show_entries",
-      "stream=codec_type,codec_name,sample_fmt,sample_rate,channels,bits_per_sample,duration_ts,time_base:format=format_name,size",
-      "-of", "json", path,
-    ], { timeout: 30000, maxBuffer: 65536, encoding: "utf8" }));
-  } catch { throw new Error("Native WAV inspection failed; candidate remains unqualified"); }
-  const parsed = z.object({
-    streams: z.array(z.object({
-      codec_type: z.literal("audio"), codec_name: z.literal("pcm_f32le"), sample_fmt: z.literal("flt"),
-      sample_rate: z.literal("48000"), channels: z.literal(2), bits_per_sample: z.literal(32),
-      duration_ts: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), time_base: z.literal("1/48000"),
-    })).length(1),
-    format: z.object({ format_name: z.literal("wav"), size: z.string().regex(/^\d+$/u) }),
-  }).parse(JSON.parse(stdout));
-  if (parsed.streams[0].duration_ts !== result.frames || Number(parsed.format.size) !== expectedBytes) {
-    throw new Error("Native WAV frame count or container length disagrees with receipt");
-  }
-}
 
 const CandidateSchema = z.object({
   version: z.literal("studio-yue2-candidate/v1"), jobId: z.string(), programFingerprint: z.string(),
@@ -177,7 +154,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index] === "--style" ? "--style-file" : argv[index];
-    if (["--submit", "--personal-creator", "--recover-only", "--help"].includes(key)) {
+    if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
     } else if (["--arrangement", "--program", "--style-file", "--seed", "--out"].includes(key)) {
@@ -186,10 +163,14 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     } else { throw new Error("Unknown evaluation argument"); }
   }
   if (flags.has("--help")) {
-    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. Default: local validation only. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending.");
+    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. Default: local validation only. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending; rental cost is not measured.");
     return;
   }
   const arrangementMode = values["--arrangement"] !== undefined;
+  const durableMode = flags.has("--durable-r2");
+  if (durableMode && (!arrangementMode || values["--out"] !== undefined)) {
+    throw new Error("--durable-r2 requires --arrangement and forbids --out");
+  }
   if (arrangementMode && (values["--program"] !== undefined || values["--style-file"] !== undefined)) {
     throw new Error("--arrangement is mutually exclusive with --program and independent style files");
   }
@@ -208,12 +189,32 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
         seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
       });
   if (!flags.has("--submit")) {
-    console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending" }, null, 2));
+    console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
+      ...(durableMode ? { storage: "r2", costStatus: "not_measured" } : {}),
+    }, null, 2));
     return;
   }
   const endpoint = environment.YUE2_EVALUATION_URL;
   const bearerToken = environment.YUE2_EVALUATION_TOKEN;
   if (!endpoint || !bearerToken) throw new Error("YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN are required for --submit");
+  if (durableMode) {
+    const { bootstrapSecrets } = await import("@/lib/bootstrap");
+    const { executeDurableYuE2Evaluation, validateDurableYuE2Evaluation } = await import("@/lib/yue2DurableEvaluation");
+    const input = {
+      request, endpoint, bearerToken, recoverOnly: flags.has("--recover-only"),
+      authorizeSubmission: async () => {
+        if (!flags.has("--submit") || flags.has("--recover-only")) throw new Error("YuE2 submission not authorized");
+      },
+    };
+    validateDurableYuE2Evaluation(input);
+    const required = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"];
+    if (required.some((key) => !process.env[key]) || (!process.env.R2_ENDPOINT && !process.env.R2_ACCOUNT_ID)) {
+      await bootstrapSecrets(() => undefined, { services: ["cloudflare"], required });
+    }
+    const result = await executeDurableYuE2Evaluation(input);
+    console.log(JSON.stringify({ ...result, storage: "r2", qualified: false, manualAudition: "pending", costStatus: "not_measured" }));
+    return;
+  }
   const result = await executeYuE2Evaluation({ request, endpoint, bearerToken,
     outputRoot: values["--out"] ?? "output/yue2-evaluation", recoverOnly: flags.has("--recover-only") });
   console.log(JSON.stringify({ ...result, jobId: request.job.job_id, qualified: false, manualAudition: "pending", costStatus: "not_measured" }));

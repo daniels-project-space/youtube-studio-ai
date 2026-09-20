@@ -370,12 +370,177 @@ export async function deleteObjects(keys: string[], bucket?: string, options: {
   return deleted;
 }
 
-/** Fetch an object's bytes from R2 as a Uint8Array. */
+type BoundedObjectBody = {
+  [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | string>;
+  transformToWebStream?: () => ReadableStream<Uint8Array>;
+  getReader?: () => ReadableStreamDefaultReader<Uint8Array>;
+  destroy?: () => void;
+  cancel?: (reason?: unknown) => Promise<void> | void;
+};
+
+function assertReadDeadline(signal?: AbortSignal, expiresAt?: number): void {
+  signal?.throwIfAborted();
+  // Immediately resolved chunks/refreshes can run before the timeout event gets a turn.
+  if (expiresAt !== undefined && performance.now() >= expiresAt) {
+    throw new DOMException("R2 object download timed out", "TimeoutError");
+  }
+}
+
+async function readBoundedObject(
+  command: GetObjectCommand,
+  maxBytes: number,
+  deadline?: AbortSignal,
+  expiresAt?: number,
+): Promise<Uint8Array> {
+  const controller = new AbortController();
+  let body: BoundedObjectBody | undefined;
+  let iterator: AsyncIterator<Uint8Array | string> | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const cancelBody = (reason: unknown) => {
+    // Do not emit an unhandled Node stream error when rejecting headers before iteration.
+    try { body?.destroy?.(); } catch { /* Best-effort transport cleanup. */ }
+    try { void reader?.cancel(reason).catch(() => undefined); } catch { /* Best-effort reader cleanup. */ }
+    try { void Promise.resolve(body?.cancel?.(reason)).catch(() => undefined); } catch { /* A web stream may be locked. */ }
+    try { void Promise.resolve(iterator?.return?.()).catch(() => undefined); } catch { /* Never await a stalled iterator. */ }
+  };
+  const onDeadline = () => controller.abort(deadline?.reason);
+  deadline?.addEventListener("abort", onDeadline, { once: true });
+  if (deadline?.aborted) onDeadline();
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(controller.signal.reason);
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    if (controller.signal.aborted) onAbort();
+  });
+  const consume = async (): Promise<Uint8Array> => {
+    assertReadDeadline(controller.signal, expiresAt);
+    const res = await getR2Client().send(command, { abortSignal: controller.signal });
+    body = res.Body as BoundedObjectBody | undefined;
+    // A transport may deliver its response after the deadline has already released our caller.
+    if (controller.signal.aborted) {
+      cancelBody(controller.signal.reason);
+      controller.signal.throwIfAborted();
+    }
+    assertReadDeadline(controller.signal, expiresAt);
+    if (!body) throw new Error("R2 object has no body");
+    const declared = res.ContentLength;
+    if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 0)) {
+      throw new Error("R2 object has invalid ContentLength");
+    }
+    if (declared !== undefined && declared > maxBytes) throw new Error("R2 object exceeds maxBytes");
+    let stream = body;
+    if (!stream.getReader && typeof stream[Symbol.asyncIterator] !== "function" && body.transformToWebStream) {
+      stream = body.transformToWebStream() as BoundedObjectBody;
+    }
+    if (stream.getReader) {
+      reader = stream.getReader();
+      const activeReader = reader;
+      iterator = { next: async () => {
+        const item = await activeReader.read();
+        return item.done ? { done: true, value: undefined } : { done: false, value: item.value };
+      } };
+    } else {
+      iterator = stream[Symbol.asyncIterator]?.();
+    }
+    if (!iterator) throw new Error("R2 object body is not an async byte stream");
+    const chunks: Uint8Array[] = [];
+    let slab: Buffer | undefined;
+    let slabLength = 0;
+    let allocated = 0;
+    let length = 0;
+    // Explicit next() avoids waiting for a stalled iterator.return() on failure.
+    while (true) {
+      const item = await iterator.next();
+      assertReadDeadline(controller.signal, expiresAt);
+      if (item.done) break;
+      if (typeof item.value !== "string" && !(item.value instanceof Uint8Array)) {
+        throw new Error("R2 object stream contains a non-byte chunk");
+      }
+      const chunkLength = typeof item.value === "string" ? Buffer.byteLength(item.value) : item.value.byteLength;
+      if (chunkLength > maxBytes - length) throw new Error("R2 object exceeds maxBytes");
+      length += chunkLength;
+      if (declared !== undefined && length > declared) throw new Error("R2 object ContentLength mismatch");
+      if (chunkLength === 0) continue;
+      const bytes = typeof item.value === "string" ? Buffer.from(item.value) : item.value;
+      // Bound both retained bytes and metadata, independent of transport chunk count.
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        if (!slab || slabLength === slab.byteLength) {
+          slab = Buffer.allocUnsafeSlow(Math.min(64 * 1024, (declared ?? maxBytes) - allocated));
+          allocated += slab.byteLength;
+          chunks.push(slab);
+          slabLength = 0;
+        }
+        const count = Math.min(bytes.byteLength - offset, slab.byteLength - slabLength);
+        slab.set(bytes.subarray(offset, offset + count), slabLength);
+        slabLength += count;
+        offset += count;
+      }
+    }
+    if (declared !== undefined && length !== declared) throw new Error("R2 object ContentLength mismatch");
+    if (slab) chunks[chunks.length - 1] = slab.subarray(0, slabLength);
+    return Buffer.concat(chunks, length);
+  };
+  try {
+    return await Promise.race([consume(), aborted]);
+  } catch (error) {
+    controller.abort(error);
+    cancelBody(error);
+    throw error;
+  } finally {
+    deadline?.removeEventListener("abort", onDeadline);
+    controller.signal.removeEventListener("abort", onAbort);
+    try { reader?.releaseLock(); } catch { /* Cancellation may still be settling. */ }
+  }
+}
+
+/** Fetch bytes; maxBytes opts into streaming size and declared-length validation. */
 export async function getObjectBytes(
   key: string,
   bucket?: string,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; maxBytes?: number } = {},
 ): Promise<Uint8Array> {
+  const maxBytes = options.maxBytes;
+  if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)) {
+    throw new Error("maxBytes must be a positive safe integer");
+  }
+  if (maxBytes !== undefined) {
+    const timeoutMs = options.timeoutMs;
+    // One invocation deadline includes credential recovery and every read attempt.
+    const duration = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.floor(timeoutMs) : undefined;
+    const expiresAt = duration === undefined ? undefined : performance.now() + duration;
+    const deadline = duration === undefined ? undefined : AbortSignal.timeout(duration);
+    const readBounded = async () => {
+      assertReadDeadline(deadline, expiresAt);
+      return await readBoundedObject(new GetObjectCommand({ Bucket: getBucket(bucket), Key: key }), maxBytes, deadline, expiresAt);
+    };
+    const recover = async () => {
+      try {
+        return await readBounded();
+      } catch (error) {
+        assertReadDeadline(deadline, expiresAt);
+        if (!isR2CredentialFailure(error)) throw error;
+        const refreshed = await refreshR2CredentialsFromVault();
+        // Vault refresh is shared and may settle after this caller has timed out.
+        assertReadDeadline(deadline, expiresAt);
+        if (!refreshed) throw error;
+        return await readBounded();
+      }
+    };
+    if (!deadline) return await recover();
+    let onAbort: () => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(deadline.reason);
+      deadline.addEventListener("abort", onAbort, { once: true });
+      if (deadline.aborted) onAbort();
+    });
+    try {
+      return await Promise.race([recover(), aborted]);
+    } finally {
+      deadline.removeEventListener("abort", onAbort);
+    }
+  }
   const read = async (): Promise<Uint8Array> => {
     const command = new GetObjectCommand({
       Bucket: getBucket(bucket),

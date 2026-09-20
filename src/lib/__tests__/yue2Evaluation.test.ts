@@ -57,7 +57,7 @@ function absent() {
 function pending(job = request.job, state = "accepted") {
   return { contract: YUE2_WORKER_CONTRACT, job_id: job.job_id, state, job };
 }
-function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request, attempt = 1) {
+function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request, attempt = 1, frames = 4800) {
   const job = seal(req.job);
   const config = seal({ schema_version: 1, manifest: YUE2_MANIFEST, cache_dir: "/explicit-test-cache",
     device: "cuda:0", local_files_only: true, candidate_count: 1,
@@ -67,7 +67,7 @@ function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request,
   const receipt = { schema_version: 1, job_id: req.job.job_id, attempt, finished_at: "2026-09-19T00:00:01Z",
     status: "completed", started_sha256: started.sha256, error: null, qualification: YUE2_QUALIFICATION,
     result: { status: "complete", truncated: { abc: false, semantic: false }, sample_rate: 48000, channels: 2,
-      frames: 4800, audio_seconds: 0.1, official_identity: "b".repeat(64),
+      frames, audio_seconds: frames / 48000, official_identity: "b".repeat(64),
       timing: { load: { seconds: 1, phases: [0.1, { seconds: 0.2 }] }, plan: { nested: { elapsed: 2 } } },
       native_audio: "audio-native.wav", official_result: "song/result.json" },
     artifacts: { "audio-native.wav": { sha256: yue2Sha256(audio), bytes: audio.length },
@@ -161,6 +161,83 @@ async function main(): Promise<void> {
       await probeYuE2NativeWav(audioPath, parsed.result, audio.length);
       assert.equal(parsed.qualification.production_approved, false);
       assert.equal(verifyYuE2Completion(request, completed(audio, request, 2)).result.frames, 4800);
+    });
+    await test("durable observation runs before terminal validation or audio and cannot be bypassed by a failed write", async () => {
+      for (const state of [pending(request.job), pending(request.job, "failed"), { ...wire, receipt: null }]) {
+        let observed = 0;
+        const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : Response.json(state));
+        const operation = fixture.client.evaluate(request, { recoverOnly: true, afterJobObserved: async () => { observed++; } });
+        if (state.state === "accepted") assert.equal((await operation).status, "pending");
+        else await rejected(operation);
+        assert.equal(observed, 1);
+        assert.equal(fixture.calls.some((call) => call.method === "POST" || call.path.endsWith(".wav")), false);
+      }
+      const blocked = stub((path) => path.endsWith("/health") ? Response.json(health()) : Response.json(wire));
+      await rejected(blocked.client.evaluate(request, { afterJobObserved: async () => { throw new Error(token); } }));
+      assert.equal(blocked.calls.some((call) => call.path.endsWith(".wav")), false);
+      const wrong = stub((path) => path.endsWith("/health") ? Response.json(health()) : Response.json({ ...wire, job_id: `yue2-eval-${"0".repeat(64)}` }));
+      let wrongObservations = 0;
+      await rejected(wrong.client.evaluate(request, { afterJobObserved: async () => { wrongObservations++; } }));
+      assert.equal(wrongObservations, 0, "wrong job must not be recorded");
+    });
+    await test("empty and one-byte audio chunks preserve exact bytes across bounded slabs", async () => {
+      const path = join(directory, "multi-slab.wav");
+      await execute("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "0.5", "-c:a", "pcm_f32le", path]);
+      const largeAudio = await readFile(path);
+      assert.ok(largeAudio.length > 2 * 65536);
+      const largeWire = completed(largeAudio, request, 1, 24000);
+      let offset = 0;
+      const fixture = stub((url) => url.endsWith("/health") ? Response.json(health()) : url.endsWith(".wav")
+        ? new Response(new ReadableStream<Uint8Array>({ pull(controller) {
+            if (offset === largeAudio.length) { controller.close(); return; }
+            controller.enqueue(new Uint8Array());
+            controller.enqueue(largeAudio.subarray(offset, ++offset));
+          } }))
+        : Response.json(largeWire));
+      const client = new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token,
+        fetch: fixture.fetcher, timeoutMs: 10000, maxAudioBytes: largeAudio.length });
+      const result = await client.evaluate(request, { recoverOnly: true });
+      assert.equal(result.status, "completed");
+      if (result.status === "completed") assert.deepEqual(Buffer.from(result.audio), largeAudio);
+      assert.equal(fixture.calls.some((call) => call.method === "POST"), false);
+    });
+    await test("late audio read cannot restart consumption after timeout when cancellation fails", async () => {
+      let reads = 0;
+      let release: (value: ReadableStreamReadResult<Uint8Array>) => void = () => undefined;
+      const delayed = new Promise<ReadableStreamReadResult<Uint8Array>>((resolveRead) => { release = resolveRead; });
+      const late = {
+        status: 200, redirected: false, headers: new Headers(),
+        body: { getReader: () => ({
+          read: () => { reads++; return reads === 1 ? delayed : new Promise(() => undefined); },
+          cancel: async () => { throw new Error("synthetic cancellation failure"); },
+        }) },
+      } as unknown as Response;
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? late : Response.json(wire));
+      const client = new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token,
+        fetch: fixture.fetcher, timeoutMs: 20 });
+      await rejected(client.evaluate(request, { recoverOnly: true }));
+      assert.equal(reads, 1);
+      release({ done: false, value: audio.subarray(0, 10) });
+      await new Promise((done) => setTimeout(done, 10));
+      assert.equal(reads, 1, "expired operation must not resume consuming the audio stream");
+    });
+    await test("immediately resolved empty audio cannot starve the request deadline", async () => {
+      let reads = 0;
+      const endless = {
+        status: 200, redirected: false, headers: new Headers(),
+        body: { getReader: () => ({
+          read: async () => {
+            reads++;
+            return reads < 1_000_000 ? { done: false, value: new Uint8Array() } : { done: true };
+          },
+          cancel: async () => undefined,
+        }) },
+      } as unknown as Response;
+      const fixture = stub((path) => path.endsWith("/health") ? Response.json(health()) : path.endsWith(".wav") ? endless : Response.json(wire));
+      const client = new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token,
+        fetch: fixture.fetcher, timeoutMs: 20 });
+      await rejected(client.evaluate(request, { recoverOnly: true }));
+      assert.ok(reads > 0 && reads < 1_000_000, "absolute deadline must interrupt microtask-only empty chunks");
     });
     await test("native format checked by ffprobe, not trusted from receipt", async () => {
       for (const [rate, channels, codec] of [[44100, 2, "pcm_f32le"], [48000, 1, "pcm_f32le"], [48000, 2, "pcm_s16le"]] as const) {
@@ -425,7 +502,7 @@ async function main(): Promise<void> {
       assert.deepEqual(JSON.parse(cli.stdout).request, arrangementRequest);
       assert.equal(JSON.parse(cli.stdout).mode, "validate_only");
       await assert.rejects(stat(outputRoot), { code: "ENOENT" });
-      for (const extra of [["--program", "unused.json"], ["--style-file", "unused.txt"], ["--style", "unused.txt"], ["--recover-only"]]) {
+      for (const extra of [["--program", "unused.json"], ["--style-file", "unused.txt"], ["--style", "unused.txt"], ["--recover-only"], ["--durable-r2"]]) {
         await assert.rejects(runYuE2EvaluationCli([...args, ...extra], {}));
       }
       const changed = clone(arrangement);
@@ -436,6 +513,37 @@ async function main(): Promise<void> {
       }));
       assert.equal(fixture.calls.length, 0);
       await writeFile(arrangementPath, JSON.stringify(arrangement));
+    });
+    await test("durable R2 CLI is opt-in, arrangement-only and validate-only without submit", async () => {
+      const arrangementPath = join(directory, "durable-arrangement.json");
+      await writeFile(arrangementPath, JSON.stringify(arrangement));
+      const args = ["--arrangement", arrangementPath, "--seed", "42", "--personal-creator", "--durable-r2"];
+      globalThis.fetch = async () => { assert.fail("durable dry-run must not access worker or vault"); };
+      const logs: string[] = [];
+      const log = console.log;
+      console.log = (value: string) => { logs.push(value); };
+      try { await runYuE2EvaluationCli(args, {}); } finally { console.log = log; }
+      const result = JSON.parse(logs[0]);
+      assert.equal(result.mode, "validate_only");
+      assert.equal(result.storage, "r2");
+      assert.equal(result.networkRequests, 0);
+      assert.equal(result.costStatus, "not_measured");
+      assert.deepEqual(result.request, arrangementRequest);
+      for (const extra of [["--out", "unused"], ["--recover-only"], ["--durable-r2"], ["--submit"]]) {
+        await assert.rejects(runYuE2EvaluationCli([...args, ...extra], {}));
+      }
+      await assert.rejects(runYuE2EvaluationCli(["--program", "unused.json", "--style-file", "unused.txt", "--seed", "42", "--personal-creator", "--durable-r2"], {}));
+      const unsafeArrangement = createAcceptedMusicArrangement({
+        ownerId: "../other-owner", channelId: arrangement.channelId, runId: arrangement.runId,
+        topic: arrangement.topic, sourceBrief: {}, arrangement: arrangement.arrangement,
+      });
+      await writeFile(arrangementPath, JSON.stringify(unsafeArrangement));
+      let networkCalls = 0;
+      globalThis.fetch = async () => { networkCalls++; throw new Error("invalid scope must fail before bootstrap"); };
+      await assert.rejects(runYuE2EvaluationCli([...args, "--submit"], {
+        YUE2_EVALUATION_URL: "http://127.0.0.1:8787", YUE2_EVALUATION_TOKEN: token,
+      }));
+      assert.equal(networkCalls, 0);
     });
     await test("arrangement CLI candidate retains artifact and native FLOAT audio; verified cache is GET-free and remains unqualified", async () => {
       const arrangementWire = completed(audio, arrangementRequest);

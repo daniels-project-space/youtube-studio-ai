@@ -114,10 +114,90 @@ frame count before candidate publication. No conversion/mastering/trim/pad occur
 Cache reuse rechecks hashes, receipts and native format without network. These
 integrity measures are not signatures against a privileged filesystem owner.
 
+## Cross-worker evaluation
+
+`--durable-r2` selects the shared durable evaluator. It requires an accepted
+arrangement, forbids `--out`, and still does no network work without `--submit`.
+The existing local and legacy independent-style modes remain unchanged.
+
+```bash
+node_modules/.bin/tsx src/scripts/evaluate-yue2-music.ts \
+  --arrangement /absolute/path/accepted-arrangement.json \
+  --seed 42 --personal-creator --durable-r2 --submit
+```
+
+Repeat the exact command with `--recover-only` on a replacement worker. R2
+configuration comes from deployment environment or the scoped Cloudflare vault
+service; worker endpoint/token remain explicit server-side environment values.
+No credentials are written into receipts. This command is for a separately
+authorized evaluation, not an automatic production dispatch.
+The CLI is a trusted operator tool: owner/run path validation is not user
+authentication. A future server or module caller must verify owner access and
+execution ownership before invoking the evaluator, including cached recovery.
+
+The constant owner/run path `owner/<owner>/runs/<run>/music/yue2-evaluation/`
+freezes the full accepted arrangement request and endpoint in `binding.json`.
+A changed seed, channel, arrangement or endpoint cannot create a second take
+under that binding. A create-only submission marker precedes POST. After that
+marker exists, even a worker 404 means hold and investigate, never repurchase.
+An ambiguous storage write cannot grant submission authority.
+
+Native WAV, raw receipt provenance and candidate evidence are retained without
+overwriting different bytes. Replay rechecks the original receipt chain, audio
+hash/length and the real native container. Download bounds are enforced while
+streaming, not after buffering an arbitrarily large storage object. Recovered
+results remain `qualified=false`, `productionApproved=false`, audition pending,
+and `costStatus=not_measured`. They do not emit the production `musicKey` handoff.
+
+This closes a prerequisite for the future shared module, not the whole runtime
+integration. The runtime still needs measured rental allocation with a frozen
+rate, supervised execution limits, failure-cost recovery and a YuE-specific
+owner-review/continuation path before unattended production admission. Inference
+phase timing alone is neither provider billing nor a hard rental-spend limit.
+
+### Durability evidence, 20 September
+
+`scripts/test-yue2-durable-integration.ts` runs separate actual CLI processes
+against the sibling Python HTTP worker and a local S3-compatible fixture through
+the real storage SDK. The independently repeated run used 21 CLI processes,
+90 local S3 requests and two immutable-write collisions, but exactly one worker
+POST and one synthetic inference. It deliberately loses an accepted POST
+response, races submissions, changes inputs and endpoint, corrupts retained
+bytes, and checks observed-job disappearance. Each process has a fresh local
+directory and a restricted test-only environment. No Cloudflare, OpenRelay,
+GPU model, or live billing service participates.
+
+The durable core also passes 19 offline behavioral cases, including late storage
+writes, revoked submission authority, failed/invalid observed worker jobs,
+interrupted output persistence, retained-byte corruption and real FFprobe
+native-format refusal. The shared client/CLI suite passes 56 checks, including
+late audio completion after cancellation, empty/tiny-chunk streaming and an
+absolute deadline that cannot be starved by immediate empty chunks. The storage
+reader passes 17 checks, including a deadline shared across credential refresh
+and retries; callers that omit the new byte limit retain their old behavior. Neither
+suite treats native-container validity or exactly-once submission as musical
+quality evidence.
+
+The final batch gate passed all 848 direct readiness tests, scoped ESLint and
+the structural audit with unchanged baselines. The optimized build passed
+TypeScript and generated all 69 static pages without warnings. The hermetic
+assembly smoke rendered a real 1920x1080 master lasting 31.021995 seconds from
+synthetic sources; it used local storage, not a live R2/provider qualification.
+Graphify was refreshed (24,643 nodes and 60,227 edges). Production health still
+reported `722facc4f5aaad004dcd9f96de3be7a29951a520`; no deployment, channel
+migration or separate runtime repository change belongs to this batch.
+
+```bash
+YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime \
+  node_modules/.bin/tsx scripts/test-yue2-durable-integration.ts
+```
+
 ## Verification and parent support
 
 ```bash
 node_modules/.bin/tsx src/lib/__tests__/yue2Evaluation.test.ts
+node_modules/.bin/tsx src/lib/__tests__/yue2DurableEvaluation.test.ts
+node_modules/.bin/tsx src/lib/__tests__/storageBoundedRead.test.ts
 node_modules/.bin/eslint src/lib/yue2Evaluation.ts src/lib/__tests__/yue2Evaluation.test.ts src/scripts/evaluate-yue2-music.ts
 node_modules/.bin/tsc --noEmit --incremental false --pretty false
 ```

@@ -317,6 +317,7 @@ export class YuE2EvaluationClient {
 
   private async transfer(path: string, method: "GET" | "POST", maximum: number, body?: unknown): Promise<{ status: number; bytes: Uint8Array }> {
     const controller = new AbortController();
+    const expiresAt = performance.now() + this.timeoutMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const operation = async () => {
@@ -325,25 +326,44 @@ export class YuE2EvaluationClient {
         headers: { Authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-      if (controller.signal.aborted) { void response.body?.cancel().catch(() => undefined); throw new Error("timeout"); }
+      if (controller.signal.aborted || performance.now() >= expiresAt) { void response.body?.cancel().catch(() => undefined); throw new Error("timeout"); }
       if (response.redirected || (response.status >= 300 && response.status < 400)) throw new Error("redirect");
       const length = response.headers.get("content-length");
       if (length !== null && (!/^\d+$/u.test(length) || Number(length) > maximum)) throw new Error("size");
       if (!response.body) return { status: response.status, bytes: new Uint8Array() };
       reader = response.body.getReader();
       const chunks: Uint8Array[] = [];
+      let slab: Uint8Array | undefined;
+      let used = 0;
       let total = 0;
       while (true) {
         const part = await reader.read();
+        controller.signal.throwIfAborted();
+        if (performance.now() >= expiresAt) throw new Error("timeout");
         if (part.done) break;
         total += part.value.byteLength;
         if (total > maximum) throw new Error("size");
-        chunks.push(part.value);
+        // Coalesce tiny chunks so the byte limit also bounds retained metadata.
+        for (let offset = 0; offset < part.value.byteLength;) {
+          if (!slab || used === slab.length) {
+            slab = new Uint8Array(Math.min(65536, maximum - chunks.length * 65536));
+            chunks.push(slab);
+            used = 0;
+          }
+          const count = Math.min(slab.length - used, part.value.byteLength - offset);
+          slab.set(part.value.subarray(offset, offset + count), used);
+          used += count;
+          offset += count;
+        }
       }
       if (length !== null && Number(length) !== total) throw new Error("length");
       const bytes = new Uint8Array(total);
       let offset = 0;
-      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      for (const chunk of chunks) {
+        const count = Math.min(chunk.byteLength, total - offset);
+        bytes.set(chunk.subarray(0, count), offset);
+        offset += count;
+      }
       return { status: response.status, bytes };
     };
     try {
@@ -371,6 +391,8 @@ export class YuE2EvaluationClient {
     submit?: boolean; recoverOnly?: boolean;
     /** Durable CLI gate must fsync a one-time submission marker before resolving true. */
     beforeSubmit?: () => Promise<boolean>;
+    /** Persist an observed exact job before receipt checks or downloading its audio. */
+    afterJobObserved?: () => Promise<void>;
   } = {}): Promise<YuE2EvaluationOutcome> {
     const request = validateYuE2EvaluationRequest(requestValue);
     const id = request.job.job_id;
@@ -398,6 +420,7 @@ export class YuE2EvaluationClient {
       }
       const state = z.object({ contract: z.literal(YUE2_WORKER_CONTRACT), job_id: JobId, state: z.string(), job: YuE2JobSchema }).passthrough().parse(response.value);
       if (state.job_id !== id || canonicalJson(state.job) !== canonicalJson(request.job)) throw new Error("job mismatch");
+      await options.afterJobObserved?.();
       if (["running", "accepted"].includes(state.state)) return { status: "pending", jobId: id, workerStatus: state.state };
       if (state.state !== "completed") throw new YuE2EvaluationError("terminal_or_ambiguous_worker_state", id);
       const completion = verifyYuE2Completion(request, response.value);
