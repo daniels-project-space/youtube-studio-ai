@@ -120,6 +120,18 @@ policy headers, validates the sealed accounting chain, probes native FLOAT audio
 and confirms recovery used exactly one inference. This is integration evidence,
 not generated-music quality or a provider-cost measurement.
 
+The 20 September intent follow-up now sends a real intent-bearing arrangement
+through this cross-language boundary. Three contradictory, independently rehashed
+roles are rejected by both request construction and client admission before any
+HTTP call. The valid client sends exactly one job POST across submission and
+GET-only recovery (separate deliberately invalid policy POSTs remain in the test).
+The Python fixture independently reports one inference and verifies its children
+were reaped. Native output is explicitly checked as one second against a
+60-second intent: a completed worker receipt must not be reported as requested
+duration adherence. This test passed with external networking disabled; scoped
+lint and TypeScript passed. Runtime sources, production settings and provider
+credentials were not changed. No GPU/audio-quality qualification is inferred.
+
 Aligned with `/home/ubuntu/youtube-studio-music-runtime/docs/HTTP_CONTRACT.md`:
 
 - GET `/v1/health`: `contract: "yue2-evaluation-worker/v1"`, full pinned manifest,
