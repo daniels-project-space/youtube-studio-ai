@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { OWNER_ID } from "./config";
 
 /**
  * Build the free, no-presign YouTube thumbnail URL for a published video.
@@ -35,6 +36,15 @@ function cachedAssetUrl(key: string): string | null {
 
 /** Share signing work without sharing a component's playback/source lifetime. */
 export function resolveAssetUrl(key: string): Promise<string> {
+  // These routes enforce ownership themselves; their URLs contain no signature.
+  // Avoid a server round trip whose only result would be this same local path.
+  if (key.startsWith(`owner/${OWNER_ID}/`) && key.length <= 1_024 &&
+    !key.includes("..") && !key.includes("\\")) {
+    const extension = key.toLowerCase().split(".").pop();
+    const route = extension && ["png", "jpg", "jpeg", "webp", "gif"].includes(extension)
+      ? "asset-image" : extension === "mp4" || extension === "webm" ? "asset-video" : null;
+    if (route) return Promise.resolve(`/api/${route}?key=${encodeURIComponent(key)}`);
+  }
   const cached = cachedAssetUrl(key);
   if (cached) return Promise.resolve(cached);
   const existing = pending.get(key);
@@ -75,10 +85,10 @@ export function invalidateAssetUrl(key: string | null | undefined): void {
 }
 
 /**
- * Resolve a private R2 object key to a short-lived presigned URL via the
- * server-only /api/asset-url route. R2 credentials never touch the client —
- * we only ever receive the signed URL. Results are memoised per key for the
- * next nine minutes. Mounted media retains its resolved URL so another
+ * Resolve owner images/videos locally to their guarded same-origin proxy.
+ * Other objects use short-lived URLs from the server-only /api/asset-url route;
+ * R2 credentials never touch the client. Signed results are memoised per key
+ * for the next nine minutes. Mounted media retains its resolved URL so another
  * component refreshing the cache cannot restart playback. Pass `null` to skip.
  */
 export function useAssetUrlState(

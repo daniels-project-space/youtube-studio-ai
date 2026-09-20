@@ -22,6 +22,7 @@ const [imageBytes, videoBytes] = await Promise.all([readFile(imagePath), readFil
 const outputDir = await mkdtemp(join(tmpdir(), "ysa-media-preview-proof-"));
 const compiled = await esbuild.build({
   absWorkingDir: process.cwd(), bundle:true, write:false, format:"iife", platform:"browser", jsx:"automatic",
+  define: { "process.env.NEXT_PUBLIC_OWNER_ID": JSON.stringify("owner_daniel") },
   stdin:{resolveDir:process.cwd(), loader:"tsx", contents:`
     import React, {useState} from 'react';
     import {createRoot} from 'react-dom/client';
@@ -60,9 +61,22 @@ const server=createServer(async (req,res)=>{
     const media=key.endsWith(".mp4") ? "/master.mp4" : "/thumbnail.png";
     res.end(JSON.stringify({url:`${media}?receipt=${encodeURIComponent(key)}-${generations.get(key)}`}));return;
   }
-  const bytes=url.pathname === "/thumbnail.png" ? imageBytes : url.pathname === "/master.mp4" ? videoBytes : null;
+  const proxyImage = url.pathname === "/api/asset-image";
+  const proxyVideo = url.pathname === "/api/asset-video";
+  if (proxyImage || proxyVideo) {
+    const key = url.searchParams.get("key") ?? "";
+    if (!key.startsWith("owner/owner_daniel/")) { res.statusCode=403;res.end();return; }
+    if (key.includes("/missing.")) { res.statusCode=404;res.end();return; }
+    if (url.searchParams.get("probe") === "1") {
+      res.setHeader("Content-Type", "application/json");res.end(JSON.stringify({available:true}));return;
+    }
+  }
+  const bytes=url.pathname === "/thumbnail.png" || proxyImage ? imageBytes : url.pathname === "/master.mp4" || proxyVideo ? videoBytes : null;
   if (!bytes) {res.statusCode=404;res.end();return;}
-  res.setHeader("Content-Type",url.pathname.endsWith(".mp4") ? "video/mp4" : "image/png");
+  if (url.searchParams.get("probe") === "1") {
+    res.setHeader("Content-Type", "application/json");res.end(JSON.stringify({available:true}));return;
+  }
+  res.setHeader("Content-Type",url.pathname.endsWith(".mp4") || proxyVideo ? "video/mp4" : "image/png");
   res.setHeader("Accept-Ranges","bytes");
   const range=/^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? "");
   if (range) {
@@ -85,6 +99,9 @@ try {
   await page.goto(base);
   await page.waitForFunction(()=>typeof (window as unknown as {setPreviewProps?:unknown}).setPreviewProps === "function");
   const cases = [
+    {name:"owner image without URL round trip",props:{assetKey:"owner/owner_daniel/channel/frame.png"},keys:[],element:"img",state:"ready"},
+    {name:"owner video without URL round trip",props:{videoStillKey:"owner/owner_daniel/channel/master.mp4"},keys:[],element:"video",state:"ready"},
+    {name:"missing proxy image still uses explicit fallback",props:{assetKey:"owner/owner_daniel/channel/missing.png",fallbackSrc:"/thumbnail.png?fallback"},keys:[],element:"img",state:"ready"},
     {name:"stored image",props:{assetKey:"stored.png",videoStillKey:"unused.mp4"},keys:["stored.png"],element:"img",state:"ready"},
     {name:"reviewed image",props:{reviewedSrc:"/thumbnail.png?reviewed",assetKey:"hidden.png",videoStillKey:"hidden.mp4"},keys:[],element:"img",state:"ready"},
     {name:"review failure to stored image",props:{reviewedSrc:"/missing-review-1.png",assetKey:"recovery.png",videoStillKey:"unused-2.mp4"},keys:["recovery.png"],element:"img",state:"ready"},
@@ -159,4 +176,9 @@ try {
   const report={outputDir,results,failures,errors};
   await writeFile(join(outputDir,"results.json"),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
   assert.deepEqual(errors,[]);assert.deepEqual(failures,[]);
+} catch (error) {
+  const report = { outputDir, results, failures, errors, fatal: String(error) };
+  await writeFile(join(outputDir,"results.json"),JSON.stringify(report,null,2));
+  console.error(JSON.stringify(report,null,2));
+  throw error;
 } finally {await browser.close();await new Promise<void>((done,reject)=>server.close(error=>error ? reject(error) : done()));}

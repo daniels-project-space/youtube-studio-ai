@@ -822,3 +822,48 @@ was not repeated for a deployment-packaging-only change. Actual cloud build and
 runtime qualification remain pending an authorized deployment; no deployment,
 thumbnail generation or paid testing was performed. Safe unchanged-runtime
 fingerprints/receipts remain open and were not replaced with JS-only hash skips.
+
+## Batch 20: Resolve guarded media proxy URLs without a Vercel request
+
+`resolveAssetUrl`, the shared client resolver used by media previews and players,
+now derives the existing same-origin image/video proxy URL for a configured-owner
+key with a supported extension and the proxy's length/traversal constraints.
+Previously `/api/asset-url` performed no signing or Convex lookup for these
+objects: it returned exactly that deterministic path after an extra HTTP request.
+The media endpoints still enforce their own owner/key admission and availability
+checks. A local URL is not proof that the asset exists or permission to bypass
+those endpoints. No storage credentials enter the browser.
+
+Audio, voice auditions, subtitle files, unknown formats and out-of-scope keys
+retain the server resolver. Its shared pending requests, nine-minute signed-URL
+cache, bounded eviction, invalidation, timeouts and failure recovery are unchanged.
+Actual source bytes, native seeking, media probes and legacy pipelines are
+unchanged. This eliminates the URL-resolution request for eligible media, not
+the subsequent probe/media requests or R2 bandwidth. Browser cache hits already
+avoided some previous invocations; no fleet billing percentage is inferred.
+
+The executable parity test invokes the existing route handler independently for
+all nine supported extension/case examples, including reserved URL characters.
+The shared resolver returns exactly those URLs and resolves a 100-card corpus
+with zero fetch/signing calls. Audio/shared auditions still call the real handler
+fixture and retain cache reuse; foreign/traversal keys retain server rejection.
+The existing cache/expiry/invalidation and media-selection suites also pass.
+
+Actual React/Chromium proof passes all 13 cases with existing local image/video
+bytes and external networking disabled. New cases cover owner image/video URLs
+without signing requests and missing-proxy fallback; native playback decodes the
+15-second frame. Existing cases cover source choice, denial, recovery, concurrent
+resolution, expiry with stable mounted media and callback rerenders. The inspected
+video screenshot is nonblank. This is functional media evidence, not a new render
+or artistic-quality approval. Initial failures exposed an outdated proof server
+returning binary media to availability probes; its response now models the JSON
+receipt expected by the current component. Fatal failures now retain diagnostics.
+Evidence: `/tmp/ysa-media-preview-proof-Pxt8E9/results.json` and adjacent screenshots.
+
+No thumbnail generation, paid provider requests or deployment was performed.
+Production invocation/latency measurements remain pending authorized deployment.
+
+Final frozen local gate: all 841 selected readiness files passed with external
+networking disabled and 30 thumbnail-named files excluded. TypeScript, scoped
+lint, whitespace checks and the post-edit Graphify refresh passed. This is a
+partial offline gate, not complete production readiness or production approval.
