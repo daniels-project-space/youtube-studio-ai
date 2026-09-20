@@ -635,3 +635,64 @@ scoped lint and authored-code whitespace checks passed. Vendored license texts
 retain upstream whitespace and line endings to preserve their source hashes.
 Graphify was refreshed after
 code edits. This partial offline gate is not complete production readiness.
+
+## Implementation Batch 16: Persist The Channel Navigation Index
+
+Batch 6 reduced response size but still read every full channel document.
+`listChannelDirectory` now reads a small owner readiness record and, once that
+owner's backfill is complete, only `channelDirectory` rows for its current
+generation. The response contract and existing Navigation/Library/SEO callers
+are unchanged. Full channel personality, pipelines, reports and detail queries
+remain authoritative and unmodified. Rows preserve channel creation order.
+
+Creation, guarded name/slug/navigation-identity edits, and deletion maintain the
+index in the same Convex transaction as the channel. Changes only to persona,
+pipeline, status, inception, locks, or external YouTube facts do not touch the
+index. A banner or other identity edit that leaves imageKey/niche/palette unchanged
+also avoids index reads and writes. Channel locks and ownership checks still
+precede writes; maintenance copies derived navigation fields, never changes a
+locked channel or its creative configuration.
+
+Legacy owners continue using the full-channel query until an explicit service-only
+`channels.backfillChannelDirectory({ ownerId })` completes. Each call processes
+at most four channels using a server-held cursor, commits those rows and cursor
+together, and returns `processed`, `isDone`, and `generation`. Repeat with the
+same owner until `isDone`; a completed call returns zero processed without
+scanning channels. No caller-provided cursor can skip ahead. Concurrent creation,
+editing and deletion use the same maintained records; queries never present an
+incomplete backfill as the full directory. No production migration was run.
+
+Deployment/rollback order:
+
+1. Deploy the complete schema, channel writer helpers, and query together.
+2. Using the existing owner-bound Studio service client, run the bounded backfill
+   above for the intended owner and verify full-query/directory parity.
+3. Before restoring old writers, call service-only
+   `channels.invalidateChannelDirectory({ ownerId })` for each enrolled owner.
+   This immediately restores full reads and advances the generation.
+4. After redeploying maintained writers, backfill again. Old-generation orphan
+   records from a rollback cannot reappear in navigation; they remain compact
+   storage records until separately cleaned up. Do not re-enable a stale ready
+   record manually or skip invalidation when rolling back.
+
+Actual handler fixtures cover paged migration, incomplete fallback, create/reseed,
+rename/art change, delete during/after migration, an empty owner's first channel,
+no-op replay, owner/viewer/service authorization, locked-channel refusal, an
+owner-conflicting projection, and old-writer rollback recovery. Their independent
+source projection has exact field/order parity. On six large synthetic channels,
+serialized read bytes fall by over 99% and navigation performs zero full-channel
+reads after enrollment. These are logical handler reads and fixture JSON bytes,
+not production storage billing, wire size, or measured subscription invalidations.
+
+The trade-off is one small state read per directory query and, for changed
+navigation identity, a state/index read plus a small write. Creation additionally
+reads its newly inserted channel once. Migration is a one-time bounded scan;
+legacy fallback retains full reads until explicitly enrolled. No Trigger task,
+Vercel API, model, thumbnail generation, channel pipeline, or paid route changed.
+
+Final local verification: all 837 selected readiness test files passed with
+external networking disabled; 30 thumbnail-named files were excluded. Seven new
+persistence cases, the existing directory and owner-lock suites, TypeScript,
+scoped lint, whitespace checks and the post-edit Graphify refresh passed.
+Production deployment, migration, reactive subscription measurement, and billing
+comparison have not been performed. This is not the full production release gate.

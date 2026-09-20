@@ -20,6 +20,9 @@ function fixture(role = "viewer") {
   { ...channel, _id: "foreign", ownerId: "other-owner" }];
   const db = { query: (table: string) => {
     queried++;
+    if (table === "channelDirectoryStates") return {
+      withIndex: () => ({ unique: async () => null }),
+    };
     assert.equal(table, "channels");
     return { withIndex: (index: string, build: (q: { eq: (key: string, value: string) => void }) => unknown) => {
       assert.equal(index, "by_owner");

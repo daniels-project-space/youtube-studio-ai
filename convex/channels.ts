@@ -2,6 +2,12 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import { v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import {
+  channelDirectoryState,
+  deleteChannelDirectory,
+  readChannelDirectory,
+  writeChannelDirectory,
+} from "./channelDirectoryProjection";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
@@ -869,7 +875,11 @@ export const createChannel = mutation({
       return outcome.channelId;
     }
 
-    return await ctx.db.insert("channels", doc);
+    const channelId = await ctx.db.insert("channels", doc);
+    const created = await ctx.db.get(channelId);
+    if (!created) throw new Error("New channel is missing");
+    await writeChannelDirectory(ctx, created);
+    return channelId;
   },
 });
 
@@ -979,18 +989,46 @@ export const listChannelDirectory = query({
     }),
   })),
   handler: async (ctx, args) => {
-    const channels = await ctx.db.query("channels")
-      .withIndex("by_owner", q => q.eq("ownerId", args.ownerId)).collect();
-    return channels.map(channel => ({
-      _id: channel._id,
-      name: channel.name,
-      slug: channel.slug,
-      identity: {
-        imageKey: channel.identity.imageKey,
-        niche: channel.identity.niche,
-        palette: channel.identity.palette,
-      },
-    }));
+    return readChannelDirectory(ctx, args.ownerId);
+  },
+});
+
+/** Explicit, bounded maintenance; never called from the navigation query. */
+export const backfillChannelDirectory = mutation({
+  args: { ownerId: v.string() },
+  returns: v.object({ processed: v.number(), isDone: v.boolean(), generation: v.number() }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "channel directory backfill");
+    let state = await channelDirectoryState(ctx, args.ownerId);
+    if (!state) {
+      const id = await ctx.db.insert("channelDirectoryStates", { ownerId: args.ownerId, generation: 1, ready: false });
+      state = await ctx.db.get(id);
+    }
+    if (!state) throw new Error("Channel directory state is missing");
+    if (state.ready) return { processed: 0, isDone: true, generation: state.generation };
+    const page = await ctx.db.query("channels")
+      .withIndex("by_owner", q => q.eq("ownerId", args.ownerId))
+      .paginate({ numItems: 4, cursor: state.cursor ?? null });
+    for (const channel of page.page) await writeChannelDirectory(ctx, channel, state.generation);
+    await ctx.db.patch(state._id, {
+      ready: page.isDone, cursor: page.isDone ? undefined : page.continueCursor,
+    });
+    return { processed: page.page.length, isDone: page.isDone, generation: state.generation };
+  },
+});
+
+/** Disable compact reads before rolling back writers; rebuild under a fresh generation. */
+export const invalidateChannelDirectory = mutation({
+  args: { ownerId: v.string() },
+  returns: v.object({ generation: v.number() }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "channel directory invalidation");
+    const state = await channelDirectoryState(ctx, args.ownerId);
+    const generation = (state?.generation ?? 1) + 1;
+    const next = { ownerId: args.ownerId, generation, ready: false, cursor: undefined };
+    if (state) await ctx.db.patch(state._id, next);
+    else await ctx.db.insert("channelDirectoryStates", next);
+    return { generation };
   },
 });
 
@@ -1142,6 +1180,7 @@ export const deleteChannel = mutation({
     await sweep("contentPlan", "by_channel_order");
     await sweep("youtubeAuth", "by_channel");
 
+    await deleteChannelDirectory(ctx, ch);
     await ctx.db.delete(args.channelId);
     return null;
   },

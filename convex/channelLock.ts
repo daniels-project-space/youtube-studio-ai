@@ -8,6 +8,7 @@
  */
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { updateChannelDirectoryForPatch } from "./channelDirectoryProjection";
 import {
   CHANNEL_LOCK_AUDIT_BLOCK_ID,
   channelMutationAuditActor,
@@ -69,6 +70,7 @@ export async function patchChannelRespectingLock(
     return { state: "channel_locked", channelId };
   }
 
+  await updateChannelDirectoryForPatch(ctx, channel, patch);
   await ctx.db.patch(channelId, patch);
   return { state: "updated", channelId };
 }

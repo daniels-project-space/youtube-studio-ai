@@ -136,6 +136,26 @@ const planWeekLegacyNovitaProviderReceipt = v.object({
  * R2 keys are per-channel prefixed; nothing here holds media bytes.
  */
 export default defineSchema({
+  channelDirectoryStates: defineTable({
+    ownerId: v.string(),
+    generation: v.number(),
+    ready: v.boolean(),
+    cursor: v.optional(v.string()),
+  }).index("by_owner", ["ownerId"]),
+  channelDirectory: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    channelCreatedAt: v.number(),
+    generation: v.number(),
+    name: v.string(),
+    slug: v.string(),
+    identity: v.object({
+      imageKey: v.optional(v.string()),
+      niche: v.optional(v.string()),
+      palette: v.array(v.string()),
+    }),
+  }).index("by_channel", ["channelId"])
+    .index("by_owner_generation", ["ownerId", "generation"]),
   // A channel = Identity + an ordered Pipeline of Blocks + Config.
   channels: defineTable({
     ownerId: v.string(),
