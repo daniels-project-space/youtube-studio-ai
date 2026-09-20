@@ -250,3 +250,32 @@ import and exercise empty ticks, immutable bundle delivery, enqueue failure
 deferral, busy claims, serialized worker pins, and foreign-project rejection.
 Scoped ESLint and repository TypeScript checking also passed. No external API or
 generation was invoked. Deployment and production savings are not yet verified.
+
+## Fourth implementation batch
+
+Two indexed recovery paths now avoid unnecessary reads and starvation:
+
+- Serialized episode retries explicitly exclude missing retry timestamps before
+  applying the due-time upper bound and 25-row cap per lifecycle state. Previously,
+  ordinary queued/failed runs could fill both batches because Convex sorts missing
+  fields before numbers. Filtering those rows after `take` could leave real retries
+  undiscovered indefinitely, as well as reread unrelated full run documents.
+- Music queued-resume recovery now has separate bounded slices for explicit due
+  deadlines and missing-deadline legacy receipts, matching factual-review recovery.
+  Future explicit deadlines are excluded by the index. Legacy rows cannot consume
+  the entire batch ahead of expired modern receipts. Legacy timestamp fallback and
+  all existing approval/integrity checks are unchanged.
+
+No index migration, table change, new cron, or schedule slowdown is required.
+The serialized fixture contains 200 ordinary runs plus two due retries and one
+future retry; only the two due rows are materialized. The music fixture contains
+100 legacy rows, an expired row, and a future row; with limit two, it reads the
+expired row plus two legacy rows, not the future row. These are local controlled
+read counts, not measured production bandwidth. Existing schemas are respected.
+
+Seven checks passed across index-bound regressions, Convex authorization, worker
+deployment transport, and music checkpoint wiring. The new harness models
+Convex's missing-field ordering rather than JavaScript's `undefined <= number`.
+Repository TypeScript checking and scoped ESLint also passed.
+See https://docs.convex.dev/database/types for the provider ordering contract.
+Production behavior and savings remain unverified until an authorized deployment.

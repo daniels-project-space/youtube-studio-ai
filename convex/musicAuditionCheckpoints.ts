@@ -448,11 +448,21 @@ export const reapExpiredQueuedResumes = mutation({
     await requireStudioServiceIdentity(ctx, args.ownerId, "music audition queued continuation recovery");
     if (!Number.isSafeInteger(args.now) || args.now < 0) throw new Error("music audition recovery timestamp is invalid");
     const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
-    const rows = await ctx.db.query("runs").withIndex("by_owner_music_audition_resume_queue_deadline", q =>
-      q.eq("ownerId", args.ownerId).eq("musicAuditionResumeState", "queued"),
-    ).take(limit * 2);
+    // Separate legacy receipts so their missing deadlines cannot occupy the
+    // entire bounded batch ahead of expired, explicitly dated deliveries.
+    const [due, legacy] = await Promise.all([
+      ctx.db.query("runs").withIndex("by_owner_music_audition_resume_queue_deadline", q =>
+        q.eq("ownerId", args.ownerId).eq("musicAuditionResumeState", "queued")
+          .gt("musicAuditionResumeQueueDeadlineAt", undefined)
+          .lte("musicAuditionResumeQueueDeadlineAt", args.now),
+      ).take(limit),
+      ctx.db.query("runs").withIndex("by_owner_music_audition_resume_queue_deadline", q =>
+        q.eq("ownerId", args.ownerId).eq("musicAuditionResumeState", "queued")
+          .eq("musicAuditionResumeQueueDeadlineAt", undefined),
+      ).take(limit),
+    ]);
     let requeued = 0; let blocked = 0;
-    for (const run of rows) {
+    for (const run of [...due, ...legacy]) {
       const deadline = musicResumeQueueDeadline(run);
       if (deadline !== undefined && deadline > args.now) continue;
       const row = run.musicAuditionCheckpointId ? await ownedCheckpoint(ctx, args.ownerId, run.musicAuditionCheckpointId).catch(() => null) : null;

@@ -1639,6 +1639,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
         q
           .eq("ownerId", args.ownerId)
           .eq("status", "queued")
+          .gt("serializedProgramEpisodeRetryAt", undefined)
           .lte("serializedProgramEpisodeRetryAt", args.now),
       )
       .take(25);
@@ -1652,6 +1653,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
         q
           .eq("ownerId", args.ownerId)
           .eq("status", "failed")
+          .gt("serializedProgramEpisodeRetryAt", undefined)
           .lte("serializedProgramEpisodeRetryAt", args.now),
       )
       .take(25);
