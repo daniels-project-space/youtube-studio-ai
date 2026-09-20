@@ -783,3 +783,42 @@ This proves route-level cancellation, not deployed Vercel disconnect propagation
 or a measured billing reduction. Provider disconnect behavior and actual avoided
 bytes/duration require qualification after an authorized deployment. No model,
 quality setting, channel pipeline, authentication boundary or schedule changed.
+
+## Batch 19: Remove test media from native Trigger uploads
+
+The production CI Trigger step now temporarily adds the root `/test-fixtures/`
+exclusion to `.gitignore`, the policy actually consumed by pinned CLI 4.5.9's
+native context archiver. An EXIT trap restores the original file on successful
+and failed deployment, preserving the deployment exit code. This is confined to
+the disposable CI checkout after the existing quality, credential, current-main
+and canonical Convex deployment gates. It does not change the committed ignore
+policy, delete fixture evidence, skip tests or alter manual deployment commands.
+An uncatchable runner termination can leave the disposable checkout modified;
+it does not change Git source or affect another checkout.
+
+`scripts/verify-trigger-build-context.mjs` runs the installed CLI's local
+`createContextArchive` function, not its unsafe native `--dry-run` deploy path.
+It creates a disposable copy of tracked working-tree inputs, packages the old
+context, executes the real parsed CI shell with an archive-only npm stand-in,
+then compares SHA-256/size/type for every retained archive entry and checks the
+original ignore bytes were restored. No credential or provider request is needed.
+Run it from this repository with the absolute path to the installed pinned CLI's
+`dist/esm/deploy/archiveContext.js`; the script verifies package name/version.
+
+Measured locally with external networking disabled: compressed upload context
+fell from 132,097,759 to 88,420,833 bytes (33.06%). Exactly 90 test-fixture files
+were excluded; all 2,574 other archived files were byte-identical, apart from the
+intentional temporary `.gitignore` policy. Public Golden references, fonts,
+Remotion sources, Python renderers, requirements, locks and task sources remain.
+These numbers measure archive transfer bytes, not final image size, live build
+duration, task execution costs or provider billing. Current runtime sources and
+packaged renderer scripts do not reference the removed fixture directory.
+
+The actual-shell regression covers success/failure restoration, exact deploy
+arguments, a known-bad baseline retaining media, rooted exclusion boundaries,
+unchanged runtime/security policies and CI ordering. It and the existing release
+policy/config suites pass offline, as does scoped lint. The full offline suite
+was not repeated for a deployment-packaging-only change. Actual cloud build and
+runtime qualification remain pending an authorized deployment; no deployment,
+thumbnail generation or paid testing was performed. Safe unchanged-runtime
+fingerprints/receipts remain open and were not replaced with JS-only hash skips.

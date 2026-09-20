@@ -198,4 +198,23 @@ jobs:
           TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
         # Runtime/provider values stay in Trigger's protected Production
         # environment. Do not replace them with an empty GitHub runner env.
-        run: npm run trigger:deploy -- --skip-sync-env-vars
+        shell: bash
+        run: |
+          # Native CLI 4.5.9 reads .gitignore, not .triggerignore. Keep retained
+          # test evidence in Git and in the quality gate, but out of this upload.
+          # This change is temporary and confined to the disposable CI checkout.
+          ignore_backup=$(mktemp)
+          cp -- .gitignore "$ignore_backup"
+          restore_ignore() {
+            status=$?
+            trap - EXIT
+            if ! cp -- "$ignore_backup" .gitignore; then
+              echo "::error::Could not restore deployment ignore policy"
+              exit 1
+            fi
+            rm -- "$ignore_backup"
+            exit "$status"
+          }
+          trap restore_ignore EXIT
+          printf '\n# CI-only native build context exclusion\n/test-fixtures/\n' >> .gitignore
+          npm run trigger:deploy -- --skip-sync-env-vars
