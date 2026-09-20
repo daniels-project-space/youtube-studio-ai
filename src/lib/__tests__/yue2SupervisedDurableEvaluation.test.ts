@@ -179,7 +179,8 @@ globalThis.fetch = async (input, init = {}) => {
 
 // The storage seam is installed before loading the actual production durable adapter.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { executeDurableYuE2Evaluation: run } = require("@/lib/yue2DurableEvaluation") as typeof import("@/lib/yue2DurableEvaluation");
+const { executeDurableYuE2Evaluation: run, readDurableYuE2Candidate: review } = require("@/lib/yue2DurableEvaluation") as typeof import("@/lib/yue2DurableEvaluation");
+const reviewScope = { ownerId: "supervised-owner", channelId: "supervised-channel", runId: "supervised-run" };
 type Input = YuE2DurableEvaluationInput;
 const args = (patch: Partial<Input> = {}): Input => ({ request, endpoint, bearerToken: token,
   expectedExecutionPolicy: policy, authorizeSubmission: async () => { current.authorizations++; }, ...patch });
@@ -280,6 +281,55 @@ async function main() {
     const verified = verifyYuE2ExecutionAccounting({ request, expectedPolicy: policy, ...evidence("pending") });
     assert.equal(verified.allocatedCostUsdMicros, null); assert.equal(verified.elapsedNs, null);
     assert.equal(verified.providerBilledCostUsdMicros, null);
+  });
+  await test("read-only review verifies retained native bytes offline and rejects false duration quality", async () => {
+    assert.equal(await review(reviewScope), null);
+    await run(args());
+    current.offline = true;
+    const before = [current.calls.length, current.writes.length, current.authorizations];
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.candidateSha256, yue2Sha256(current.objects.get(candidateKey)!));
+    assert.equal(result.quality.status, "blocked");
+    assert.equal(result.quality.requestedDurationSec, 60);
+    assert.equal(result.quality.actualDurationSec, 0.1);
+    assert.equal(result.quality.durationMatches, false);
+    assert.equal(result.quality.productionApproved, false);
+    assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
+    assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  await test("read-only review refuses unsafe scope before storage and never follows foreign candidate keys", async () => {
+    await rejected(review({ ...reviewScope, runId: "../other-run" }));
+    assert.equal(current.reads.length, 0);
+    await run(args()); current.offline = true;
+    const candidate = saved(candidateKey);
+    current.objects.set(candidateKey, Buffer.from(canonicalJson({ ...candidate,
+      audioKey: "owner/foreign/runs/private/audio.wav" })));
+    const before = current.reads.length;
+    await rejected(review(reviewScope));
+    assert.deepEqual(current.reads.slice(before), [candidateKey]);
+  });
+  await test("read-only review rejects missing, swapped or corrupt provenance without recovery writes", async () => {
+    for (const key of [bindingKey, markerKey, provenanceKey, accountingKey]) {
+      current = fixture(); await run(args()); current.offline = true;
+      const before = [current.calls.length, current.writes.length];
+      const bytes = current.objects.get(key)!;
+      current.objects.delete(key);
+      await rejected(review(reviewScope));
+      current.objects.set(key, Buffer.from(`${bytes.toString()} `));
+      await rejected(review(reviewScope));
+      assert.deepEqual([current.calls.length, current.writes.length], before);
+    }
+  });
+  await test("read-only review verifies actual audio and scope even when worker claims completion", async () => {
+    await run(args()); current.offline = true;
+    await rejected(review({ ...reviewScope, channelId: "another-channel" }));
+    const candidate = saved(candidateKey);
+    const audioKey = String(candidate.audioKey);
+    const bytes = Buffer.from(current.objects.get(audioKey)!);
+    bytes[bytes.length - 1] ^= 1;
+    current.objects.set(audioKey, bytes);
+    await rejected(review(reviewScope));
   });
   await test("a genuinely new process recovers pending work using GET only", async () => {
     current.postState = "pending"; assert.equal((await run(args())).status, "pending");

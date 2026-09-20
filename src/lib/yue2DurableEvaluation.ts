@@ -146,6 +146,92 @@ async function probeAudio(audio: Uint8Array, completion: YuE2VerifiedCompletion)
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
+/** Read-only review: never repairs storage, contacts a worker, or admits paid work. */
+export async function readDurableYuE2Candidate(scope: { ownerId: string; channelId: string; runId: string }) {
+  try {
+    const { ownerId, channelId, runId } = scope;
+    [ownerId, channelId, runId].forEach((id) => safeId.parse(id));
+    const root = `owner/${ownerId}/runs/${runId}/music/yue2-evaluation/`;
+    const candidateBytes = await optionalRead(`${root}candidate.json`);
+    if (!candidateBytes) return null;
+    const candidate = YuE2DurableCandidateSchema.parse(parseJson(candidateBytes));
+    if (candidate.version !== "studio-yue2-durable-candidate/v2" ||
+      candidate.ownerId !== ownerId || candidate.channelId !== channelId || candidate.runId !== runId ||
+      candidate.bindingKey !== `${root}binding.json` || candidate.provenanceKey !== `${root}provenance.json` ||
+      candidate.audioKey !== `${root}audio-native-${candidate.audioSha256}.wav` ||
+      candidate.executionAccounting.key !== `${root}execution-accounting.json`) {
+      throw new Error("review candidate identity mismatch");
+    }
+    const bindingBytes = await read(candidate.bindingKey);
+    if (yue2Sha256(bindingBytes) !== candidate.bindingSha256) throw new Error("review binding hash mismatch");
+    const binding = z.object({
+      version: z.literal("studio-yue2-durable-evaluation/v2"),
+      ownerId: z.literal(ownerId), channelId: z.literal(channelId), runId: z.literal(runId),
+      endpoint: z.string(), request: z.unknown(), expectedExecutionPolicy: z.unknown(),
+    }).strict().parse(parseJson(bindingBytes));
+    validateYuE2Endpoint(binding.endpoint);
+    const request = validateYuE2EvaluationRequest(binding.request);
+    if (request.version !== YUE2_ARRANGEMENT_EVALUATION_VERSION ||
+      request.acceptedArrangement.ownerId !== ownerId || request.acceptedArrangement.channelId !== channelId ||
+      request.acceptedArrangement.runId !== runId || request.job.job_id !== candidate.jobId ||
+      request.programFingerprint !== candidate.programFingerprint ||
+      yue2Sha256(jsonBytes(request)) !== candidate.requestSha256) throw new Error("review request identity mismatch");
+    const expectedPolicy = validateYuE2ExecutionPolicy(binding.expectedExecutionPolicy);
+    assertBytes(await read(`${root}submission-attempt.json`), jsonBytes({
+      version: binding.version, bindingSha256: candidate.bindingSha256, jobId: candidate.jobId, recovery: "same_job_get_only",
+    }));
+    const provenanceBytes = await read(candidate.provenanceKey);
+    if (yue2Sha256(provenanceBytes) !== candidate.provenanceSha256) throw new Error("review provenance hash mismatch");
+    const provenance = z.object({
+      version: z.literal("studio-yue2-provenance/v1"), bindingSha256: z.literal(candidate.bindingSha256),
+      request: z.unknown(), statusResponse: z.unknown(),
+    }).strict().parse(parseJson(provenanceBytes));
+    assertBytes(jsonBytes(provenance.request), jsonBytes(request));
+    const completion = verifyYuE2Completion(request, provenance.statusResponse);
+    const accountingBytes = await read(candidate.executionAccounting.key);
+    if (yue2Sha256(accountingBytes) !== candidate.executionAccounting.sha256) throw new Error("review accounting hash mismatch");
+    const accounting = z.object({
+      version: z.literal("studio-yue2-durable-accounting/v1"), bindingSha256: z.literal(candidate.bindingSha256),
+      statusResponse: z.unknown(), accountingResponse: z.unknown(),
+    }).strict().parse(parseJson(accountingBytes));
+    const verified = verifyYuE2ExecutionAccounting({ request, expectedPolicy,
+      statusResponse: accounting.statusResponse, accountingResponse: accounting.accountingResponse });
+    if (verified.status !== "measured_allocation_estimate" || verified.supervisorStatus !== "completed" ||
+      !verified.slotReleasable) throw new Error("review accounting is not completed");
+    const terminal = z.object({ receipt_payloads: z.object({ terminal: z.object({ sha256: hash }) }) })
+      .parse(completion.statusResponse).receipt_payloads.terminal.sha256;
+    if (terminal !== verified.evidence.receipt_payloads.terminal?.sha256) throw new Error("review terminal mismatch");
+    assertBytes(jsonBytes(candidate.executionAccounting), jsonBytes({
+      key: `${root}execution-accounting.json`, sha256: yue2Sha256(accountingBytes),
+      policySha256: verified.submissionPolicySha256, status: verified.status,
+      supervisorStatus: verified.supervisorStatus, elapsedNs: verified.elapsedNs,
+      allocatedCostUsdMicros: verified.allocatedCostUsdMicros, providerBilledCostUsdMicros: null,
+    }));
+    if (candidate.audioSha256 !== completion.audio.sha256 || candidate.audioBytes !== completion.audio.bytes ||
+      candidate.nativeOutput.frames !== completion.result.frames ||
+      candidate.nativeOutput.durationSec !== completion.result.audio_seconds) throw new Error("review audio identity mismatch");
+    const audio = await read(candidate.audioKey, MAX_AUDIO_BYTES);
+    await probeAudio(audio, completion);
+    const requestedDurationSec = request.acceptedArrangement.arrangement.requestedDurationSec;
+    // Native exact-duration evidence is a frame-count comparison, not a model's
+    // success flag or an arbitrary percentage allowance for missing content.
+    const durationMatches = candidate.nativeOutput.frames === requestedDurationSec * 48000;
+    return {
+      candidate, candidateSha256: yue2Sha256(candidateBytes), request,
+      quality: {
+        status: durationMatches ? "needs_audition" as const : "blocked" as const,
+        requestedDurationSec, actualDurationSec: candidate.nativeOutput.frames / 48000,
+        durationMatches, nativeFormatVerified: true as const,
+        productionApproved: false as const,
+        unresolved: ["signal_integrity", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
+      },
+    };
+  } catch {
+    // Storage paths, worker addresses and raw receipt contents stay server-side.
+    throw new YuE2EvaluationError("retained_review_verification_failed");
+  }
+}
+
 /** Evaluation-only durable execution. Unknown cost and owner audition never imply approval. */
 export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationInput): Promise<YuE2DurableEvaluationOutcome> {
   let jobId: string | undefined;

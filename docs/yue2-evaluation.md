@@ -263,6 +263,30 @@ YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime \
 
 ## Verification and parent support
 
+### Read-only owner review
+
+`GET /api/yue2-evaluations/review?runId=<owned-run-id>` authenticates the Studio
+session/service identity, verifies run and channel ownership, and reads only the
+retained supervised v2 candidate. It never submits, repairs, regenerates, writes
+an approval, or advances a pipeline. Missing candidates return `review: null`;
+incomplete or corrupt evidence fails closed without signing an audio URL.
+
+The reader checks the request, scope, submission marker, policy, allocation,
+terminal receipt, provenance, audio hash and actual native WAV container before
+issuing a ten-minute download URL. The review server needs FFprobe; a missing
+binary refuses review rather than trusting a worker's format claim. This route
+has not been qualified on the production web deployment.
+
+Quality is separate from transport correctness. Exact requested duration is
+compared with measured frame count; a 0.1-second fixture for a 60-second brief is
+explicitly blocked despite valid native format. Signal integrity, unwanted
+vocals, channel-personality fit, arrangement fidelity, repetition, ending and
+listening quality remain unresolved, not invented passing scores. The accepted
+arrangement and topic are exposed, but a source-brief fingerprint alone does not
+prove channel-personality compliance. Human review/decision UI, retained
+personality/reference context, signal measurements and real GPU/audio
+qualification remain required. No thumbnail module changes are part of this work.
+
 ```bash
 node_modules/.bin/tsx src/lib/__tests__/yue2Evaluation.test.ts
 node_modules/.bin/tsx src/lib/__tests__/yue2DurableEvaluation.test.ts
