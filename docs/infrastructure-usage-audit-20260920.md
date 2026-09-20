@@ -499,3 +499,37 @@ Shared recovery remains opt-in and unactivated. The six-to-one schedule change
 would remove 216,000 starts per 30 days at one-minute cadence, but production
 billing savings cannot be claimed until deployment, topology verification, and
 observation. Thumbnail schedules and GPU safety reapers remain untouched.
+
+## Implementation Batch 12: Atomic Continuation Preparation
+
+Music-audition and factual-review delivery now each call one
+`prepareResumeDispatch` Convex mutation instead of a recovery mutation followed
+by a separate pending query. Plain shared helpers run the original bounded due
+and legacy recovery scans, then select pending receipts in the same transaction.
+The old endpoints remain for already-deployed workers and diagnostics. Both
+individual schedules and the opt-in shared schedule use the new path.
+
+This removes one function round trip per tick per lane: two rather than four
+Convex calls on their combined idle tick, or 86,400 fewer calls per 30 days at
+one-minute cadence. It does not remove the indexed database scans, guarantee
+lower database bytes, or establish a dollar saving. The old separate query could
+reuse Convex query-cache results; the transactional pending read cannot use that
+separate cache and may therefore increase database reads. The larger transaction
+may retry under contention; live cache, contention and billing measurements
+remain open and must be compared before activation.
+If pending selection fails, recovery writes now roll back with the transaction;
+the next tick retries recovery and no Trigger delivery is authorized by that
+failed response. Global delivery keys and execution fences still own concurrency.
+
+Local actual-handler fixtures cover exact recovered envelopes, original worker
+pins, repeat preparation without attempt consumption, bounded due/legacy reads,
+service/owner isolation, invalid timestamps, and exhausted factual deliveries.
+Actual dispatcher fixtures cover the single idle call, preparation failure,
+accepted enqueue with a lost acknowledgement, enqueue failure accounting, and
+unchanged same-run worker pins. These are controlled fixtures, not a deployed
+Convex concurrency or paid-provider qualification. No thumbnail tests or
+generation were run for this batch.
+
+Deployment order remains Convex before Trigger: new workers require the new
+endpoints, while old workers remain compatible with the retained endpoints.
+No production deployment, schedule activation, or settings change was performed.

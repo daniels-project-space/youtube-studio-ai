@@ -17,7 +17,7 @@ type PendingMusicAuditionResume = {
 
 const musicAuditionCheckpointsApi = (api as unknown as {
   readonly musicAuditionCheckpoints: {
-    readonly listPendingResumes: never; readonly reapExpiredQueuedResumes: never;
+    readonly prepareResumeDispatch: never;
     readonly markResumeQueued: never; readonly recordResumeEnqueueFailure: never;
   };
 }).musicAuditionCheckpoints;
@@ -34,13 +34,10 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = input?.convex ?? new ConvexHttpClient(url!);
-  const recovery = await convex.mutation(musicAuditionCheckpointsApi.reapExpiredQueuedResumes, {
+  const { recovery, pending } = await convex.mutation(musicAuditionCheckpointsApi.prepareResumeDispatch, {
     ownerId, now: Date.now(), limit: MUSIC_AUDITION_CONTINUATION_LIMIT,
-  } as never) as unknown as { requeued: number; blocked: number };
+  } as never) as unknown as { recovery: { requeued: number; blocked: number }; pending: PendingMusicAuditionResume[] };
   if (recovery.requeued || recovery.blocked) log(`music-audition queued delivery recovery: ${recovery.requeued} reissued, ${recovery.blocked} manual-blocked`);
-  const pending = await convex.query(musicAuditionCheckpointsApi.listPendingResumes, {
-    ownerId, limit: MUSIC_AUDITION_CONTINUATION_LIMIT,
-  } as never) as unknown as PendingMusicAuditionResume[];
   let triggered = 0;
   for (const receipt of pending.slice(0, MUSIC_AUDITION_CONTINUATION_LIMIT)) {
     const request = musicAuditionResumeSchedule({

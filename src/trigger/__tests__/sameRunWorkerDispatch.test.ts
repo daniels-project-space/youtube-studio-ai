@@ -16,6 +16,11 @@ let transported: unknown;
 let research = false;
 let researchCalls = 0;
 let networkCalls = 0;
+let empty = false;
+let failPreparation = false;
+let failEnqueue = false;
+let failAcknowledgement = false;
+const queries: string[] = [];
 const triggers: { task: string; payload: Row; options: Row }[] = [];
 const keys: { seed: string; options?: Row }[] = [];
 const mutations: string[] = [];
@@ -23,6 +28,7 @@ const fields = () => transported === undefined ? {} : { workerDeployment: transp
 class Convex {
   async query(ref: Parameters<typeof getFunctionName>[0]): Promise<unknown> {
     const name = getFunctionName(ref);
+    queries.push(name);
     if (name === "channels:listChannels") return mode === "doctor" ? [] : [{
       _id: "channel-a", name: "Channel", slug: "channel", status: "active", family: "narrated_stock",
       identity: {}, casefileAutoResearchEnabled: research,
@@ -38,9 +44,16 @@ class Convex {
   async mutation(ref: Parameters<typeof getFunctionName>[0]): Promise<unknown> {
     const name = getFunctionName(ref);
     mutations.push(name);
+    if (name.endsWith(":prepareResumeDispatch")) {
+      if (failPreparation) throw new Error("fixture preparation unavailable");
+      const selected = (mode === "music" && name.startsWith("musicAuditionCheckpoints:")) ||
+        (mode === "factual" && name.startsWith("factualReviewCheckpoints:"));
+      return { recovery: { requeued: 0, blocked: 0 }, pending: empty || !selected ? [] : [{ ...receipt, ...fields() }] };
+    }
     if (name.endsWith(":reapExpiredQueuedResumes") || name === "runs:reapExpiredQueuedPublishContinuations") return { requeued: 0, blocked: 0 };
     if (name === "contentPlan:claimNextPlanRun") return { state: "cadence", runId: receipt.runId, reused: true, ...fields() };
     if (name === "runs:claimAutomaticResume") return { state: "queued", attempts: 2, reused: true, ...fields() };
+    if (failAcknowledgement && name.endsWith(":markResumeQueued")) throw new Error("fixture acknowledgement lost");
     if (name.endsWith(":markResumeQueued") || name.endsWith(":recordResumeEnqueueFailure") || name === "runs:recordAutomaticResumeDispatchFailure") return null;
     throw new Error(`unexpected mutation ${name}`);
   }
@@ -60,7 +73,11 @@ loader._load = function (id, ...args) {
   if (id === "@trigger.dev/sdk") return {
     task: (definition: unknown) => definition, schedules: { task: (definition: unknown) => definition },
     idempotencyKeys: { create: async (seed: string, options?: Row) => { keys.push({ seed, options }); return `key:${seed}`; } },
-    tasks: { trigger: async (task: string, payload: Row, options: Row) => { triggers.push({ task, payload, options }); return { id: "trigger-a" }; } },
+    tasks: { trigger: async (task: string, payload: Row, options: Row) => {
+      triggers.push({ task, payload, options });
+      if (failEnqueue) throw new Error("fixture enqueue failed");
+      return { id: "trigger-a" };
+    } },
   };
   if (id === "@/lib/studioConvexHttpClient") return { StudioConvexHttpClient: Convex };
   if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
@@ -101,12 +118,40 @@ async function main() {
   } as Record<string, { run: (payload?: Row, options?: Row) => Promise<unknown> }>;
   /* eslint-enable @typescript-eslint/no-require-imports */
   const invoke = async (kind: string, context?: Row) => {
-    triggers.length = 0; keys.length = 0; mutations.length = 0; researchCalls = 0;
+    triggers.length = 0; keys.length = 0; mutations.length = 0; queries.length = 0; researchCalls = 0;
     try { await tasks[kind].run({}, context === undefined ? undefined : { ctx: context }); }
     catch (error) {
       assert.match(String(error), /worker deployment|verified dispatch project\/environment/);
     }
   };
+  for (const kind of ["music", "factual"]) {
+    mode = kind;
+    empty = true;
+    await invoke(kind);
+    assert.equal(mutations.length, 1, "idle recovery uses one Convex function call");
+    assert.match(mutations[0], /:prepareResumeDispatch$/);
+    assert.deepEqual(queries, []);
+    assert.deepEqual(triggers, []);
+    assert.deepEqual(keys, []);
+    failPreparation = true;
+    await assert.rejects(tasks[kind].run(), /fixture preparation unavailable/);
+    assert.deepEqual(triggers, [], "failed preparation cannot authorize delivery");
+    failPreparation = false;
+    empty = false;
+    failAcknowledgement = true;
+    await invoke(kind);
+    assert.equal(triggers.length, 1);
+    assert.equal(mutations.length, 2);
+    assert.match(mutations[1], /:markResumeQueued$/);
+    assert.deepEqual(queries, []);
+    failAcknowledgement = false;
+    failEnqueue = true;
+    await invoke(kind);
+    assert.equal(triggers.length, 1);
+    assert.equal(mutations.length, 2);
+    assert.match(mutations[1], /:recordResumeEnqueueFailure$/);
+    failEnqueue = false;
+  }
   for (const kind of Object.keys(tasks)) {
     mode = kind;
     for (const casefile of kind === "scheduler" ? [false, true] : [false]) {

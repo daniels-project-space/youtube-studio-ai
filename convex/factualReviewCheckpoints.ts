@@ -569,7 +569,10 @@ export const reject = mutation({
 
 export const listPendingResumes = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  handler: listPendingResumesForDispatch,
+});
+
+async function listPendingResumesForDispatch(ctx: ReviewCtx, args: { ownerId: string; limit?: number }) {
     await requireStudioServiceIdentity(ctx, args.ownerId, "factual review continuation recovery");
     const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
     const runs = await ctx.db
@@ -660,8 +663,7 @@ export const listPendingResumes = query({
       if (pending.length >= limit) break;
     }
     return pending;
-  },
-});
+}
 
 /**
  * A Trigger acceptance can be lost before its queued task starts. Reap that
@@ -677,7 +679,10 @@ export const reapExpiredQueuedResumes = mutation({
     limit: v.optional(v.number()),
   },
   returns: v.object({ checked: v.number(), requeued: v.number(), blocked: v.number() }),
-  handler: async (ctx, args) => {
+  handler: recoverExpiredQueuedResumes,
+});
+
+async function recoverExpiredQueuedResumes(ctx: MutationCtx, args: { ownerId: string; now: number; limit?: number }) {
     await requireStudioServiceIdentity(ctx, args.ownerId, "factual review queued continuation recovery");
     if (!Number.isSafeInteger(args.now) || args.now < 0) {
       throw new Error("factual review queued continuation recovery time is invalid");
@@ -815,6 +820,16 @@ export const reapExpiredQueuedResumes = mutation({
       requeued++;
     }
     return { checked, requeued, blocked };
+}
+
+// Keep recovery and its pending read in one transaction; no nested function calls.
+// Legacy endpoints remain available for already-deployed workers and diagnostics.
+export const prepareResumeDispatch = mutation({
+  args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const recovery = await recoverExpiredQueuedResumes(ctx, args);
+    const pending = await listPendingResumesForDispatch(ctx, args);
+    return { recovery, pending };
   },
 });
 

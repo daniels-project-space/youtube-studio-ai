@@ -18,6 +18,7 @@ import {
 import {
   listPendingResumes,
   markResumeQueued,
+  prepareResumeDispatch,
   reapExpiredQueuedResumes,
 } from "../../../convex/factualReviewCheckpoints";
 import { RUN_QUEUE_LEASE_MS } from "@/lib/runLease";
@@ -531,12 +532,12 @@ async function main(): Promise<void> {
     firstQueuedAt + RUN_QUEUE_LEASE_MS,
     "accepted delivery carries a bounded queue deadline",
   );
-  const firstQueueRecovery = await invoke<{ requeued: number; blocked: number }>(
-    reapExpiredQueuedResumes,
+  const prepared = await invoke<{ recovery: { requeued: number; blocked: number }; pending: Array<Record<string, unknown>> }>(
+    prepareResumeDispatch,
     ctx,
     { ownerId, now: Date.now(), limit: 10 },
   );
-  assert.deepEqual(firstQueueRecovery, { checked: 1, requeued: 1, blocked: 0 });
+  assert.deepEqual(prepared.recovery, { checked: 1, requeued: 1, blocked: 0 });
   const reissued = await db.get(queuedRunId);
   assert.equal(reissued?.status, "awaiting_factual_review");
   assert.equal(reissued?.factualReviewState, "approved");
@@ -547,6 +548,7 @@ async function main(): Promise<void> {
     limit: 10,
   });
   const reissuedReceipt = reissuedOutbox.find((row) => row.runId === queuedRunId);
+  assert.deepEqual(prepared.pending, reissuedOutbox, "combined transaction sees its recovered receipt with unchanged payload");
   assert.deepEqual(
     {
       checkpointId: reissuedReceipt?.checkpointId,

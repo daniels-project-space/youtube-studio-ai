@@ -7,8 +7,8 @@ import {
   listPendingPublishContinuations,
 } from "../../../convex/runs";
 import { claimNextPlanRun } from "../../../convex/contentPlan";
-import { listPendingResumes as factualResumes } from "../../../convex/factualReviewCheckpoints";
-import { listPendingResumes as musicResumes } from "../../../convex/musicAuditionCheckpoints";
+import { listPendingResumes as factualResumes, prepareResumeDispatch as prepareFactual } from "../../../convex/factualReviewCheckpoints";
+import { listPendingResumes as musicResumes, prepareResumeDispatch as prepareMusic } from "../../../convex/musicAuditionCheckpoints";
 import { verifiedWorkerDeploymentFields } from "../../../convex/pipelineWorkerDeploymentTransport";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
@@ -161,6 +161,9 @@ async function main() {
     const factualRows = await factual.invoke<Record<string, unknown>[]>(factualResumes, { ownerId });
     assert.equal(factualRows.length, 1);
     assertBinding(factualRows[0], pinned);
+    assert.deepEqual(await factual.invoke(prepareFactual, { ownerId, now: 100 }), {
+      recovery: { checked: 0, requeued: 0, blocked: 0 }, pending: factualRows,
+    });
     factual.run.pipelineInvocationSha256 = "0".repeat(64);
     assert.deepEqual(await factual.invoke(factualResumes, { ownerId }), []);
 
@@ -169,6 +172,17 @@ async function main() {
     const musicRows = await music.invoke<Record<string, unknown>[]>(musicResumes, { ownerId });
     assert.equal(musicRows.length, 1);
     assertBinding(musicRows[0], pinned);
+    assert.deepEqual(await music.invoke(prepareMusic, { ownerId, now: 100 }), {
+      recovery: { requeued: 0, blocked: 0 }, pending: musicRows,
+    });
+    Object.assign(music.run, { musicAuditionResumeState: "queued", musicAuditionResumeAttempts: 1,
+      musicAuditionResumeQueueDeadlineAt: 100, musicAuditionResumeQueuedAt: 0 });
+    assert.deepEqual(await music.invoke(prepareMusic, { ownerId, now: 100 }), {
+      recovery: { requeued: 1, blocked: 0 }, pending: [{ ...musicRows[0], attempt: 1 }],
+    }, "music recovery and dispatch selection retain the exact approved envelope in one transaction");
+    assert.deepEqual(await music.invoke(prepareMusic, { ownerId, now: 100 }), {
+      recovery: { requeued: 0, blocked: 0 }, pending: [{ ...musicRows[0], attempt: 1 }],
+    }, "a repeated preparation does not consume an enqueue attempt");
     music.run.pipelineInvocationSha256 = "0".repeat(64);
     assert.deepEqual(await music.invoke(musicResumes, { ownerId }), []);
 

@@ -24,8 +24,7 @@ type PendingFactualReviewResume = {
 
 const factualReviewCheckpointsApi = (api as unknown as {
   readonly factualReviewCheckpoints: {
-    readonly listPendingResumes: never;
-    readonly reapExpiredQueuedResumes: never;
+    readonly prepareResumeDispatch: never;
     readonly markResumeQueued: never;
     readonly recordResumeEnqueueFailure: never;
   };
@@ -47,20 +46,16 @@ export async function dispatchPendingFactualReviewContinuations(input?: {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = input?.convex ?? new ConvexHttpClient(url!);
-  const queuedRecovery = await convex.mutation(factualReviewCheckpointsApi.reapExpiredQueuedResumes, {
+  const { recovery: queuedRecovery, pending } = await convex.mutation(factualReviewCheckpointsApi.prepareResumeDispatch, {
     ownerId,
     now: Date.now(),
     limit: FACTUAL_REVIEW_CONTINUATION_LIMIT,
-  } as never) as unknown as { requeued: number; blocked: number };
+  } as never) as unknown as { recovery: { requeued: number; blocked: number }; pending: PendingFactualReviewResume[] };
   if (queuedRecovery.requeued > 0 || queuedRecovery.blocked > 0) {
     log(
       `factual-review queued delivery recovery: ${queuedRecovery.requeued} reissued, ${queuedRecovery.blocked} manual-blocked`,
     );
   }
-  const pending = await convex.query(factualReviewCheckpointsApi.listPendingResumes, {
-    ownerId,
-    limit: FACTUAL_REVIEW_CONTINUATION_LIMIT,
-  } as never) as unknown as PendingFactualReviewResume[];
   let triggered = 0;
 
   for (const receipt of pending.slice(0, FACTUAL_REVIEW_CONTINUATION_LIMIT)) {
@@ -147,7 +142,7 @@ export async function dispatchPendingFactualReviewContinuations(input?: {
 
 export const factualReviewContinuationDispatcher = schedules.task({
   id: "factual-review-continuation-dispatcher",
-  // Empty ticks are an indexed owner-scoped outbox read. This does not admit
+  // Empty ticks are one bounded owner-scoped recovery transaction. This does not admit
   // fresh work and does not call a model/browser/render provider.
   ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,

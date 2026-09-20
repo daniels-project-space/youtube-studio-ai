@@ -23,7 +23,7 @@ assert.match(pipeline, /musicAuditionResume[\s\S]*musicQualityReceiptKey/u);
 assert.match(pipeline, /getObjectBytes\(approved\.qualityReceiptKey\)[\s\S]*MusicProgramQualityReceiptSchema\.parse/u);
 assert.match(pipeline, /music audition fence: refusing self-heal/u);
 assert.match(dispatcher, /musicAuditionResumeSchedule[\s\S]*idempotencyKeys\.create\(request\.idempotencySeed,[\s\S]*scope: "global"/u);
-assert.match(dispatcher, /reapExpiredQueuedResumes[\s\S]*musicAuditionResumeSchedule[\s\S]*deliveryAttempt: receipt\.attempt \+ 1/u);
+assert.match(dispatcher, /prepareResumeDispatch[\s\S]*musicAuditionResumeSchedule[\s\S]*deliveryAttempt: receipt\.attempt \+ 1/u);
 assert.match(
   approvalRoute,
   /assertPinnedMiniMaxMusic3Receipt\(runtime, program\)[\s\S]*?assertMusicAuditionNativeBytes\([\s\S]*?nativeWavBytes/u,

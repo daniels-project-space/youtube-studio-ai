@@ -341,7 +341,10 @@ export const getApprovedMusicAuditionResume = query({
 
 export const listPendingResumes = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  handler: listPendingResumesForDispatch,
+});
+
+async function listPendingResumesForDispatch(ctx: MusicAuditionCtx, args: { ownerId: string; limit?: number }) {
     await requireStudioServiceIdentity(ctx, args.ownerId, "music audition continuation recovery");
     const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
     const runs = await ctx.db.query("runs").withIndex("by_owner_music_audition_resume", q =>
@@ -383,8 +386,7 @@ export const listPendingResumes = query({
       if (pending.length >= limit) break;
     }
     return pending;
-  },
-});
+}
 
 export const markResumeQueued = mutation({
   args: {
@@ -444,7 +446,10 @@ export const recordResumeEnqueueFailure = mutation({
 
 export const reapExpiredQueuedResumes = mutation({
   args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  handler: recoverExpiredQueuedResumes,
+});
+
+async function recoverExpiredQueuedResumes(ctx: MutationCtx, args: { ownerId: string; now: number; limit?: number }) {
     await requireStudioServiceIdentity(ctx, args.ownerId, "music audition queued continuation recovery");
     if (!Number.isSafeInteger(args.now) || args.now < 0) throw new Error("music audition recovery timestamp is invalid");
     const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
@@ -495,6 +500,16 @@ export const reapExpiredQueuedResumes = mutation({
       requeued++;
     }
     return { requeued, blocked };
+}
+
+// Keep recovery and its pending read in one transaction; no nested function calls.
+// Legacy endpoints remain available for already-deployed workers and diagnostics.
+export const prepareResumeDispatch = mutation({
+  args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const recovery = await recoverExpiredQueuedResumes(ctx, args);
+    const pending = await listPendingResumesForDispatch(ctx, args);
+    return { recovery, pending };
   },
 });
 

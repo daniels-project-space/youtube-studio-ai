@@ -71,7 +71,7 @@ assert.match(
 );
 assert.match(
   dispatcher,
-  /reapExpiredQueuedResumes[\s\S]*factualReviewResumeSchedule[\s\S]*deliveryAttempt: receipt\.attempt \+ 1/,
+  /prepareResumeDispatch[\s\S]*factualReviewResumeSchedule[\s\S]*deliveryAttempt: receipt\.attempt \+ 1/,
   "the dispatcher reissues only an expired delivery with a new bounded Trigger key",
 );
 assert.match(
