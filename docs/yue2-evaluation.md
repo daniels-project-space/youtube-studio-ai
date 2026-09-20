@@ -344,6 +344,27 @@ Persistent human decisions, reference comparisons, remaining
 perceptual measurements and real GPU/audio
 qualification remain required. No thumbnail module changes are part of this work.
 
+### Shared Music Admission Safety
+
+The shared legacy `music` executor now rejects any explicitly supplied provider
+outside its supported enum before storage or generation. In particular, setting
+`provider: "yue2"` is not an activation mechanism: it refuses instead of silently
+falling through to Mureka. Omitted provider selection retains the existing default;
+valid Suno, Mureka and MiniMax selections and legacy reuse remain unchanged.
+
+Prepared weekly music is also checked against the executing owner, channel and
+topic before any program write or audio read. Its sealed program is parsed with
+the existing fingerprint-validating schema and checked independently against the
+channel and topic. This supplements, not replaces, the scheduled manifest validator
+and downstream exact-byte/native-quality checks. Frozen identity is not recomputed
+from live channel settings, and existing commercial-provider failover is unchanged.
+
+`musicInputAdmission.test.ts` executes the real shared block with network and
+storage instrumentation: unknown/coerced providers, foreign receipts, a valid but
+foreign sealed program, and a corrupt fingerprint all fail before I/O. Supported
+reuse and matching-program admission remain covered. This is local safety evidence,
+not a live YuE generation or a completed audition-to-production handoff.
+
 ```bash
 node_modules/.bin/tsx src/lib/__tests__/yue2Evaluation.test.ts
 node_modules/.bin/tsx src/lib/__tests__/yue2DurableEvaluation.test.ts

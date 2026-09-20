@@ -11,6 +11,8 @@ import { PRICE } from "@/engine/pricing";
 import {
   assertMusicProgramQualityReceipt,
   createChannelMusicProgram,
+  ChannelMusicProgramSchema,
+  ChannelMusicProviderSchema,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
@@ -73,9 +75,22 @@ export const music: Block = {
     // route could attach a sibling's track without proving it belongs to this
     // episode program.
     const musicProgram = musicProgramForCurrentRoute(ctx, topic);
-    const requestedProvider = ["suno", "mureka", "minimax_music3"].includes(String(ctx.params.provider))
-      ? ctx.params.provider as MusicProvider
-      : undefined;
+    const selection = ctx.params.provider === undefined ? undefined : ChannelMusicProviderSchema.safeParse(ctx.params.provider);
+    if (selection && !selection.success) {
+      throw new Error("music: unsupported explicit provider; refusing substitution with a default provider");
+    }
+    const requestedProvider = selection?.success ? selection.data : undefined;
+    let preparedProgram: ChannelMusicProgram | undefined;
+    if (preparedMusic !== undefined) {
+      if (!preparedMusic || typeof preparedMusic !== "object" ||
+        preparedMusic.ownerId !== ctx.ownerId || preparedMusic.channelId !== String(ctx.channelId) || preparedMusic.topic !== topic) {
+        throw new Error("music: prepared weekly music does not match the current owner, channel and topic");
+      }
+      preparedProgram = ChannelMusicProgramSchema.parse(preparedMusic.musicProgram);
+      if (preparedProgram.channelId !== String(ctx.channelId) || preparedProgram.topic !== topic) {
+        throw new Error("music: prepared weekly sound program does not match the current channel and topic");
+      }
+    }
     if (
       musicProgram &&
       requestedProvider !== undefined &&
@@ -180,7 +195,7 @@ export const music: Block = {
       styleDNA: dna,
       musicBrief: getMusicBrief(ctx.store) ?? null,
     }));
-    const channelMusicProgram: ChannelMusicProgram = preparedMusic?.musicProgram ?? createChannelMusicProgram({
+    const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
       family: route?.family ?? "music_loop",
