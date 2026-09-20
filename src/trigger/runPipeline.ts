@@ -231,12 +231,7 @@ const factualReviewCheckpointsApi = (api as unknown as {
   };
 }).factualReviewCheckpoints;
 
-const musicAuditionCheckpointsApi = (api as unknown as {
-  readonly musicAuditionCheckpoints: {
-    readonly createAwaiting: never;
-    readonly assertApprovedMusicAuditionResume: never;
-  };
-}).musicAuditionCheckpoints;
+const musicAuditionCheckpointsApi = api.musicAuditionCheckpoints;
 
 const automaticProviderHealthApi = (api as unknown as {
   readonly automaticProviderHealth: {
@@ -2380,7 +2375,7 @@ export const runPipelineTask = task({
         // Claiming the lease proved the immutable owner decision; recheck it
         // immediately before engine construction and seed only the receipt key
         // upload_draft needs. The persisted music stage remains sealed.
-        const approved = await convex.query(musicAuditionCheckpointsApi.assertApprovedMusicAuditionResume, {
+        const approved = await convex.query(musicAuditionCheckpointsApi.getApprovedMusicAuditionResume, {
           ownerId,
           channelId: payload.channelId as Id<"channels">,
           runId: payload.runId as Id<"runs">,

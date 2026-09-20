@@ -327,6 +327,18 @@ export async function assertApprovedMusicAuditionResume(
   return { qualityReceiptKey: row.qualityReceiptKey };
 }
 
+export const getApprovedMusicAuditionResume = query({
+  args: {
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    checkpointId: v.id("musicAuditionCheckpoints"), checkpointFingerprint: v.string(),
+    qualityReceiptFingerprint: v.string(), approvalFingerprint: v.string(), invocationSha256: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "music audition continuation");
+    return assertApprovedMusicAuditionResume(ctx, args);
+  },
+});
+
 export const listPendingResumes = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
