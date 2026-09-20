@@ -1301,6 +1301,7 @@ export async function runPipeline(
     let costAccounted = false;
     let usageReported = false;
     let imageUsageReported = false;
+    let executedStore: Readonly<Record<string, unknown>> | undefined;
     const reportUsage = (): ModelUsageSummary => {
       const summary = usageScope.snapshot();
       if (!usageReported && hasModelUsage(summary)) {
@@ -1358,12 +1359,12 @@ export async function runPipeline(
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
         patch = await checkpointCostScope.run(() =>
-          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => ({
-            ...ctx,
+          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => {
             // Snapshot after input rehydration, and start every retry from the
             // producer's artifacts rather than a failed attempt's local edits.
-            store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
-          }), retries, log))),
+            executedStore = declaredArtifactStore(manifest, store, optionalFallbacks, log);
+            return { ...ctx, store: executedStore };
+          }, retries, log))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
@@ -1398,7 +1399,8 @@ export async function runPipeline(
       }
       assertStageInvocationUnchanged({
         ownerId: opts.ownerId, runId: opts.runId, channelId: opts.channelId, keyPrefix: opts.keyPrefix,
-        manifest, params, store, inputRefs, inputIdentities: artifactIdentities,
+        manifest, params, store: executedStore ? { ...store, ...executedStore } : store,
+        inputRefs, inputIdentities: artifactIdentities,
       }, invocationHash);
       assertProduced(manifest, patch);
       const producedRefs = await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);

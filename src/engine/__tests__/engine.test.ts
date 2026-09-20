@@ -334,13 +334,17 @@ async function moduleInputIsolation(): Promise<void> {
   register({
     id: "isolation_editor", consumes: ["packet"], produces: ["editedPacket"],
     run: async (ctx) => {
-      const packet = ctx.store.packet as typeof original;
-      assert.deepEqual(packet, original, "every retry must receive pristine producer inputs");
+      const input = ctx.store.packet as typeof original;
+      assert.deepEqual(input, original, "every retry must receive pristine producer inputs");
       attempts++;
+      // A failed attempt cannot poison its retry. A successful transformation
+      // explicitly copies its input and publishes a separate declared output.
+      const packet = attempts === 1 ? input : structuredClone(input);
       packet.sections[0].label = "local edit";
       const descriptor = Object.getOwnPropertyDescriptor(ctx.store, "packet");
-      assert.equal(descriptor?.value, packet);
-      descriptor!.value.tags.push("local tag");
+      assert.equal(descriptor?.value, input);
+      if (attempts === 1) descriptor!.value.tags.push("local tag");
+      else packet.tags.push("local tag");
       assert.equal(Object.getPrototypeOf(ctx.store), null);
       assert.throws(() => Object.setPrototypeOf(ctx.store, {}), /read-only/);
       assert.throws(() => Object.preventExtensions(ctx.store), /read-only/);
