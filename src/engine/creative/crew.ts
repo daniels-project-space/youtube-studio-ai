@@ -19,6 +19,7 @@ import { ExecutionError } from "@/engine/executionErrors";
 import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
+  StyleDNA,
   StructureBrief,
   VisualBrief,
   CutSheet,
@@ -39,6 +40,10 @@ export interface CrewContext {
   dnaDigest?: string;
   /** Audio slice of the DNA (composer only). */
   dnaAudio?: string;
+  /** Exact frozen identity for opt-in producers; legacy prompts remain unchanged. */
+  persona?: string;
+  styleGrammar?: string;
+  sourceAudioDna?: Partial<StyleDNA["audio"]> | null;
   /** Resolved per-channel role controls; must influence the actual brief. */
   roleDirectives?: string;
   /** Bounded, immutable serial-episode continuity (when the route owns one). */
@@ -319,8 +324,12 @@ export async function briefComposerWithArrangement(
   assertArrangementComposerAdmission(config.model, admission);
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
+    ctx.persona ? `Channel persona: ${ctx.persona}` : "",
+    ctx.styleGrammar ? `Channel style grammar: ${ctx.styleGrammar}` : "",
     bible.composerDoctrine ? `Your doctrine: ${bible.composerDoctrine}` : "",
-    ctx.dnaAudio ?? "",
+    ctx.sourceAudioDna === undefined ? ctx.dnaAudio ?? "" :
+      `Frozen audio identity (only authored values; omitted fields are unspecified): ${JSON.stringify(ctx.sourceAudioDna)}\n` +
+      `Loopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.`,
   ].filter(Boolean).join("\n\n");
   const prompt = `${promptContext}\n\n` +
       `Author this video's complete instrumental music arrangement. Preserve the locked channel sound, ` +

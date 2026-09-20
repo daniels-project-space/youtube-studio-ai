@@ -371,6 +371,9 @@ function crewCtx(
     targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
     dnaDigest: dnaDigest(g.dna),
     dnaAudio: dnaAudioDigest(g.dna),
+    persona: g.persona,
+    styleGrammar: g.styleGrammar,
+    sourceAudioDna: g.dna?.audio ?? null,
     roleDirectives: roleDirectives ? JSON.stringify(roleDirectives) : undefined,
     serializedEpisodeContext: serializedEpisodeContext
       ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)

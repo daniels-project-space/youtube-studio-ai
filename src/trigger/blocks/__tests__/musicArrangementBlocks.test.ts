@@ -74,6 +74,8 @@ const developing: AcceptedMusicArrangementDraft = {
 };
 const seedStore = {
   topic: "Night horizon", showBible: bible, channelSlug: "arrangement-evaluation", channelName: "Arrangement evaluation",
+  persona: "Observant, intimate, never theatrical.",
+  styleGrammar: "Patient understatement; no sentimental uplift.",
   styleDNA: { audio: { genre: "ambient strings", instrumentation: ["bowed strings"], textures: ["dry room"], bpmRange: [50, 60], moodArc: "steady", loopable: true } },
 };
 const stageContext = (store: Record<string, unknown> = seedStore): StageContext => ({
@@ -165,7 +167,7 @@ async function main() {
     assert.ok(request.prompt.includes("ambient strings"));
     assert.ok(request.prompt.includes("30 min"));
     assert.ok(request.prompt.startsWith(producedBrief.reviewContext.promptContext + "\n\n"), "review retains the exact context actually dispatched");
-    for (const value of [bible.positioning, bible.vibe, bible.iconicMotif, bible.avoidInSpace[0], bible.composerDoctrine!, "ambient strings", "Operator role directives:"]) {
+    for (const value of [bible.positioning, bible.vibe, bible.iconicMotif, bible.avoidInSpace[0], bible.composerDoctrine!, seedStore.persona, seedStore.styleGrammar, "ambient strings", "Operator role directives:"]) {
       assert.ok(producedBrief.reviewContext.promptContext.includes(value), `missing review grounding: ${value}`);
     }
     assert.ok(request.prompt.includes(`Content family: ${producedBrief.reviewContext.family}.`));
@@ -210,6 +212,18 @@ async function main() {
   providerError = new Error("composer provider unavailable");
   await assert.rejects(selected.execute(stageContext()), /composer provider unavailable/);
   providerError = undefined;
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20 };
+  for (const audio of [{ instrumentation: ["prepared piano"], textures: ["felt transients"] }, null]) {
+    const output = await selected.execute(stageContext({ ...seedStore, styleDNA: audio === null ? null : { audio } }));
+    const brief = ComposerBriefWithArrangementSchema.parse(output.musicBrief);
+    const context = brief.reviewContext!.promptContext;
+    assert.ok(context.includes(`Frozen audio identity (only authored values; omitted fields are unspecified): ${JSON.stringify(audio)}`));
+    assert.ok(!context.includes("master target -14 LUFS"));
+    assert.ok(!context.includes("natural ending"));
+    assert.ok(!context.includes('"bpmRange"'));
+    assert.ok(context.includes(seedStore.persona), "authored bible must not suppress persona");
+    assert.ok(context.includes(seedStore.styleGrammar));
+  }
   fixtureChargeUsd = 0.07; // Synthetic observed-charge evidence, not a provider rate or reservation.
   response = { arrangement: { ...flat, requestedDurationSec: 301 }, duckDb: -15, bedLufs: -20 };
   const failedStages: Parameters<RunStageSink["upsert"]>[0][] = [];
@@ -230,6 +244,8 @@ async function main() {
   assert.equal((legacyOutput.musicBrief as { musicPrompt: string }).musicPrompt, "Legacy prose remains unchanged");
   assert.equal(Object.hasOwn(legacyOutput.musicBrief as object, "arrangement"), false);
   assert.equal(calls.at(-1)!.maxTokens, 2500);
+  assert.ok(!calls.at(-1)!.prompt.includes(seedStore.persona));
+  assert.ok(!calls.at(-1)!.prompt.includes("Frozen audio identity"));
   await assert.rejects(musicArrangementPlan.run(stageContext({ topic: seedStore.topic, ...legacyOutput })));
   routingProbe = true;
   const { agentJson } = load("@/agents/mastra") as typeof import("@/agents/mastra");
