@@ -258,14 +258,14 @@ function normalizeRetryCount(value: unknown, fallback: unknown): number {
 /** Run a block, retrying TRANSIENT errors with exponential backoff. */
 async function runBlockWithRetry(
   block: Block,
-  ctx: StageContext,
+  createContext: () => StageContext,
   retries: number,
   log: (msg: string, extra?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   let attempt = 0;
   for (;;) {
     try {
-      return await block.run(ctx);
+      return await block.run(createContext());
     } catch (err) {
       // Once a block reports accepted paid work, retrying the whole block can
       // purchase it again. Provider adapters must recover an accepted job in
@@ -315,7 +315,7 @@ function artifactSummary(value: unknown): string {
   return String(value);
 }
 
-/** Build the only store view a module may observe. */
+/** Isolate declared inputs; local nested edits must not rewrite upstream artifacts. */
 export function declaredArtifactStore(
   manifest: ModuleManifest,
   store: Record<string, unknown>,
@@ -325,6 +325,11 @@ export function declaredArtifactStore(
   const required = new Set(Object.keys(manifest.consumes));
   const optional = new Set(Object.keys(manifest.optionalConsumes));
   const allowed = new Set([...required, ...optional]);
+  // Clone only declared artifacts, preserving aliases within this module's
+  // snapshot. Descriptor access must not expose the original objects either.
+  const snapshot = Object.assign(Object.create(null), structuredClone(Object.fromEntries(
+    [...allowed].filter((key) => Object.hasOwn(store, key)).map((key) => [key, store[key]]),
+  ))) as Record<string, unknown>;
   const assertAllowed = (property: PropertyKey): string | null => {
     if (typeof property === "symbol") return null;
     const key = String(property);
@@ -335,7 +340,7 @@ export function declaredArtifactStore(
     }
     return key;
   };
-  return new Proxy(store, {
+  return new Proxy(snapshot, {
     get(target, property, receiver) {
       const key = assertAllowed(property);
       if (key === null) return Reflect.get(target, property, receiver);
@@ -366,6 +371,12 @@ export function declaredArtifactStore(
     },
     defineProperty() {
       throw new Error(`module "${manifest.id}" attempted to redefine the read-only artifact store`);
+    },
+    setPrototypeOf() {
+      throw new Error(`module "${manifest.id}" attempted to change the read-only artifact store prototype`);
+    },
+    preventExtensions() {
+      throw new Error(`module "${manifest.id}" attempted to seal the read-only artifact store`);
     },
   });
 }
@@ -1257,7 +1268,7 @@ export async function runPipeline(
     };
     const usageScope = createModelUsageScope();
     const imageUsageScope = createImageUsageScope();
-    const ctx: StageContext = {
+    const ctx: Omit<StageContext, "store"> = {
       ownerId: opts.ownerId,
       runId: opts.runId,
       channelId: opts.channelId,
@@ -1265,7 +1276,6 @@ export async function runPipeline(
       ...(opts.assertInlinePaidExecutionLease ? { assertInlinePaidExecutionLease: opts.assertInlinePaidExecutionLease } : {}),
       keyPrefix: opts.keyPrefix,
       params,
-      store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
       ...(configuredEnvelope === undefined ? {} : { stageBudgetUsd: configuredEnvelope }),
@@ -1348,7 +1358,12 @@ export async function runPipeline(
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
         patch = await checkpointCostScope.run(() =>
-          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, ctx, retries, log))),
+          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => ({
+            ...ctx,
+            // Snapshot after input rehydration, and start every retry from the
+            // producer's artifacts rather than a failed attempt's local edits.
+            store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
+          }), retries, log))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);

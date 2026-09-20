@@ -323,6 +323,54 @@ async function artifactBatching(): Promise<void> {
   );
 }
 
+async function moduleInputIsolation(): Promise<void> {
+  _resetBlocks();
+  const original = { sections: [{ label: "approved" }], tags: ["original"] };
+  let attempts = 0;
+  register({
+    id: "isolation_source", consumes: [], produces: ["packet"],
+    run: async () => ({ packet: original }),
+  });
+  register({
+    id: "isolation_editor", consumes: ["packet"], produces: ["editedPacket"],
+    run: async (ctx) => {
+      const packet = ctx.store.packet as typeof original;
+      assert.deepEqual(packet, original, "every retry must receive pristine producer inputs");
+      attempts++;
+      packet.sections[0].label = "local edit";
+      const descriptor = Object.getOwnPropertyDescriptor(ctx.store, "packet");
+      assert.equal(descriptor?.value, packet);
+      descriptor!.value.tags.push("local tag");
+      assert.equal(Object.getPrototypeOf(ctx.store), null);
+      assert.throws(() => Object.setPrototypeOf(ctx.store, {}), /read-only/);
+      assert.throws(() => Object.preventExtensions(ctx.store), /read-only/);
+      if (attempts === 1) throw Object.assign(new Error("temporary upstream failure"), { status: 503 });
+      return { editedPacket: packet };
+    },
+  });
+  register({
+    id: "isolation_consumer", consumes: ["packet", "editedPacket"], produces: ["verified"],
+    run: async (ctx) => {
+      assert.deepEqual(ctx.store.packet, { sections: [{ label: "approved" }], tags: ["original"] });
+      assert.deepEqual(ctx.store.editedPacket, { sections: [{ label: "local edit" }], tags: ["original", "local tag"] });
+      return { verified: true };
+    },
+  });
+  const { sink, rows } = memSink();
+  const result = await runPipeline(validatePipeline([
+    { block: "isolation_source" }, { block: "isolation_editor" }, { block: "isolation_consumer" },
+  ]), {
+    ownerId: "o", channelId: "c", runId: "module_isolation", keyPrefix: "p/", budgetUsd: 0, sink,
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(attempts, 2);
+  assert.equal(result.store.verified, true);
+  assert.deepEqual(original, { sections: [{ label: "approved" }], tags: ["original"] });
+  assert.deepEqual(rows.find((row) => row.block === "isolation_source" && row.status === "ok")?.outputs,
+    { packet: original });
+  console.log("MODULE ISOLATION PASS: nested and descriptor edits stay local; only declared output reaches downstream");
+}
+
 async function main(): Promise<void> {
   await positive();
   await negativeValidation();
@@ -331,6 +379,7 @@ async function main(): Promise<void> {
   preflightParameterIntegrity();
   await costAndBudget();
   await artifactBatching();
+  await moduleInputIsolation();
   console.log("\nALL ENGINE TESTS PASSED");
 }
 
