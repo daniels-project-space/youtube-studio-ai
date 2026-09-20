@@ -50,7 +50,7 @@ async function prepareExternalScore(ctx: StageContext): Promise<PreparedMotionCo
   if (typeof length !== "number" || !Number.isSafeInteger(length) || length <= 0 || length > SHARED_SCORE_MAX_BYTES) {
     throw new Error("motion_comic shared score is missing, empty, or exceeds the byte limit");
   }
-  const bytes = await getObjectBytes(key, undefined, { timeoutMs: 120_000 });
+  const bytes = await getObjectBytes(key, undefined, { timeoutMs: 120_000, maxBytes: length });
   if (!bytes.byteLength || bytes.byteLength > SHARED_SCORE_MAX_BYTES || bytes.byteLength !== length) {
     throw new Error("motion_comic shared score byte length changed or exceeds the byte limit");
   }
@@ -100,7 +100,9 @@ async function prepareExternalScore(ctx: StageContext): Promise<PreparedMotionCo
     if (failure.name !== "PreconditionFailed" && failure.name !== "ConditionalRequestConflict" &&
       failure.$metadata?.httpStatusCode !== 412 && failure.$metadata?.httpStatusCode !== 409) throw error;
   }
-  const persisted = JSON.parse(Buffer.from(await getObjectBytes(bindingKey, undefined, { timeoutMs: 30_000 })).toString("utf8"));
+  const persisted = JSON.parse(Buffer.from(await getObjectBytes(bindingKey, undefined, {
+    timeoutMs: 30_000, maxBytes: 64 * 1024,
+  })).toString("utf8"));
   if (canonicalJson(persisted) !== bindingJson) {
     throw new Error("motion_comic shared score durable source binding mismatch; original source and mix must be restored");
   }

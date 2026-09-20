@@ -25,6 +25,7 @@ const hash = createHash("sha256").update(source).digest("hex");
 let root: string;
 let headLength: number | null = source.byteLength;
 let returnedBytes: Uint8Array = source;
+let sourceReadError: Error | undefined;
 let castCalls: CastInput[] = [];
 let reads: string[] = [];
 let heads: string[] = [];
@@ -74,10 +75,15 @@ loader._load = function (id, ...args) {
   };
   if (id.endsWith("/storage")) return {
     headObjectMetadata: async (key: string) => { heads.push(key); return headLength === null ? null : { contentLength: headLength }; },
-    getObjectBytes: async (key: string) => {
+    getObjectBytes: async (key: string, _bucket?: string, options?: { maxBytes?: number; timeoutMs?: number }) => {
       reads.push(key);
-      if (key === sourceKey) return sourceReadQueue.shift() ?? returnedBytes;
+      if (key === sourceKey) {
+        assert.deepEqual(options, { timeoutMs: 120_000, maxBytes: headLength }, "bound actual streaming to the advertised source size");
+        if (sourceReadError) throw sourceReadError;
+        return sourceReadQueue.shift() ?? returnedBytes;
+      }
       if (key.includes("/bindings/")) {
+        assert.deepEqual(options, { timeoutMs: 30_000, maxBytes: 64 * 1024 });
         if (!bindings.has(key)) throw new Error("NoSuchKey");
         return bindings.get(key)!;
       }
@@ -169,6 +175,7 @@ async function main() {
     castCalls = []; heads = []; reads = []; assets = []; leaseCalls = 0;
     bindingWriteAttempts = 0;
     headLength = source.byteLength; returnedBytes = source;
+    sourceReadError = undefined;
     invalidAudio = false; validationProbes = 0; nestedMusicGenerations = 0;
     scoreEvidenceOverride = undefined;
     sourceReadQueue = []; localDirectory = undefined;
@@ -242,6 +249,12 @@ async function main() {
     await assert.rejects(() => selected.execute(context()), /byte limit/);
     assert.equal(reads.length, 0); assert.equal(castCalls.length, 0);
   }
+  reset(); sourceReadError = new Error("stream exceeded maxBytes");
+  await assert.rejects(() => selected.execute(context()), /exceeded maxBytes/);
+  assert.deepEqual(reads, [sourceKey]);
+  assert.equal(castCalls.length, 0);
+  assert.equal(validationProbes, 0);
+  assert.equal(bindingWriteAttempts, 0);
   reset(); returnedBytes = new Uint8Array();
   await assert.rejects(() => selected.execute(context()), /byte length/);
   assert.equal(castCalls.length, 0);
