@@ -10,17 +10,25 @@ const fence = { leaseOwner: "receipt-worker", executionLeaseToken: 1 };
 const run = { _id: scope.runId, ownerId: scope.ownerId, channelId: scope.channelId, status: "running",
   leaseOwner: fence.leaseOwner, executionAttempts: 1, leaseExpiresAt: Date.now() + 60_000 };
 let row: Record<string, unknown> | undefined;
+let progress: Record<string, unknown> | undefined;
 let reads = 0;
 const ctx = {
   auth: { getUserIdentity: async () => ({ subject: "receipt-service", role: "service", owner_id: scope.ownerId }) },
   db: {
     normalizeId: (_table: string, id: string) => id,
     get: async (id: string) => id === scope.runId ? run : { _id: scope.channelId, ownerId: scope.ownerId },
-    query: () => ({ withIndex: () => ({ unique: async () => row ?? null, collect: async () => row ? [row] : [] }) }),
-    insert: async (_table: string, value: Record<string, unknown>) => { row = { _id: "stage-receipt", ...structuredClone(value) }; return row._id; },
-    patch: async (_id: string, patch: Record<string, unknown>) => {
+    query: (table: string) => ({ withIndex: () => ({
+      unique: async () => (table === "runStageProgress" ? progress : row) ?? null,
+      collect: async () => row ? [row] : [], take: async () => row ? [row] : [],
+    }) }),
+    insert: async (table: string, value: Record<string, unknown>) => {
+      if (table === "runStageProgress") { progress = { _id: "progress-receipt", ...structuredClone(value) }; return progress._id; }
+      row = { _id: "stage-receipt", ...structuredClone(value) }; return row._id;
+    },
+    patch: async (id: string, patch: Record<string, unknown>) => {
+      const target = id === "progress-receipt" ? progress! : row!;
       for (const [key, value] of Object.entries(patch)) {
-        if (value === undefined) delete row![key]; else row![key] = structuredClone(value);
+        if (value === undefined) delete target[key]; else target[key] = structuredClone(value);
       }
     },
   },

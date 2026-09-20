@@ -395,7 +395,8 @@ async function lateParentWritesCannotEraseChildCharges() {
     db: {
       normalizeId: (_table: string, id: string) => id,
       get: async (id: string) => id === options.runId ? run : { _id: options.channelId, ownerId: options.ownerId },
-      query: () => ({ withIndex: () => ({ unique: async () => stage }) }),
+      query: (table: string) => ({ withIndex: () => ({ unique: async () => table === "runStageProgress"
+        ? { _id: "legacy-progress", ownerId: options.ownerId, runId: options.runId } : stage }) }),
       patch: async (_id: string, patch: Record<string, unknown>) => { Object.assign(stage, patch); },
     },
   };

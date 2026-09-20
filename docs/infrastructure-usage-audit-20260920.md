@@ -558,3 +558,45 @@ waits for its three active siblings, and prevents H3 dispatch. Invalid later
 receipts cause zero consumer media reads; changed bytes still fail their digest.
 These are concurrency and transfer-bound proofs, not measured fleet RAM, latency,
 or billing reductions. JSON manifest/sidecar reads remain a separate open bound.
+
+## Implementation Batch 14: Compact Dashboard Stage Progress
+
+`listRecent` and `listOverviewRuns` now use a separate per-run progress record
+containing stage ID, block, status and optional start time. Previously both
+queries loaded full `runStages` documents solely to calculate those fields.
+The normal fenced stage upsert initializes this record only before a run's first
+stage exists, and updates it in the same transaction as the authoritative ledger.
+Self-heal updates existing and newly inserted stages together. Cost/output-only
+writes leave the progress record unchanged; child-cost receipts do not affect
+its fields. Channel deletion also removes the progress record.
+
+Legacy runs are explicitly marked for full-ledger fallback, never represented by
+a partial mirror. This avoids a large backfill, preserves old comparisons, and
+means these runs do not receive the new read savings. Detailed stage views,
+Pipeline Doctor, and resume readers remain unchanged and still read full rows.
+Compact writes add a small row read per normal stage update, a first-write
+enrollment probe, and a compact write only when progress changes. This trade-off
+targets repeated dashboard reads and payload-driven subscription invalidations;
+it is not a blanket reduction in database operations.
+
+Actual mutation/query handler fixtures preserve progress across creation,
+completion, timing changes, self-heal, legacy fallback, stale-worker rejection,
+owner/viewer boundaries and remote-child cost updates. A two-stage fixture with
+over 400,000 serialized characters of input/output data produces a progress record
+under 1,000 characters; the actual dashboard/list queries perform zero `runStages`
+reads for that enrolled run and match the old summary. These are fixture payload
+sizes and logical reads, not production wire bytes or measured billing savings.
+
+Deployment is pending. Deploy the complete Convex schema and all stage writers
+together. A rollback must retain projection maintenance or invalidate the compact
+records before restoring a writer that does not maintain them; otherwise the
+new reader could trust stale progress after a later rollout. No bulk migration,
+production mutation, thumbnail work or paid generation was performed.
+
+The network-isolated compatibility sweep completed 835 selected test files:
+834 passed and the unchanged DocuMotion Google Fonts fetch failed offline.
+Thirty thumbnail-named files were excluded. Focused progress, enrichment,
+stage-reuse, cost, self-heal, lease and authorization checks passed, as did
+TypeScript and scoped lint. A subsequent focused cleanup fixture verifies the
+new record follows channel deletion without deleting another run's record.
+This is not a complete green production release gate.

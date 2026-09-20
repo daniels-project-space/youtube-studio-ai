@@ -1117,6 +1117,8 @@ export const deleteChannel = mutation({
       .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
       .collect();
     for (const r of runs) {
+      const progress = await ctx.db.query("runStageProgress").withIndex("by_run", q => q.eq("runId", r._id)).unique();
+      if (progress) await ctx.db.delete(progress._id);
       for (const s of await ctx.db.query("runStages").withIndex("by_run", (q) => q.eq("runId", r._id)).collect()) {
         await ctx.db.delete(s._id);
       }

@@ -26,6 +26,7 @@ function context() {
       { _id: "runs:active-b-1", _creationTime: 6, ownerId: OWNER, channelId: CHANNEL_B, status: "running", startedAt: 25, leaseExpiresAt: Date.now() + 60_000 },
     ],
     runStages: [],
+    runStageProgress: [],
   };
   let channelGets = 0;
   let runIndexReads = 0;
@@ -62,6 +63,11 @@ function context() {
         },
         async collect() {
           return rows[table]!.filter((row) => filters.every(([field, value]) => row[field] === value));
+        },
+        async unique() {
+          const matches = await query.collect();
+          assert(matches.length <= 1);
+          return matches[0] ?? null;
         },
       };
       return query;

@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { deriveReleaseEvidenceProjection } from "../src/lib/releaseEvidenceStatus";
 import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "../src/lib/runLease";
 import { StageReuseReceiptSchema } from "../src/engine/stageReuseContract";
+import { prepareRunStageProgress, updateRunStageProgress } from "./runStageProgressProjection";
 
 /**
  * Release evidence is the only artifact subset needed for the qa_visual run
@@ -105,6 +106,7 @@ export const upsertRunStage = mutation({
 
     let stageId: Id<"runStages">;
     let stageOutputs: unknown = args.outputs;
+    const progress = await prepareRunStageProgress(ctx, args.ownerId, args.runId);
     if (existing) {
       const patch: Record<string, unknown> = { status: args.status };
       if (args.startedAt !== undefined) patch.startedAt = args.startedAt;
@@ -140,6 +142,11 @@ export const upsertRunStage = mutation({
         error: args.error,
       });
     }
+
+    await updateRunStageProgress(ctx, args.ownerId, args.runId, [{
+      stageId, block: args.block, status: args.status,
+      ...((args.startedAt ?? existing?.startedAt) === undefined ? {} : { startedAt: args.startedAt ?? existing?.startedAt }),
+    }], progress);
 
     // Artifact persistence precedes the runner's `qa_visual: ok` transition.
     // Read the raw rows only after writing this stage, then project a

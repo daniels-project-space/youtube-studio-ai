@@ -14,6 +14,7 @@ import { pipelineInvocationSha256 } from "../src/lib/pipelineInvocationHash";
 import { verifiedWorkerDeploymentFields, workerDeploymentValidator, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 import { frozenRunPipelinePresentation } from "../src/lib/runPipelinePresentation";
 import { summarizeRunStageProgress } from "../src/lib/runStageProgress";
+import { readRunStageProgress, updateRunStageProgress } from "./runStageProgressProjection";
 import {
   assertScheduledPlanPayloadMatches,
   normalizeScheduledPlanPayload,
@@ -1938,14 +1939,17 @@ export const advanceSelfHealGeneration = mutation({
           }
         : {}),
     });
+    const progressUpdates: Parameters<typeof updateRunStageProgress>[3] = [];
     for (const block of rerunBlocks) {
       const existing = stagesByBlock.get(block);
       if (existing?.length) {
         for (const stage of existing) {
           await ctx.db.patch(stage._id, { status: "superseded", error });
+          progressUpdates.push({ stageId: stage._id, block, status: "superseded",
+            ...(stage.startedAt === undefined ? {} : { startedAt: stage.startedAt }) });
         }
       } else {
-        await ctx.db.insert("runStages", {
+        const stageId = await ctx.db.insert("runStages", {
           ownerId: args.ownerId,
           runId: args.runId,
           block,
@@ -1954,8 +1958,10 @@ export const advanceSelfHealGeneration = mutation({
           cost: 0,
           error,
         });
+        progressUpdates.push({ stageId, block, status: "superseded" });
       }
     }
+    await updateRunStageProgress(ctx, args.ownerId, args.runId, progressUpdates);
     return { generation: nextGeneration };
   },
 });
@@ -3412,7 +3418,7 @@ export const listOverviewRuns = query({
           })
         : undefined;
       const stages = recentLive
-        ? await ctx.db.query("runStages").withIndex("by_run", (q) => q.eq("runId", run._id)).collect()
+        ? await readRunStageProgress(ctx, run.ownerId, run._id)
         : [];
       return {
         _id: run._id,
@@ -3516,10 +3522,7 @@ export const listRecent = query({
             })
           : undefined;
         const stages = live
-          ? await ctx.db
-              .query("runStages")
-              .withIndex("by_run", (q) => q.eq("runId", run._id))
-              .collect()
+          ? await readRunStageProgress(ctx, run.ownerId, run._id)
           : [];
         return {
           _id: run._id,

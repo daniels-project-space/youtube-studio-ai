@@ -160,6 +160,7 @@ async function main() {
           };
           predicate(q);
           return {
+            unique: async () => null,
             take: async () => table === "runs" ? [run] : [],
             collect: async () => table === "runStages" ? stages : [],
           };

@@ -1287,6 +1287,15 @@ export default defineSchema({
     receipt: v.any(),
   }).index("by_worker_instance", ["workerName", "instanceId"]),
 
+  // Compact list-view progress. Missing stages marks a legacy run using full reads.
+  runStageProgress: defineTable({
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    stages: v.optional(v.array(v.object({
+      stageId: v.id("runStages"), block: v.string(), status: v.string(), startedAt: v.optional(v.number()),
+    }))),
+  }).index("by_run", ["runId"]),
+
   // Per-block progress for a run — drives the live UI.
   runStages: defineTable({
     ownerId: v.string(),
