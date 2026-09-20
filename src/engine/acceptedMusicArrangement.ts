@@ -11,6 +11,25 @@ function nonblankText(maximum?: number) {
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/u);
 const fraction = z.number().finite().min(0).max(1);
 
+const MusicReviewContextBodySchema = z.object({
+  version: z.literal("music-review-context/v1"),
+  topic: nonblankText(), family: nonblankText(120), channelName: z.string().max(500).nullable(),
+  promptContext: nonblankText(65_536),
+}).strict();
+
+export const MusicReviewContextSchema = MusicReviewContextBodySchema.extend({ fingerprint }).strict()
+  .superRefine((context, issue) => {
+    const { fingerprint: supplied, ...body } = context;
+    if (supplied !== sha256Hex(canonicalJson(body))) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, path: ["fingerprint"], message: "music review context fingerprint mismatch" });
+    }
+  });
+
+export function createMusicReviewContext(input: Omit<z.infer<typeof MusicReviewContextBodySchema>, "version">) {
+  const body = MusicReviewContextBodySchema.parse({ version: "music-review-context/v1", ...input });
+  return MusicReviewContextSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+}
+
 export const AcceptedMusicArrangementSectionSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/u),
   label: nonblankText(80),
@@ -59,11 +78,15 @@ const AcceptedMusicArrangementBodySchema = z.object({
   topic: nonblankText(),
   sourceBriefFingerprint: fingerprint,
   arrangement: AcceptedMusicArrangementDraftSchema,
+  reviewContext: MusicReviewContextSchema.optional(),
 }).strict();
 
 export const AcceptedMusicArrangementSchema = AcceptedMusicArrangementBodySchema.extend({
   fingerprint,
 }).strict().superRefine((artifact, issue) => {
+  if (artifact.reviewContext && artifact.reviewContext.topic !== artifact.topic) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, path: ["reviewContext"], message: "music review context belongs to another topic" });
+  }
   const { fingerprint: suppliedFingerprint, ...body } = artifact;
   if (suppliedFingerprint !== sha256Hex(canonicalJson(body))) {
     issue.addIssue({ code: z.ZodIssueCode.custom, path: ["fingerprint"], message: "accepted music arrangement fingerprint does not bind its content" });
@@ -111,14 +134,19 @@ export function createAcceptedMusicArrangement(input: {
   sourceBrief: unknown;
   arrangement: unknown;
 }): AcceptedMusicArrangement {
+  const briefFingerprint = sourceBriefFingerprint(input.sourceBrief);
+  const reviewContext = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
+    Object.hasOwn(input.sourceBrief, "reviewContext")
+    ? MusicReviewContextSchema.parse((input.sourceBrief as Record<string, unknown>).reviewContext) : undefined;
   const body = AcceptedMusicArrangementBodySchema.parse({
     version: ACCEPTED_MUSIC_ARRANGEMENT_VERSION,
     ownerId: input.ownerId,
     channelId: input.channelId,
     runId: input.runId,
     topic: input.topic,
-    sourceBriefFingerprint: sourceBriefFingerprint(input.sourceBrief),
+    sourceBriefFingerprint: briefFingerprint,
     arrangement: input.arrangement,
+    ...(reviewContext ? { reviewContext } : {}),
   });
   return AcceptedMusicArrangementSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
 }

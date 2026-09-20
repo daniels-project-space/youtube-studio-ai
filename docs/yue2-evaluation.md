@@ -296,10 +296,22 @@ diagnostics. The review runtime needs FFmpeg as well as FFprobe.
 
 True peak, perceptual artifacts, unwanted
 vocals, channel-personality fit, arrangement fidelity, repetition, ending and
-listening quality remain unresolved, not invented passing scores. The accepted
-arrangement and topic are exposed, but a source-brief fingerprint alone does not
-prove channel-personality compliance. Human review/decision UI, retained
-personality/reference context, remaining perceptual measurements and real GPU/audio
+listening quality remain unresolved, not invented passing scores. New opt-in
+composer outputs retain `music-review-context/v1`: the exact prompt context
+containing channel positioning, vibe, motif, works/avoid lists, doctrine,
+Style-DNA, role directives and any serialized-episode context supplied to the
+composer, plus topic, family and channel name. It is created server-side before
+dispatch, never authored by the model. The family is now explicit in that
+composer's prompt. Context fingerprints are bound into the source brief and
+accepted arrangement, then preserved through the durable evaluation request.
+The provider's accepted music direction is not silently rewritten to add it.
+
+The review endpoint exposes the retained context for comparison and keeps
+`channelPersonalityVerified: false`. Older artifacts remain unchanged and show
+`contextRetained: false`; live channel settings are not used to reconstruct or
+backfill historical intent. Retention alone does not prove channel-personality
+compliance. Human review/decision UI, reference comparisons, remaining
+perceptual measurements and real GPU/audio
 qualification remain required. No thumbnail module changes are part of this work.
 
 ```bash

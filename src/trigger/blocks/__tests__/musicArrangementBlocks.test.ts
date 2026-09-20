@@ -124,10 +124,11 @@ async function main() {
   assert.equal(calls.length, callsBeforeValidation, "legacy pairing is rejected during graph validation before any text purchase");
 
   for (const arrangement of [flat, developing, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
+    const family = arrangement.role === "narration_bed" ? "narrated_stock" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const outputs: Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0][] = [];
     const resolved = validatePipeline([
-      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { targetSeconds: 1800 } },
+      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { targetSeconds: 1800, family } },
       { block: "music_arrangement_plan" },
     ], Object.keys(seedStore));
     const beforeCalls = calls.length;
@@ -143,6 +144,11 @@ async function main() {
     assert.equal(Object.hasOwn(producedBrief.audio, "voiceFx"), false);
     assert.equal(Object.hasOwn(producedBrief.directives as object, "voiceFx"), false);
     assert.equal(producedBrief.musicPrompt, arrangement.direction);
+    assert.ok(producedBrief.reviewContext);
+    assert.deepEqual(accepted.reviewContext, producedBrief.reviewContext);
+    assert.equal(accepted.reviewContext?.topic, seedStore.topic);
+    assert.equal(accepted.reviewContext?.channelName, seedStore.channelName);
+    assert.equal(accepted.reviewContext?.family, family);
     assert.deepEqual(accepted.arrangement, arrangement, "no inferred sections, normalization, or duration clamp");
     assert.equal(accepted.sourceBriefFingerprint, sha256Hex(canonicalJson(result.store.musicBrief)));
     for (const key of ["ownerId", "channelId", "runId"] as const) assert.equal(accepted[key], stageContext()[key]);
@@ -158,7 +164,14 @@ async function main() {
     assert.ok(request.prompt.includes(bible.composerDoctrine!));
     assert.ok(request.prompt.includes("ambient strings"));
     assert.ok(request.prompt.includes("30 min"));
+    assert.ok(request.prompt.startsWith(producedBrief.reviewContext.promptContext + "\n\n"), "review retains the exact context actually dispatched");
+    for (const value of [bible.positioning, bible.vibe, bible.iconicMotif, bible.avoidInSpace[0], bible.composerDoctrine!, "ambient strings", "Operator role directives:"]) {
+      assert.ok(producedBrief.reviewContext.promptContext.includes(value), `missing review grounding: ${value}`);
+    }
+    assert.ok(request.prompt.includes(`Content family: ${producedBrief.reviewContext.family}.`));
     assert.ok(!request.schema.safeParse({ ...response as object, inventedField: true }).success);
+    assert.ok(!request.schema.safeParse({ ...response as object, reviewContext: producedBrief.reviewContext }).success,
+      "the model cannot author its own channel-context evidence");
 
     const plannerContext = stageContext({ topic: seedStore.topic, musicBrief: result.store.musicBrief });
     const first = await musicArrangementPlan.run(plannerContext);

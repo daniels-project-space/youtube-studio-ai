@@ -37,6 +37,8 @@ export async function GET(request: Request) {
       brief: {
         topic: material.request.acceptedArrangement.topic,
         sourceBriefFingerprint: material.request.acceptedArrangement.sourceBriefFingerprint,
+        reviewContext: material.request.acceptedArrangement.reviewContext ?? null,
+        contextRetained: material.request.acceptedArrangement.reviewContext !== undefined,
         channelPersonalityVerified: false,
       },
       allocation: {

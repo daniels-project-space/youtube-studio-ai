@@ -16,7 +16,7 @@ import {
   type ArrangementComposerAdmission,
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
-import { AcceptedMusicArrangementDraftSchema } from "@/engine/acceptedMusicArrangement";
+import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StructureBrief,
@@ -292,6 +292,7 @@ const arrangementComposerResponseSchema = z.object({
 
 export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
+  reviewContext: MusicReviewContextSchema.optional(),
   audio: z.object({
     duckDb: z.number().finite(),
     bedLufs: z.number().finite(),
@@ -316,10 +317,12 @@ export async function briefComposerWithArrangement(
 ): Promise<z.infer<typeof ComposerBriefWithArrangementSchema>> {
   const config = agentJsonConfiguration("composer_arrangement");
   assertArrangementComposerAdmission(config.model, admission);
-  const prompt =
-      `${header(bible, ctx)}\n\n` +
-      (bible.composerDoctrine ? `Your doctrine: ${bible.composerDoctrine}\n\n` : "") +
-      (ctx.dnaAudio ? `${ctx.dnaAudio}\n\n` : "") +
+  const promptContext = [
+    header(bible, ctx), `Content family: ${ctx.family}.`,
+    bible.composerDoctrine ? `Your doctrine: ${bible.composerDoctrine}` : "",
+    ctx.dnaAudio ?? "",
+  ].filter(Boolean).join("\n\n");
+  const prompt = `${promptContext}\n\n` +
       `Author this video's complete instrumental music arrangement. Preserve the locked channel sound, ` +
       `operator direction, and episode nuance. You own the musical form; the generator will not invent ` +
       `a build, drop, climax, motif, or section progression for you. A continuous flat arrangement is valid ` +
@@ -341,6 +344,9 @@ export async function briefComposerWithArrangement(
       `"startFraction":number,"endFraction":number,"energy":number,"instruction":string}]},` +
       `"duckDb":number,"bedLufs":number,"voiceFx":string?}.`;
   assertArrangementComposerInput(prompt, config.system);
+  const reviewContext = createMusicReviewContext({
+    topic: ctx.topic, family: ctx.family, channelName: ctx.channelName ?? null, promptContext,
+  });
   let dispatchAdmitted = false;
   try {
     const raw = arrangementComposerResponseSchema.parse(await agentJson({
@@ -365,6 +371,7 @@ export async function briefComposerWithArrangement(
       },
     }));
     return ComposerBriefWithArrangementSchema.parse({
+      reviewContext,
       arrangement: raw.arrangement,
       musicPrompt: raw.arrangement.direction,
       audio: {

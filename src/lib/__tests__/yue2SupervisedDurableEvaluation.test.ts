@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import Module from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAcceptedMusicArrangement } from "@/engine/acceptedMusicArrangement";
+import { createAcceptedMusicArrangement, createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   createYuE2AcceptedArrangementRequest, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
@@ -27,7 +27,10 @@ const policy: YuE2ExecutionPolicy = {
 };
 const request = createYuE2AcceptedArrangementRequest({
   arrangement: createAcceptedMusicArrangement({ ownerId: "supervised-owner", channelId: "supervised-channel", runId: "supervised-run",
-    topic: "Synthetic supervised evaluation", sourceBrief: { musicPrompt: "Hold steady" },
+    topic: "Synthetic supervised evaluation", sourceBrief: { musicPrompt: "Hold steady", reviewContext: createMusicReviewContext({
+      topic: "Synthetic supervised evaluation", family: "music_loop", channelName: "Supervised fixture",
+      promptContext: "Keep a quiet continuous texture. No dramatic build; preserve the channel's restrained personality.",
+    }) },
     arrangement: { role: "primary_music", direction: "No invented build", requestedDurationSec: 60,
       form: "continuous", ending: "natural_cadence", playback: "once",
       sections: Array.from({ length: 4 }, (_, i) => ({ id: `section-${i}`, label: "Steady section",
@@ -299,6 +302,7 @@ async function main() {
     assert.equal(result.quality.signal.frames, 4800);
     assert.equal(result.quality.signal.longestQuietWindowRunSec, 0.1);
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
+    assert.deepEqual(result.request.acceptedArrangement.reviewContext, request.acceptedArrangement.reviewContext);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
   await test("read-only review refuses unsafe scope before storage and never follows foreign candidate keys", async () => {

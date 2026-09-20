@@ -5,6 +5,7 @@ import {
   AcceptedMusicArrangementDraftSchema,
   AcceptedMusicArrangementSchema,
   createAcceptedMusicArrangement,
+  createMusicReviewContext,
   projectAcceptedMusicArrangementToYuEStyle,
   type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
@@ -234,6 +235,32 @@ function utf8Limit(): void {
   assert.equal(AcceptedMusicArrangementSchema.safeParse(overflow).success, true, "provider limit does not rewrite provider-neutral acceptance");
 }
 
+function retainedReviewContext(): void {
+  const context = createMusicReviewContext({
+    topic: input.topic, family: "music_loop", channelName: "Quiet hours",
+    promptContext: "Restrained nocturnal personality. Never add a climax. Preserve the natural ending.",
+  });
+  const accepted = createAcceptedMusicArrangement({ ...input, arrangement: draft(),
+    sourceBrief: { ...input.sourceBrief, reviewContext: context } });
+  assert.deepEqual(accepted.reviewContext, context);
+  assert.equal(Object.hasOwn(make(), "reviewContext"), false, "old artifacts never acquire invented context");
+  assert.deepEqual(AcceptedMusicArrangementSchema.parse(JSON.parse(JSON.stringify(accepted))), accepted);
+  assert.throws(() => createAcceptedMusicArrangement({ ...input, arrangement: draft(), sourceBrief: {
+    reviewContext: { ...context, promptContext: "Different channel personality" },
+  } }), /context fingerprint mismatch/);
+  const changed = createMusicReviewContext({ topic: context.topic, family: context.family,
+    channelName: context.channelName, promptContext: "Different channel personality" });
+  assert.throws(() => AcceptedMusicArrangementSchema.parse({ ...accepted, reviewContext: changed }), /fingerprint/);
+  assert.throws(() => createAcceptedMusicArrangement({ ...input, topic: "Another episode", arrangement: draft(),
+    sourceBrief: { reviewContext: context } }), /another topic/);
+  const second = createAcceptedMusicArrangement({ ...input, arrangement: draft(), sourceBrief: { reviewContext: changed } });
+  assert.notEqual(second.fingerprint, accepted.fingerprint);
+  assert.notEqual(second.sourceBriefFingerprint, accepted.sourceBriefFingerprint);
+  assert.equal(projectAcceptedMusicArrangementToYuEStyle(second), projectAcceptedMusicArrangementToYuEStyle(accepted),
+    "retaining review context does not silently rewrite the composer's accepted direction");
+}
+
+retainedReviewContext();
 validation();
 fingerprints();
 projection();

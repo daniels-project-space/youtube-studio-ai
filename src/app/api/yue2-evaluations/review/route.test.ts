@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { getFunctionName } from "convex/server";
 import { createOperatorSessionToken } from "@/lib/operatorSession";
+import { createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
 
 const env = { ...process.env };
 process.env.STUDIO_OWNER_ID = "review-owner";
@@ -24,6 +25,7 @@ const material = {
   },
   request: { acceptedArrangement: {
     topic: "Quiet overnight rain", sourceBriefFingerprint: "b".repeat(64),
+    reviewContext: undefined as ReturnType<typeof createMusicReviewContext> | undefined,
     arrangement: { direction: "Steady, no startling changes", requestedDurationSec: 60 },
   } },
   quality: { status: "blocked", durationMatches: false, productionApproved: false },
@@ -97,10 +99,20 @@ async function main() {
   assert.equal(body.review.candidateSha256, material.candidateSha256);
   assert.equal(body.review.quality.status, "blocked");
   assert.equal(body.review.brief.channelPersonalityVerified, false);
+  assert.equal(body.review.brief.contextRetained, false);
+  assert.equal(body.review.brief.reviewContext, null);
   assert.equal(body.review.allocation.providerBilledCostUsdMicros, null);
   assert.equal(body.review.nativeWavUrl, "https://signed-fixture.invalid/native.wav");
   assert.doesNotMatch(JSON.stringify(body), /private-binding-key|private-worker|audioKey|bindingKey/);
   assert.deepEqual(calls.slice(-4), ["runs:getRun", "channels:getChannel", "material", "presign"]);
+  material.request.acceptedArrangement.reviewContext = createMusicReviewContext({
+    topic: "Quiet overnight rain", family: "music_loop", channelName: "Night rain",
+    promptContext: "Unhurried rainfall, restrained texture, no sudden changes.",
+  });
+  const withContext = await (await GET(request())).json();
+  assert.deepEqual(withContext.review.brief.reviewContext, material.request.acceptedArrangement.reviewContext);
+  assert.equal(withContext.review.brief.contextRetained, true);
+  assert.equal(withContext.review.brief.channelPersonalityVerified, false, "retention is not a creative verdict");
   console.log("YuE review route PASS: real session auth, ownership, verified-material-only signing, private projection, no approval");
 }
 
