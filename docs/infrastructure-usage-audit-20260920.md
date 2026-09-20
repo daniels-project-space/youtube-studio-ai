@@ -220,3 +220,33 @@ checking (`tsc --noEmit --incremental`) also passed. No provider calls
 or thumbnail generation were involved. This batch is not deployed; browser and
 production behavior remain unverified. Broader delivery and validation-receipt
 work remains open.
+
+## Third implementation batch
+
+`bundleFanoutDispatcher` and `serializedProgramEpisodeRetryDispatcher` no longer
+invoke the general provider secret bootstrap. Their real execution paths use only
+the authenticated Studio Convex client, pure receipt builders, and Trigger SDK
+delivery. The Convex JWT private key is a deployment input in `trigger.config.ts`;
+the client does not obtain it from provider hydration. Missing deployment
+credentials still fail closed. Generation workers retain their own bootstrap.
+
+Previously, each cold dispatcher process attempted to hydrate 21 service namespaces
+before checking its outbox. `hydrateEnv` queries the central vault even when all
+the corresponding provider keys are already in the environment. Successful reads
+are cached only within the process. Removing this work avoids unnecessary vault
+Convex requests, response bytes, and Trigger execution time; it also keeps unrelated
+generation credentials out of these delivery-only paths.
+
+At two minute schedules, the cold-per-tick upper-bound scenario is 86,400 starts
+times 21 namespaces = 1,814,400 vault requests per 30 days. This is not an observed
+billing total: warm process reuse, absent vault access, and failures affect actual
+calls. The vault is a separate Convex deployment from the Studio application.
+Schedule count, cadence, outbox queries, and GPU safeguards are unchanged by this
+batch; event-driven dispatch remains the larger follow-up.
+
+Seven local checks passed across real-body provider-isolation fixtures and existing
+bundle/serialized/worker-pin contracts. Fixtures reject any bootstrap/provider
+import and exercise empty ticks, immutable bundle delivery, enqueue failure
+deferral, busy claims, serialized worker pins, and foreign-project rejection.
+Scoped ESLint and repository TypeScript checking also passed. No external API or
+generation was invoked. Deployment and production savings are not yet verified.

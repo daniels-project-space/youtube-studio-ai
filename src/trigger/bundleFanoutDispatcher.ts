@@ -2,7 +2,6 @@ import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { bootstrapSecrets } from "@/lib/bootstrap";
 import { bundleFanoutDispatchSchedule } from "@/lib/bundleFanout";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 
@@ -36,9 +35,7 @@ export async function dispatchDueBundleFanouts(input?: {
   ownerId?: string;
   now?: number;
 }): Promise<{ due: number; triggered: number; deferred: number }> {
-  await bootstrapSecrets((message) =>
-    console.log(`[bundle-fanout-dispatcher] ${message}`),
-  );
+  // Delivery needs only deployed Convex/Trigger credentials, not generation providers.
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";

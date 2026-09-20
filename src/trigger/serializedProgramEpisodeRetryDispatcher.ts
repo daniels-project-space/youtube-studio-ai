@@ -4,7 +4,6 @@ import { api } from "../../convex/_generated/api";
 import {
   serializedProgramEpisodeBusyRetrySchedule,
 } from "@/lib/serializedProgramEpisode";
-import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { ScheduledPlanRunPayload } from "@/lib/scheduledPlanRuntime";
 import type { RunPipelineInput } from "./runPipeline";
 import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
@@ -32,9 +31,7 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
   now?: number;
   dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">;
 }): Promise<{ due: number; triggered: number }> {
-  await bootstrapSecrets((message) =>
-    console.log(`[serialized-program-episode-retry-dispatcher] ${message}`),
-  );
+  // Delivery needs only deployed Convex/Trigger credentials, not generation providers.
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
