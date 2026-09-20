@@ -10,6 +10,7 @@ import type { RunPipelineInput } from "./runPipeline";
 import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 const SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT = 50;
+const SERIALIZED_PROGRAM_EPISODE_RETRY_CONCURRENCY = 4;
 
 type DueRetryReceipt = {
   runId: string;
@@ -44,7 +45,7 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
   })) as DueRetryReceipt[];
 
   let triggered = 0;
-  for (const receipt of due.slice(0, SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT)) {
+  const dispatch = async (receipt: DueRetryReceipt) => {
     const deploymentOptions = pipelineWorkerDeploymentDispatchOptions(receipt.workerDeployment);
     if (receipt.workerDeployment) {
       if (!input?.dispatchContext) throw new Error("bound serialized resume requires verified dispatch project/environment");
@@ -78,7 +79,20 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
       idempotencyKey,
     });
     triggered++;
-  }
+  };
+  const batch = due.slice(0, SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT);
+  let next = 0;
+  const failures: unknown[] = [];
+  // A bad receipt cannot starve other channels. Bound active delivery calls,
+  // and settle all started work before reporting failure to the scheduler.
+  await Promise.all(Array.from({ length: Math.min(batch.length, SERIALIZED_PROGRAM_EPISODE_RETRY_CONCURRENCY) }, async () => {
+    while (next < batch.length) {
+      const receipt = batch[next++];
+      try { await dispatch(receipt); }
+      catch (error) { failures.push(error); }
+    }
+  }));
+  if (failures.length) throw failures[0];
   return { due: due.length, triggered };
 }
 

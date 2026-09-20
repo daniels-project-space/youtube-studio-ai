@@ -10,7 +10,8 @@ import { dispatchDueSerializedProgramEpisodeRetries } from "./serializedProgramE
 export const sharedDeliveryRecovery = schedules.task({
   id: "shared-delivery-recovery",
   ...(deliveryRecoveryMode() === "shared" ? { cron: "* * * * *" } : {}),
-  maxDuration: 120,
+  // Inherit the project ceiling, as serialized recovery did before consolidation.
+  // A shorter aggregate deadline could terminate still-valid delivery batches.
   retry: { maxAttempts: 1 },
   run: async (_payload, options) => {
     if (deliveryRecoveryMode() !== "shared") return { skipped: "individual-delivery-recovery" };

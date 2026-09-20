@@ -17,7 +17,7 @@ const functions = {
   serialized: "dispatchDueSerializedProgramEpisodeRetries",
 } as const;
 
-function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure = false) {
+function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure: boolean | ((payload: Row) => Promise<void>) = false) {
   const queries: { name: string; args: Row }[] = [];
   const mutations: { name: string; args: Row }[] = [];
   const keys: { seed: string; options: Row }[] = [];
@@ -43,7 +43,8 @@ function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure = fals
       } },
       tasks: { trigger: async (task: string, payload: Row, options: Row) => {
         triggers.push({ task, payload, options });
-        if (triggerFailure) throw new Error("fixture enqueue failure");
+        if (typeof triggerFailure === "function") await triggerFailure(payload);
+        else if (triggerFailure) throw new Error("fixture enqueue failure");
         return { id: "trigger-fixture" };
       } },
     };
@@ -115,4 +116,47 @@ test("serialized delivery retains frozen invocation, exact worker pin and not-be
   const foreign = fixture("serialized", [receipt]);
   await assert.rejects(foreign.run({ dispatchContext: { ...workerDeployment, projectId: "foreign" } }), /worker deployment/);
   assert.deepEqual(foreign.triggers, []);
+});
+
+test("serialized recovery isolates a poison receipt and bounds concurrent delivery to four", async () => {
+  const due = Array.from({ length: 51 }, (_, index) => ({
+    runId: `run-${index}`, channelId: `channel-${index}`, invocationSha256: "a".repeat(64),
+    retryAt: 2_000_000, attempt: 1,
+  }));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let active = 0, peak = 0, completed = 0;
+  const f = fixture("serialized", due, undefined, async payload => {
+    active++; peak = Math.max(peak, active);
+    try {
+      await gate;
+      if (payload.runId === "run-0") throw new Error("fixture poison receipt");
+      completed++;
+    } finally { active--; }
+  });
+  let settled = false;
+  const result = f.run().then(() => { settled = true; return null; }, error => { settled = true; return error; });
+  for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+  assert.equal(f.triggers.length, 4);
+  assert.equal(active, 4);
+  assert.equal(settled, false);
+  release();
+  assert.match(String(await result), /fixture poison receipt/);
+  assert.equal(peak, 4);
+  assert.equal(active, 0);
+  assert.equal(completed, 49);
+  assert.equal(f.triggers.length, 50, "preserve the durable batch cap");
+  assert.equal(new Set(f.triggers.map(row => row.payload.runId)).size, 50);
+  assert.equal(f.queries.length, 1);
+  assert.deepEqual(f.mutations, []);
+});
+
+test("foreign worker receipt fails closed without starving valid sibling channels", async () => {
+  const valid = { runId: "valid", channelId: "channel", invocationSha256: "a".repeat(64), retryAt: 2_000_000, attempt: 1 };
+  const f = fixture("serialized", [{ ...valid, runId: "foreign", workerDeployment: {
+    version: "worker-a", projectId: "foreign", environmentId: "production",
+  } }, valid]);
+  await assert.rejects(f.run({ dispatchContext: { projectId: "project-a", environmentId: "production" } }), /worker deployment/);
+  assert.deepEqual(f.triggers.map(row => row.payload.runId), ["valid"]);
+  assert.equal(f.keys.length, 1, "foreign receipts cannot acquire a delivery key");
 });

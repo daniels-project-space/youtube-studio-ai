@@ -87,6 +87,7 @@ test("shared tick invokes all six real entry points directly and passes exact de
   }
   assert.equal(Object.keys(result as Row).length, 6);
   assert.equal(shared.retry?.maxAttempts, 1, "a failed aggregate must not automatically replay successful sibling handlers");
+  assert.equal(shared.maxDuration, undefined, "inherit the legacy serialized recovery ceiling rather than truncating its batch");
 });
 
 test("one synchronous failure does not suppress other handlers and aggregate waits for settlement", async () => {

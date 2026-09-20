@@ -357,9 +357,10 @@ has been made; no production saving is claimed.
 1. Obtain deployment/activation authorization. Keep the mode consistent between
    task indexing and runtime; do not change only a live worker environment setting.
 2. Verify realistic six-outbox batch latency, concurrent SDK calls, and transport
-   stalls in an isolated environment. Shared recovery has a 120-second task ceiling.
-   In particular, serialized recovery previously inherited the longer project
-   default: do not activate if its legitimate batches cannot fit the shared ceiling.
+   stalls in an isolated environment. Shared recovery now inherits the project
+   ceiling, preserving serialized recovery's previous limit (currently 7,200
+   seconds), rather than imposing a new 120-second cutoff. This ceiling does not
+   bound individual requests or prove that a batch completes within one cadence.
    Promise settlement isolates rejection, not CPU hangs or process termination.
 3. Deploy with the intended mode and inspect the live schedule inventory. Trigger
    synchronizes declarative cron additions/removals on deployment; separately
@@ -429,3 +430,25 @@ mutation isolation, failure retry, distinct artifacts, and eviction. This reduce
 repeat analysis CPU only within a warm process; it does not reduce WAV download
 bandwidth or guarantee cross-instance reuse. No paid generation, thumbnails, or
 production deployment is part of this batch. Production savings remain unmeasured.
+
+## Implementation Batch 10: Bound Serialized Recovery Delivery Concurrency
+
+The existing serialized-episode recovery handler now services its same maximum
+50 receipts with at most four concurrent delivery chains. Previously a rejected
+receipt ended the entire loop; now other selected receipts are serviced and all
+started work settles before the first failure is reported. A foreign or malformed
+worker pin still fails before idempotency-key creation or enqueue. Frozen payloads,
+global keys, channel concurrency keys, and not-before times are unchanged.
+
+This applies to both individual and shared mode. It adds no database reads,
+mutations, provider bootstrap, task children, or generation admission. The shared
+task inherits the project duration ceiling to avoid shortening the old serialized
+handler's allowance. The aggregate still has one attempt; shared mode is not active.
+
+Deterministic delayed-transport tests execute the real handler and payload builders:
+four calls remain in flight, one fails, the other 49 selected receipts complete,
+and receipt 51 is not dispatched. Another case rejects a foreign worker while
+delivering the valid sibling. These prove concurrency and rejection isolation,
+not production latency or billing savings. Hung calls can still occupy slots;
+repeated poison receipts can still consume batch capacity. Durable retry backoff,
+transport cancellation, and actual six-handler load verification remain open.
