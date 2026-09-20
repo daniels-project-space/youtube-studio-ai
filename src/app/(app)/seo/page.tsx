@@ -20,8 +20,8 @@ import { compact } from "@/components/Chart";
 import { IconSeo, IconSpark, IconExternal } from "@/components/icons";
 import styles from "./seo.module.css";
 
-/** A channel row enriched with its identity.niche (from listChannels). */
-type ChannelWithNiche = ChannelRow & { niche: string | null };
+/** Only directory fields are needed to select a channel's stored niche. */
+type ChannelWithNiche = Pick<ChannelRow, "_id" | "name" | "slug"> & { niche: string | null };
 
 type SeoSection = "brief" | "signals" | "strategy";
 
@@ -114,10 +114,7 @@ export function SeoWorkspace({
     document.getElementById(`seo-tab-${nextSection}`)?.focus();
   };
 
-  // listChannels carries identity.niche — we read it for the niche selector.
-  const channels = useQuery(api.channels.listChannels, { ownerId }) as
-    | (ChannelRow & { identity?: { niche?: string } })[]
-    | undefined;
+  const channels = useQuery(api.channels.listChannelDirectory, { ownerId });
 
   const channelNiches = useMemo<ChannelWithNiche[]>(
     () =>
@@ -125,9 +122,6 @@ export function SeoWorkspace({
         _id: c._id,
         name: c.name,
         slug: c.slug,
-        status: c.status,
-        template: c.template,
-        budget: c.budget,
         niche: c.identity?.niche ?? null,
       })),
     [channels],

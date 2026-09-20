@@ -157,7 +157,8 @@ assert.match(livePipelineCss, /@media \(max-width: 520px\)/);
 // console in one responsive workspace backed by the persisted run queries.
 assert.match(runDetail, /RunMediaWorkbench/);
 assert.match(runDetail, /<LivePipeline nodes=\{nodes\}/);
-assert.match(runDetail, /<LogConsole runId=\{run\._id\}/);
+assert.match(runDetail, /<LogConsole key=\{run\._id\} runId=\{run\._id\}/,
+  "switching runs must reset console disclosure state while retaining the correct log query ID");
 assert.match(runDetail, /styles\.summaryGrid/);
 assert.match(runDetail, /data-run-status=\{run\.status\}/);
 assert.match(runDetail, /publishedOpen && <div className=\{styles\.publishedFrame\}/);

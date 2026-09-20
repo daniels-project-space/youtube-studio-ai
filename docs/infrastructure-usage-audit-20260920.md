@@ -299,3 +299,30 @@ has no verified per-runtime deployed-source receipt, and a previous successful C
 run alone is insufficient: missing credentials or stale policy can skip the actual
 deployment. Add durable, independently verified Convex and Trigger receipts before
 using runtime fingerprints to authorize reuse of a prior deployment.
+
+## Sixth implementation batch
+
+`channels:listChannelDirectory` now returns an explicit validated projection:
+channel ID, name, slug, and identity image key/niche/palette. The global channel
+switcher, Library filter, and SEO niche selector use this same query and owner
+argument. Their types no longer pretend they require a complete channel record.
+The existing `listChannels` query is unchanged for modules and full-context views.
+
+The query preserves the existing owner authorization wrapper and indexed owner
+filter. It does not mutate or truncate stored channel personality, pipeline,
+budget, or architect data. A large-context fixture verifies more than 99% smaller
+serialized output for that fixture only, absence of excluded fields, unchanged
+full-query output, missing-artwork behavior, and rejection of owner spoofing before
+database access. This is not a measured fleet-wide saving.
+
+This projection reduces returned/subscription payload, not database document-read
+bytes: it still reads full channel documents. A maintained compact directory table
+is needed to remove those reads and unrelated document invalidations. Existing
+identical subscriptions can already share work; do not multiply savings by the
+number of mounted consumers.
+
+Directory handler/wiring, Convex authorization, and operator UI contract checks
+passed, as did repository TypeScript checking and scoped ESLint. The operator
+contract now also asserts the run-keyed LogConsole introduced in the first batch.
+No generation, deployment, or production bandwidth measurement was performed.
+Deployment order must put the new Convex query live before the web callers.

@@ -965,6 +965,35 @@ export const getChannelBySlug = query({
   },
 });
 
+/** Navigation-only projection. Full identity and pipeline state stay on detail queries. */
+export const listChannelDirectory = query({
+  args: { ownerId: v.string() },
+  returns: v.array(v.object({
+    _id: v.id("channels"),
+    name: v.string(),
+    slug: v.string(),
+    identity: v.object({
+      imageKey: v.optional(v.string()),
+      niche: v.optional(v.string()),
+      palette: v.array(v.string()),
+    }),
+  })),
+  handler: async (ctx, args) => {
+    const channels = await ctx.db.query("channels")
+      .withIndex("by_owner", q => q.eq("ownerId", args.ownerId)).collect();
+    return channels.map(channel => ({
+      _id: channel._id,
+      name: channel.name,
+      slug: channel.slug,
+      identity: {
+        imageKey: channel.identity.imageKey,
+        niche: channel.identity.niche,
+        palette: channel.identity.palette,
+      },
+    }));
+  },
+});
+
 export const listChannels = query({
   args: { ownerId: v.string() },
   handler: async (ctx, args) => {

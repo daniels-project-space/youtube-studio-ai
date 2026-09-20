@@ -6,7 +6,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
-import type { ChannelRow, VideoRow } from "@/lib/types";
+import type { VideoRow } from "@/lib/types";
 import { orderLibraryVideos } from "@/lib/libraryOrder";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -55,9 +55,7 @@ export default function LibraryPage() {
     | VideoRow[]
     | undefined;
   const summary = useQuery(api.videos.librarySummary, { ownerId }) as LibrarySummary | undefined;
-  const channels = useQuery(api.channels.listChannels, { ownerId }) as
-    | ChannelRow[]
-    | undefined;
+  const channels = useQuery(api.channels.listChannelDirectory, { ownerId });
   const setLibraryState = useMutation(api.videos.setLibraryState);
   const applyBulkLibraryState = useMutation(api.videos.applyBulkLibraryState);
   const undoBulkLibraryState = useMutation(api.videos.undoBulkLibraryState);

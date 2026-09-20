@@ -27,7 +27,7 @@ export function LibraryFilters({
   onChange,
   resultCount,
 }: {
-  channels: ChannelRow[];
+  channels: Pick<ChannelRow, "_id" | "name" | "slug">[];
   state: LibraryFilterState;
   onChange: (next: LibraryFilterState) => void;
   resultCount?: number;

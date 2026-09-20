@@ -5,7 +5,6 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
-import type { ChannelRow } from "@/lib/types";
 import { IconChevron } from "./icons";
 import { ChannelAvatar } from "./ChannelArt";
 import { StudioMark } from "./StudioMark";
@@ -18,9 +17,7 @@ import { StudioMark } from "./StudioMark";
 export function ChannelSwitcher() {
   const ownerId = useOwnerId();
   const { selectedSlug, setSelectedSlug } = useSelectedChannel();
-  const channels = useQuery(api.channels.listChannels, { ownerId }) as
-    | ChannelRow[]
-    | undefined;
+  const channels = useQuery(api.channels.listChannelDirectory, { ownerId });
 
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
