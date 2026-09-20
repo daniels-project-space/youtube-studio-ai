@@ -533,3 +533,28 @@ generation were run for this batch.
 Deployment order remains Convex before Trigger: new workers require the new
 endpoints, while old workers remain compatible with the retained endpoints.
 No production deployment, schedule activation, or settings change was performed.
+
+## Implementation Batch 13: Bounded Prepared Image Transfers
+
+The weekly image producer previously verified every retained still with one
+unbounded `Promise.all`, then copied all H3 conditioning frames the same way.
+Both paths now admit at most four concurrent operations. On failure they stop
+admitting new operations and drain already-started work before rejecting, so a
+task retry cannot overlap abandoned local transfer/copy promises. Successful
+create-only copies remain reusable; failures never authorize image replacement.
+
+Retained stills, H3 source frames, and create-only collision reads now enforce
+the exact receipt/source byte length during download with a five-minute deadline.
+Fresh image downloads use the existing prepared-image contract's 50 MiB ceiling.
+The shared image-stage consumer validates all receipt bounds and digests before
+its first media read, then applies each exact byte cap. Hashes, candidate order,
+generation quality, and native H3 inputs remain unchanged; no thumbnail code or
+generation is involved.
+
+Controlled storage fixtures execute the actual sidecar verifier, consumer
+admission helper, and H3 copy/dispatch function. Twelve retained images produce
+a measured peak of four active transfers; a failed transfer stops new admission,
+waits for its three active siblings, and prevents H3 dispatch. Invalid later
+receipts cause zero consumer media reads; changed bytes still fail their digest.
+These are concurrency and transfer-bound proofs, not measured fleet RAM, latency,
+or billing reductions. JSON manifest/sidecar reads remain a separate open bound.

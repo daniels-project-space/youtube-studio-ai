@@ -1123,7 +1123,7 @@ function assertExactStillCandidates(shots: ShotPlan[], manifest: StillRenderMani
 }
 
 /** Validate a prepared sidecar again at the paid-stage boundary. */
-async function assertPreparedImagesForShots(
+export async function assertPreparedImagesForShots(
   shots: ShotPlan[],
   prepared: PlanWeekPreparedImages,
   scope: { ownerId: string; channelId: string; keyPrefix: string },
@@ -1148,11 +1148,15 @@ async function assertPreparedImagesForShots(
       item.shotId !== manifestItem.shotId ||
       item.candidateIndex !== manifestItem.candidateIndex ||
       item.stillKey !== manifestItem.stillKey ||
+      !Number.isSafeInteger(item.byteLength) || item.byteLength < 256 || item.byteLength > 50 * 1024 * 1024 ||
+      typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256) ||
       !item.stillKey.startsWith(`${scope.keyPrefix.replace(/\/$/, "")}/plan-batches/`)
     ) {
       throw new Error("prepared image byte receipt order does not match the still manifest");
     }
-    const bytes = await getObjectBytes(item.stillKey);
+  }
+  for (const item of prepared.items) {
+    const bytes = await getObjectBytes(item.stillKey, undefined, { maxBytes: item.byteLength, timeoutMs: 300_000 });
     if (bytes.byteLength !== item.byteLength || sha256BytesHex(bytes) !== item.sha256) {
       throw new Error(`prepared image ${item.stillKey} no longer matches its receipt`);
     }

@@ -31,6 +31,7 @@ import {
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 
@@ -68,7 +69,7 @@ type PreparedH3Batch = {
   receiptKey: string;
   jobs: Array<Omit<MiniMaxH3RenderRequest, "provider" | "execution">>;
   sceneIds: string[];
-  firstFrames: Array<{ sourceKey: string; destinationKey: string; sha256: string }>;
+  firstFrames: Array<{ sourceKey: string; destinationKey: string; sha256: string; byteLength: number }>;
 };
 
 function safePart(value: unknown, label: string): string {
@@ -188,7 +189,7 @@ export function buildPreparedH3Batch(args: {
       maxCostUsd: request.maxCostUsd,
     });
     sceneIds.push(shot.id);
-    firstFrames.push({ sourceKey: still.stillKey, destinationKey: firstFrame.r2Key, sha256: still.sha256 });
+    firstFrames.push({ sourceKey: still.stillKey, destinationKey: firstFrame.r2Key, sha256: still.sha256, byteLength: still.byteLength });
   }
   return {
     orderKey: `plan-week-h3-${args.manifestSha256.slice(0, 48)}`,
@@ -290,16 +291,16 @@ async function readPreparationManifest(payload: PlanWeekPreparedImagesArgs): Pro
   });
 }
 
-async function verifyStoredSidecar(key: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedImages | null> {
+export async function verifyStoredSidecar(key: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedImages | null> {
   let bytes: Uint8Array;
   try { bytes = await getObjectBytes(key); } catch (error) { if (objectNotFound(error)) return null; throw error; }
   const prepared = assertPlanWeekPreparedImagesBinding({ prepared: JSON.parse(new TextDecoder().decode(bytes)), manifest });
-  await Promise.all(prepared.items.map(async (item) => {
-    const media = await getObjectBytes(item.stillKey);
+  await forEachPreparedMedia(prepared.items, async (item) => {
+    const media = await getObjectBytes(item.stillKey, undefined, { maxBytes: item.byteLength, timeoutMs: 300_000 });
     if (media.byteLength !== item.byteLength || sha256BytesHex(media) !== item.sha256) {
       throw new Error(`weekly prepared image ${item.stillKey} failed its retained-byte integrity check`);
     }
-  }));
+  });
   return prepared;
 }
 
@@ -320,14 +321,14 @@ async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<v
   } catch (error) {
     const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
     if (status !== 409 && status !== 412) throw error;
-    const existing = await getObjectBytes(key);
+    const existing = await getObjectBytes(key, undefined, { maxBytes: bytes.byteLength, timeoutMs: 300_000 });
     if (existing.byteLength !== bytes.byteLength || sha256BytesHex(existing) !== sha256BytesHex(bytes)) {
       throw new Error(`weekly prepared image create-only collision at ${key}`);
     }
   }
 }
 
-async function dispatchPreparedFootage(
+export async function dispatchPreparedFootage(
   manifest: PlanWeekPreparationManifest,
   payload: PlanWeekPreparedImagesArgs,
   prepared: PlanWeekPreparedImages,
@@ -343,13 +344,13 @@ async function dispatchPreparedFootage(
   // H3's weekly worker only admits canonical first-frame keys. Copying the
   // verified still bytes into that namespace is create-only and idempotent;
   // a changed winner fails before Salad capacity admission.
-  await Promise.all(batch.firstFrames.map(async (frame) => {
-    const bytes = await getObjectBytes(frame.sourceKey);
-    if (sha256BytesHex(bytes) !== frame.sha256) {
+  await forEachPreparedMedia(batch.firstFrames, async (frame) => {
+    const bytes = await getObjectBytes(frame.sourceKey, undefined, { maxBytes: frame.byteLength, timeoutMs: 300_000 });
+    if (bytes.byteLength !== frame.byteLength || sha256BytesHex(bytes) !== frame.sha256) {
       throw new Error(`weekly prepared H3 source frame ${frame.sourceKey} failed its image receipt check`);
     }
     await persistMediaCreateOnly(frame.destinationKey, bytes);
-  }));
+  });
   const h3Payload = {
     ownerId: payload.ownerId,
     orderKey: batch.orderKey,
@@ -435,7 +436,7 @@ export const planWeekPreparedImagesTask = task({
       const identity = `${candidate.shotId}:${candidate.candidateIndex}`;
       if (seen.has(identity)) throw new Error(`weekly prepared images returned duplicate candidate ${identity}`);
       seen.add(identity);
-      const source = await getObjectBytes(candidate.key);
+      const source = await getObjectBytes(candidate.key, undefined, { maxBytes: 50 * 1024 * 1024, timeoutMs: 300_000 });
       const stillKey = planWeekPreparedImageKey({ ...canonicalScope(payload), index });
       await persistMediaCreateOnly(stillKey, source);
       const sha256 = sha256BytesHex(source);
