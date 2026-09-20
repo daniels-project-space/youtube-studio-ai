@@ -120,7 +120,7 @@ function evidence(remote: Remote) {
 type Bundle = ReturnType<typeof evidence>;
 function fixture() {
   return { objects: new Map<string, Buffer>(), calls: [] as string[], writes: [] as string[], reads: [] as string[],
-    posts: 0, authorizations: 0, audio, remote: "missing" as Remote, postState: "completed" as Remote,
+    posts: 0, authorizations: 0, probes: 0, analyses: 0, failAnalysis: false, audio, remote: "missing" as Remote, postState: "completed" as Remote,
     advertisedPolicy: policy, offline: false, observedPolicy: false, audioFailure: false,
     responseCount: 0, mutateEvidence: undefined as ((value: Bundle, sequence: number) => void) | undefined,
     putFault: undefined as ((key: string, bytes: Uint8Array) => void) | undefined };
@@ -129,6 +129,21 @@ let current = fixture();
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
 loader._load = function (id, ...args) {
+  if (id.endsWith("/yue2NativeAudio")) {
+    const actual = originalLoad.call(this, id, ...args) as typeof import("@/lib/yue2NativeAudio");
+    return { ...actual, probeYuE2NativeWav: (...input: Parameters<typeof actual.probeYuE2NativeWav>) => {
+      current.probes++;
+      return actual.probeYuE2NativeWav(...input);
+    } };
+  }
+  if (id.endsWith("/nativeAudioSignal")) {
+    const actual = originalLoad.call(this, id, ...args) as typeof import("@/lib/nativeAudioSignal");
+    return { ...actual, measureNativeAudioSignal: (...input: Parameters<typeof actual.measureNativeAudioSignal>) => {
+      current.analyses++;
+      if (current.failAnalysis) throw new Error("synthetic transient analysis failure");
+      return actual.measureNativeAudioSignal(...input);
+    } };
+  }
   if (id.endsWith("/storage")) return {
     getObjectBytes: async (key: string, bucket: unknown, options: { timeoutMs: number; maxBytes: number }) => {
       assert.equal(bucket, undefined); assert.equal(options.timeoutMs, 30_000);
@@ -304,6 +319,51 @@ async function main() {
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
     assert.deepEqual(result.request.acceptedArrangement.reviewContext, request.acceptedArrangement.reviewContext);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  await test("repeat and concurrent review reuse analysis but reread bytes and isolate returned measurements", async () => {
+    current.audio = wav(4801);
+    await run(args()); current.offline = true;
+    const probes = current.probes;
+    const [first, second] = await Promise.all([review(reviewScope), review(reviewScope)]);
+    assert.ok(first && second);
+    assert.equal(current.probes - probes, 1);
+    assert.equal(current.analyses, 1);
+    first.quality.signal.reviewReasons.length = 0;
+    assert.deepEqual(second.quality.signal.reviewReasons, ["digital_silence"]);
+    const beforeReads = current.reads.length;
+    const third = await review(reviewScope);
+    assert.ok(third);
+    assert.deepEqual(third.quality.signal.reviewReasons, ["digital_silence"]);
+    assert.equal(third.quality.productionApproved, false);
+    assert.equal(current.analyses, 1);
+    const audioKey = String(saved(candidateKey).audioKey);
+    for (const key of [candidateKey, bindingKey, markerKey, provenanceKey, accountingKey, audioKey]) {
+      assert.ok(current.reads.slice(beforeReads).includes(key));
+    }
+    const bytes = Buffer.from(current.objects.get(audioKey)!);
+    bytes[bytes.length - 1] ^= 1;
+    current.objects.set(audioKey, bytes);
+    await rejected(review(reviewScope));
+    assert.equal(current.analyses, 1);
+  });
+  await test("failed analysis is retried and the bounded cache evicts old successful measurements", async () => {
+    current.audio = wav(4802);
+    await run(args()); current.offline = true; current.failAnalysis = true;
+    await rejected(review(reviewScope));
+    assert.equal(current.analyses, 1);
+    current.failAnalysis = false;
+    assert.ok(await review(reviewScope));
+    assert.equal(current.analyses, 2);
+    const retained = current;
+    for (let frames = 4803; frames < 4812; frames++) {
+      current = fixture(); current.audio = wav(frames);
+      await run(args()); current.offline = true;
+      assert.ok(await review(reviewScope));
+      assert.equal(current.analyses, 1, "different bytes require fresh analysis");
+    }
+    current = retained;
+    assert.ok(await review(reviewScope));
+    assert.equal(current.analyses, 3, "evicted measurement must be recomputed");
   });
   await test("duration-correct stereo cancellation blocks retained review without repair or worker calls", async () => {
     current.audio = wav(60 * 48000);

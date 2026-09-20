@@ -137,17 +137,45 @@ async function immutable(key: string, bytes: Uint8Array, contentType: string): P
   return created;
 }
 
+type VerifiedSignal = Awaited<ReturnType<typeof measureNativeAudioSignal>>;
+const verifiedSignalCache = new Map<string, { promise: Promise<VerifiedSignal | null>; settled: boolean }>();
+const MAX_VERIFIED_SIGNALS = 8;
+
 async function probeAudio(audio: Uint8Array, completion: YuE2VerifiedCompletion, analyzeSignal = false) {
+  // Always authenticate the bytes read this time, including on a cache hit.
   verifyYuE2Audio(completion, audio);
-  const directory = await mkdtemp(join(tmpdir(), "yue2-durable-native-"));
+  const key = analyzeSignal ? yue2Sha256(jsonBytes({ audio: completion.audio, result: completion.result })) : undefined;
+  const cached = key ? verifiedSignalCache.get(key) : undefined;
+  if (cached) {
+    verifiedSignalCache.delete(key!);
+    verifiedSignalCache.set(key!, cached);
+    return structuredClone(await cached.promise);
+  }
+  const measure = async () => {
+    const directory = await mkdtemp(join(tmpdir(), "yue2-durable-native-"));
+    try {
+      const path = join(directory, "audio-native.wav");
+      await writeFile(path, audio, { mode: 0o600, flag: "wx" });
+      await probeYuE2NativeWav(path, completion.result, audio.byteLength);
+      return analyzeSignal ? await measureNativeAudioSignal({
+        path, sampleRateHz: 48000, channels: 2, expectedFrames: completion.result.frames,
+      }) : null;
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  };
+  if (!key) return measure();
+  if (verifiedSignalCache.size >= MAX_VERIFIED_SIGNALS) {
+    const oldestSettled = [...verifiedSignalCache].find(([, entry]) => entry.settled);
+    if (oldestSettled) verifiedSignalCache.delete(oldestSettled[0]);
+  }
+  const entry = { promise: measure(), settled: false };
+  // Never evict an in-flight verification or retain unbounded pending work.
+  if (verifiedSignalCache.size < MAX_VERIFIED_SIGNALS) verifiedSignalCache.set(key, entry);
   try {
-    const path = join(directory, "audio-native.wav");
-    await writeFile(path, audio, { mode: 0o600, flag: "wx" });
-    await probeYuE2NativeWav(path, completion.result, audio.byteLength);
-    return analyzeSignal ? await measureNativeAudioSignal({
-      path, sampleRateHz: 48000, channels: 2, expectedFrames: completion.result.frames,
-    }) : null;
-  } finally { await rm(directory, { recursive: true, force: true }); }
+    return structuredClone(await entry.promise);
+  } catch (error) {
+    if (verifiedSignalCache.get(key) === entry) verifiedSignalCache.delete(key);
+    throw error;
+  } finally { entry.settled = true; }
 }
 
 /** Read-only review: never repairs storage, contacts a worker, or admits paid work. */

@@ -408,3 +408,24 @@ At 20:54:21 UTC, shared-mode verification correctly failed with exit 1: all six
 individual schedules remain active and the shared schedule is absent. Production
 therefore has not received the shared-mode savings. This negative check is expected,
 not an outage. Six local verifier tests and scoped ESLint also passed.
+
+## Implementation Batch 9: Reuse Verified Native Audio Analysis
+
+The retained YuE review reader now coalesces and reuses successful native probe
+and full-file signal measurements in a process-local, eight-entry cache keyed by
+the exact audio receipt and native result. Each request still reads and verifies
+the complete receipt chain and fresh WAV hash before cache lookup. Channel
+personality, requested duration, unresolved artistic checks, and approval remain
+outside the cache; production approval remains false.
+
+Failures are evicted, returned measurements are cloned, and only settled entries
+can be evicted for another key. Overflow runs uncached when all entries are
+pending: this bounds retained entries, not total concurrent analysis. No WAV bytes
+are intentionally retained as cached results. Restart/deployment clears the cache.
+
+Local integration checks use real FFprobe and signal analysis with synthetic WAV
+fixtures, including concurrent reuse, fresh storage reads, post-cache tampering,
+mutation isolation, failure retry, distinct artifacts, and eviction. This reduces
+repeat analysis CPU only within a warm process; it does not reduce WAV download
+bandwidth or guarantee cross-instance reuse. No paid generation, thumbnails, or
+production deployment is part of this batch. Production savings remain unmeasured.
