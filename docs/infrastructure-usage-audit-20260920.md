@@ -867,3 +867,39 @@ Final frozen local gate: all 841 selected readiness files passed with external
 networking disabled and 30 thumbnail-named files excluded. TypeScript, scoped
 lint, whitespace checks and the post-edit Graphify refresh passed. This is a
 partial offline gate, not complete production readiness or production approval.
+
+## Batch 21: Stop checkpoint read failures from repurchasing candidates
+
+The shared narrated hook and entity-imagery iteration checkpoint reader previously
+treated every read or JSON parse failure as a cache miss. An R2 outage, access
+denial, missing credentials or damaged saved result could therefore initiate
+another paid draft/extraction instead of retaining the existing work.
+
+Only a `NoSuchKey` response with HTTP 404 now permits first-run production.
+Missing buckets, ambiguous errors and corrupt receipts stop with the existing
+non-retryable `PAID_STAGE_RECONCILIATION_REQUIRED` classification. JSON reads are
+bounded to 1 MiB and 30 seconds, with fatal UTF-8 decoding and per-caller candidate
+shape validation. Oversized metadata is held, never truncated or regenerated.
+Finite nonnegative cost and optional nonempty receipt IDs are required; legacy
+receipts without IDs retain their canonical-content accounting identity.
+Saved candidates still undergo the existing quality review. No model, prompt,
+quality threshold, channel configuration or legacy pipeline was changed.
+
+The real registered blocks and pipeline runner pass 44 offline cases covering
+access/storage failures, malformed payloads, both legacy/current receipt reuse,
+and explicit absence. With three retries configured, each uncertain read causes
+one read, no write, no automatic retry and zero paid draft/critic calls. Valid
+hook reuse still calls its independent critic. Confirmed absence allows one
+normal candidate purchase and checkpoint write. The existing ambiguous-provider
+test now supplies an explicit missing-object fixture rather than relying on absent
+storage configuration to masquerade as a cache miss.
+
+This prevents one avoidable replay path, not exactly-once generation: writes are
+still best-effort, and a genuinely absent receipt after a lost write or concurrent
+first attempts is not covered by a pre-dispatch claim. No deployment, paid call
+or thumbnail generation was performed. Production savings are not measured.
+
+Final local gate: all 842 selected readiness files passed with external networking
+disabled and 30 thumbnail-named files excluded. TypeScript, scoped lint, whitespace
+checks and the post-code-edit Graphify refresh passed. This remains a partial
+offline gate, not complete production readiness or production approval.

@@ -568,23 +568,45 @@ function iterationRequestHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-async function readIterationCheckpoint<T>(key: string, log: (msg: string) => void): Promise<T | null> {
-  let parsed: T;
+async function readIterationCheckpoint<T>(
+  key: string,
+  log: (msg: string) => void,
+  validate: (value: Record<string, unknown>) => boolean,
+): Promise<T | null> {
+  let bytes: Uint8Array;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(await getObjectBytes(key))) as T;
+    bytes = await getObjectBytes(key, undefined, { maxBytes: 1024 * 1024, timeoutMs: 30_000 });
+  } catch (error) {
+    const failure = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+    // A missing bucket, denied access or unavailable storage cannot prove that
+    // this iteration has not already purchased a candidate.
+    if (failure?.name === "NoSuchKey" && failure.$metadata?.httpStatusCode === 404) {
+      log(`checkpoint miss: ${key.split("/").pop() ?? key}`);
+      return null;
+    }
+    throw new ExecutionError("PAID_STAGE_RECONCILIATION_REQUIRED: iteration checkpoint unreadable; retain saved work and inspect storage before replay", {
+      code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false, phase: "iteration_checkpoint_read",
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    const value = parsed as Record<string, unknown>;
+    if (!value || typeof value !== "object" || Array.isArray(value)
+      || typeof value.costUsd !== "number" || !Number.isFinite(value.costUsd) || value.costUsd < 0
+      || (value.costReceiptId !== undefined && (typeof value.costReceiptId !== "string" || !value.costReceiptId.trim()))
+      || !validate(value)) throw new Error("invalid checkpoint");
   } catch {
-    // Absent (the normal first-run case) or unreadable — either way, produce it.
-    log(`checkpoint miss: ${key.split("/").pop() ?? key}`);
-    return null;
+    throw new ExecutionError("PAID_STAGE_RECONCILIATION_REQUIRED: iteration checkpoint malformed; preserve the receipt instead of repurchasing", {
+      code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false, phase: "iteration_checkpoint_read",
+    });
   }
-  const paid = parsed as { costUsd?: unknown; costReceiptId?: unknown } | null;
-  if (paid && typeof paid.costUsd === "number" && Number.isFinite(paid.costUsd) && paid.costUsd >= 0) {
-    observeCheckpointCostReceipt({
-      id: checkpointCostReceiptId(key, typeof paid.costReceiptId === "string" ? paid.costReceiptId : `legacy:${canonicalJson(parsed)}`),
-      costUsd: paid.costUsd,
-    }, true);
-  }
-  return parsed;
+  const paid = parsed as { costUsd: number; costReceiptId?: string };
+  observeCheckpointCostReceipt({
+    id: checkpointCostReceiptId(key, paid.costReceiptId ?? `legacy:${canonicalJson(parsed)}`),
+    costUsd: paid.costUsd,
+  }, true);
+  return parsed as T;
 }
 
 async function writeIterationCheckpoint(key: string, value: unknown, log: (msg: string) => void): Promise<void> {
@@ -972,6 +994,7 @@ export const hookCraft: Block = {
         const cached = await readIterationCheckpoint<{ hook: string; costUsd: number }>(
           checkpointKey,
           (m) => ctx.log(`hook_craft: ${m}`),
+          (value) => typeof value.hook === "string",
         );
         if (cached && typeof cached.hook === "string") {
           observedCostUsd += Number(cached.costUsd) || 0;
@@ -2536,6 +2559,11 @@ export const entityImagery: Block = {
         const cached = await readIterationCheckpoint<EntityCandidate & { costUsd: number }>(
           checkpointKey,
           (m) => ctx.log(`entity_imagery: ${m}`),
+          (value) => Array.isArray(value.proposed) && value.proposed.every(entity => typeof entity === "string")
+            && Array.isArray(value.resolved) && value.resolved.every(entity =>
+              entity !== null && typeof entity === "object"
+              && typeof entity.entity === "string" && typeof entity.url === "string"
+              && (entity.attribution === undefined || typeof entity.attribution === "string")),
         );
         if (cached && Array.isArray(cached.resolved) && Array.isArray(cached.proposed)) {
           observedCostUsd += Number(cached.costUsd) || 0;

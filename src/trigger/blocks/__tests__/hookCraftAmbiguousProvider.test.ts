@@ -5,16 +5,27 @@
  * provider transport is controlled.
  */
 import assert from "node:assert/strict";
-import { registerAllBlocks } from "@/engine/blocks";
+import Module from "node:module";
 import { runPipeline } from "@/engine/runner";
 import { validatePipeline } from "@/engine/validate";
 
 async function main(): Promise<void> {
+  const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
+  const originalLoad = loader._load;
+  loader._load = function (name, ...args) {
+    if (name === "@/lib/storage") return {
+      getObjectBytes: async () => { throw Object.assign(new Error("fixture missing checkpoint"), {
+        name: "NoSuchKey", $metadata: { httpStatusCode: 404 },
+      }); },
+    };
+    return originalLoad.call(this, name, ...args);
+  };
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.OPENROUTER_API_KEY;
   let providerCalls = 0;
   try {
     process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
+    const { registerAllBlocks } = await import("@/engine/blocks");
     registerAllBlocks();
     globalThis.fetch = async (url) => {
       assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
@@ -46,6 +57,7 @@ async function main(): Promise<void> {
     assert.ok(result.error.includes("openRouter"), "the retained execution error must name the provider boundary");
     console.log("HOOK_CRAFT AMBIGUOUS PROVIDER PASS — no fallback, no replay, execution recovery receives the provider ambiguity");
   } finally {
+    loader._load = originalLoad;
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalKey;
