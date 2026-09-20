@@ -370,6 +370,13 @@ export async function deleteObjects(keys: string[], bucket?: string, options: {
   return deleted;
 }
 
+export class ObjectSizeLimitError extends Error {
+  constructor() {
+    super("R2 object exceeds maxBytes");
+    this.name = "ObjectSizeLimitError";
+  }
+}
+
 type BoundedObjectBody = {
   [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | string>;
   transformToWebStream?: () => ReadableStream<Uint8Array>;
@@ -427,7 +434,7 @@ async function readBoundedObject(
     if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 0)) {
       throw new Error("R2 object has invalid ContentLength");
     }
-    if (declared !== undefined && declared > maxBytes) throw new Error("R2 object exceeds maxBytes");
+    if (declared !== undefined && declared > maxBytes) throw new ObjectSizeLimitError();
     let stream = body;
     if (!stream.getReader && typeof stream[Symbol.asyncIterator] !== "function" && body.transformToWebStream) {
       stream = body.transformToWebStream() as BoundedObjectBody;
@@ -457,7 +464,7 @@ async function readBoundedObject(
         throw new Error("R2 object stream contains a non-byte chunk");
       }
       const chunkLength = typeof item.value === "string" ? Buffer.byteLength(item.value) : item.value.byteLength;
-      if (chunkLength > maxBytes - length) throw new Error("R2 object exceeds maxBytes");
+      if (chunkLength > maxBytes - length) throw new ObjectSizeLimitError();
       length += chunkLength;
       if (declared !== undefined && length > declared) throw new Error("R2 object ContentLength mismatch");
       if (chunkLength === 0) continue;

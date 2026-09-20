@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
-import { getObjectBytes, isR2CredentialFailure } from "@/lib/storage";
+import { getObjectBytes, isR2CredentialFailure, ObjectSizeLimitError } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
 const MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_SHARED_READS = 4;
+const pendingReads = new Map<string, Promise<Uint8Array>>();
 
 async function readImageBytes(key: string): Promise<Uint8Array> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      return await getObjectBytes(key, undefined, { timeoutMs: 15_000 });
+      return await getObjectBytes(key, undefined, {
+        timeoutMs: 15_000,
+        maxBytes: MAX_INLINE_IMAGE_BYTES,
+      });
     } catch (error) {
+      if (error instanceof ObjectSizeLimitError) throw error;
       lastError = error;
       if (attempt === 1) break;
       // R2 can briefly miss a read at one edge immediately after a successful
@@ -21,6 +27,19 @@ async function readImageBytes(key: string): Promise<Uint8Array> {
     }
   }
   throw lastError instanceof Error ? lastError : new Error("image unavailable");
+}
+
+function readSharedImageBytes(key: string): Promise<Uint8Array> {
+  const pending = pendingReads.get(key);
+  if (pending) return pending;
+  // Coalesce only overlapping reads, never cache completed bytes for mutable keys.
+  // Cap bookkeeping without denying unrelated media requests during a burst.
+  if (pendingReads.size >= MAX_SHARED_READS) return readImageBytes(key);
+  const read = readImageBytes(key).finally(() => {
+    pendingReads.delete(key);
+  });
+  pendingReads.set(key, read);
+  return read;
 }
 
 function contentType(key: string): string | undefined {
@@ -59,14 +78,11 @@ export async function GET(request: Request) {
   }
   try {
     // R2 deployments do not consistently expose a usable HEAD response. Read
-    // the already owner-scoped image directly and enforce the hard byte cap
-    // before returning it; this avoids turning valid artwork into a false 404.
-    const bytes = await readImageBytes(key);
+    // the already owner-scoped image with a streaming byte cap; probes use
+    // the same bounded read so they cannot admit an oversized object.
+    const bytes = await readSharedImageBytes(key);
     if (probe) {
       return NextResponse.json({ available: true }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
-    }
-    if (bytes.byteLength > MAX_INLINE_IMAGE_BYTES) {
-      return NextResponse.json({ error: "image too large" }, { status: 413 });
     }
     return new NextResponse(Buffer.from(bytes), {
       status: 200,
@@ -84,6 +100,11 @@ export async function GET(request: Request) {
   } catch (error) {
     if (probe) {
       return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (error instanceof ObjectSizeLimitError) {
+      return NextResponse.json({ error: "image too large" }, {
+        status: 413, headers: { "Cache-Control": "private, no-store" },
+      });
     }
     if (isR2CredentialFailure(error)) {
       return NextResponse.json(

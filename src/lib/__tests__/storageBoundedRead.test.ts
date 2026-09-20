@@ -178,7 +178,8 @@ test("invalid and oversized headers reject before any body consumption", async (
   for (const ContentLength of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, "2", null, 5]) {
     const s = stream([Buffer.from("ab")]);
     const f = fixture(async () => ({ Body: s.body, ContentLength }));
-    await assert.rejects(f.read("object", undefined, { maxBytes: 4 }), /ContentLength|maxBytes/);
+    await assert.rejects(f.read("object", undefined, { maxBytes: 4 }),
+      ContentLength === 5 ? { name: "ObjectSizeLimitError", message: "R2 object exceeds maxBytes" } : /ContentLength/);
     assert.equal(s.counts.next, 0);
     assert.equal(s.counts.transform, 0);
     assert.equal(s.counts.destroy, 1);
@@ -191,7 +192,7 @@ test("invalid and oversized headers reject before any body consumption", async (
 test("headerless overrun stops immediately, aborts and releases stream", async () => {
   const s = stream([Buffer.from("ab"), Buffer.from("cde"), Buffer.from("unused")]);
   const f = fixture(async () => ({ Body: s.body }));
-  await assert.rejects(f.read("object", undefined, { maxBytes: 4 }), /maxBytes/);
+  await assert.rejects(f.read("object", undefined, { maxBytes: 4 }), { name: "ObjectSizeLimitError", message: "R2 object exceeds maxBytes" });
   assert.equal(s.counts.next, 2);
   assert.equal(s.counts.returned, 1);
   assert.equal(s.counts.destroy, 1);

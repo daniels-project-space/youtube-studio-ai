@@ -166,7 +166,7 @@ worker pinning and cross-version compatibility for pending jobs.
 4. Add immutable validation receipts and direct authenticated media delivery.
 5. Add per-surface release fingerprints and measure safe machine sizing.
 
-Further testing is currently paused at user request. When it resumes, use
+Testing was paused until this audit identified the general improvements. Use
 non-generating fixtures and bounded integration checks: no thumbnail generation,
 no paid provider work, no publishing. Validate duplicate/lost deliveries, expired
 leases, stale deployment pins, unauthorized reads, artifact replacement, range
@@ -192,5 +192,31 @@ run ID so disclosure state cannot carry across different runs.
 
 Full persisted log storage and the open console's warning/error counts are
 unchanged. A compact closed-state count record remains future work. Presentation
-regression cases were added but not executed while testing is paused. This batch
+regression cases were initially added without execution during the audit pause. This batch
 is not deployed; production savings and browser behavior remain unverified.
+
+## Second implementation batch
+
+Shared image delivery now passes its 25 MiB cap into the streaming storage
+reader, including availability probes. A typed size-limit failure prevents a
+second download attempt; display requests return 413 and probes return unavailable.
+Oversized ContentLength headers are rejected before consumption, and headerless
+overruns are stopped during transfer by the existing bounded reader.
+
+Overlapping reads of the same owner-validated key share one promise per server
+instance, including their transient retry. At most four distinct reads are kept
+in this coalescing map; overflow still works without coalescing. This bounds map
+bookkeeping, not total server concurrency or memory. All settled promises are
+removed, so failures can recover and replaced artwork is read afresh. No completed
+byte cache, distributed cache, HEAD dependency, or direct-browser delivery change
+is introduced. Savings depend on request overlap within a server instance.
+
+Real-handler fixture cases cover coalescing, mutable-key freshness, size rejection,
+retry sharing, failure cleanup, owner rejection, and distinct-key isolation. They
+perform no generation. After the audit was complete, 25 local checks passed across
+the image handler fixtures, existing image/video source contracts, bounded storage
+reader, and log-console presentation. Scoped ESLint and repository TypeScript
+checking (`tsc --noEmit --incremental`) also passed. No provider calls
+or thumbnail generation were involved. This batch is not deployed; browser and
+production behavior remain unverified. Broader delivery and validation-receipt
+work remains open.
