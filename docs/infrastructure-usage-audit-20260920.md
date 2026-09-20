@@ -753,3 +753,33 @@ networking disabled, with 30 thumbnail-named files excluded. The six new logging
 cases, prior channel/progress cleanup suites, TypeScript, scoped lint, whitespace
 checks and post-edit Graphify refresh passed. No production release or complete
 production-readiness claim follows from this partial offline gate.
+
+## Batch 18: Cancel abandoned private-video work
+
+The shared `asset-video` route previously used independent 30-second storage
+timeouts and non-cancellable retry waits. A client leaving a preview could leave
+its aggregate proof (up to 15 GETs), retry loop or full-master fallback running.
+The route now combines the incoming request signal with each existing storage
+timeout, checks abandonment before and after signing, and cancels backoff waits.
+The same signal remains attached to the upstream response body after headers,
+so cancellation can stop a streaming full-source fallback as well as probes.
+Aborted handlers return a non-cacheable 499 when a response is still possible.
+
+Active requests retain the same three range checks, five attempts, signing-second
+backoff, exact-range retries, source bytes and full-source recovery. No positive
+availability cache was introduced: deleted or replaced objects still get fresh
+checks. This does not remove Vercel media proxying or reduce successful playback
+bytes; a direct private media gateway remains a separate larger opportunity.
+
+Seven executable video cases plus the existing shared image/video contract and
+six image-delivery cases pass offline (14 checks). They cover pre-aborted requests,
+abort during signing, all three in-flight probes, real abortable backoff, unchanged
+fallback/range behavior, and a real loopback HTTP response whose storage socket
+closes after the downstream request signal aborts. TypeScript and scoped lint
+pass. No generated media, thumbnails, paid providers or production requests were
+used. The prior 838-file offline gate was not rerun for this route-only change.
+
+This proves route-level cancellation, not deployed Vercel disconnect propagation
+or a measured billing reduction. Provider disconnect behavior and actual avoided
+bytes/duration require qualification after an authorized deployment. No model,
+quality setting, channel pipeline, authentication boundary or schedule changed.

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { setTimeout as delay } from "node:timers/promises";
 import { OWNER_ID } from "@/lib/config";
 import { presignDownload } from "@/lib/storage";
 
@@ -32,9 +33,10 @@ function isOwnedVideoKey(key: string): boolean {
  * boundary while avoiding the old five sequential client → Next requests for
  * every Lo-Fi card (and their duplicated signing work).
  */
-async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ available: boolean; reason?: string }> {
+async function verifyPreviewRanges(key: string, mimeType: string, signal: AbortSignal): Promise<{ available: boolean; reason?: string }> {
   let unavailableReason = "The private preview did not admit every required seek range.";
   for (let attempt = 0; attempt < PREVIEW_PROBE_MAX_ATTEMPTS; attempt++) {
+    signal.throwIfAborted();
     try {
       // One fresh signature per proof wave gives a just-written R2 object a
       // genuine new edge/cache key on each retry while the three range checks
@@ -43,6 +45,7 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ ava
         expiresIn: 300,
         responseContentType: mimeType,
       });
+      signal.throwIfAborted();
       const admitted = await Promise.all(PREVIEW_PROBE_RANGES.map(async (range) => {
         let response: Response | undefined;
         try {
@@ -50,7 +53,7 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ ava
             method: "GET",
             headers: { Range: range },
             redirect: "error",
-            signal: AbortSignal.timeout(30_000),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
           });
           // The stream must answer each exact byte range. A successful 200
           // full-object response is not an adequate proof for native seeking.
@@ -61,6 +64,7 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ ava
           await response?.body?.cancel().catch(() => {});
         }
       }));
+      signal.throwIfAborted();
       if (admitted.every(Boolean)) return { available: true };
     } catch {
       // The bounded retry below handles a transient signing or edge failure;
@@ -68,10 +72,11 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ ava
       // than indistinguishable from a clean range miss.
       unavailableReason = "The temporary private-preview proof could not reach storage.";
     }
+    signal.throwIfAborted();
     if (attempt < PREVIEW_PROBE_MAX_ATTEMPTS - 1) {
       // Cross the AWS signing-second boundary before asking a different R2
       // edge/cache key. This is the same bounded window as normal playback.
-      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 1_100 + 300 * attempt)));
+      await delay(Math.min(2_000, 1_100 + 300 * attempt), undefined, { signal });
     }
   }
   return { available: false, reason: unavailableReason };
@@ -95,8 +100,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    request.signal.throwIfAborted();
     if (probe && !request.headers.get("range")) {
-      const preview = await verifyPreviewRanges(key, mimeType);
+      const preview = await verifyPreviewRanges(key, mimeType, request.signal);
       return NextResponse.json(
         preview,
         { headers: { "Cache-Control": "private, no-store" } },
@@ -117,10 +123,12 @@ export async function GET(request: Request) {
     let upstream: Response | null = null;
     const maxAttempts = 5;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      request.signal.throwIfAborted();
       const signedUrl = await presignDownload(key, {
         expiresIn: 300,
         responseContentType: mimeType,
       });
+      request.signal.throwIfAborted();
       const attemptHeaders = new Headers(forwardedHeaders);
       // Some R2 edges intermittently answer a valid non-zero range with a
       // false 404 even though the same object and the initial range exist.
@@ -134,7 +142,9 @@ export async function GET(request: Request) {
         method: "GET",
         headers: attemptHeaders,
         redirect: "error",
-        signal: AbortSignal.timeout(30_000),
+        // Keep cancellation attached after headers arrive: abandoning playback
+        // must also stop the full-master fallback's streaming storage read.
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]),
       });
       if (upstream.ok || (upstream.status >= 200 && upstream.status < 300)) break;
       const retryable = upstream.status === 404 || upstream.status >= 500;
@@ -147,7 +157,7 @@ export async function GET(request: Request) {
       // AWS-style signatures have one-second timestamp precision. Waiting at
       // least 1.1s ensures the next presign is a genuinely new URL instead of
       // retrying the same edge cache key; later retries remain bounded.
-      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 1_100 + 300 * attempt)));
+      await delay(Math.min(2_000, 1_100 + 300 * attempt), undefined, { signal: request.signal });
     }
     if (!upstream) throw new Error("video request did not produce a response");
     const responseHeaders = new Headers();
@@ -201,6 +211,9 @@ export async function GET(request: Request) {
       headers: responseHeaders,
     });
   } catch {
+    if (request.signal.aborted) {
+      return new NextResponse(null, { status: 499, headers: { "Cache-Control": "private, no-store" } });
+    }
     if (probe) {
       return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
