@@ -42,6 +42,7 @@ function fixture() {
       const query = {
         withIndex: (_name: string, build: (r: typeof range) => unknown) => { build(range); return query; },
         collect: async () => output(rows()),
+        async *[Symbol.asyncIterator]() { yield* output(rows()); },
         unique: async () => { const result = rows(); assert(result.length <= 1); return output(result[0] ?? null); },
         paginate: async ({ numItems, cursor }: { numItems: number; cursor: string | null }) => {
           assert.equal(numItems, 4, "maintenance must remain bounded");

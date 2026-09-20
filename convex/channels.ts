@@ -2,6 +2,7 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import { v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { deleteRunLogChunks } from "./runLogChunks";
 import {
   channelDirectoryState,
   deleteChannelDirectory,
@@ -1163,6 +1164,7 @@ export const deleteChannel = mutation({
       for (const lg of await ctx.db.query("runLogs").withIndex("by_run", (q) => q.eq("runId", r._id)).collect()) {
         await ctx.db.delete(lg._id);
       }
+      await deleteRunLogChunks(ctx, r._id);
       await ctx.db.delete(r._id);
     }
     const sweep = async (table: "assets" | "topicMemory" | "videoAnalytics" | "videoReleaseProvenance" | "channelAnalytics" | "contentPlan" | "youtubeAuth", index: string) => {

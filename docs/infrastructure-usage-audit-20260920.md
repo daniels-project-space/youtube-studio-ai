@@ -696,3 +696,60 @@ persistence cases, the existing directory and owner-lock suites, TypeScript,
 scoped lint, whitespace checks and the post-edit Graphify refresh passed.
 Production deployment, migration, reactive subscription measurement, and billing
 comparison have not been performed. This is not the full production release gate.
+
+## Implementation Batch 17: Pack Shared Run Logs Without Dropping Evidence
+
+The existing `runLogSink` already batches HTTP mutations, but the mutation wrote
+one database document and its repeated owner/run metadata per line. Eligible
+new batches now write immutable `runLogChunks`: at most 25 lines and 64 KiB of
+serialized UTF-8 line data per chunk. A per-run head is read and advanced in the
+same transaction. Only a strictly newer `(at, seq)` range may become a chunk;
+late or overlapping worker ranges stay individually indexed in `runLogs`.
+Tiny packets (under four lines), oversized single messages, and non-finite legacy
+values retain individual storage. No line, message, level or structured evidence
+is truncated or discarded by packing. Existing best-effort sink transport failure
+behavior is unchanged and is not promoted to durable audit delivery by this work.
+
+The existing `listRunLogs` API merges the two storage forms using Convex's value
+ordering, then returns the same newest-capped, oldest-first tail. Chunk-line IDs
+are stable opaque strings, not IDs of individual `runLogs` documents; current
+consumers use them only as display keys. Legacy row IDs remain unchanged.
+Strictly disjoint chunk ranges allow the reader to stop after enough newest
+chunk lines instead of scanning arbitrary overlapping batches. It reads at most
+the requested legacy tail plus the requested chunk tail and one partial chunk
+(up to 24 surplus lines). Mixed histories can therefore read more line content
+than a single legacy tail; chunk-only new runs avoid that duplication. The reader
+does not depend on the mutable write head. Channel deletion also removes its
+chunks and head, leaving other channels/runs intact.
+
+An actual sink-to-mutation fixture persists a 1,000-line synchronous burst as
+40 immutable chunks plus one head (41 document writes instead of 1,000), with
+one HTTP mutation in both old and new designs. Its 500-line query reads 20 chunk
+documents. For that short-message fixture, stored serialized JSON shrinks by
+over 20% from eliminating repeated document/owner/run fields. These are fixture
+document counts and JSON bytes, not measured production billing or wire bytes;
+large messages will show a smaller proportional saving. Ordinary 25-line flushes
+use one chunk and one head write. Tiny batches keep one write per line and no
+head read; overlapping eligible batches add a head read without write savings.
+
+The independent chronological oracle covers legacy rows, late workers, reversed
+arrival, rolled-back clocks, equal timestamps/sequence numbers, missing sequence
+numbers, duplicate delivery, and multiple tail sizes. Byte-bound tests include
+non-ASCII text and a 100 KiB message retained intact outside chunks. Additional
+cases cover signed zero/non-finite legacy ordering, owner isolation, viewer
+write refusal, and actual channel cleanup. The existing sink, API call sites,
+LogConsole layout, thumbnail modules, provider routes and pipeline contracts are
+unchanged. No log migration, deletion or cloud test was run in production.
+
+Deploy schema, writer, merged reader and cleanup together. Rollback must retain
+the merged reader and chunk cleanup even if writes return to individual rows;
+an old reader alone would hide already-persisted chunk history. Do not delete
+chunks to make an old deployment appear compatible. Historic individual rows
+remain readable without a backfill. Production deployment, concurrent-transaction
+qualification, observed fleet packing ratio and actual usage deltas remain open.
+
+Final local verification: all 838 selected readiness files passed with external
+networking disabled, with 30 thumbnail-named files excluded. The six new logging
+cases, prior channel/progress cleanup suites, TypeScript, scoped lint, whitespace
+checks and post-edit Graphify refresh passed. No production release or complete
+production-readiness claim follows from this partial offline gate.

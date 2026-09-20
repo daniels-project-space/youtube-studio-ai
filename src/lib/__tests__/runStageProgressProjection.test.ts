@@ -49,6 +49,7 @@ function fixture(legacy = false) {
         withIndex: (_name: string, build: (r: typeof range) => unknown) => { build(range); return query; },
         order: (direction: string) => { descending = direction === "desc"; return query; },
         collect: async () => rows(), take: async (limit: number) => rows().slice(0, limit),
+        async *[Symbol.asyncIterator]() { yield* rows(); },
         unique: async () => { const result = rows(); assert(result.length <= 1); return result[0] ?? null; },
       };
       return query;

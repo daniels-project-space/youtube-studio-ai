@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { runLogLineValidator } from "./runLogChunks";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import {
   CHANNEL_COMPOSITION_RECEIPT_VERSION,
@@ -1368,6 +1369,19 @@ export default defineSchema({
     .index("by_owner", ["ownerId"]),
 
   // Per-run streamed console lines (ctx.log) — drives the live LogConsole.
+  runLogChunks: defineTable({
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    endAt: v.number(),
+    endSeq: v.optional(v.number()),
+    lines: v.array(runLogLineValidator),
+  }).index("by_run_end", ["runId", "endAt", "endSeq"]),
+  runLogChunkHeads: defineTable({
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    endAt: v.number(),
+    endSeq: v.optional(v.number()),
+  }).index("by_run", ["runId"]),
   runLogs: defineTable({
     ownerId: v.string(),
     runId: v.id("runs"),
