@@ -279,3 +279,23 @@ Convex's missing-field ordering rather than JavaScript's `undefined <= number`.
 Repository TypeScript checking and scoped ESLint also passed.
 See https://docs.convex.dev/database/types for the provider ordering contract.
 Production behavior and savings remain unverified until an authorized deployment.
+
+## Fifth implementation batch
+
+The serialized cloud-release job now runs its existing stale-revision policy
+immediately after checkout, before Node setup/cache restoration and `npm ci`.
+Superseded releases skip those steps. A second check still runs after installation
+and directly before the Convex/Trigger deployment steps, so a main-branch advance
+during installation cannot use an outdated admission decision.
+
+This uses the existing built-in-only Node/Git policy and preserves trusted-SHA
+validation, the verified docs-only exception, protected deployment credentials,
+release queue serialization, and fail-closed remote errors. It does not skip
+quality checks or cancel running deployments. The real-Git/real-CLI release-policy
+test and parsed workflow wiring checks pass. No remote deployment was performed.
+
+Per-runtime unchanged-source skipping is still unfinished. The workflow currently
+has no verified per-runtime deployed-source receipt, and a previous successful CI
+run alone is insufficient: missing credentials or stale policy can skip the actual
+deployment. Add durable, independently verified Convex and Trigger receipts before
+using runtime fingerprints to authorize reuse of a prior deployment.

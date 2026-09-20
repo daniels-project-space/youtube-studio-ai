@@ -89,6 +89,14 @@ assert.deepEqual(parsed.jobs.typecheck.concurrency, {
 assert.deepEqual(job.concurrency,{group:"youtube-studio-cloud-runtimes",queue:"max","cancel-in-progress":false});
 const guardIndex = job.steps.findIndex(step=>step.id === "release_policy");
 assert.ok(guardIndex > 0);
+const admissionIndex = job.steps.findIndex(step=>step.id === "release_admission");
+assert.equal(admissionIndex, 1, "reject stale releases directly after checkout, before setup or install");
+assert.equal(job.steps[admissionIndex].run, "node scripts/cloud-runtime-release-policy.mjs");
+assert.deepEqual(job.steps.slice(admissionIndex + 1, guardIndex + 1).map(step => step.if), [
+  "steps.release_admission.outputs.deploy == 'true'",
+  "steps.release_admission.outputs.deploy == 'true'",
+  "steps.release_admission.outputs.deploy == 'true'",
+], "node setup, dependency install, and final guard require early admission");
 assert.equal(job.steps[guardIndex-1].name,"Install deploy tooling");
 assert.deepEqual(job.steps.slice(guardIndex+1).map(step=>step.if),[
   "steps.release_policy.outputs.deploy == 'true'", "steps.release_policy.outputs.deploy == 'true'",

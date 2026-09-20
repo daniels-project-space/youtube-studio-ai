@@ -167,14 +167,22 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      - name: Reject superseded cloud release before tooling setup
+        id: release_admission
+        # The policy uses only Node built-ins and Git, both present on the
+        # hosted runner. Recheck after install to close the intervening race.
+        run: node scripts/cloud-runtime-release-policy.mjs
       - uses: actions/setup-node@v4
+        if: steps.release_admission.outputs.deploy == 'true'
         with:
           node-version: 24
           cache: npm
       - name: Install deploy tooling
+        if: steps.release_admission.outputs.deploy == 'true'
         run: npm ci --no-audit --no-fund
       - name: Verify cloud release still matches main
         id: release_policy
+        if: steps.release_admission.outputs.deploy == 'true'
         run: node scripts/cloud-runtime-release-policy.mjs
       - name: Deploy canonical Convex runtime
         if: steps.release_policy.outputs.deploy == 'true'
