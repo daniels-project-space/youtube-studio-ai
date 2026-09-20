@@ -380,3 +380,31 @@ also passed. TypeScript and scoped ESLint passed. Provider synchronization, load
 and production behavior remain unverified.
 
 Provider schedule semantics: https://trigger.dev/docs/tasks/scheduled
+
+## Eighth implementation batch: live schedule verification
+
+`scripts/verify-delivery-recovery-schedules.mjs` is a GET-only migration verifier.
+It reads all schedule pages with a bounded page count and request timeout, checks
+pagination completeness, and requires two agreeing observations. It verifies the
+explicit production environment and exact recovery task set/cadence. Missing,
+duplicate, wrong-mode, wrong-cadence, or manually managed recovery schedules fail.
+Unrelated thumbnail and GPU safety schedules are outside its scope and unchanged.
+It neither creates/deletes schedules nor triggers tasks or edits provider state.
+
+From the repository, with the production read credential already present locally:
+
+```sh
+node --env-file=.env.local scripts/verify-delivery-recovery-schedules.mjs --mode individual --environment cmpu4i98gfghqn70jp33s1diz
+```
+
+Use `--mode shared` after separately authorized deployment/synchronization. A zero
+exit proves only the observed schedule inventory, not handler load, delivery,
+worker version, billing, or deployment health. The output explicitly states this.
+It does not output API credentials or raw provider error bodies.
+
+Live read-only verification on 2026-09-20 at 20:54:20 UTC passed individual mode:
+exactly the six expected active minute schedules in the production environment.
+At 20:54:21 UTC, shared-mode verification correctly failed with exit 1: all six
+individual schedules remain active and the shared schedule is absent. Production
+therefore has not received the shared-mode savings. This negative check is expected,
+not an outage. Six local verifier tests and scoped ESLint also passed.
