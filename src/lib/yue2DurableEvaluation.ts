@@ -5,6 +5,7 @@ import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
+import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
 import {
   validateYuE2ExecutionPolicy, verifyYuE2ExecutionPolicy, verifyYuE2ExecutionAccounting,
   type YuE2ExecutionPolicy, type YuE2VerifiedExecutionAccounting,
@@ -136,13 +137,16 @@ async function immutable(key: string, bytes: Uint8Array, contentType: string): P
   return created;
 }
 
-async function probeAudio(audio: Uint8Array, completion: YuE2VerifiedCompletion): Promise<void> {
+async function probeAudio(audio: Uint8Array, completion: YuE2VerifiedCompletion, analyzeSignal = false) {
   verifyYuE2Audio(completion, audio);
   const directory = await mkdtemp(join(tmpdir(), "yue2-durable-native-"));
   try {
     const path = join(directory, "audio-native.wav");
     await writeFile(path, audio, { mode: 0o600, flag: "wx" });
     await probeYuE2NativeWav(path, completion.result, audio.byteLength);
+    return analyzeSignal ? await measureNativeAudioSignal({
+      path, sampleRateHz: 48000, channels: 2, expectedFrames: completion.result.frames,
+    }) : null;
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
@@ -211,7 +215,8 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
       candidate.nativeOutput.frames !== completion.result.frames ||
       candidate.nativeOutput.durationSec !== completion.result.audio_seconds) throw new Error("review audio identity mismatch");
     const audio = await read(candidate.audioKey, MAX_AUDIO_BYTES);
-    await probeAudio(audio, completion);
+    const signal = await probeAudio(audio, completion, true);
+    if (!signal) throw new Error("review signal measurements missing");
     const requestedDurationSec = request.acceptedArrangement.arrangement.requestedDurationSec;
     // Native exact-duration evidence is a frame-count comparison, not a model's
     // success flag or an arbitrary percentage allowance for missing content.
@@ -219,11 +224,12 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
     return {
       candidate, candidateSha256: yue2Sha256(candidateBytes), request,
       quality: {
-        status: durationMatches ? "needs_audition" as const : "blocked" as const,
+        status: durationMatches && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
         requestedDurationSec, actualDurationSec: candidate.nativeOutput.frames / 48000,
         durationMatches, nativeFormatVerified: true as const,
+        signal,
         productionApproved: false as const,
-        unresolved: ["signal_integrity", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
+        unresolved: ["true_peak", "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
       },
     };
   } catch {

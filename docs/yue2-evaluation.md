@@ -279,12 +279,27 @@ has not been qualified on the production web deployment.
 
 Quality is separate from transport correctness. Exact requested duration is
 compared with measured frame count; a 0.1-second fixture for a 60-second brief is
-explicitly blocked despite valid native format. Signal integrity, unwanted
+explicitly blocked despite valid native format. A full-file, bounded FFmpeg
+decode additionally measures per-channel sample peak, RMS, DC offset, non-finite
+values, nonzero samples, samples at/above full scale and consecutive full-scale
+runs. Digital silence, constant signals, dead stereo channels, non-finite data,
+and full-scale samples require review. This is not a claim that every full-scale
+sample is audibly clipped, and it does not replace true-peak measurement.
+
+Quiet windows use a declared -60 dBFS peak threshold and 100 ms windows; their
+fraction and longest consecutive window run are observations, not a generic
+rejection threshold. Quiet sleep/meditation material is not automatically bad.
+The decoder preserves sample rate/channel layout, never normalizes the audio,
+streams rather than retaining a second decoded file, and enforces the exact
+probed sample count, a 256 MiB decode ceiling, a 30-second deadline and bounded
+diagnostics. The review runtime needs FFmpeg as well as FFprobe.
+
+True peak, perceptual artifacts, unwanted
 vocals, channel-personality fit, arrangement fidelity, repetition, ending and
 listening quality remain unresolved, not invented passing scores. The accepted
 arrangement and topic are exposed, but a source-brief fingerprint alone does not
 prove channel-personality compliance. Human review/decision UI, retained
-personality/reference context, signal measurements and real GPU/audio
+personality/reference context, remaining perceptual measurements and real GPU/audio
 qualification remain required. No thumbnail module changes are part of this work.
 
 ```bash

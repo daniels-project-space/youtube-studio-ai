@@ -295,6 +295,9 @@ async function main() {
     assert.equal(result.quality.actualDurationSec, 0.1);
     assert.equal(result.quality.durationMatches, false);
     assert.equal(result.quality.productionApproved, false);
+    assert.deepEqual(result.quality.signal.reviewReasons, ["digital_silence"]);
+    assert.equal(result.quality.signal.frames, 4800);
+    assert.equal(result.quality.signal.longestQuietWindowRunSec, 0.1);
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
