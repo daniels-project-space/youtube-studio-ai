@@ -3192,10 +3192,13 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_owner_updated", ["ownerId", "updatedAt"]),
 
-  // Single project-wide "what are we working toward right now" record, so
-  // both automation and Daniel can query current intent/priorities. Not
-  // per-owner scoped (one project, one active goal) — history is simply the
-  // set of rows ordered by updatedAt; the latest is authoritative.
+  // Append-only human evaluation notes; never a production approval or resume.
+  yue2Auditions: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    candidateSha256: v.string(), submission: v.any(), reviewedAt: v.number(), revision: v.number(),
+  }).index("by_owner_run_candidate", ["ownerId", "runId", "candidateSha256", "revision"]),
+
+  // Single project-wide goal; latest updatedAt is authoritative.
   projectGoals: defineTable({
     statement: v.string(),
     priorities: v.array(v.string()),

@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createMusicReviewContext } from "../src/engine/acceptedMusicArrangement";
 import { measureNativeAudioSignal } from "../src/lib/nativeAudioSignal";
 import type { YuE2CandidateReview } from "../src/lib/yue2ReviewTypes";
+import type { YuE2AuditionRecord } from "../src/engine/yue2Audition";
 
 const root = process.cwd();
 const outputDir = await mkdtemp(join(tmpdir(), "yue-review-browser-"));
@@ -60,6 +61,7 @@ const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.conten
 let mode: "ready" | "absent" | "blocked" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
 const methods: string[] = [];
+let savedAudition: YuE2AuditionRecord | null = null;
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://fixture.invalid");
   methods.push(req.method ?? "");
@@ -71,11 +73,23 @@ const server = createServer((req, res) => {
   if (url.pathname === "/fixture.css") { res.setHeader("Content-Type", "text/css"); res.end(css); return; }
   if (url.pathname === "/api/yue2-evaluations/review") {
     requests++;
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", chunk => { body += chunk; });
+      req.on("end", () => {
+        const parsed = JSON.parse(body);
+        assert.equal(parsed.runId, "first-run");
+        assert.equal(parsed.audition.candidateSha256, review.candidateSha256);
+        savedAudition = { ...parsed.audition, reviewedAt: 123456789, reviewerId: "fixture-owner", productionApproved: false };
+        res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: true, audition: savedAudition }));
+      }); return;
+    }
     assert.equal(req.method, "GET");
     res.setHeader("Content-Type", "application/json"); res.setHeader("Cache-Control", "private, no-store");
     if (mode === "held") { held = res; return; }
     if (mode === "unauthorized" || mode === "unavailable") { res.statusCode = mode === "unauthorized" ? 401 : 503; res.end('{"ok":false}'); return; }
     const current = structuredClone(review);
+    current.audition = savedAudition;
     current.nativeWavUrl = `/native.wav?receipt=${requests}`;
     if (url.searchParams.get("runId") === "second-run") current.brief.topic = "Second run only";
     if (mode === "missing-context") { current.brief.reviewContext = null; current.brief.contextRetained = false; }
@@ -124,12 +138,35 @@ try {
     await page.evaluate((size) => { document.documentElement.style.fontSize = `${size}px`; }, font);
     await page.getByText("Signal measurements", { exact: true }).click();
     await page.getByText("Unresolved checks and provenance", { exact: true }).click();
+    await page.getByText("Record audition", { exact: true }).click();
+    const form = page.getByRole("form", { name: "YuE audition record" });
+    await form.getByLabel("Audition notes", { exact: true }).fill("Restrained tone, but the ending needs a longer audition.");
+    assert.equal(await form.getByRole("option", { name: "Promising, not production-approved" }).evaluate((option: HTMLOptionElement) => option.disabled), true);
+    await form.getByRole("button", { name: "Save audition" }).click();
+    await form.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
     assert.ok(await page.getByText("Not approved for production.", { exact: false }).isVisible());
     assert.equal(await page.getByRole("button", { name: /approve|generate|publish/i }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: join(outputDir, `${name}.png`), fullPage: true });
   }
   await page.setViewportSize({ width: 900, height: 1000 });
+  await page.getByRole("button", { name: "Reload review" }).click();
+  await page.getByText("Record audition", { exact: true }).click();
+  const auditionForm = page.getByRole("form", { name: "YuE audition record" });
+  assert.equal(await auditionForm.getByLabel("Audition notes", { exact: true }).inputValue(), "Restrained tone, but the ending needs a longer audition.");
+  await auditionForm.getByRole("checkbox").check();
+  const judgments = auditionForm.locator("select").filter({ has: page.locator('option[value="unreviewed"]') });
+  for (const select of await judgments.all()) await select.selectOption("pass");
+  for (const textarea of await auditionForm.getByRole("textbox", { name: /Interval .* observations/ }).all()) {
+    await textarea.fill("The restrained texture follows this section's intent.");
+  }
+  await auditionForm.getByLabel("Verdict", { exact: true }).selectOption("promising");
+  await auditionForm.getByRole("button", { name: "Save audition" }).click();
+  await auditionForm.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
+  const recorded = savedAudition as YuE2AuditionRecord | null;
+  assert.ok(recorded);
+  assert.equal(recorded.verdict, "promising");
+  assert.equal(recorded.productionApproved, false);
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
     ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"]] as const) {
@@ -163,10 +200,18 @@ try {
   const pageSource = await readFile(join(root, "src/app/(app)/runs/[runId]/page.tsx"), "utf8");
   assert.match(pageSource, /stage\.block === "music_arrangement_plan".*<YuE2EvaluationPanel/);
   assert.deepEqual(errors, []);
-  assert.ok(methods.every((method) => method === "GET"));
+  assert.ok(methods.every((method) => method === "GET" || method === "POST"));
+  assert.ok(savedAudition);
   await writeFile(join(outputDir, "results.json"), JSON.stringify({ synthetic: true, nativePlayback: true,
     viewports: ["desktop", "mobile", "large-text"], requests, errors, methods: [...new Set(methods)] }, null, 2));
   console.log(`YuE review browser PASS: playback, seeking, responsive layouts, absent/error/retry, missing context, blocking, stale-run refusal; synthetic API only. Evidence: ${outputDir}`);
+} catch (error) {
+  for (const page of browser.contexts().flatMap(context => context.pages())) {
+    await page.screenshot({ path: join(outputDir, "failure.png"), fullPage: true });
+    await writeFile(join(outputDir, "failure.html"), await page.content());
+  }
+  console.error({ outputDir, errors });
+  throw error;
 } finally {
   await browser.close(); server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { YuE2CandidateReview } from "@/lib/yue2ReviewTypes";
 import { IconChevron } from "./icons";
+import { YuE2AuditionForm } from "./YuE2AuditionForm";
 import styles from "./YuE2EvaluationPanel.module.css";
 
 type ReviewState = { status: "loading" } | { status: "error"; message: string } |
@@ -105,6 +106,10 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
         })}
       </ol>
     </div>
+    <details className={styles.disclosure}>
+      <summary>Record audition</summary>
+      <YuE2AuditionForm key={review.candidateSha256} runId={runId} review={review} />
+    </details>
     <details className={styles.disclosure}>
       <summary>Signal measurements</summary>
       <dl className={styles.facts}>

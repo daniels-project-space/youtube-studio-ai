@@ -340,9 +340,36 @@ After a production build, `node scripts/check-yue2-review-bundle.mjs` rejects
 accidental inclusion of project sources, graph output, test fixtures, docs,
 scripts, Git data or environment files in this route's deployment trace.
 
-Persistent human decisions, reference comparisons, remaining
-perceptual measurements and real GPU/audio
-qualification remain required. No thumbnail module changes are part of this work.
+### Persistent Owner Audition
+
+The on-demand review now offers an owner audition form with seven explicit
+judgments, an ordered review of every accepted section, full-source listening
+acknowledgment, notes, and a needs-work/rejected/promising verdict. No judgment
+defaults to passing. Promising requires retained personality context, no blocking
+technical findings, complete listening and passing documented section judgments.
+It is not production approval and does not remove unresolved technical checks.
+
+POST to the review endpoint requires a same-origin owner session, bounds the body
+to 64 KiB and ten seconds, verifies owner/run/channel scope, and freshly verifies
+the retained receipts and actual WAV before comparing the submitted candidate
+digest and ordered section IDs. The browser cannot supply measurement facts,
+storage keys, reviewer identity, timestamps or approval authority.
+
+The service-only Convex `yue2Auditions` handlers append changed judgments without
+rewriting earlier rows. Repeating the latest identical submission is idempotent;
+the read uses one candidate-scoped indexed latest-row query. There is no new poll,
+Trigger task, generation, publication, or pipeline continuation. Closing or
+switching review abandons late responses; an ambiguous save requires reload.
+
+Local contract, actual route/session, and actual Convex-handler fixture checks
+cover rejection and persistence boundaries. Chromium exercises native playback,
+responsive audition editing, save/reload and incomplete-verdict gating against a
+synthetic API. This is not deployed database persistence or real GPU qualification.
+Deploy the Convex table/functions before the web callers; production is unchanged.
+
+Reference comparisons, remaining perceptual measurements, real GPU/audio
+qualification and the audition-to-production handoff remain required. No thumbnail
+module changes are part of this work.
 
 ### Shared Music Admission Safety
 

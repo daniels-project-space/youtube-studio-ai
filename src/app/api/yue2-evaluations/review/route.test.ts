@@ -3,6 +3,7 @@ import Module from "node:module";
 import { getFunctionName } from "convex/server";
 import { createOperatorSessionToken } from "@/lib/operatorSession";
 import { createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
+import { YUE2_AUDITION_CHECKS } from "@/engine/yue2Audition";
 
 const env = { ...process.env };
 process.env.STUDIO_OWNER_ID = "review-owner";
@@ -26,7 +27,7 @@ const material = {
   request: { acceptedArrangement: {
     topic: "Quiet overnight rain", sourceBriefFingerprint: "b".repeat(64),
     reviewContext: undefined as ReturnType<typeof createMusicReviewContext> | undefined,
-    arrangement: { direction: "Steady, no startling changes", requestedDurationSec: 60 },
+    arrangement: { direction: "Steady, no startling changes", requestedDurationSec: 60, sections: [{ id: "opening" }] },
   } },
   quality: { status: "blocked", durationMatches: false, productionApproved: false },
 };
@@ -37,10 +38,15 @@ loader._load = function (id, ...args) {
     async query(reference: Parameters<typeof getFunctionName>[0], input: unknown) {
       const name = getFunctionName(reference);
       calls.push(name);
+      if (name === "yue2Auditions:latest") return null;
       if (name === "runs:getRun") { assert.deepEqual(input, { runId: "review-run" }); return run; }
       assert.equal(name, "channels:getChannel");
       assert.deepEqual(input, { channelId: "review-channel" });
       return channel;
+    }
+    async mutation(reference: Parameters<typeof getFunctionName>[0], input: { submission: unknown }) {
+      assert.equal(getFunctionName(reference), "yue2Auditions:record"); calls.push("save-audition");
+      return { ...input.submission as object, reviewedAt: 123, reviewerId: "review-owner", productionApproved: false };
     }
   } };
   if (id.endsWith("/yue2DurableEvaluation")) return {
@@ -62,7 +68,7 @@ loader._load = function (id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { GET } = require("./route") as typeof import("./route");
+const { GET, POST } = require("./route") as typeof import("./route");
 
 async function main() {
   const token = await createOperatorSessionToken();
@@ -104,7 +110,7 @@ async function main() {
   assert.equal(body.review.allocation.providerBilledCostUsdMicros, null);
   assert.equal(body.review.nativeWavUrl, "https://signed-fixture.invalid/native.wav");
   assert.doesNotMatch(JSON.stringify(body), /private-binding-key|private-worker|audioKey|bindingKey/);
-  assert.deepEqual(calls.slice(-4), ["runs:getRun", "channels:getChannel", "material", "presign"]);
+  assert.deepEqual(calls.slice(-5), ["runs:getRun", "channels:getChannel", "material", "yue2Auditions:latest", "presign"]);
   material.request.acceptedArrangement.reviewContext = createMusicReviewContext({
     topic: "Quiet overnight rain", family: "music_loop", channelName: "Night rain",
     promptContext: "Unhurried rainfall, restrained texture, no sudden changes.",
@@ -113,6 +119,33 @@ async function main() {
   assert.deepEqual(withContext.review.brief.reviewContext, material.request.acceptedArrangement.reviewContext);
   assert.equal(withContext.review.brief.contextRetained, true);
   assert.equal(withContext.review.brief.channelPersonalityVerified, false, "retention is not a creative verdict");
+  const audition = { candidateSha256: material.candidateSha256, verdict: "needs_work", listenedEntireSource: false,
+    checks: Object.fromEntries(YUE2_AUDITION_CHECKS.map(key => [key, "unreviewed"])),
+    sections: [{ id: "opening", judgment: "unreviewed", notes: "" }], notes: "Opening needs a closer listen." };
+  const post = (patch = {}, origin = "https://studio.invalid") => POST(new Request("https://studio.invalid/api/yue2-evaluations/review", {
+    method: "POST", headers: { cookie: `studio_session=${token}`, origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ runId: "review-run", audition: { ...audition, ...patch } }),
+  }));
+  assert.equal((await post({}, "https://foreign.invalid")).status, 403);
+  const beforeBodyFailures = calls.length;
+  for (const [body, status] of [["{", 400], ["x".repeat(65537), 413]] as const) {
+    const result = await POST(new Request("https://studio.invalid/api/yue2-evaluations/review", { method: "POST",
+      headers: { cookie: `studio_session=${token}`, origin: "https://studio.invalid" }, body }));
+    assert.equal(result.status, status);
+  }
+  assert.equal(calls.length, beforeBodyFailures, "body validation is bounded before database access");
+  assert.equal((await post({ productionApproved: true })).status, 400);
+  assert.equal((await post({ candidateSha256: "f".repeat(64) })).status, 409);
+  assert.equal((await post({ verdict: "promising" })).status, 409);
+  assert.equal((await post({ sections: [{ id: "foreign", judgment: "pass", notes: "Wrong section" }] })).status, 409);
+  unavailable = true;
+  assert.equal((await post()).status, 503);
+  unavailable = false;
+  assert.equal(calls.includes("save-audition"), false);
+  const saved = await post();
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).audition.productionApproved, false);
+  assert.deepEqual(calls.slice(-4), ["runs:getRun", "channels:getChannel", "material", "save-audition"]);
   console.log("YuE review route PASS: real session auth, ownership, verified-material-only signing, private projection, no approval");
 }
 
