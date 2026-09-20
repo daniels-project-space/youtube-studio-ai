@@ -10,10 +10,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { noise2D } from "@remotion/noise";
-import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
-import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
-import { loadFont as loadCaveat } from "@remotion/google-fonts/Caveat";
-import { loadFont as loadSpecialElite } from "@remotion/google-fonts/SpecialElite";
+import { loadDocuFonts } from "./docuFonts";
 import { type DocuTheme, type DocuShotKind, getStyle } from "./docuStyles";
 import {
   safeFrameForDocuLayout,
@@ -34,10 +31,7 @@ import type { VoxShotData } from "./VoxShots";
 // readiness into delayRender deterministically (no CDN race), so text NEVER
 // renders before its font is ready. This replaced a hand-rolled loader that
 // raced intermittently in the long-lived pipeline browser (invisible quotes).
-loadAnton();
-loadOswald("normal", { weights: ["500", "600", "700"], subsets: ["latin"] });
-loadCaveat("normal", { weights: ["600", "700"], subsets: ["latin"] });
-loadSpecialElite("normal", { weights: ["400"], subsets: ["latin"] });
+loadDocuFonts();
 
 /**
  * DOCUMOTION — the documentary-collage shot kit. A themeable kit of motion

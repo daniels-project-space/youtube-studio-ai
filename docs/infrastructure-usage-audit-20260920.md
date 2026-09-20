@@ -600,3 +600,38 @@ stage-reuse, cost, self-heal, lease and authorization checks passed, as did
 TypeScript and scoped lint. A subsequent focused cleanup fixture verifies the
 new record follows channel deletion without deleting another run's record.
 This is not a complete green production release gate.
+
+## Implementation Batch 15: Remove Runtime Font CDN Dependency
+
+The remaining offline gate failure came from DocuMotion fetching Google Fonts
+during browser initialization. Six exact versioned WOFF2 files (215,364 bytes)
+are now bundled locally, with original license texts and SHA-256 provenance.
+All nine selected faces retain their family, weight, subset and Unicode ranges.
+Remotion's native `loadFontFromInfo` lifecycle still blocks rendering until fonts
+are ready. Unknown font URLs after a dependency update fail explicitly; there is
+no CDN or substitute-font fallback. The acquisition script is maintenance-only,
+not a build-time download. No thumbnail files or generation were changed.
+
+This removes one external failure/retry source from renders at the cost of about
+210 KiB of static font assets in the bundle. It does not remove local font reads,
+prove fewer production retries, or establish dollar savings on any provider.
+The existing quote-card fixture rendered all four styles at 1920x1080, 960x540
+and 1080x1920 with external networking disabled. All twelve stills were visually
+inspected: no missing text, clipping or attribution overlap. This is a typography
+and layout regression check, not channel-specific artistic approval or a full
+motion review. Detective-board red accents have weak visual contrast, especially
+the small attribution, and remain a separate quality follow-up; no palette was
+silently changed as part of this infrastructure fix.
+
+Offline parity tests verify every selected face maps to the retained source
+receipt, all font/license hashes and byte lengths match, shared metadata is not
+mutated, and unvendored dependency changes fail closed. Render evidence is local
+at `/tmp/youtube-studio-ai-documotion-quote-regression/`. Production deployment
+and provider billing comparisons remain pending.
+
+Final verification: all 836 selected readiness test files passed in the
+network-isolated sweep, with 30 thumbnail-named files excluded. TypeScript,
+scoped lint and authored-code whitespace checks passed. Vendored license texts
+retain upstream whitespace and line endings to preserve their source hashes.
+Graphify was refreshed after
+code edits. This partial offline gate is not complete production readiness.

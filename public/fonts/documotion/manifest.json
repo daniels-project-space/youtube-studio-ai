@@ -1,0 +1,65 @@
+{
+  "licenseRevision": "e44c4b011a820c2cbe2fd2cfa8052037d7edb571",
+  "assets": [
+    {
+      "source": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3K8-C8QSw.woff2",
+      "file": "1Ptgg87LROyAm3K8-C8QSw.woff2",
+      "sha256": "82cc85bd416dc825c05b4264a8a58e189e528fed8a05fbd471b5493e010d623b",
+      "byteLength": 8680
+    },
+    {
+      "source": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3K9-C8QSw.woff2",
+      "file": "1Ptgg87LROyAm3K9-C8QSw.woff2",
+      "sha256": "0d17b7880f389deeb6663a52fa4eadc6d9116bdda725f0aa1f3d404fbb7d3d59",
+      "byteLength": 31356
+    },
+    {
+      "source": "https://fonts.gstatic.com/s/anton/v27/1Ptgg87LROyAm3Kz-C8.woff2",
+      "file": "1Ptgg87LROyAm3Kz-C8.woff2",
+      "sha256": "d0fa07ff63dd60cbc0e2f58e29c802dca2a5ae0276c999f59c6111ab7bbaec3b",
+      "byteLength": 18612
+    },
+    {
+      "source": "https://fonts.gstatic.com/s/oswald/v57/TK3iWkUHHAIjg752GT8G.woff2",
+      "file": "TK3iWkUHHAIjg752GT8G.woff2",
+      "sha256": "bd73278ee0c50041b91b4c03d1229e35b501637f46b6409e7da2d3a758446ea5",
+      "byteLength": 28488
+    },
+    {
+      "source": "https://fonts.gstatic.com/s/caveat/v23/Wnz6HAc5bAfYB2Q7ZjYY.woff2",
+      "file": "Wnz6HAc5bAfYB2Q7ZjYY.woff2",
+      "sha256": "891951df5e8b5b0f0bc760d31375405e795c666b5add70437de12d4a6482b33f",
+      "byteLength": 74932
+    },
+    {
+      "source": "https://fonts.gstatic.com/s/specialelite/v20/XLYgIZbkc4JPUL5CVArUVL0ntnAOSA.woff2",
+      "file": "XLYgIZbkc4JPUL5CVArUVL0ntnAOSA.woff2",
+      "sha256": "770493d84cbb753cd0573d0f014550583138f40469d137e310d239593a1949d8",
+      "byteLength": 53296
+    },
+    {
+      "source": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/anton/OFL.txt",
+      "file": "anton-OFL.txt",
+      "sha256": "ee67e6ee22790b7929f1a3769ca2801d565c64b5a9096942c1adf5596de9c9e4",
+      "byteLength": 4484
+    },
+    {
+      "source": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/oswald/OFL.txt",
+      "file": "oswald-OFL.txt",
+      "sha256": "0fd731a904b729a4e02eaf5e8ebd06783edd9abe400e8882760160230675b652",
+      "byteLength": 4483
+    },
+    {
+      "source": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/ofl/caveat/OFL.txt",
+      "file": "caveat-OFL.txt",
+      "sha256": "1f9d81d094273d82f3898a1ee8b598a717d050ecbf5ff7bede105b704880157b",
+      "byteLength": 4385
+    },
+    {
+      "source": "https://raw.githubusercontent.com/google/fonts/e44c4b011a820c2cbe2fd2cfa8052037d7edb571/apache/specialelite/LICENSE.txt",
+      "file": "specialelite-LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "byteLength": 11358
+    }
+  ]
+}
