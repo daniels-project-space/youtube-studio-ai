@@ -38,6 +38,12 @@ const arrangement = createAcceptedMusicArrangement({
 const arrangementRequest = createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true });
 const clone = <T>(value: T): T => structuredClone(value);
 const token = "fixture-bearer-never-log-this-secret-123456";
+const executionPolicy = {
+  schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
+  rate_source: "operator_configured", rate_reference: "explicit-offline-test-rate", runtime_id: "cpu-fixture",
+  hourly_rate_usd_micros: 3600000, max_execution_seconds: 5, termination_grace_seconds: 1,
+  reserved_allocation_usd_micros: 6000,
+};
 
 // These HTTP fixtures explicitly simulate transport and runtime receipts. FFmpeg
 // creates synthetic test audio; ffprobe and all production parsers run unchanged.
@@ -587,6 +593,106 @@ async function main(): Promise<void> {
         YUE2_EVALUATION_URL: "http://127.0.0.1:8787", YUE2_EVALUATION_TOKEN: token,
       }));
       assert.equal(networkCalls, 0);
+    });
+    await test("execution-policy CLI validation freezes exact terms without credentials, network or GPU", async () => {
+      const arrangementPath = join(directory, "policy-arrangement.json");
+      const policyPath = join(directory, "execution-policy.json");
+      await writeFile(arrangementPath, JSON.stringify(arrangement));
+      const args = ["--arrangement", arrangementPath, "--seed", "42", "--personal-creator", "--durable-r2", "--execution-policy", policyPath];
+      globalThis.fetch = async () => { assert.fail("policy validation must not access any network"); };
+      const noSecrets = new Proxy({}, { get() { assert.fail("validation must precede credential reads"); } });
+      for (const policy of [executionPolicy, { ...executionPolicy, hourly_rate_usd_micros: 7200000, reserved_allocation_usd_micros: 12000 }]) {
+        await writeFile(policyPath, JSON.stringify(policy));
+        const logs: string[] = [];
+        const log = console.log;
+        console.log = (value: string) => { logs.push(value); };
+        try { await runYuE2EvaluationCli(args, noSecrets); } finally { console.log = log; }
+        const result = JSON.parse(logs[0]);
+        assert.deepEqual(result.expectedExecutionPolicy, policy, "never silently substitute an earlier rate");
+        assert.deepEqual(result.request, arrangementRequest);
+        assert.equal(result.costBasis, "operator_configured_allocation_estimate");
+        assert.equal(result.providerBilling, "unknown");
+        assert.equal(result.costStatus, "not_measured");
+        assert.equal(result.networkRequests, 0);
+        assert.equal(result.mode, "validate_only");
+        assert.equal(result.qualification.production_approved, false);
+      }
+      const cli = await execute(process.execPath, ["--import", "tsx", "src/scripts/evaluate-yue2-music.ts", ...args]);
+      assert.equal(JSON.parse(cli.stdout).expectedExecutionPolicy.hourly_rate_usd_micros, 7200000);
+      assert.equal(JSON.parse(cli.stdout).networkRequests, 0);
+    });
+    await test("malformed or underreserved execution policies fail before secret or external IO even with submit", async () => {
+      const policyPath = join(directory, "invalid-execution-policy.json");
+      const args = ["--arrangement", "must-not-read-arrangement.json", "--seed", "42", "--personal-creator", "--durable-r2", "--execution-policy", policyPath];
+      let secrets = 0;
+      let network = 0;
+      const noSecrets = new Proxy({}, { get() { secrets++; throw new Error("unexpected secret read"); } });
+      globalThis.fetch = async () => { network++; throw new Error("unexpected network IO"); };
+      const missingRate = { ...executionPolicy } as Record<string, unknown>;
+      delete missingRate.hourly_rate_usd_micros;
+      const invalidPolicies = ["{", "null", "[]", JSON.stringify(missingRate),
+        JSON.stringify({ ...executionPolicy, hourly_rate_usd_micros: 7200000 }),
+        JSON.stringify({ ...executionPolicy, hourly_rate_usd_micros: 1.5 }),
+        JSON.stringify({ ...executionPolicy, max_execution_seconds: 0 }),
+        JSON.stringify({ ...executionPolicy, extra: true }),
+        JSON.stringify({ ...executionPolicy, rate_reference: "x".repeat(65536) }),
+        Buffer.from([0xff, 0xfe])];
+      for (const contents of invalidPolicies) {
+        await writeFile(policyPath, contents);
+        for (const extra of [[], ["--submit"], ["--submit", "--recover-only"]]) {
+          await assert.rejects(runYuE2EvaluationCli([...args, ...extra], noSecrets), (error: unknown) => {
+            assert.notEqual((error as NodeJS.ErrnoException).code, "ENOENT", "reject policy before reading arrangement");
+            return true;
+          });
+        }
+      }
+      assert.equal(secrets, 0);
+      assert.equal(network, 0);
+      for (const extra of [["--execution-policy"], ["--execution-policy", "missing.json", "--execution-policy", "duplicate.json"]]) {
+        await assert.rejects(runYuE2EvaluationCli(["--durable-r2", ...extra], noSecrets));
+      }
+      await assert.rejects(runYuE2EvaluationCli(["--arrangement", "unused.json", "--seed", "42", "--personal-creator", "--execution-policy", policyPath], noSecrets), /requires --durable-r2/);
+      await assert.rejects(runYuE2EvaluationCli(["--program", "unused.json", "--style-file", "unused.txt", "--seed", "42", "--personal-creator", "--execution-policy", policyPath, "--submit"], noSecrets), /requires --durable-r2/);
+    });
+    await test("actual CLI forwards validated expected policy through pure validation before bootstrap and durable execution", async () => {
+      const policyPath = join(directory, "forward-execution-policy.json");
+      await writeFile(policyPath, JSON.stringify(executionPolicy));
+      const args = ["--arrangement", join(directory, "policy-arrangement.json"), "--seed", "42", "--personal-creator", "--durable-r2", "--execution-policy", policyPath, "--submit"];
+      // Intercept only external boundaries in a fresh process; execute the real CLI parser and policy validator.
+      const harness = `
+        const assert = require("node:assert/strict");
+        const Module = require("node:module");
+        const events = [];
+        const policy = ${JSON.stringify(executionPolicy)};
+        globalThis.fetch = async () => { throw new Error("No live IO allowed"); };
+        globalThis.cliTestBoundaries = {
+            bootstrapSecrets: async () => { events.push("bootstrap"); },
+            validateDurableYuE2Evaluation(input) { assert.deepEqual(input.expectedExecutionPolicy, policy); events.push("validate"); },
+            async executeDurableYuE2Evaluation(input) {
+              assert.deepEqual(input.expectedExecutionPolicy, policy);
+              assert.equal(input.recoverOnly, false);
+              await input.authorizeSubmission();
+              events.push("execute");
+              return { status: "pending", jobId: input.request.job.job_id, reused: false, bindingKey: "fixture", workerStatus: "accepted" };
+            }
+        };
+        Module.registerHooks({ resolve(id, context, next) {
+          let names;
+          if (/\\/bootstrap(?:\\.ts)?$/.test(id)) names = ["bootstrapSecrets"];
+          if (/\\/yue2DurableEvaluation(?:\\.ts)?$/.test(id)) names = ["validateDurableYuE2Evaluation", "executeDurableYuE2Evaluation"];
+          if (names) return { shortCircuit: true, url: "data:text/javascript," + encodeURIComponent(
+            names.map(name => "export const " + name + " = globalThis.cliTestBoundaries." + name + ";").join("\\n")) };
+          return next(id, context);
+        } });
+        require("./src/scripts/evaluate-yue2-music.ts").runYuE2EvaluationCli(${JSON.stringify(args)}, {
+          YUE2_EVALUATION_URL: "http://127.0.0.1:8787", YUE2_EVALUATION_TOKEN: ${JSON.stringify(token)}
+        }).then(() => { assert.deepEqual(events, ["validate", "bootstrap", "execute"]); }, error => { console.error(error); process.exitCode = 1; });
+      `;
+      const result = await execute(process.execPath, ["--import", "tsx", "--eval", harness], {
+        env: { NODE_ENV: "test", PATH: process.env.PATH, HOME: process.env.HOME },
+      });
+      assert.equal(JSON.parse(result.stdout).status, "pending");
+      assert.ok(!result.stdout.includes(token));
     });
     await test("arrangement CLI candidate retains artifact and native FLOAT audio; verified cache is GET-free and remains unqualified", async () => {
       const arrangementWire = completed(audio, arrangementRequest);

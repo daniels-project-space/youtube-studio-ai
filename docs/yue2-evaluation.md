@@ -40,9 +40,8 @@ job/config, supervisor and runner receipts, and recomputes integer micro-USD
 allocation using `BigInt`. Failed-work evidence can be retrieved independently
 of successful audio download. Provider billing remains unknown.
 
-This path is not yet wired into the durable R2 CLI or a production music module.
-Those callers must freeze the expected policy before submission and retain verified
-failure accounting before supervised execution can become an unattended workflow.
+The durable R2 CLI can opt into this path with an explicit execution-policy file.
+Production module admission remains separate and is not enabled by this evaluator.
 The runtime's `docs/SUPERVISION.md` documents the child-only deadline, unbounded
 parent readback limitation, containment, and GPU qualification still required.
 
@@ -173,12 +172,59 @@ results remain `qualified=false`, `productionApproved=false`, audition pending,
 and `costStatus=not_measured`. They do not emit the production `musicKey` handoff.
 
 This closes a prerequisite for the future shared module, not the whole runtime
-integration. The runtime still needs measured rental allocation with a frozen
-rate, supervised execution limits, failure-cost recovery and a YuE-specific
-owner-review/continuation path before unattended production admission. Inference
+integration. A YuE-specific owner-review/continuation path and actual pinned GPU
+qualification remain necessary before unattended production admission. Inference
 phase timing alone is neither provider billing nor a hard rental-spend limit.
 
-### Durability evidence, 20 September
+### Supervised durable evaluation
+
+Add `--execution-policy /absolute/path/policy.json` to the accepted-arrangement
+`--durable-r2` command. It is rejected in local output mode. The file must satisfy
+the sibling runtime's strict policy contract, including the operator-supplied
+rate, runtime identity, execution limit, and reservation. Default validation reads
+only bounded local files; it does not bootstrap credentials, access R2, or call
+the worker. Network work still requires explicit `--submit`.
+
+The supervised `studio-yue2-durable-evaluation/v2` binding freezes
+`expectedExecutionPolicy` together with the exact request and endpoint at the same
+owner/run path. Changing or omitting the policy, or trying to adopt an existing
+unsupervised binding, fails rather than purchasing a new take. Immediately before
+reserving the one-time POST, the evaluator verifies the worker's policy against
+this local expectation; the POST header atomically binds the same raw-policy hash.
+
+`execution-accounting.json` independently retains the verified status snapshot and
+immutable accounting receipt chain, bound to the durable run. Only terminal
+measured allocation evidence is published there; incomplete evidence is unknown,
+not zero. Failed, timed-out, and overrun jobs return `status: held` with the retained
+accounting reference and never create an audio candidate. Replacement workers can
+recover a retained failure without HTTP or another inference. A failed audio
+download can still retain its verified execution allocation for later recovery.
+
+Successful supervised candidates use `studio-yue2-durable-candidate/v2` and require
+`executionAccounting` to reference verified completed accounting for the exact same
+runner terminal as their audio provenance. Cached recovery revalidates both chains,
+the referenced accounting bytes, and native audio. Concurrent final-evidence writes
+may differ in an earlier GET status snapshot, but must agree on the same immutable
+accounting and core receipt chain. Different terminal evidence is never overwritten.
+
+`executionAccounting.allocatedCostUsdMicros` is a configured-rate estimate;
+`providerBilledCostUsdMicros` stays null and `costStatus` stays `not_measured` for
+actual billing. The child deadline does not forcibly bound parent artifact readback
+or stop the rented VM's bill. Qualification and approval remain unchanged. Existing
+unsupervised v1 bindings, candidates, and local CLI behavior are preserved.
+
+The supervised bridge passes 16 focused cases, including simultaneous accounting
+writers, different valid status snapshots, conflicting terminal evidence, retained
+cost after an audio-download error, and a genuinely separate recovery process.
+The independent real SDK/CLI/Python integration run passed all three modes:
+legacy (21 CLI processes, 90 local S3 requests), supervised success (23 processes,
+89 requests), and supervised failure (12 processes, 42 requests). Each mode made
+exactly one worker POST and one synthetic inference. The failure mode retained
+positive allocation without creating a candidate, then recovered offline from R2
+fixture evidence. These checks use local synthetic services, not live R2 or GPU
+qualification.
+
+### Unsupervised durability evidence, 20 September
 
 `scripts/test-yue2-durable-integration.ts` runs separate actual CLI processes
 against the sibling Python HTTP worker and a local S3-compatible fixture through

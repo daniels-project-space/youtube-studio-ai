@@ -7,6 +7,7 @@ import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
+import { validateYuE2ExecutionPolicy } from "@/lib/yue2ExecutionAccounting";
 export { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
 import {
   createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest, verifyYuE2Audio, verifyYuE2Completion, yue2Sha256,
@@ -157,17 +158,20 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
-    } else if (["--arrangement", "--program", "--style-file", "--seed", "--out"].includes(key)) {
+    } else if (["--arrangement", "--program", "--style-file", "--seed", "--out", "--execution-policy"].includes(key)) {
       if (values[key] !== undefined || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Invalid evaluation argument");
       values[key] = argv[++index];
     } else { throw new Error("Unknown evaluation argument"); }
   }
   if (flags.has("--help")) {
-    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. Default: local validation only. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending; rental cost is not measured.");
+    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2 [--execution-policy POLICY.json]] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. --execution-policy requires --durable-r2 and validates a bounded local policy before credentials or network access; its exact terms are bound to durable evaluation. Default: local validation only, no GPU or network. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending. Supervised accounting is an operator-configured allocation estimate, not provider billing or a hard VM bill cap; provider billing remains unknown. Without a policy, cost is not measured.");
     return;
   }
   const arrangementMode = values["--arrangement"] !== undefined;
   const durableMode = flags.has("--durable-r2");
+  if (values["--execution-policy"] !== undefined && !durableMode) {
+    throw new Error("--execution-policy requires --durable-r2");
+  }
   if (durableMode && (!arrangementMode || values["--out"] !== undefined)) {
     throw new Error("--durable-r2 requires --arrangement and forbids --out");
   }
@@ -178,6 +182,8 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     throw new Error("Explicit arrangement or program/style files, seed and --personal-creator acknowledgement are required");
   }
   if (flags.has("--recover-only") && !flags.has("--submit")) throw new Error("--recover-only requires explicit --submit to enable network access");
+  const expectedExecutionPolicy = values["--execution-policy"] === undefined ? undefined
+    : validateYuE2ExecutionPolicy(parseFileJson(await readYuE2File(resolve(values["--execution-policy"]), 65536)));
   const request = arrangementMode
     ? createYuE2AcceptedArrangementRequest({
         arrangement: parseFileJson(await readYuE2File(resolve(values["--arrangement"]), 256 * 1024)),
@@ -191,6 +197,8 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   if (!flags.has("--submit")) {
     console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
       ...(durableMode ? { storage: "r2", costStatus: "not_measured" } : {}),
+      ...(expectedExecutionPolicy ? { expectedExecutionPolicy,
+        costBasis: "operator_configured_allocation_estimate", providerBilling: "unknown" } : {}),
     }, null, 2));
     return;
   }
@@ -202,6 +210,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     const { executeDurableYuE2Evaluation, validateDurableYuE2Evaluation } = await import("@/lib/yue2DurableEvaluation");
     const input = {
       request, endpoint, bearerToken, recoverOnly: flags.has("--recover-only"),
+      ...(expectedExecutionPolicy ? { expectedExecutionPolicy } : {}),
       authorizeSubmission: async () => {
         if (!flags.has("--submit") || flags.has("--recover-only")) throw new Error("YuE2 submission not authorized");
       },
