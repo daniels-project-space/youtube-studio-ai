@@ -30,6 +30,29 @@ No Python runtime or worker manifest change is needed.
 
 ## Frozen wire contract
 
+The client also supports opt-in supervised-runtime transport:
+`executionPolicySha256` binds POST admission to a caller-selected raw-policy
+digest. `fetchExecutionPolicy()` and `fetchExecutionAccounting(request)` are
+bounded GET-only transport methods; their returned bodies are untrusted until
+checked by `verifyYuE2ExecutionPolicy` / `verifyYuE2ExecutionAccounting` from
+`src/lib/yue2ExecutionAccounting.ts`. The accounting verifier binds the admission,
+job/config, supervisor and runner receipts, and recomputes integer micro-USD
+allocation using `BigInt`. Failed-work evidence can be retrieved independently
+of successful audio download. Provider billing remains unknown.
+
+This path is not yet wired into the durable R2 CLI or a production music module.
+Those callers must freeze the expected policy before submission and retain verified
+failure accounting before supervised execution can become an unattended workflow.
+The runtime's `docs/SUPERVISION.md` documents the child-only deadline, unbounded
+parent readback limitation, containment, and GPU qualification still required.
+
+The opt-in `scripts/test-yue2-supervised-integration.ts` check uses
+`YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime`. It starts an isolated
+real Python HTTP worker with a synthetic CPU backend, rejects missing/changed
+policy headers, validates the sealed accounting chain, probes native FLOAT audio,
+and confirms recovery used exactly one inference. This is integration evidence,
+not generated-music quality or a provider-cost measurement.
+
 Aligned with `/home/ubuntu/youtube-studio-music-runtime/docs/HTTP_CONTRACT.md`:
 
 - GET `/v1/health`: `contract: "yue2-evaluation-worker/v1"`, full pinned manifest,

@@ -291,6 +291,7 @@ export type YuE2EvaluationOutcome =
 export interface YuE2EvaluationClientOptions {
   endpoint: string; bearerToken: string; fetch?: typeof globalThis.fetch;
   timeoutMs?: number; maxResponseBytes?: number; maxAudioBytes?: number;
+  executionPolicySha256?: string;
 }
 
 export class YuE2EvaluationClient {
@@ -300,12 +301,17 @@ export class YuE2EvaluationClient {
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
   private readonly maxAudioBytes: number;
+  private readonly executionPolicySha256: string | undefined;
   private readonly attempted = new Set<string>();
 
   constructor(options: YuE2EvaluationClientOptions) {
     this.origin = validateYuE2Endpoint(options.endpoint);
     if (!/^[A-Za-z0-9_-]{32,512}$/u.test(options.bearerToken)) throw new YuE2EvaluationError("invalid_bearer_token");
     this.token = options.bearerToken;
+    if (options.executionPolicySha256 !== undefined && !Hash.safeParse(options.executionPolicySha256).success) {
+      throw new YuE2EvaluationError("invalid_execution_policy_hash");
+    }
+    this.executionPolicySha256 = options.executionPolicySha256;
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 30000;
     this.maxResponseBytes = options.maxResponseBytes ?? 2 * 1024 * 1024;
@@ -323,7 +329,9 @@ export class YuE2EvaluationClient {
     const operation = async () => {
       const response = await this.fetcher(`${this.origin}${path}`, {
         method, redirect: "error", signal: controller.signal,
-        headers: { Authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        headers: { Authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(method === "POST" && this.executionPolicySha256 !== undefined
+            ? { "X-YuE2-Execution-Policy-SHA256": this.executionPolicySha256 } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       if (controller.signal.aborted || performance.now() >= expiresAt) { void response.body?.cancel().catch(() => undefined); throw new Error("timeout"); }
@@ -385,6 +393,28 @@ export class YuE2EvaluationClient {
     try {
       return { status: response.status, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(response.bytes)) as unknown };
     } catch { throw new YuE2EvaluationError("invalid_json"); }
+  }
+
+  /** Transport only: callers must verify the sealed policy against their own expected policy. */
+  async fetchExecutionPolicy(): Promise<unknown> {
+    const response = await this.json("/v1/execution-policy");
+    if (response.status !== 200) throw new YuE2EvaluationError("execution_policy_unavailable");
+    return response.value;
+  }
+
+  /** GET-only evidence recovery also works for failed jobs; it never downloads audio or submits. */
+  async fetchExecutionAccounting(requestValue: unknown): Promise<{ statusResponse: unknown; accountingResponse: unknown }> {
+    const request = validateYuE2EvaluationRequest(requestValue);
+    const id = request.job.job_id;
+    try {
+      const status = await this.json(`/v1/jobs/${id}`);
+      if (status.status !== 200) throw new Error("status unavailable");
+      const accounting = await this.json(`/v1/jobs/${id}/accounting`);
+      if (accounting.status !== 200) throw new Error("accounting unavailable");
+      return { statusResponse: status.value, accountingResponse: accounting.value };
+    } catch {
+      throw new YuE2EvaluationError("execution_accounting_unavailable", id);
+    }
   }
 
   async evaluate(requestValue: unknown, options: {

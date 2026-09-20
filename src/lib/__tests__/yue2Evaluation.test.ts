@@ -271,6 +271,49 @@ async function main(): Promise<void> {
       assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 0);
       assert.equal(fixture.calls.at(-1)?.path, `/v1/jobs/${request.job.job_id}/artifacts/audio-native.wav`);
     });
+    await test("accounting transport recovers failed-job evidence with GET only and refuses absent evidence", async () => {
+      const failed = pending(request.job, "failed");
+      const policy = seal({ test: "transport-only-not-verified" });
+      const accounting = { test: "untrusted-until-sealed-accounting-validation" };
+      const fixture = stub((path, init) => {
+        assert.equal(init.method, "GET");
+        if (path === "/v1/execution-policy") return Response.json(policy);
+        return Response.json(path.endsWith("/accounting") ? accounting : failed);
+      });
+      assert.deepEqual(await fixture.client.fetchExecutionPolicy(), policy);
+      assert.deepEqual(await fixture.client.fetchExecutionAccounting(request), { statusResponse: failed, accountingResponse: accounting });
+      assert.equal(fixture.calls.length, 3);
+      const missing = stub(() => absent());
+      await assert.rejects(missing.client.fetchExecutionPolicy());
+      await rejected(missing.client.fetchExecutionAccounting(request));
+      assert.equal(missing.calls.length, 2);
+    });
+
+    await test("execution policy hash is validated locally and bound only to submission", async () => {
+      let calls = 0;
+      const hash = "e".repeat(64);
+      const fetcher: typeof fetch = async (url, init = {}) => {
+        calls++;
+        const isPost = init.method === "POST";
+        assert.equal(new Headers(init.headers).get("X-YuE2-Execution-Policy-SHA256"), isPost ? hash : null);
+        if (String(url).endsWith("/v1/health")) return Response.json(health());
+        if (isPost) {
+          assert.deepEqual(JSON.parse(String(init.body)), request.job);
+          return Response.json(pending());
+        }
+        return absent();
+      };
+      for (const invalid of ["", "E".repeat(64), "e".repeat(63), `${hash}\n`, null, 42]) {
+        assert.throws(() => new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token,
+          fetch: fetcher, executionPolicySha256: invalid as string }));
+      }
+      assert.equal(calls, 0);
+      const client = new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token,
+        fetch: fetcher, executionPolicySha256: hash });
+      assert.equal((await client.evaluate(request, { submit: true })).status, "pending");
+      assert.equal(calls, 3);
+    });
+
     await test("GET missing then at most one exact POST; subsequent GET reuse", async () => {
       let admitted = false;
       const fixture = stub((path, init) => {
