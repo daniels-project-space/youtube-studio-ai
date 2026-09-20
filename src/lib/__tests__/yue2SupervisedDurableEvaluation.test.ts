@@ -48,12 +48,12 @@ function seal(value: unknown): Receipt {
   const payload_json = `${canonicalJson(value)}\n`;
   return { payload_json, sha256: yue2Sha256(payload_json) };
 }
-function wav() {
-  const bytes = Buffer.alloc(44 + 4800 * 8);
+function wav(frames = 4800) {
+  const bytes = Buffer.alloc(44 + frames * 8);
   bytes.write("RIFF"); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
   bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(3, 20); bytes.writeUInt16LE(2, 22);
   bytes.writeUInt32LE(48000, 24); bytes.writeUInt32LE(384000, 28); bytes.writeUInt16LE(8, 32);
-  bytes.writeUInt16LE(32, 34); bytes.write("data", 36); bytes.writeUInt32LE(4800 * 8, 40);
+  bytes.writeUInt16LE(32, 34); bytes.write("data", 36); bytes.writeUInt32LE(frames * 8, 40);
   return bytes;
 }
 const audio = wav();
@@ -78,10 +78,10 @@ function evidence(remote: Remote) {
   const runnerTerminal = seal({ schema_version: 1, job_id: request.job.job_id, attempt: 1,
     finished_at: "2026-09-20T00:00:01Z", status: completed ? "completed" : "failed", started_sha256: runnerStarted.sha256,
     result: completed ? { status: "complete", truncated: { abc: false, semantic: false }, sample_rate: 48000, channels: 2,
-      frames: 4800, audio_seconds: 0.1, official_identity: "a".repeat(64), timing: { load: { seconds: 1 } },
+      frames: (current.audio.length - 44) / 8, audio_seconds: (current.audio.length - 44) / 384000, official_identity: "a".repeat(64), timing: { load: { seconds: 1 } },
       native_audio: "audio-native.wav", official_result: "song/result.json" } : null,
     error: completed ? null : { type: "FixtureFailure", message: "explicit synthetic failure" }, qualification: YUE2_QUALIFICATION,
-    artifacts: completed ? { "audio-native.wav": { sha256: yue2Sha256(audio), bytes: audio.length },
+    artifacts: completed ? { "audio-native.wav": { sha256: yue2Sha256(current.audio), bytes: current.audio.length },
       "song/result.json": { sha256: "b".repeat(64), bytes: 17 } } : {} });
   runnerTerminal.payload_json = runnerTerminal.payload_json.replace('"seconds":1}', '"seconds":1.0}');
   runnerTerminal.sha256 = yue2Sha256(runnerTerminal.payload_json);
@@ -120,7 +120,7 @@ function evidence(remote: Remote) {
 type Bundle = ReturnType<typeof evidence>;
 function fixture() {
   return { objects: new Map<string, Buffer>(), calls: [] as string[], writes: [] as string[], reads: [] as string[],
-    posts: 0, authorizations: 0, remote: "missing" as Remote, postState: "completed" as Remote,
+    posts: 0, authorizations: 0, audio, remote: "missing" as Remote, postState: "completed" as Remote,
     advertisedPolicy: policy, offline: false, observedPolicy: false, audioFailure: false,
     responseCount: 0, mutateEvidence: undefined as ((value: Bundle, sequence: number) => void) | undefined,
     putFault: undefined as ((key: string, bytes: Uint8Array) => void) | undefined };
@@ -172,7 +172,7 @@ globalThis.fetch = async (input, init = {}) => {
   if (current.remote === "missing") return Response.json({ contract: YUE2_WORKER_CONTRACT, state: "refused", error: "job_not_found" }, { status: 404 });
   if (path.endsWith("/artifacts/audio-native.wav")) {
     if (current.audioFailure) throw new Error("synthetic download failure after paid-work boundary");
-    return new Response(new Uint8Array(audio));
+    return new Response(new Uint8Array(current.audio));
   }
   const bundle = evidence(current.remote); current.mutateEvidence?.(bundle, ++current.responseCount);
   if (path.endsWith("/accounting")) return Response.json(bundle.accountingResponse);
@@ -303,6 +303,24 @@ async function main() {
     assert.equal(result.quality.signal.longestQuietWindowRunSec, 0.1);
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
     assert.deepEqual(result.request.acceptedArrangement.reviewContext, request.acceptedArrangement.reviewContext);
+    assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  await test("duration-correct stereo cancellation blocks retained review without repair or worker calls", async () => {
+    current.audio = wav(60 * 48000);
+    for (let frame = 0; frame < 60 * 48000; frame++) {
+      const sample = 0.2 * Math.sin(2 * Math.PI * 1000 * frame / 48000);
+      current.audio.writeFloatLE(sample, 44 + frame * 8);
+      current.audio.writeFloatLE(-sample, 48 + frame * 8);
+    }
+    await run(args()); current.offline = true;
+    const before = [current.calls.length, current.writes.length, current.authorizations];
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.quality.durationMatches, true);
+    assert.equal(result.quality.status, "blocked");
+    assert.deepEqual(result.quality.signal.reviewReasons, ["mono_cancellation_requires_review"]);
+    assert.equal(result.quality.signal.monoFoldDown.rmsAmplitude, 0);
+    assert.equal(result.quality.productionApproved, false);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
   await test("read-only review refuses unsafe scope before storage and never follows foreign candidate keys", async () => {

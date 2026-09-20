@@ -286,6 +286,13 @@ runs. Digital silence, constant signals, dead stereo channels, non-finite data,
 and full-scale samples require review. This is not a claim that every full-scale
 sample is audibly clipped, and it does not replace true-peak measurement.
 
+The same native decode measures an equal-weight mono fold-down, with finite
+frame count, nonzero frame count, peak and RMS. Complete cancellation of varying
+stereo content requires review even when both individual channels look healthy
+and the requested duration matches. Invalid frames remain unknown, not silence.
+Partial cancellation and stereo width are measured, not generic failures; this
+check neither modifies the source nor certifies perceptual mono compatibility.
+
 Quiet windows use a declared -60 dBFS peak threshold and 100 ms windows; their
 fraction and longest consecutive window run are observations, not a generic
 rejection threshold. Quiet sleep/meditation material is not automatically bad.

@@ -12,6 +12,13 @@ export type NativeAudioSignal = {
   quietThresholdDbfs: -60;
   quietWindowFraction: number;
   longestQuietWindowRunSec: number;
+  monoFoldDown: {
+    method: "arithmetic_channel_mean";
+    finiteFrames: number;
+    nonZeroFrames: number;
+    peakAmplitude: number | null;
+    rmsAmplitude: number | null;
+  };
   channelMeasurements: Array<{
     peakAmplitude: number | null;
     rmsAmplitude: number | null;
@@ -41,6 +48,8 @@ export async function measureNativeAudioSignal(input: {
   let bytesRead = 0, samples = 0, nonFiniteSamples = 0, samplesAtOrAboveFullScale = 0;
   let maximumConsecutiveFullScaleSamples = 0;
   let carry = Buffer.alloc(0);
+  let frameSum = 0, frameFinite = true;
+  let monoFinite = 0, monoNonZero = 0, monoPeak = 0, monoSquareSum = 0;
   const windowFrames = Math.max(1, Math.round(sampleRateHz / 10));
   const quietAmplitude = 10 ** (-60 / 20);
   let windowPeak = 0, framesInWindow = 0, windows = 0, quietWindows = 0;
@@ -65,6 +74,8 @@ export async function measureNativeAudioSignal(input: {
       const sample = bytes.readFloatLE(offset);
       const channel = channelStats[samples % channels];
       samples++;
+      if (Number.isFinite(sample)) frameSum += sample;
+      else frameFinite = false;
       if (!Number.isFinite(sample)) {
         nonFiniteSamples++;
         windowPeak = Infinity;
@@ -85,7 +96,20 @@ export async function measureNativeAudioSignal(input: {
           maximumConsecutiveFullScaleSamples = Math.max(maximumConsecutiveFullScaleSamples, channel.ceilingRun);
         } else channel.ceilingRun = 0;
       }
-      if (samples % channels === 0 && ++framesInWindow === windowFrames) finishWindow();
+      if (samples % channels === 0) {
+        // Measure an equal-weight mono fold-down without modifying the source.
+        // A frame with any invalid channel is unknown, never digital silence.
+        if (frameFinite) {
+          const mono = frameSum / channels;
+          monoFinite++;
+          if (mono !== 0) monoNonZero++;
+          monoPeak = Math.max(monoPeak, Math.abs(mono));
+          monoSquareSum += mono * mono;
+        }
+        frameSum = 0;
+        frameFinite = true;
+        if (++framesInWindow === windowFrames) finishWindow();
+      }
     }
     carry = Buffer.from(bytes.subarray(completeBytes));
   }
@@ -127,11 +151,20 @@ export async function measureNativeAudioSignal(input: {
   else if (channelStats.every((channel) => channel.finite === expectedFrames && channel.minimum === channel.maximum)) reviewReasons.push("constant_signal");
   else if (channelStats.some((channel) => channel.finite === expectedFrames && channel.nonZero === 0)) reviewReasons.push("silent_channel_requires_review");
   if (samplesAtOrAboveFullScale) reviewReasons.push("full_scale_samples_require_review");
+  if (channels === 2 && monoFinite === expectedFrames && monoNonZero === 0 &&
+    channelStats.some((channel) => channel.minimum !== channel.maximum)) {
+    reviewReasons.push("mono_cancellation_requires_review");
+  }
   return {
     version: "native-audio-signal/v1", frames: expectedFrames, sampleRateHz, channels,
     nonFiniteSamples, samplesAtOrAboveFullScale, maximumConsecutiveFullScaleSamples,
     quietWindowDurationSec: windowFrames / sampleRateHz, quietThresholdDbfs: -60,
     quietWindowFraction: quietWindows / windows, longestQuietWindowRunSec: longestQuietFrames / sampleRateHz,
+    monoFoldDown: {
+      method: "arithmetic_channel_mean", finiteFrames: monoFinite, nonZeroFrames: monoNonZero,
+      peakAmplitude: monoFinite ? monoPeak : null,
+      rmsAmplitude: monoFinite ? Math.sqrt(monoSquareSum / monoFinite) : null,
+    },
     channelMeasurements: channelStats.map((channel) => ({
       peakAmplitude: channel.finite ? channel.peak : null,
       rmsAmplitude: channel.finite ? Math.sqrt(channel.squareSum / channel.finite) : null,

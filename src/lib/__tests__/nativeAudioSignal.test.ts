@@ -36,6 +36,19 @@ async function main() {
     assert.ok(Math.abs(result.channelMeasurements[0].rmsAmplitude! - 0.2 / Math.sqrt(2)) < 1e-7);
     assert.ok(Math.abs(result.channelMeasurements[0].dcOffset!) < 1e-7);
     assert.equal(result.channelMeasurements[0].finiteSamples, frames);
+    assert.equal(result.monoFoldDown.finiteFrames, frames);
+    assert.equal(result.monoFoldDown.rmsAmplitude, result.channelMeasurements[0].rmsAmplitude);
+    result = await analyze((frame, channel) => channel ? -tone(frame) : tone(frame));
+    assert.deepEqual(result.reviewReasons, ["mono_cancellation_requires_review"]);
+    assert.equal(result.monoFoldDown.rmsAmplitude, 0);
+    assert.equal(result.monoFoldDown.nonZeroFrames, 0);
+    assert.ok(result.channelMeasurements.every((channel) => channel.rmsAmplitude! > 0.1));
+    result = await analyze((frame, channel) => channel ? tone(frame + 12) : tone(frame));
+    assert.deepEqual(result.reviewReasons, [], "wide stereo is not itself a defect");
+    assert.ok(Math.abs(result.monoFoldDown.rmsAmplitude! - 0.1) < 1e-7);
+    result = await analyze((frame, channel) => channel ? -0.5 * tone(frame) : tone(frame));
+    assert.deepEqual(result.reviewReasons, [], "partial cancellation is measured, not automatically rejected");
+    assert.ok(Math.abs(result.monoFoldDown.rmsAmplitude! - 0.05 / Math.sqrt(2)) < 1e-7);
     result = await analyze(() => 0);
     assert.deepEqual(result.reviewReasons, ["digital_silence"]);
     assert.equal(result.longestQuietWindowRunSec, 1);
@@ -51,10 +64,13 @@ async function main() {
     result = await analyze((frame, channel) => frame === 10 && channel === 0 ? NaN : frame === 20 && channel === 1 ? Infinity : tone(frame));
     assert.deepEqual(result.reviewReasons, ["non_finite_samples"]);
     assert.equal(result.nonFiniteSamples, 2);
+    assert.equal(result.monoFoldDown.finiteFrames, frames - 2);
     assert.equal(result.channelMeasurements[0].finiteSamples, frames - 1);
     result = await analyze(() => NaN);
     assert.deepEqual(result.reviewReasons, ["non_finite_samples"]);
     assert.equal(result.channelMeasurements[0].rmsAmplitude, null, "unmeasurable is not zero");
+    assert.equal(result.monoFoldDown.rmsAmplitude, null);
+    assert.equal(result.monoFoldDown.peakAmplitude, null);
     result = await analyze((frame) => frame < 24000 ? 0 : tone(frame));
     assert.equal(result.quietWindowFraction, 0.5);
     assert.equal(result.longestQuietWindowRunSec, 0.5);
@@ -100,6 +116,16 @@ else {
     const measured = await measureNativeAudioSignal(input);
     assert.equal(measured.channelMeasurements[0].finiteSamples, 8);
     assert.deepEqual(measured.reviewReasons, []);
+    const expectedMono = Array.from({ length: 8 }, (_, i) =>
+      (Math.fround(Math.sin(i * 2) / 4) + Math.fround(Math.sin(i * 2 + 1) / 4)) / 2);
+    assert.equal(measured.monoFoldDown.finiteFrames, 8);
+    assert.ok(Math.abs(measured.monoFoldDown.rmsAmplitude! -
+      Math.sqrt(expectedMono.reduce((sum, value) => sum + value * value, 0) / 8)) < 1e-12,
+    "frame accumulation survives one-byte decoder chunks");
+    const mono = await measureNativeAudioSignal({ ...input, channels: 1, expectedFrames: 16 });
+    assert.equal(mono.monoFoldDown.finiteFrames, 16);
+    assert.equal(mono.monoFoldDown.rmsAmplitude, mono.channelMeasurements[0].rmsAmplitude);
+    assert.deepEqual(mono.reviewReasons, []);
     for (const [mode, message] of [["partial", /frame count/], ["overflow", /frame bound/], ["diagnostics", /diagnostic bound/], ["stall", /timed out/]] as const) {
       process.env.NATIVE_SIGNAL_FIXTURE_MODE = mode;
       if (mode === "stall") {
