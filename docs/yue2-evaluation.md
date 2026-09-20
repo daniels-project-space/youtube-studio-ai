@@ -42,8 +42,13 @@ of successful audio download. Provider billing remains unknown.
 
 The durable R2 CLI can opt into this path with an explicit execution-policy file.
 Production module admission remains separate and is not enabled by this evaluator.
-The runtime's `docs/SUPERVISION.md` documents the child-only deadline, unbounded
-parent readback limitation, containment, and GPU qualification still required.
+The runtime's `docs/SUPERVISION.md` documents the contained inference and artifact
+readback deadlines, remaining parent metadata/GET limitations, containment, and
+GPU qualification still required. Artifact verification now uses a separate
+contained process with only the original execution allowance remaining; a stalled
+readback holds the slot rather than allowing replacement inference. The v1 receipt
+shape and conservative child-process-only scope are unchanged; this is not a hard
+VM billing limit or proof of GPU cancellation.
 
 The opt-in `scripts/test-yue2-supervised-integration.ts` check uses
 `YUE2_TEST_RUNTIME=/home/ubuntu/youtube-studio-music-runtime`. It starts an isolated
