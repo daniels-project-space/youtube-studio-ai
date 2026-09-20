@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectReadinessTests } from "./readiness-test-selection.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = join(root, "src");
@@ -33,7 +34,8 @@ const extraTests = [
   join(root, "scripts", "quizyear-pipeline-dryrun.ts"),
 ];
 
-const tests = [...directTests(sourceRoot).sort(), ...extraTests];
+const selection = selectReadinessTests([...directTests(sourceRoot).sort(), ...extraTests], process.argv.slice(2));
+const { tests } = selection;
 if (tests.length === 0) {
   console.error("No direct production-readiness tests were discovered under src/");
   process.exit(1);
@@ -94,17 +96,25 @@ async function executeAllTests() {
     while (nextIndex < tests.length) {
       const index = nextIndex++;
       results[index] = await executeTest(tests[index]);
+      const result = results[index];
+      console.log(`[${++completed}/${tests.length}] ${result.status === 0 && !result.timedOut && !result.spawnError ? "PASS" : "FAIL"} ${result.label}`);
     }
   };
+  let completed = 0;
   await Promise.all(Array.from({ length: Math.min(DIRECT_TEST_CONCURRENCY, tests.length) }, worker));
   return results;
 }
 
-// Run EVERY test, then report. This used to exit on the first failure, which
+// Run every selected test, then report. The default selects the complete gate.
+// This used to exit on the first failure, which
 // hides the size of a breakage: when the owner lock moved to Convex it broke
 // two golden surface tests, and because one of them sorts third out of 579 the
 // suite died there and the remaining 576 never ran. A green-looking partial
 // sweep is worse than a red one, because it is quoted as evidence.
+if (selection.partial) {
+  console.log(`PARTIAL READINESS: excluding ${selection.excluded.length} thumbnail-named tests; this is not the complete production gate.`);
+  for (const path of selection.excluded) console.log(`EXCLUDED ${relative(root, path)}`);
+}
 console.log(`Running ${tests.length} direct readiness tests with ${DIRECT_TEST_CONCURRENCY} workers.`);
 const results = await executeAllTests();
 const failures = [];
@@ -134,4 +144,6 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`\nAll ${tests.length} direct production-readiness tests passed.`);
+console.log(selection.partial
+  ? `\nAll ${tests.length} selected readiness tests passed; ${selection.excluded.length} excluded. COMPLETE PRODUCTION READINESS NOT VERIFIED.`
+  : `\nAll ${tests.length} direct production-readiness tests passed.`);

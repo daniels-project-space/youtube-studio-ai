@@ -472,3 +472,30 @@ options, malformed receipts avoiding the native download, successful legacy reus
 and corrupt-master refusal. The separate shared-storage tests exercise real stream
 size/deadline cancellation. These are bounded resource-use guarantees and early
 rejection improvements, not measured production bandwidth or billing savings.
+
+## Offline Compatibility Sweep (Thumbnail Work Excluded)
+
+The readiness runner now accepts `--exclude-thumbnail`, explicitly lists excluded
+paths, and labels the result partial. The default CI gate still selects every
+test. Selection is based on filenames, not a claim that all remaining integration
+fixtures contain no thumbnail-related contract assertions. Live progress now
+identifies completed tests without waiting for the whole sweep.
+
+On September 20, an isolated Linux network namespace with only loopback enabled
+ran 832 selected test files: 831 passed and one failed; 30 thumbnail-named files
+were excluded. External provider access was unavailable, and no thumbnail
+generation or paid generation was performed. Three selector checks also passed.
+This is compatibility evidence, not full production readiness or a billing test.
+
+The failure is `src/lib/__tests__/documotionQuoteCard.test.ts`: actual Remotion
+quote-card rendering requests pinned Anton WOFF2 files from Google Fonts and
+fails with `ERR_INTERNET_DISCONNECTED`. A targeted isolated rerun reproduced it.
+The four font families currently use Remotion's native readiness loader; no
+font substitution, relaxed layout checks, or renderer edits were made. Vendoring
+the exact licensed font bytes while preserving loader readiness is follow-up
+work, below the requested infrastructure-usage priority.
+
+Shared recovery remains opt-in and unactivated. The six-to-one schedule change
+would remove 216,000 starts per 30 days at one-minute cadence, but production
+billing savings cannot be claimed until deployment, topology verification, and
+observation. Thumbnail schedules and GPU safety reapers remain untouched.
