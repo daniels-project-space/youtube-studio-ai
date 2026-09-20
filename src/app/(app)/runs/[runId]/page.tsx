@@ -18,6 +18,7 @@ import {
 import { LogConsole } from "@/components/LogConsole";
 import { FactualReviewPanel } from "@/components/FactualReviewPanel";
 import { MusicAuditionPanel } from "@/components/MusicAuditionPanel";
+import { YuE2EvaluationPanel } from "@/components/YuE2EvaluationPanel";
 import {
   RunMediaWorkbench,
   type RunMediaAsset,
@@ -267,6 +268,7 @@ export default function RunDetailPage({
         <FactualReviewPanel runId={String(run._id)} />
       )}
       {run.status === "awaiting_music_audition" && <MusicAuditionPanel runId={String(run._id)} />}
+      {stages?.some((stage) => stage.block === "music_arrangement_plan") && <YuE2EvaluationPanel key={runId} runId={String(run._id)} />}
 
       {compactLegacyRecord ? (
         <LegacyRecordShelf

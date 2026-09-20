@@ -317,7 +317,30 @@ The review endpoint exposes the retained context for comparison and keeps
 `channelPersonalityVerified: false`. Older artifacts remain unchanged and show
 `contextRetained: false`; live channel settings are not used to reconstruct or
 backfill historical intent. Retention alone does not prove channel-personality
-compliance. Human review/decision UI, reference comparisons, remaining
+compliance. The run detail page now offers an on-demand YuE evaluation section
+for runs with a `music_arrangement_plan` stage. It reads this verified endpoint
+only when opened, plays the native WAV, seeks to intended section starts, and
+shows retained channel intent, arrangement, measured defects, unresolved checks,
+candidate/source hashes and the allocation estimate separately from the unknown
+provider bill. Missing context, absent candidates, authentication failures,
+invalid evidence and audio failures have explicit states. Reload performs a
+fresh verification/signing request; closing or switching runs cancels pending
+requests and discards late responses. There is no approval, generation or
+publishing action, and no automatic polling or background audio signing.
+
+`tsx scripts/yue2-review-browser-proof.mts` exercises the actual component and
+native Chromium WAV decoding/seeking/playback with synthetic API/audio fixtures.
+Desktop, phone and enlarged-text screenshots are inspected; error/retry,
+missing-context, blocked-duration, expired-audio and stale-run cases pass.
+This is local UI evidence, not a live retained GPU candidate audition.
+
+The native analyzer follows the existing external-FFmpeg tracing convention;
+the configurable binary is provided by the runtime, not copied from the project.
+After a production build, `node scripts/check-yue2-review-bundle.mjs` rejects
+accidental inclusion of project sources, graph output, test fixtures, docs,
+scripts, Git data or environment files in this route's deployment trace.
+
+Persistent human decisions, reference comparisons, remaining
 perceptual measurements and real GPU/audio
 qualification remain required. No thumbnail module changes are part of this work.
 

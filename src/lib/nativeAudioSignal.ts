@@ -116,7 +116,8 @@ export async function measureNativeAudioSignal(input: {
   await new Promise<void>((resolve, reject) => {
     // No resampling, remixing, normalisation or repair: inspect the native
     // samples. The caller separately verifies the container's rate/channels.
-    const child = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", [
+    // FFmpeg is installed by the runtime, not bundled from project files.
+    const child = spawn(/* turbopackIgnore: true */ process.env.FFMPEG_BIN ?? "ffmpeg", [
       "-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", path,
       "-map", "0:a:0", "-vn", "-sn", "-dn", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1",
     ], { stdio: ["ignore", "pipe", "pipe"] });

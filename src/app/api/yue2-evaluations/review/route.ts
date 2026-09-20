@@ -6,6 +6,7 @@ import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { presignDownload } from "@/lib/storage";
 import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
+import type { YuE2CandidateReview } from "@/lib/yue2ReviewTypes";
 
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
         providerBilledCostUsdMicros: null,
       },
       quality,
-    } }, { headers });
+    } satisfies YuE2CandidateReview }, { headers });
   } catch (error) {
     const status = error instanceof StudioAuthError ? error.status : 503;
     return NextResponse.json({ ok: false, error: status === 503 ? "Review evidence unavailable or invalid" : "Authentication required" },
