@@ -250,7 +250,9 @@ export async function executeRenderBlock(
 
   // Rehydration needs its storage credentials, but provider-facing execution
   // remains behind the frozen route and remaining-budget gates below.
-  await bootstrapSecrets((m, x) => console.log(`[${taskLabel}] ${m}`, x ?? ""), { required: [] });
+  await bootstrapSecrets((m, x) => console.log(`[${taskLabel}] ${m}`, x ?? ""), {
+    services: ["cloudflare"], required: [],
+  });
 
   const block = manifest.block;
 
@@ -477,6 +479,15 @@ export async function executeRenderBlock(
   };
 
   try {
+    // Scope only the audited implementations. Other versions and DocuMotion
+    // retain general hydration; their integrated provider needs differ.
+    if (manifest.version !== "1.0.0" || manifest.id !== "timeline_assemble") {
+      const scopedNovita = manifest.version === "1.0.0" &&
+        (manifest.id === "novita_render_images" || manifest.id === "novita_render_video");
+      await bootstrapSecrets((m, x) => console.log(`[${taskLabel}] ${m}`, x ?? ""), scopedNovita
+        ? { services: ["cloudflare", "novita", "openrouter", "langfuse"], required: [] }
+        : { required: [] });
+    }
     const costIdentity = {
       ownerId: payload.ownerId,
       channelId: payload.channelId as Id<"channels">,

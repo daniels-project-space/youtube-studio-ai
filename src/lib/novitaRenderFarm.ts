@@ -543,7 +543,7 @@ export function hasNovitaRenderFarmConfig(): boolean {
 /** True only when the scoped HTTPS bridge configuration passes all local checks. */
 export async function hasNovitaRenderBridge(): Promise<boolean> {
   try {
-    await bootstrapSecrets();
+    await bootstrapSecrets(() => {}, { services: ["cloudflare", "novita"] });
     const { hasDirectNovitaRenderConfig } = await import("./novitaDirectRender");
     return hasDirectNovitaRenderConfig();
   } catch {
@@ -825,7 +825,7 @@ async function launchBridgeRender(
 export async function getNovitaRenderStatus(jobId: string): Promise<NovitaBridgeStatus> {
   const identity = /^(image|video)-[a-f0-9]{32}$/.exec(jobId);
   if (!identity) throw new Error("novitaRenderFarm: invalid bridge job id");
-  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
+  await bootstrapSecrets(() => {}, { services: ["novita"], required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const { baseUrl, token } = renderBridgeConfig();
   const statusRes = await fetch(`${baseUrl}/status?jobId=${encodeURIComponent(jobId)}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -1014,7 +1014,7 @@ export function imageJobs(cfg: NovitaRenderCfg) {
 async function startImageRender(userCfg: NovitaRenderCfg) {
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
-  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
+  await bootstrapSecrets(() => {}, { services: ["novita"], required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const jobs = imageJobs(cfg);
   const launch = await launchBridgeRender("image", {
     prefix: cfg.prefix,

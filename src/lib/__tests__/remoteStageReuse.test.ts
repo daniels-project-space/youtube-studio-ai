@@ -64,10 +64,12 @@ const receiverContext = TaskRunContext.parse({
 type Mutation = "seed" | "output" | "missing-receipt" | "params" | "module" | "restoration" | "missing-second-receipt" | "missing-outputs" | "missing-stage" | "failed-stage" | "input-mutation";
 type VersionCase = "v2" | "missing-v2" | "fingerprint-drift" | "historical-v1";
 type WorkerMutation = "wrong-version" | "missing-actual" | "missing-context" | "project" | "environment" | "run-version" | "deployment-version" | "missing-binding";
-function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?: WorkerMutation) {
+function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?: WorkerMutation,
+  remoteId?: "novita_render_images" | "novita_render_video") {
   const calls = { admission: 0, stages: 0, bootstrap: 0, rehydrate: 0, paid: 0, begin: 0, finish: 0, artifactQueries: 0,
     defaultExecution: 0, alternateExecution: 0, reconstruction: 0 };
   const writtenArtifacts: NonNullable<Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0]>[] = [];
+  const bootstrapOptions: unknown[] = [];
   let observedStore: Record<string, unknown> | undefined;
   let acceptedCost: number | undefined;
   let observedStageBudget: number | undefined;
@@ -80,7 +82,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     produces: ["scriptApproved"], run: noUpstreamExecution,
   };
   const renderer: Block = {
-    id: versionCase ? "documotion_short" : "timeline_assemble", paid: true,
+    id: remoteId ?? (versionCase ? "documotion_short" : "timeline_assemble"), paid: true,
     consumes: ["narrationText", "narrationKey", "narrationLocalPath", "scriptApproved"],
     produces: ["videoKey"],
     async run(ctx: StageContext) {
@@ -261,7 +263,9 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
         } };
       },
     },
-    "@/lib/bootstrap": { bootstrapSecrets: async () => { calls.bootstrap++; } },
+    "@/lib/bootstrap": { bootstrapSecrets: async (_log: unknown, options: unknown) => {
+      calls.bootstrap++; bootstrapOptions.push(structuredClone(options));
+    } },
     "@/trigger/taskRetryPolicy": retryPolicy,
     "@/lib/renderBlockAdmission": renderAdmission,
     "@/lib/pipelineInvocationSnapshot": invocationSnapshots,
@@ -306,13 +310,14 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       return await loaded.exports.executeRenderBlock({
         ...scope, leaseOwner: "parent", executionLeaseToken: 1, dispatchKey: "child-dispatch",
         blockId: renderer.id, params: entries[2]!.params ?? {}, budgetUsd: snapshot.budgetUsd, seedStore: snapshot.seedStore,
-      }, { ...options, ...(versionCase && versionCase !== "historical-v1" && workerMutation !== "missing-context"
+      }, { ...options, ...(remoteId ? { machineClass: "offloaded" as const } : {}),
+        ...(versionCase && versionCase !== "historical-v1" && workerMutation !== "missing-context"
         ? { workerContext: ctx } : {}) });
     } finally {
       missingActual?.mock.restore();
     }
   };
-  return { run, calls, rows, savedRowsBefore, expectedLineage, writtenArtifacts, snapshot, reconstructed, legacyCompilation,
+  return { run, calls, rows, savedRowsBefore, expectedLineage, writtenArtifacts, snapshot, reconstructed, legacyCompilation, bootstrapOptions,
     observedStore: () => observedStore, acceptedCost: () => acceptedCost, observedStageBudget: () => observedStageBudget };
 }
 
@@ -325,6 +330,22 @@ async function main() {
   assert.equal(unchanged.calls.finish, 1);
   assert.equal(unchanged.calls.stages, 1, "reuse adds no stage query round trips");
   assert.equal(unchanged.calls.admission, 1, "one fenced admission replaces the lease mutation and two full-document queries");
+  assert.deepEqual(unchanged.bootstrapOptions, [{ services: ["cloudflare"], required: [] }],
+    "local timeline assembly must never hydrate generation, music, publishing or messaging credentials");
+  for (const blockId of ["novita_render_images", "novita_render_video"] as const) {
+    const provider = harness(undefined, undefined, undefined, blockId);
+    await provider.run();
+    assert.deepEqual(provider.bootstrapOptions, [
+      { services: ["cloudflare"], required: [] },
+      { services: ["cloudflare", "novita", "openrouter", "langfuse"], required: [] },
+    ]);
+    const refused = harness("missing-receipt", undefined, undefined, blockId);
+    await assert.rejects(refused.run(), /STAGE_REUSE_RECONCILIATION_REQUIRED/);
+    assert.deepEqual(refused.bootstrapOptions, [{ services: ["cloudflare"], required: [] }],
+      "unadmitted inputs must not hydrate provider credentials");
+    assert.equal(refused.calls.begin, 0);
+    assert.equal(refused.calls.paid, 0);
+  }
   assert.equal(unchanged.calls.artifactQueries, 0, "historical artifacts must not replace selected identities");
   assert.equal(unchanged.observedStore()!.narrationLocalPath, "/new-worker/narration.mp3");
   assert.equal(unchanged.observedStore()!.scriptApproved, true);
@@ -368,6 +389,9 @@ async function main() {
       }
       const output = await candidate.run();
       assert.equal(candidate.calls.reconstruction, 1, "matching binding reaches the actual reconstruction once");
+      assert.deepEqual(candidate.bootstrapOptions, [
+        { services: ["cloudflare"], required: [] }, { required: [] },
+      ], "DocuMotion and alternate versions retain their integrated provider bootstrap");
       assert.equal(output.patch.videoKey, "owners/remote-reuse/final.mp4");
       assert.equal(output.patch.__costUsd, 0.2, "fake observed cost survives real cost transport");
       assert.equal(candidate.calls.defaultExecution, versionCase === "v2" ? 0 : 1);

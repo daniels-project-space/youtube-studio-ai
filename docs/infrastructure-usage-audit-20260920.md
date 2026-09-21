@@ -1158,3 +1158,37 @@ Validation: five focused files pass in an external-network-disabled serial run,
 including authorization, remote lease lifecycle, actual worker replay/version
 binding, render admission and frozen budget admission. TypeScript, scoped lint
 and whitespace checks pass. No full release gate or deployed API test is claimed.
+
+## Batch 28: Scope Render Credentials And Delay Provider Setup
+
+Remote children previously hydrated all 21 general vault services immediately
+before upstream receipt validation and rehydration. They now hydrate only
+Cloudflare for storage at that point. Provider setup follows frozen input,
+lineage and remaining-budget admission instead of preceding those checks.
+
+The audited `1.0.0` timeline assembler needs only storage and local rendering,
+so it performs no second bootstrap. The audited Novita image/video blocks request
+Cloudflare, Novita, OpenRouter and optional Langfuse tracing. Their nested direct
+renderer/readiness helpers now request only Cloudflare and Novita instead of
+silently expanding back to the whole vault. Retired bridge helpers request only
+Novita and remain retired. DocuMotion and other module versions retain general
+provider hydration after admission because their integrated requirements differ.
+
+For a fresh process with successful vault reads, this changes 21 service reads
+to one for local assembly (95.2% fewer), or four for the scoped Novita workers
+(81.0% fewer). Existing in-flight deduplication, successful-service caching,
+explicit environment precedence and missing-credential refusal are unchanged.
+Warm processes already avoided successful repeated reads; these percentages are
+cold-worker vault-call counts, not Trigger, Convex or Vercel bill reductions.
+No model, prompt, precision, render profile, review gate or channel definition
+changes. No publishing/music/messaging credentials are requested by these scoped
+workers; this is reduced hydration, not process-environment secret isolation.
+
+Six focused external-network-disabled test files pass. The actual remote runner
+proves storage-only timeline setup, both scoped offloaded paths, no provider
+hydration for invalid upstream receipts, and unchanged DocuMotion/versioned
+compatibility. Actual Novita readiness/status helpers make exactly two cold vault
+reads across repeated calls and fail closed on missing configuration; fake vault
+transport refuses provider requests. Existing bootstrap, lease and durable
+delivery tests also pass. No thumbnail tests, paid generation or deployment ran.
+Live vault inventory, cold-start latency and production savings remain unverified.

@@ -628,7 +628,7 @@ async function prepareControlPlane(): Promise<DirectControlPlane> {
 /** Read-only cloud readiness; it never creates a provider worker. */
 export async function directNovitaFleetHealth(): Promise<DirectNovitaFleetHealth> {
   try {
-    await bootstrapSecrets();
+    await bootstrapSecrets(() => {}, { services: ["cloudflare", "novita"] });
     const control = await prepareControlPlane();
     const videoRuntime = assessNovitaVideoProfileRuntime(generationProfile("production"));
     // Control-plane readiness is not video admission. In particular the
@@ -1980,7 +1980,7 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
       "direct Novita render requires an explicit positive maxCostUsd before control-plane admission",
     );
   }
-  await bootstrapSecrets();
+  await bootstrapSecrets(() => {}, { services: ["cloudflare", "novita"] });
   const control = await prepareControlPlane();
   if (control.activeInstanceCount >= control.config.verifiedGpuQuota) {
     throw new NovitaAdmissionError("all verified RTX 4090 capacity is currently in use");
