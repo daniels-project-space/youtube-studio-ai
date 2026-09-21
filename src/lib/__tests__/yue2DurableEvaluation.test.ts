@@ -59,6 +59,10 @@ function completion(bytes: Uint8Array, req: YuE2AcceptedArrangementRequest) {
     artifacts: { "audio-native.wav": { sha256: yue2Sha256(bytes), bytes: bytes.length },
       "song/result.json": { sha256: "c".repeat(64), bytes: 23 } },
   };
+  if (current.preClamp) Object.assign(receipt.artifacts, {
+    "audio-unclipped.wav": { sha256: yue2Sha256(bytes), bytes: bytes.length },
+    "headroom-status.json": { sha256: yue2Sha256(headroom()), bytes: headroom().length },
+  });
   const terminal = seal(receipt);
   terminal.payload_json = terminal.payload_json.replace('"seconds":1}', '"seconds":1.0}');
   terminal.sha256 = yue2Sha256(terminal.payload_json);
@@ -76,12 +80,19 @@ function fixture() {
     authorizations: 0, posts: 0, getFault: undefined as Fault | undefined, putFault: undefined as Fault | undefined,
     afterPutFault: undefined as Fault | undefined, audio, req: baseRequest,
     remote: "missing" as "missing" | "pending" | "completed" | "failed",
-    invalidReceipt: false, audioFailure: false,
+    invalidReceipt: false, audioFailure: false, preClamp: false,
     postMode: "completed" as "completed" | "pending" | "ambiguous",
     barrier: false, jobGets: 0, release: undefined as (() => void) | undefined,
   };
 }
 let current = fixture();
+function headroom() {
+  const payload = { schema: "yue2-pre-clamp-source/v1", decode_passes: 1, decoder_sha256: "a".repeat(64),
+    source: "audio-unclipped.wav", official: "audio-native.wav", source_sha256: yue2Sha256(current.audio),
+    samples_outside_unit_range: 0, raw_sample_peak: 0, clamped_samples_equal_reference: true,
+    gain_applied: false, production_approved: false };
+  return Buffer.from(JSON.stringify({ payload, sha256: seal(payload).sha256 }));
+}
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
@@ -123,7 +134,9 @@ globalThis.fetch = async (input, init = {}) => {
     current.posts++;
     current.remote = current.postMode === "pending" ? "pending" : "completed";
     if (current.postMode === "ambiguous") throw new Error(`simulated lost response ${token}`);
-  } else if (path.endsWith("/artifacts/audio-native.wav")) {
+  } else if (path.endsWith("/artifacts/headroom-status.json")) {
+    return new Response(headroom());
+  } else if (path.endsWith("/artifacts/audio-native.wav") || path.endsWith("/artifacts/audio-unclipped.wav")) {
     if (current.audioFailure) throw new Error("audio download failed");
     return new Response(new Uint8Array(current.audio));
   }
@@ -185,6 +198,45 @@ async function main() {
     const again = await run(args({ recoverOnly: true, authorizeSubmission: async () => { throw new Error("must not authorize recovery"); } }));
     assert.equal(again.status, "completed"); assert.equal(again.reused, true);
     assert.deepEqual([current.calls.length, current.writes.length], counts); assert.equal(current.posts, 1);
+  });
+  await test("raw source retention seals both artifacts and reuses without worker access", async () => {
+    current.preClamp = true;
+    const result = await run(args());
+    assert.equal(result.status, "completed");
+    if (result.status !== "completed") throw new Error("expected complete");
+    const source = result.candidate.preClampSource;
+    assert.ok(source);
+    assert.deepEqual(current.objects.get(source.audioKey), audio);
+    assert.deepEqual(current.objects.get(source.receiptKey), headroom());
+    const counts = [current.calls.length, current.writes.length];
+    assert.equal((await run(args({ recoverOnly: true }))).status, "completed");
+    assert.deepEqual([current.calls.length, current.writes.length], counts);
+    current.objects.set(source.receiptKey, Buffer.from("corrupt"));
+    await rejected(run(args({ recoverOnly: true })));
+    assert.deepEqual([current.calls.length, current.writes.length], counts);
+  });
+  await test("interrupted source writes recover via GET only before publishing candidate", async () => {
+    current.preClamp = true;
+    current.putFault = key => { if (key.includes("headroom-")) throw new Error("interrupted receipt write"); };
+    await rejected(run(args()));
+    assert.equal(current.posts, 1);
+    assert.equal(current.objects.has(candidateKey), false);
+    assert.ok([...current.objects.keys()].some(key => key.includes("audio-unclipped-")));
+    current.putFault = undefined;
+    const result = await run(args({ recoverOnly: true }));
+    assert.equal(result.status, "completed");
+    assert.equal(current.posts, 1);
+    assert.ok(current.objects.has(candidateKey));
+  });
+  await test("missing raw audio on a sealed candidate is not silently repaired or repurchased", async () => {
+    current.preClamp = true;
+    const result = await run(args());
+    if (result.status !== "completed" || !result.candidate.preClampSource) throw new Error("expected raw source");
+    current.objects.delete(result.candidate.preClampSource.audioKey);
+    const calls = current.calls.length;
+    await rejected(run(args()));
+    assert.equal(current.calls.length, calls);
+    assert.equal(current.posts, 1);
   });
   await test("independent clients racing the same missing job admit one POST; loser GET-recovers", async () => {
     current.barrier = true;

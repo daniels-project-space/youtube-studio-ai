@@ -431,12 +431,24 @@ async function runIntegration(supervised: boolean, failInference = false): Promi
     assert.equal(workerRequests.length, beforeReuse, "malformed or cross-owner/run candidates never trigger worker HTTP");
 
     const audioEntries = [...s3.objects].filter(([, bytes]) => bytes.subarray(0, 4).toString() === "RIFF");
-    assert.equal(audioEntries.length, 1);
-    const [audioKey, audio] = audioEntries[0];
-    const corrupt = Buffer.from(audio); corrupt[corrupt.length - 1] ^= 1;
-    s3.objects.set(audioKey, corrupt);
+    assert.equal(audioEntries.length, 2, "native and pre-clamp source retained separately");
+    const source = candidate.preClampSource as Record<string, unknown>;
+    assert.ok(source);
+    assert.equal(source.audioSha256, createHash("sha256").update(s3.objects.get(String(source.audioKey))!).digest("hex"));
+    assert.equal(source.receiptSha256, createHash("sha256").update(s3.objects.get(String(source.receiptKey))!).digest("hex"));
+    for (const [audioKey, audio] of audioEntries) {
+      const corrupt = Buffer.from(audio); corrupt[corrupt.length - 1] ^= 1;
+      s3.objects.set(audioKey, corrupt);
+      await refusal(cli(["--submit", "--recover-only"]));
+      assert.equal(workerRequests.length, beforeReuse, "tampered retained bytes must not trigger regeneration");
+      s3.objects.set(audioKey, audio);
+    }
+    const receiptKey = String(source.receiptKey);
+    const receipt = s3.objects.get(receiptKey)!;
+    s3.objects.set(receiptKey, Buffer.from("corrupt headroom receipt"));
     await refusal(cli(["--submit", "--recover-only"]));
-    assert.equal(workerRequests.length, beforeReuse, "tampered retained bytes must not trigger regeneration");
+    assert.equal(workerRequests.length, beforeReuse);
+    s3.objects.set(receiptKey, receipt);
 
     // A previously observed job owns the purchase even if it disappears from
     // the worker ledger before the next independent CLI process starts.

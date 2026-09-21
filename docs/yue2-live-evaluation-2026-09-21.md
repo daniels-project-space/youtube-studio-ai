@@ -336,3 +336,30 @@ The build pin selects the new transport revision. The OpenRelay image has not ye
 been rebuilt/deployed with this revision. The durable application path still needs
 raw-source retention and measured mastering; neither raw audio nor the original
 clamped waveform is automatically approved for production delivery.
+
+### Durable Application Source Retention
+
+`executeDurableYuE2Evaluation` now retains terminal-verified pre-clamp WAVs and
+headroom receipts at separate content-addressed keys. Candidate references bind
+both hashes and byte lengths. A candidate is published only after immutable
+writes, readback, receipt verification and actual FLOAT WAV inspection succeed.
+Previously sealed candidates preserve their original retention contract.
+
+Interrupted source writes recover through fixed artifact GETs, without a new
+submission. Completed-candidate reuse and read-only review reverify retained
+source evidence. Missing or corrupted sources on a sealed candidate fail closed;
+they are not silently replaced or repurchased. The official native listening
+audio, signal-review gates and production-denial flags remain unchanged.
+
+Validation: 22 durable behavioral cases, 40 supervised/review cases, and real
+Python HTTP plus S3-wire integration for legacy completion, supervised completion
+and supervised failure pass. Each wire scenario made exactly one POST and one
+explicitly fake CPU inference. Successful scenarios checked both retained WAVs
+and the headroom receipt, then confirmed corruption refusal without worker calls.
+Typecheck and scoped ESLint pass. No live R2 writes, GPU rental or production
+deployment occurred. The canonical production bucket's public-access configuration
+still needs resolution before treating these artifacts as privately stored.
+
+Measured mastering and its delivery lineage remain the next audio integration
+step. Retaining an unclipped source is not itself safe playback, channel-quality
+approval, seamless-loop qualification or exact final-video assembly.
