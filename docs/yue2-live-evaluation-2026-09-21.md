@@ -363,3 +363,32 @@ still needs resolution before treating these artifacts as privately stored.
 Measured mastering and its delivery lineage remain the next audio integration
 step. Retaining an unclipped source is not itself safe playback, channel-quality
 approval, seamless-loop qualification or exact final-video assembly.
+
+### Measured Headroom Preparation
+
+`src/lib/yue2Headroom.ts` now prepares a separate audition derivative from the
+terminal-verified pre-clamp source. It measures the complete source using the
+existing oversampled true-peak meter, applies only negative linear gain when
+needed, and remeasures the complete saved FLOAT WAV. The ceiling is -1 dBTP with
+a 0.2 dB margin for the meter's 0.1 dB display resolution. Quiet sources are not
+amplified or re-encoded. There is no compression, EQ, trimming, looping, resampling
+or loudness normalization. Missing reliable metering or non-finite samples refuse
+preparation. Silence remains unchanged and retains its review warnings.
+
+The local evaluation command retains `audio-headroom.wav` and
+`headroom-preparation.json` alongside the untouched official and raw files.
+Candidate hashes bind both derivative files. The preparation receipt binds the
+job, raw audio and source receipt, gain, native frame count, before/after meter
+results, and an explicit false production-approval flag. Offline candidate reuse
+checks these identities, probes actual format/frame count, and remeasures output
+without rendering or contacting the worker. Existing candidates remain readable.
+
+Seventy client/CLI checks pass, including actual FFmpeg processing of synthetic
+over-range stereo, unchanged frames/source bytes, deterministic repeat output,
+no amplification, silence warnings, and corrupted-derivative refusal. Real Python
+HTTP-to-TypeScript CLI integration passes for the legacy fixture and five shared
+arrangement fixtures, each retaining preparation evidence. Typecheck and scoped
+ESLint pass. These new DSP tests use synthetic audio, not a new GPU composition or
+musical audition. No GPU rental, live storage writes or production deployment
+occurred. The durable application and its listening/review surface still need to
+adopt this derivative explicitly; their listening audio is not silently replaced.

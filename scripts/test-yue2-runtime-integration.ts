@@ -75,6 +75,13 @@ async function main(): Promise<void> {
     assert.equal(candidate.productionApproved, false);
     assert.equal(candidate.nativeFormatVerified, true);
     assert.equal(candidate.preClampSourceRetained, true);
+    const preparedBytes = await readFile(join(directory, "audio-headroom.wav"));
+    const preparationBytes = await readFile(join(directory, "headroom-preparation.json"));
+    assert.equal(candidate.headroom.audioSha256, yue2Sha256(preparedBytes));
+    assert.equal(candidate.headroom.receiptSha256, yue2Sha256(preparationBytes));
+    const preparation = JSON.parse(preparationBytes.toString());
+    assert.equal(preparation.gainDb, 0, "quiet CPU fixture is never amplified");
+    assert.equal(preparation.productionApproved, false);
     const sourceBytes = await readFile(join(directory, "audio-unclipped.wav"));
     const headroom = JSON.parse(await readFile(join(directory, "headroom-status.json"), "utf8"));
     assert.equal(headroom.payload.source_sha256, yue2Sha256(sourceBytes));
@@ -122,6 +129,7 @@ async function main(): Promise<void> {
       assert.equal(savedCandidate.programFingerprint, arrangement.fingerprint);
       assert.equal(savedCandidate.nativeFormatVerified, true);
       assert.equal(savedCandidate.preClampSourceRetained, true);
+      assert.ok(savedCandidate.headroom, "every shared arrangement retains measured headroom evidence");
       assert.equal(savedCandidate.productionApproved, false);
       assert.equal(savedCandidate.qualification.exact_duration, "unqualified");
       assert.equal(savedCandidate.qualification.instrumental_only, "unqualified");

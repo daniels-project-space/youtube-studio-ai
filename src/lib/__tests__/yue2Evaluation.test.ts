@@ -14,6 +14,7 @@ import {
   YUE2_ARRANGEMENT_EVALUATION_VERSION, type YuE2SealedReceipt, type YuE2BoundEvaluationRequest,
 } from "@/lib/yue2Evaluation";
 import { executeYuE2Evaluation, probeYuE2NativeWav, runYuE2EvaluationCli } from "@/scripts/evaluate-yue2-music";
+import { prepareYuE2Headroom, verifyYuE2Headroom } from "@/lib/yue2Headroom";
 
 const execute = promisify(execFile);
 const program = createChannelMusicProgram({
@@ -91,8 +92,8 @@ function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request,
     artifacts: { "audio-native.wav": `/v1/jobs/${req.job.job_id}/artifacts/audio-native.wav` } };
 }
 
-function withPreClamp(audio: Uint8Array) {
-  const wire = completed(audio);
+function withPreClamp(audio: Uint8Array, officialAudio = audio) {
+  const wire = completed(officialAudio);
   const payload = { schema: "yue2-pre-clamp-source/v1", decode_passes: 1, decoder_sha256: "a".repeat(64),
     source: "audio-unclipped.wav", official: "audio-native.wav", source_sha256: yue2Sha256(audio),
     samples_outside_unit_range: 0, raw_sample_peak: 0.25, clamped_samples_equal_reference: true,
@@ -238,6 +239,15 @@ async function main(): Promise<void> {
       const calls = fixture.calls.length;
       assert.equal((await executeYuE2Evaluation(input)).reused, true);
       assert.equal(fixture.calls.length, calls);
+      const preparedPath = join(result.directory, "audio-headroom.wav");
+      const prepared = await readFile(preparedPath);
+      const savedCandidate = JSON.parse(await readFile(join(result.directory, "candidate.json"), "utf8"));
+      assert.equal(savedCandidate.headroom.audioSha256, yue2Sha256(prepared));
+      await chmod(preparedPath, 0o600);
+      await writeFile(preparedPath, "corrupt derivative");
+      await assert.rejects(executeYuE2Evaluation(input));
+      assert.equal(fixture.calls.length, calls);
+      await writeFile(preparedPath, prepared);
       const path = join(result.directory, "headroom-status.json");
       await chmod(path, 0o600);
       await writeFile(path, "corrupt");
@@ -258,6 +268,57 @@ async function main(): Promise<void> {
         raw.wire.receipt_payloads.terminal = seal(raw.wire.receipt);
         assert.throws(() => verifyYuE2PreClampSource(verifyYuE2Completion(request, raw.wire), audio, receipt));
       }
+    });
+    await test("headroom attenuation measures the output and never changes frame count or source", async () => {
+      const frames = 4800;
+      const sourceAudio = Buffer.alloc(44 + frames * 8);
+      sourceAudio.write("RIFF"); sourceAudio.writeUInt32LE(sourceAudio.length - 8, 4); sourceAudio.write("WAVEfmt ", 8);
+      sourceAudio.writeUInt32LE(16, 16); sourceAudio.writeUInt16LE(3, 20); sourceAudio.writeUInt16LE(2, 22);
+      sourceAudio.writeUInt32LE(48000, 24); sourceAudio.writeUInt32LE(384000, 28); sourceAudio.writeUInt16LE(8, 32);
+      sourceAudio.writeUInt16LE(32, 34); sourceAudio.write("data", 36); sourceAudio.writeUInt32LE(frames * 8, 40);
+      const native = Buffer.from(sourceAudio);
+      for (let frame = 0; frame < frames; frame++) for (let channel = 0; channel < 2; channel++) {
+        const value = 1.4 * Math.sin(frame * 2 * Math.PI * (channel ? 330 : 220) / 48000);
+        sourceAudio.writeFloatLE(value, 44 + frame * 8 + channel * 4);
+        native.writeFloatLE(Math.max(-1, Math.min(1, value)), 44 + frame * 8 + channel * 4);
+      }
+      const original = Buffer.from(sourceAudio);
+      const raw = withPreClamp(sourceAudio, native);
+      const completion = verifyYuE2Completion(request, raw.wire);
+      const source = { audio: sourceAudio, receipt: raw.receipt };
+      const prepared = await prepareYuE2Headroom(completion, source);
+      assert.ok(prepared.receipt.gainDb < 0);
+      assert.ok(prepared.receipt.before.fullScaleSamples > 0);
+      assert.equal(prepared.receipt.after.fullScaleSamples, 0);
+      assert.ok(prepared.receipt.after.dbtp! <= -1);
+      assert.equal(prepared.receipt.frames, frames);
+      assert.equal(prepared.receipt.productionApproved, false);
+      assert.deepEqual(sourceAudio, original);
+      await verifyYuE2Headroom(completion, source, prepared.audio, prepared.receipt);
+      await assert.rejects(verifyYuE2Headroom(completion, source, prepared.audio,
+        { ...prepared.receipt, gainDb: 0 }));
+      await assert.rejects(verifyYuE2Headroom(completion, source, Buffer.from("corrupt"), prepared.receipt));
+      const repeat = await prepareYuE2Headroom(completion, source);
+      assert.deepEqual(repeat.audio, prepared.audio);
+      assert.deepEqual(repeat.receipt, prepared.receipt);
+    });
+    await test("quiet sources are not amplified and silence remains a review issue", async () => {
+      const raw = withPreClamp(audio);
+      const prepared = await prepareYuE2Headroom(verifyYuE2Completion(request, raw.wire), { audio, receipt: raw.receipt });
+      assert.equal(prepared.receipt.gainDb, 0);
+      assert.deepEqual(prepared.audio, audio);
+      assert.equal(prepared.receipt.productionApproved, false);
+      const silentPath = join(directory, "headroom-silence.wav");
+      await execute("ffmpeg", ["-v", "error", "-nostdin", "-n", "-i", audioPath,
+        "-af", "volume=0", "-c:a", "pcm_f32le", silentPath]);
+      const silent = await readFile(silentPath);
+      const silentFixture = withPreClamp(silent);
+      const silentResult = await prepareYuE2Headroom(verifyYuE2Completion(request, silentFixture.wire),
+        { audio: silent, receipt: silentFixture.receipt });
+      assert.equal(silentResult.receipt.gainDb, 0);
+      assert.equal(silentResult.receipt.after.status, "digital_silence");
+      assert.ok(silentResult.receipt.after.reviewReasons.length > 0);
+      assert.deepEqual(silentResult.audio, silent);
     });
     await test("empty and one-byte audio chunks preserve exact bytes across bounded slabs", async () => {
       const path = join(directory, "multi-slab.wav");
