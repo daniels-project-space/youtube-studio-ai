@@ -23,6 +23,7 @@ import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
@@ -56,11 +57,6 @@ function digest(value: unknown, label: string): string {
   return value.trim().toLowerCase();
 }
 
-function objectNotFound(error: unknown): boolean {
-  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
-  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" || candidate?.$metadata?.httpStatusCode === 404;
-}
-
 export function assertPlanWeekPreparedScriptArgs(value: unknown): PlanWeekPreparedScriptArgs {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly prepared script payload is invalid");
   const raw = value as Record<string, unknown>;
@@ -92,9 +88,9 @@ export function assertPlanWeekPreparedScriptArgs(value: unknown): PlanWeekPrepar
 }
 
 async function readPreparationManifest(payload: PlanWeekPreparedScriptArgs): Promise<PlanWeekPreparationManifest> {
-  const bytes = await getObjectBytes(payload.manifestKey);
+  const bytes = await getObjectBytes(payload.manifestKey, undefined, PREPARED_METADATA_READ);
   if (sha256BytesHex(bytes) !== payload.manifestSha256) throw new Error("weekly prepared script manifest digest mismatch");
-  const manifest = normalizePlanWeekPreparationManifest(JSON.parse(new TextDecoder().decode(bytes)));
+  const manifest = normalizePlanWeekPreparationManifest(decodePreparedMetadata(bytes));
   return assertPlanWeekPreparationManifestBinding({
     manifest,
     pointer: { version: PLAN_WEEK_PREPARATION_VERSION, manifestKey: payload.manifestKey, manifestSha256: payload.manifestSha256 },
@@ -114,8 +110,8 @@ async function readPreparationManifest(payload: PlanWeekPreparedScriptArgs): Pro
 
 async function readSidecar(key: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedScript | null> {
   let bytes: Uint8Array;
-  try { bytes = await getObjectBytes(key); } catch (error) { if (objectNotFound(error)) return null; throw error; }
-  const prepared = assertPlanWeekPreparedScriptBinding({ prepared: JSON.parse(new TextDecoder().decode(bytes)), manifest });
+  try { bytes = await getObjectBytes(key, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
+  const prepared = assertPlanWeekPreparedScriptBinding({ prepared: decodePreparedMetadata(bytes), manifest });
   return prepared;
 }
 

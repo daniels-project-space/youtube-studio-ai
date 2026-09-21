@@ -74,6 +74,7 @@ import { configuredMaxCostUsd } from "@/engine/moduleManifest";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
+import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
 import { alertBudget, alertFailure } from "@/lib/telegram";
@@ -1331,9 +1332,9 @@ export const runPipelineTask = task({
           }
           let rawManifest: unknown;
           try {
-            rawManifest = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(scheduledPlan.preparation.manifestKey),
-            ));
+            rawManifest = decodePreparedMetadata(
+              await getObjectBytes(scheduledPlan.preparation.manifestKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
             throw new Error(
               `scheduled plan preparation manifest is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
@@ -1357,13 +1358,11 @@ export const runPipelineTask = task({
           const preparedScriptKey = planWeekPreparedScriptKey(weeklyPreparation);
           let rawPreparedScript: unknown | undefined;
           try {
-            rawPreparedScript = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(preparedScriptKey),
-            ));
+            rawPreparedScript = decodePreparedMetadata(
+              await getObjectBytes(preparedScriptKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            const name = (error as { name?: string }).name;
-            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+            if (!preparedObjectAbsent(error)) {
               throw new Error(
                 `scheduled plan prepared script is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
               );
@@ -1378,13 +1377,11 @@ export const runPipelineTask = task({
           const preparedNarrationKey = planWeekPreparedNarrationKey(weeklyPreparation);
           let rawPreparedNarration: unknown | undefined;
           try {
-            rawPreparedNarration = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(preparedNarrationKey),
-            ));
+            rawPreparedNarration = decodePreparedMetadata(
+              await getObjectBytes(preparedNarrationKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            const name = (error as { name?: string }).name;
-            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+            if (!preparedObjectAbsent(error)) {
               throw new Error(
                 `scheduled plan prepared narration is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
               );
@@ -1399,13 +1396,11 @@ export const runPipelineTask = task({
           const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);
           let rawPreparedMusic: unknown | undefined;
           try {
-            rawPreparedMusic = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(preparedMusicKey),
-            ));
+            rawPreparedMusic = decodePreparedMetadata(
+              await getObjectBytes(preparedMusicKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            const name = (error as { name?: string }).name;
-            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+            if (!preparedObjectAbsent(error)) {
               throw new Error(
                 `scheduled plan prepared music is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
               );
@@ -1420,13 +1415,11 @@ export const runPipelineTask = task({
           const preparedFootageKey = planWeekPreparedFootageKey(weeklyPreparation);
           let rawPreparedFootage: unknown | undefined;
           try {
-            rawPreparedFootage = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(preparedFootageKey),
-            ));
+            rawPreparedFootage = decodePreparedMetadata(
+              await getObjectBytes(preparedFootageKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            const name = (error as { name?: string }).name;
-            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+            if (!preparedObjectAbsent(error)) {
               throw new Error(
                 `scheduled plan prepared footage is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
               );
@@ -1441,13 +1434,11 @@ export const runPipelineTask = task({
           const preparedImagesKey = planWeekPreparedImagesKey(weeklyPreparation);
           let rawPreparedImages: unknown | undefined;
           try {
-            rawPreparedImages = JSON.parse(new TextDecoder().decode(
-              await getObjectBytes(preparedImagesKey),
-            ));
+            rawPreparedImages = decodePreparedMetadata(
+              await getObjectBytes(preparedImagesKey, undefined, PREPARED_METADATA_READ),
+            );
           } catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            const name = (error as { name?: string }).name;
-            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+            if (!preparedObjectAbsent(error)) {
               throw new Error(
                 `scheduled plan prepared images are unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
               );

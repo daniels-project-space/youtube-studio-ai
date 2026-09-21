@@ -903,3 +903,49 @@ Final local gate: all 842 selected readiness files passed with external networki
 disabled and 30 thumbnail-named files excluded. TypeScript, scoped lint, whitespace
 checks and the post-code-edit Graphify refresh passed. This remains a partial
 offline gate, not complete production readiness or production approval.
+
+## Batch 22: Bound prepared metadata and distinguish storage failure from absence
+
+The script, narration, music and image preparation producers, plus all five
+scheduled-run sidecar readers, accepted any HTTP 404, `NotFound`, or `NoSuchKey`
+name as missing prepared work. A missing bucket or ambiguous gateway response
+could therefore bypass reuse and enter generation. Only `NoSuchKey` together
+with HTTP 404 now authorizes this transition. Other errors propagate; existing
+task retry limits remain unchanged and cannot turn those errors into a miss.
+
+All four producers' manifest/sidecar reads, narration's script handoff, and the
+scheduled runner's manifest/five sidecars now use the existing streaming storage
+reader with an 8 MiB metadata ceiling and a 30-second whole-read deadline.
+Fatal UTF-8 decoding rejects altered text instead of inserting replacement
+characters. Oversized packets are rejected intact for reconciliation, not
+truncated, summarized or regenerated. Existing scope/hash/schema/quality checks
+remain after transport admission. Audio/image generation settings and legacy
+pipeline definitions are unchanged. This ceiling is a transfer-admission policy,
+not proof that every historical packet fits; a larger legitimate packet requires
+review rather than a silent content reduction.
+
+The real four producer entry points pass 28 ambiguous-storage holds and 12
+corrupt/oversized metadata holds, with zero paid calls in those cases. A confirmed
+missing script receipt reaches exactly one stubbed generation call. The real
+image-sidecar reader still restores all 12 fixture images with their exact byte
+identities. Exact-limit JSON, UTF-8 preservation and one-byte-over-limit cases
+exercise the shared decoder. Temporarily restoring the old absence predicate
+makes the regression fail; the strict predicate is restored. Scheduled runner
+coverage here is a source-wiring assertion for all six bounded reads and five
+absence checks, not a deployed scheduled-run proof. Seventeen existing storage
+stream tests independently exercise real Node/web streams, content-length
+overruns, cancellation, deadlines and credential-refresh boundaries.
+
+This bounds one class of worker time/memory and prevents avoidable generation;
+no fleet billing percentage is claimed. It does not establish exactly-once
+generation after a lost write or concurrent first attempts, qualify YuE on a GPU,
+or complete weekly preparation. No deployment or paid generation was performed.
+
+Frozen offline sweep: 843 of 844 selected readiness files passed, with 30
+thumbnail-named files excluded. The sole failure was the shared-music direction
+fixture representing absence with `NoSuchKey` but no HTTP status. That fixture
+now explicitly supplies HTTP 404; application code was not relaxed. Its rerun
+and four focused companion suites passed (21 test-runner cases, including the
+17 storage-stream cases). The full sweep was not repeated after this fixture-only
+correction. TypeScript, scoped lint and whitespace checks passed. This remains
+partial offline evidence, not a production release or full MVP qualification.

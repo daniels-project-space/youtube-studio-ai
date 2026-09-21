@@ -33,7 +33,7 @@ loader._load = function (id, ...args) {
     putObject: async (_key: string, bytes: Uint8Array) => { persisted = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(bytes).toString())); },
     getObjectBytes: async (key: string) => {
       if (key === manifestKey) return manifestBytes;
-      throw Object.assign(new Error("missing sidecar"), { name: "NoSuchKey" });
+      throw Object.assign(new Error("missing sidecar"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
     },
   };
   const actual = originalLoad.call(this, id, ...args);

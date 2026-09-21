@@ -31,6 +31,7 @@ import {
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
@@ -91,11 +92,6 @@ const CAMERA_MOVES = new Set<Shot["cameraMove"]>([
   "truck_left", "truck_right", "handheld_drift",
 ]);
 const SHOT_SCALES = new Set<Shot["shotScale"]>(["wide", "medium", "close", "extreme_close", "establishing"]);
-
-function objectNotFound(error: unknown): boolean {
-  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
-  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" || candidate?.$metadata?.httpStatusCode === 404;
-}
 
 function generationIdentity(profile: GenerationProfile): StillRenderManifest["generation"] {
   return {
@@ -270,9 +266,9 @@ export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPrepar
 }
 
 async function readPreparationManifest(payload: PlanWeekPreparedImagesArgs): Promise<PlanWeekPreparationManifest> {
-  const manifestBytes = await getObjectBytes(payload.manifestKey);
+  const manifestBytes = await getObjectBytes(payload.manifestKey, undefined, PREPARED_METADATA_READ);
   if (sha256BytesHex(manifestBytes) !== payload.manifestSha256) throw new Error("weekly prepared images manifest digest mismatch");
-  const parsed = JSON.parse(new TextDecoder().decode(manifestBytes)) as unknown;
+  const parsed = decodePreparedMetadata(manifestBytes);
   const normalized = normalizePlanWeekPreparationManifest(parsed);
   return assertPlanWeekPreparationManifestBinding({
     manifest: normalized,
@@ -293,8 +289,8 @@ async function readPreparationManifest(payload: PlanWeekPreparedImagesArgs): Pro
 
 export async function verifyStoredSidecar(key: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedImages | null> {
   let bytes: Uint8Array;
-  try { bytes = await getObjectBytes(key); } catch (error) { if (objectNotFound(error)) return null; throw error; }
-  const prepared = assertPlanWeekPreparedImagesBinding({ prepared: JSON.parse(new TextDecoder().decode(bytes)), manifest });
+  try { bytes = await getObjectBytes(key, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
+  const prepared = assertPlanWeekPreparedImagesBinding({ prepared: decodePreparedMetadata(bytes), manifest });
   await forEachPreparedMedia(prepared.items, async (item) => {
     const media = await getObjectBytes(item.stillKey, undefined, { maxBytes: item.byteLength, timeoutMs: 300_000 });
     if (media.byteLength !== item.byteLength || sha256BytesHex(media) !== item.sha256) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { PREPARED_METADATA_READ } from "@/lib/preparedMediaStorage";
 import {
   planWeekPreparedImageKey, planWeekPreparationManifestSha256,
   PLAN_WEEK_PREPARATION_VERSION,
@@ -47,7 +48,10 @@ const originalLoad = loader._load;
 loader._load = function (name, ...args) {
   if (name === "@/lib/storage") return {
     getObjectBytes: async (key: string, _bucket?: string, options?: { maxBytes: number; timeoutMs: number }) => {
-      if (key === "sidecar") return new TextEncoder().encode(JSON.stringify(sidecar));
+      if (key === "sidecar") {
+        assert.deepEqual(options, PREPARED_METADATA_READ);
+        return new TextEncoder().encode(JSON.stringify(sidecar));
+      }
       assert(items.some(item => item.stillKey === key));
       assert.deepEqual(options, { maxBytes: 512, timeoutMs: 300_000 });
       started++; active++; peak = Math.max(peak, active);

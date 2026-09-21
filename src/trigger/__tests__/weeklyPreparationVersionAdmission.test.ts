@@ -8,6 +8,7 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -29,7 +30,9 @@ let writes = 0;
 let dispatches = 0;
 let mutations = 0;
 let networkCalls = 0;
-let sidecarMode: "existing" | "missing" | "stop" = "existing";
+let sidecarMode: "existing" | "missing" | "stop" | "error" | "bytes" = "existing";
+let sidecarError: unknown;
+let sidecarBytes = Buffer.from("{}");
 let channelPipeline: unknown[] = [];
 const sidecarBoundary = new Error("unversioned task reached the existing sidecar boundary");
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
@@ -55,11 +58,14 @@ async function main(): Promise<void> {
       },
     };
     if (id === "@/lib/storage") return {
-      getObjectBytes: async (key: string) => {
+      getObjectBytes: async (key: string, _bucket?: string, options?: unknown) => {
+        assert.deepEqual(options, PREPARED_METADATA_READ, "every preparation metadata read must bound transfer and time");
         reads.push(key);
         if (key === manifestKey) return manifestBytes;
         if (sidecarMode === "stop") throw sidecarBoundary;
-        if (sidecarMode === "missing") throw Object.assign(new Error("not found"), { name: "NoSuchKey" });
+        if (sidecarMode === "missing") throw Object.assign(new Error("not found"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
+        if (sidecarMode === "error") throw sidecarError;
+        if (sidecarMode === "bytes") return sidecarBytes;
         return Buffer.from("{}");
       },
       putObject: async () => { writes++; throw new Error("write forbidden"); },
@@ -140,11 +146,45 @@ async function main(): Promise<void> {
       }), (error: unknown) => error === sidecarBoundary);
       assert.equal(reads.length, 2, `${name} retains its unversioned sidecar path`);
     }
+    const payload = { ...scope, manifestKey, manifestSha256: sha256BytesHex(manifestBytes), maxCostUsd: 2,
+      shots: [{ id: "shot-1", prompt: "An archive with a sealed map", seed: 7 }] };
+    const ambiguous = [
+      Object.assign(new Error("bucket missing"), { name: "NoSuchBucket", $metadata: { httpStatusCode: 404 } }),
+      Object.assign(new Error("gateway missing"), { name: "NotFound", $metadata: { httpStatusCode: 404 } }),
+      Object.assign(new Error("unproven absence"), { name: "NoSuchKey" }),
+      Object.assign(new Error("conflicting status"), { name: "NoSuchKey", $metadata: { httpStatusCode: 503 } }),
+      Object.assign(new Error("denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } }),
+      new Error("metadata read timed out"), null,
+    ];
+    for (const error of ambiguous) {
+      sidecarMode = "error"; sidecarError = error;
+      for (const [name, producer] of producers) {
+        reads = [];
+        await assert.rejects(() => producer.run(payload), caught => caught === error);
+        assert.equal(reads.length, 2, `${name} stops at ambiguous storage without a replacement purchase`);
+      }
+      assert.equal(preparedObjectAbsent(error), false);
+    }
+    assert.equal(preparedObjectAbsent({ name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }), true);
+    for (const bytes of [Buffer.from("{"), Buffer.from([0x22, 0xff, 0x22]), Buffer.alloc(PREPARED_METADATA_READ.maxBytes + 1, 32)]) {
+      assert.throws(() => decodePreparedMetadata(bytes));
+      sidecarMode = "bytes"; sidecarBytes = bytes;
+      for (const [, producer] of producers) await assert.rejects(() => producer.run(payload));
+    }
+    const valid = { script: "A complete source", unicode: "\u00e9", values: [1, false, null] };
+    assert.deepEqual(decodePreparedMetadata(Buffer.from(JSON.stringify(valid))), valid);
+    // Exact-limit whitespace is valid; the limit rejects, never truncates, a byte over.
+    const atLimit = Buffer.alloc(PREPARED_METADATA_READ.maxBytes, 32);
+    atLimit.write("{}");
+    assert.deepEqual(decodePreparedMetadata(atLimit), {});
     assert.equal(paidCalls, 0);
     assert.equal(writes, 0);
     assert.equal(dispatches, 0);
     assert.equal(networkCalls, 0);
-    console.log("WEEKLY VERSION ADMISSION PASS: four real producer boundaries, week-ahead pre-spend gate, malformed/default pins, unversioned reuse path");
+    sidecarMode = "missing";
+    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run(payload), /paid call forbidden/);
+    assert.equal(paidCalls, 1, "confirmed missing object still admits first-time script generation (stubbed)");
+    console.log("WEEKLY VERSION ADMISSION PASS: four real producers, version gates, bounded metadata, 28 ambiguous-read holds, 12 corrupt metadata holds, confirmed absence admits one stubbed purchase");
   } finally {
     loader._load = originalLoad;
     globalThis.fetch = originalFetch;

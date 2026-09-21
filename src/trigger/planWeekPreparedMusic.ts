@@ -32,6 +32,7 @@ import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studio
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { downloadTo, readBytes } from "@/lib/files";
 import { crossfadeConcatAudio, masterAudioTransparentGain, probe } from "@/lib/ffmpeg";
@@ -93,11 +94,6 @@ function digest(value: unknown, label: string): string {
     throw new Error(`weekly prepared music ${label} is invalid`);
   }
   return value.trim().toLowerCase();
-}
-
-function objectNotFound(error: unknown): boolean {
-  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
-  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" || candidate?.$metadata?.httpStatusCode === 404;
 }
 
 function finiteNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
@@ -227,9 +223,9 @@ function assertArgs(value: unknown): PlanWeekPreparedMusicArgs {
 }
 
 async function readManifest(payload: PlanWeekPreparedMusicArgs): Promise<PlanWeekPreparationManifest> {
-  const bytes = await getObjectBytes(payload.manifestKey);
+  const bytes = await getObjectBytes(payload.manifestKey, undefined, PREPARED_METADATA_READ);
   if (sha256BytesHex(bytes) !== payload.manifestSha256) throw new Error("weekly prepared music manifest digest mismatch");
-  const manifest = normalizePlanWeekPreparationManifest(JSON.parse(new TextDecoder().decode(bytes)));
+  const manifest = normalizePlanWeekPreparationManifest(decodePreparedMetadata(bytes));
   return assertPlanWeekPreparationManifestBinding({
     manifest,
     pointer: { version: PLAN_WEEK_PREPARATION_VERSION, manifestKey: payload.manifestKey, manifestSha256: payload.manifestSha256 },
@@ -241,8 +237,8 @@ async function readManifest(payload: PlanWeekPreparedMusicArgs): Promise<PlanWee
 
 async function readSidecar(sidecarKey: string, audioKey: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedMusic | null> {
   let bytes: Uint8Array;
-  try { bytes = await getObjectBytes(sidecarKey); } catch (error) { if (objectNotFound(error)) return null; throw error; }
-  const prepared = assertPlanWeekPreparedMusicBinding({ prepared: JSON.parse(new TextDecoder().decode(bytes)), manifest });
+  try { bytes = await getObjectBytes(sidecarKey, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
+  const prepared = assertPlanWeekPreparedMusicBinding({ prepared: decodePreparedMetadata(bytes), manifest });
   const audio = await getObjectBytes(audioKey);
   if (audio.byteLength !== prepared.audioByteLength || sha256BytesHex(audio) !== prepared.audioSha256) throw new Error("weekly prepared music retained audio failed its immutable receipt check");
   return prepared;
