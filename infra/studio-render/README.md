@@ -184,3 +184,21 @@ The retry completed on the real GPU. See
 [`docs/yue2-live-evaluation-2026-09-21.md`](../../docs/yue2-live-evaluation-2026-09-21.md)
 for native-output hashes, retained receipts, measured timing, duration mismatch
 and clipping-review findings. Generation success is not production approval.
+
+### Retained HTTP-capable image, 21 September 19:08 UTC
+
+The latest retained image supersedes the earlier build above:
+runtime `7a3eeaec826be487f05b68b54e0f618b98467111`, image
+`sha256:b05c41d3edf330896e19ae45e13521070d3e5df7b03863b9c3e2bae94c7f03c1`.
+`yue2_http_delivery_probe.py --state /read-only-ledger --job-id COMPLETED_JOB
+--cache-dir /mnt/yue2-hf-cache` verifies real retained native/unclipped WAV and
+headroom receipt delivery through the authenticated HTTP server. Run with
+network disabled and sufficient temporary space for one copied job; no GPU
+device or inference dispatcher is required. The original ledger must be mounted
+read-only. The cache path identifies the existing job configuration; this probe
+does not load weights.
+
+The probe passed inside this image on the retained 3090 host, with zero new
+inferences and original hashes preserved. The VM was stopped afterward.
+This is not an externally reachable deployment: persistent app-to-worker
+transport, channel-aware composition and production qualification remain open.

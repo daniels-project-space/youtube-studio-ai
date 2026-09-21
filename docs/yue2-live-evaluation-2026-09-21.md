@@ -463,3 +463,39 @@ storage credential refresh remains unchanged. Runtime/app deployment and exact
 deployed credential verification are still pending; this is not production
 activation, musical qualification or permission to publish. No GPU work or
 thumbnail generation was performed.
+
+## Retained Worker HTTP Image Verification
+
+The 3090 VM now retains runtime `7a3eeaec826be487f05b68b54e0f618b98467111`,
+including authenticated unclipped-source and headroom-receipt delivery. Image:
+`sha256:b05c41d3edf330896e19ae45e13521070d3e5df7b03863b9c3e2bae94c7f03c1`.
+Docker inspection confirmed the exact revision and Studio project/lane labels.
+The curated context was prepared from Studio `4e3d6175` and transferred to
+`/var/lib/youtube-studio-render/builds/yue2-source-7a3eeae` on the retained VM.
+
+The repeatable `infra/studio-render/yue2_http_delivery_probe.py` passed both
+locally and inside that actual image on the provider host. It copies only an
+already completed job into temporary state and never starts a dispatcher. The
+source ledger is mounted read-only. Authenticated HTTP downloads of native WAV,
+unclipped WAV and headroom receipt match the original terminal hashes and byte
+counts; MIME, length and digest headers match; anonymous requests return 401.
+The original and copied inference ledgers remain unchanged. This is verification
+of real retained audio delivery, not another inference or musical audition.
+
+Container `studio-yue2-http-delivery-20260921` exited 0 at 19:08:32 UTC, with
+`--network none`, read-only root, UID 1000, dropped capabilities and no GPU device
+needed for the transport probe. Evidence is retained on the controller at
+`/var/lib/youtube-studio-render/operator/yue2-http-delivery-20260921.json`.
+The existing budget controller reserved a further 5 cents for a maximum
+15-minute window, preserving prior reservations and the approved $1 total.
+The external shutdown guard was active before restart. Provider state confirmed
+the same VM stopped after retrieval. No additional inference or thumbnail job
+was submitted.
+
+Important remaining boundary: this verifies loopback HTTP inside the isolated
+image, not a reachable Vercel/Trigger worker URL. A persistent authenticated
+transport must preserve the inference container's network isolation. Do not
+switch to host networking merely to expose the loopback listener, and do not
+enable legacy pipeline replacements or claim production activation from this
+test. The shared production music block still requires the qualified YuE2
+continuation and channel-bound output approval.
