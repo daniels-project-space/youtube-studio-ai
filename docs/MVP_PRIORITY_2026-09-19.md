@@ -47,9 +47,15 @@ key, and Trigger builds no longer forward an OpenRelay key from build-machine
 environment. Production Trigger environment contained no such override.
 Re-arm shutdown protection before restarting; do not reset the approved budget.
 
-Next: private worker deployment,
-native generation and musical audition. Do not substitute more build checks
-for that live gate or mark shared production music integration complete.
+Native generation has now completed on the real 3090 in 133 seconds including
+supervised verification. Its 228.48-second output missed the approximately
+30-second request and has full-scale/true-peak review flags; see
+`docs/yue2-live-evaluation-2026-09-21.md`. The native audio and both attempt ledgers
+are retained, and the VM was stopped after retrieval.
+
+Next: private worker connection, channel-bound shared-music handoff, duration
+planning and musical audition. Do not mark shared production integration or
+music quality complete on the strength of one successful inference.
 
 ## MVP acceptance
 

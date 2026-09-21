@@ -179,3 +179,8 @@ attempt exposed a missing passwd entry for UID 1000 during Torch cache setup;
 the pinned image now registers `studio`, without widening capabilities or
 changing inference precision. Preserve that failed receipt when evaluating the
 explicit retry. The external VM shutdown guard remains separately required.
+
+The retry completed on the real GPU. See
+[`docs/yue2-live-evaluation-2026-09-21.md`](../../docs/yue2-live-evaluation-2026-09-21.md)
+for native-output hashes, retained receipts, measured timing, duration mismatch
+and clipping-review findings. Generation success is not production approval.
