@@ -8,7 +8,7 @@ import { directory, worktree } from './studio-render-build.mjs';
 
 const studio = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtime = '/home/ubuntu/youtube-studio-music-runtime';
-const runtimeRevision = 'd1c7a06065a232d8982c2b5f64cea9a4a8ceb244';
+const runtimeRevision = '53d5a804d604d048fbb2e16b113e66a9817bec05';
 const root = '/var/lib/youtube-studio-render';
 const project = 'youtube-studio-ai';
 const run = (command, args, options = {}) => execFileSync(command, args, {
