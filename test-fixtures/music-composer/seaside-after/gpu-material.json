@@ -1,0 +1,221 @@
+{
+  "candidate": {
+    "version": "studio-yue2-durable-candidate/v2",
+    "ownerId": "isolated-operator-evaluation",
+    "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+    "runId": "seaside-composer-evaluation-20260921-01",
+    "jobId": "yue2-eval-cb3b5e41babd7634f0b40ebc8ed278297874394b6b6a09052d73291c667fb813",
+    "programFingerprint": "3673bce7f5a461ed3bac7a010427a7def23896d7d5cbac5ad2f4890d55556e02",
+    "requestSha256": "3132abd8275a86c79de4a6b1f195dbab1ed0aa2201d5660bca4b47a2604e6950",
+    "bindingKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/binding.json",
+    "bindingSha256": "2d1281b5ee3163156b55d4d2eb613b36992e2fea0ae085c7fc26dc76cca92add",
+    "provenanceKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/provenance.json",
+    "provenanceSha256": "ab2498123c6d0f8a27a7de93fbeb336d437cfa19a58742994474e1c1be05df9b",
+    "audioKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/audio-native-c22b388febc0a0b19d7e33180f658f1c8ee861a32f2450f77f2b7e51a2276529.wav",
+    "audioSha256": "c22b388febc0a0b19d7e33180f658f1c8ee861a32f2450f77f2b7e51a2276529",
+    "audioBytes": 54696536,
+    "preClampSource": {
+      "audioKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/audio-unclipped-6ce0eda3230b61c18c9d2762f2bb0598b0f1728b5253601b5ff77fb2252c85ce.wav",
+      "audioSha256": "6ce0eda3230b61c18c9d2762f2bb0598b0f1728b5253601b5ff77fb2252c85ce",
+      "audioBytes": 54696536,
+      "receiptKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/headroom-d1211262f26ce2296365505ffe2394e5198d4a5460f558f27d9f4a1b892a7a51.json",
+      "receiptSha256": "d1211262f26ce2296365505ffe2394e5198d4a5460f558f27d9f4a1b892a7a51",
+      "receiptBytes": 529
+    },
+    "headroom": {
+      "audioKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/audio-headroom-74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93.wav",
+      "audioSha256": "74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93",
+      "audioBytes": 54696562,
+      "receiptKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/headroom-preparation.json",
+      "receiptSha256": "925ae758a655534763304236bb77e91b440722a6812bace49105654ebb886350"
+    },
+    "nativeOutput": {
+      "sampleRateHz": 48000,
+      "channels": 2,
+      "codec": "pcm_f32le",
+      "frames": 6837056,
+      "durationSec": 142.43866666666668
+    },
+    "nativeFormatVerified": true,
+    "qualified": false,
+    "productionApproved": false,
+    "manualAudition": "pending",
+    "costStatus": "not_measured",
+    "qualification": {
+      "quality": "unqualified",
+      "rtx3090": "unqualified",
+      "exact_duration": "unqualified",
+      "instrumental_only": "unqualified",
+      "production_approved": false
+    },
+    "executionAccounting": {
+      "key": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/execution-accounting.json",
+      "sha256": "6219ba341326e9366915fa7cf96db9ce5220bb70f8d1007c64ce545f262aece2",
+      "policySha256": "dc27c0e99bd30a546b1dcec3346c63f5825b8f47bfcdc2611740a342b7d5566f",
+      "status": "measured_allocation_estimate",
+      "supervisorStatus": "completed",
+      "elapsedNs": 84159359400,
+      "allocatedCostUsdMicros": 4208,
+      "providerBilledCostUsdMicros": null
+    }
+  },
+  "candidateSha256": "0d4be29217b0af627d9ebd1d474ce531d34e2298ab36dab6c1743ef217a980f6",
+  "request": {
+    "version": "studio-yue2-arrangement-evaluation/v1",
+    "programFingerprint": "3673bce7f5a461ed3bac7a010427a7def23896d7d5cbac5ad2f4890d55556e02",
+    "manifestSha256": "0fdc439206f6274696e11f7fdaa7dc05f73061cc61779dbab1ab777fe54cab97",
+    "job": {
+      "schema_version": 2,
+      "job_id": "yue2-eval-cb3b5e41babd7634f0b40ebc8ed278297874394b6b6a09052d73291c667fb813",
+      "style": "Role: primary_music.\nRequested duration: 30 seconds.\nForm: sectional.\nEnding: natural_cadence.\nPlayback: repeat.\nTechnical restriction: instrumental only; no vocals or lyrics.\nDirection:\nCozy, nostalgic Ghibli-inspired lofi hip-hop. Soft felt upright piano playing gentle, warm jazz-inflected chords, accompanied by distant tape rain sounds, soft ocean swells against a lighthouse tower, mellow Rhodes piano accents, subtle upright acoustic bass, and lazy unquantized brushed lofi hip-hop drums. No vocals, no harsh synths, relaxing and contemplative atmosphere.\nSections (fractions of the requested duration):\nSection intro-mist: Rain on the Glass (Intro); startFraction 0; endFraction 0.2; energy 0.3.\nEstablish quiet atmosphere with gentle tape hiss, soft ocean rain, and an intimate solo felt piano phrase.\nSection desk-rain-a: Warm Lamp & Ledger (Theme A); startFraction 0.2; endFraction 0.5; energy 0.45.\nIntroduce subtle dusty kick-snare brush groove, round warm sub-bass, and Rhodes harmonic counterpoint.\nSection beacon-glow-b: Turning Light (Theme B); startFraction 0.5; endFraction 0.8; energy 0.5.\nRich Ghibli-esque harmonic progression with delicate melodic phrasing on upper piano register.\nSection calm-cadence: Midnight Solitude (Outro); startFraction 0.8; endFraction 1; energy 0.25.\nRhythm drops out gently, letting a warm resolving major 7th chord ring out beneath gentle rain.",
+      "lyrics": "",
+      "seed": 42,
+      "license": {
+        "scope": "personal_creator",
+        "acknowledged": true,
+        "company_commercial_authorized": false
+      },
+      "requested_duration_sec": 30,
+      "source_duration_policy": "natural_loop",
+      "abc": "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=80\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:F\n% intro-mist\nV: Vocal\n\"Fmaj7\" z32 | \"Am7\" z16 \"Bbmaj7\" z16 |\nV: Ins\nF8 A8 c8 e8 | e8 d8 c8 A8 |\n% desk-rain-a\nV: Vocal\n\"Gm7\" z16 \"C7\" z16 | \"Fmaj7\" z16 \"Dm7\" z16 | \"Gm7\" z16 \"C7sus4\" z8 \"C7\" z8 |\nV: Ins\nG8 B8 d8 f8 | e8 c8 A8 F8 | G8 A8 B8 c8 |\n% beacon-glow-b\nV: Vocal\n\"Bbmaj7\" z16 \"Am7\" z16 | \"Gm7\" z16 \"Am7\" z16 | \"Bbmaj7\" z16 \"C7\" z16 |\nV: Ins\nd8 f8 e8 c8 | B8 d8 c8 A8 | B8 c8 d8 e8 |\n% calm-cadence\nV: Vocal\n\"Bbmaj7\" z16 \"C7sus4\" z8 \"C7\" z8 | \"Fmaj7\" z32 |\nV: Ins\nd8 c8 B8 G8 | F32 |"
+    },
+    "acceptedArrangement": {
+      "version": "accepted-music-arrangement/v1",
+      "ownerId": "isolated-operator-evaluation",
+      "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+      "runId": "seaside-composer-evaluation-20260921-01",
+      "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+      "sourceBriefFingerprint": "3a68510428c39faac4b828804ce6344a9e6ea216d2f30302e3c02302a5986924",
+      "arrangement": {
+        "role": "primary_music",
+        "requestedDurationSec": 30,
+        "form": "sectional",
+        "ending": "natural_cadence",
+        "playback": "repeat",
+        "direction": "Cozy, nostalgic Ghibli-inspired lofi hip-hop. Soft felt upright piano playing gentle, warm jazz-inflected chords, accompanied by distant tape rain sounds, soft ocean swells against a lighthouse tower, mellow Rhodes piano accents, subtle upright acoustic bass, and lazy unquantized brushed lofi hip-hop drums. No vocals, no harsh synths, relaxing and contemplative atmosphere.",
+        "sections": [
+          {
+            "id": "intro-mist",
+            "label": "Rain on the Glass (Intro)",
+            "startFraction": 0,
+            "endFraction": 0.2,
+            "energy": 0.3,
+            "instruction": "Establish quiet atmosphere with gentle tape hiss, soft ocean rain, and an intimate solo felt piano phrase."
+          },
+          {
+            "id": "desk-rain-a",
+            "label": "Warm Lamp & Ledger (Theme A)",
+            "startFraction": 0.2,
+            "endFraction": 0.5,
+            "energy": 0.45,
+            "instruction": "Introduce subtle dusty kick-snare brush groove, round warm sub-bass, and Rhodes harmonic counterpoint."
+          },
+          {
+            "id": "beacon-glow-b",
+            "label": "Turning Light (Theme B)",
+            "startFraction": 0.5,
+            "endFraction": 0.8,
+            "energy": 0.5,
+            "instruction": "Rich Ghibli-esque harmonic progression with delicate melodic phrasing on upper piano register."
+          },
+          {
+            "id": "calm-cadence",
+            "label": "Midnight Solitude (Outro)",
+            "startFraction": 0.8,
+            "endFraction": 1,
+            "energy": 0.25,
+            "instruction": "Rhythm drops out gently, letting a warm resolving major 7th chord ring out beneath gentle rain."
+          }
+        ]
+      },
+      "musicIntent": {
+        "role": "primary_music",
+        "requestedDurationSec": 30,
+        "ending": "natural_cadence",
+        "playback": "repeat"
+      },
+      "reviewContext": {
+        "version": "music-review-context/v1",
+        "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+        "family": "music_loop",
+        "channelName": "Seaside Ghibli Lofi",
+        "promptContext": "Channel: Seaside Ghibli Lofi (Lo-Fi Music).\nPositioning: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\nVibe: \nIconic motif: \nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Rainy Lighthouse Keeper's Desk Lofi\".\n\nContent family: music_loop.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"primary_music\",\"requestedDurationSec\":30,\"ending\":\"natural_cadence\",\"playback\":\"repeat\"}\n\nChannel persona: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): null\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+        "fingerprint": "d0e3fd2c54ac6fc12bdeb89cbe1aa23aa491063346f458880f73254354a05bec"
+      },
+      "symbolicScore": "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=80\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:F\n% intro-mist\nV: Vocal\n\"Fmaj7\" z32 | \"Am7\" z16 \"Bbmaj7\" z16 |\nV: Ins\nF8 A8 c8 e8 | e8 d8 c8 A8 |\n% desk-rain-a\nV: Vocal\n\"Gm7\" z16 \"C7\" z16 | \"Fmaj7\" z16 \"Dm7\" z16 | \"Gm7\" z16 \"C7sus4\" z8 \"C7\" z8 |\nV: Ins\nG8 B8 d8 f8 | e8 c8 A8 F8 | G8 A8 B8 c8 |\n% beacon-glow-b\nV: Vocal\n\"Bbmaj7\" z16 \"Am7\" z16 | \"Gm7\" z16 \"Am7\" z16 | \"Bbmaj7\" z16 \"C7\" z16 |\nV: Ins\nd8 f8 e8 c8 | B8 d8 c8 A8 | B8 c8 d8 e8 |\n% calm-cadence\nV: Vocal\n\"Bbmaj7\" z16 \"C7sus4\" z8 \"C7\" z8 | \"Fmaj7\" z32 |\nV: Ins\nd8 c8 B8 G8 | F32 |",
+      "fingerprint": "3673bce7f5a461ed3bac7a010427a7def23896d7d5cbac5ad2f4890d55556e02"
+    }
+  },
+  "listeningAudioKey": "owner/isolated-operator-evaluation/runs/seaside-composer-evaluation-20260921-01/music/yue2-evaluation/audio-headroom-74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93.wav",
+  "quality": {
+    "status": "needs_audition",
+    "requestedDurationSec": 30,
+    "actualDurationSec": 142.43866666666668,
+    "durationMatches": false,
+    "nativeDurationMatches": false,
+    "expectedNativeFrames": 1439936,
+    "sourceDurationPolicy": "natural_loop",
+    "naturalLoopDurationAccepted": true,
+    "nativeFormatVerified": true,
+    "signal": {
+      "version": "native-audio-signal/v1",
+      "frames": 6837056,
+      "sampleRateHz": 48000,
+      "channels": 2,
+      "nonFiniteSamples": 0,
+      "samplesAtOrAboveFullScale": 0,
+      "maximumConsecutiveFullScaleSamples": 0,
+      "quietWindowDurationSec": 0.1,
+      "quietThresholdDbfs": -60,
+      "quietWindowFraction": 0,
+      "longestQuietWindowRunSec": 0,
+      "monoFoldDown": {
+        "method": "arithmetic_channel_mean",
+        "finiteFrames": 6837056,
+        "nonZeroFrames": 6837056,
+        "peakAmplitude": 0.83367720246315,
+        "rmsAmplitude": 0.11986168705780238
+      },
+      "channelMeasurements": [
+        {
+          "peakAmplitude": 0.8679028153419495,
+          "rmsAmplitude": 0.12289055084182965,
+          "dcOffset": 0.00003336878221741325,
+          "finiteSamples": 6837056,
+          "nonZeroSamples": 6837056
+        },
+        {
+          "peakAmplitude": 0.848256528377533,
+          "rmsAmplitude": 0.12422233774967148,
+          "dcOffset": 0.00004322366188275361,
+          "finiteSamples": 6837056,
+          "nonZeroSamples": 6837056
+        }
+      ],
+      "truePeak": {
+        "method": "ffmpeg_ebur128_oversampled",
+        "resolutionDb": 0.1,
+        "status": "measured",
+        "dbtp": -1.2
+      },
+      "reviewReasons": []
+    },
+    "headroomPreparation": {
+      "method": "linear_attenuation_only",
+      "gainDb": -2,
+      "sourceSha256": "6ce0eda3230b61c18c9d2762f2bb0598b0f1728b5253601b5ff77fb2252c85ce",
+      "audioSha256": "74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93"
+    },
+    "productionApproved": false,
+    "unresolved": [
+      "exact_delivery_duration",
+      "perceptual_artifacts",
+      "instrumental_only",
+      "channel_personality_fit",
+      "arrangement_fidelity",
+      "repetition",
+      "ending",
+      "listening_quality"
+    ]
+  }
+}

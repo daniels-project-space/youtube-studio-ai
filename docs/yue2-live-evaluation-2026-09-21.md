@@ -638,3 +638,39 @@ Natural-length eligible loop performances remain allowed; exact final video
 duration is assembly's responsibility. No live text or GPU generation occurred
 for this change. Channel-fit audition, loop-seam qualification and exact final
 assembly verification remain open, and no production pipeline was switched.
+
+## Composer-to-GPU-to-Private-Storage Proof
+
+The real Seaside composer output from `0e53a274` was sent unchanged through the
+Studio HTTPS gateway to the installed isolated RTX3090 image. Exact manifest and
+execution-policy checks passed before one job submission. The real durable CLI
+froze the request and submission marker in the private bucket, recovered the
+same running job, and retained native audio, unclipped source, headroom receipt,
+attenuation-only listening audio and supervised accounting with immutable
+readback. See `test-fixtures/music-composer/seaside-after/gpu-material.json` and
+the accompanying README for identities, measurements and limitations.
+
+The 30-second symbolic composition rendered as 142.4386667 seconds of audio.
+Natural-loop source admission permits this length; it does not prove timing or
+arrangement fidelity. The exact supplied ABC is checked before semantic
+generation, so the source cannot silently be replaced by runtime score planning.
+No trim or forced early stop was used to conceal the discrepancy. Listening
+audio retains all 6,837,056 frames and measures -1.2 dBTP after -2 dB attenuation,
+with no full-scale/non-finite samples or quiet-window flags. Real musical and
+channel-fit approval remains pending; the full candidate was presented for
+owner audition, not labelled qualified.
+
+Supervised execution took 84.1593594 seconds and allocated $0.004208 at the
+configured compute rate, not provider billing. The independent 15-minute guard
+was active before restart. After durable completion the worker/tunnel were
+stopped, and OpenRelay confirmed the VM stopped at 20:04:21.002 UTC. Conservative
+GPU reservations total 58 cents of the approved $1. No new text generation,
+thumbnail test, legacy-channel mutation or production deployment occurred in
+this render window.
+
+After confirmed shutdown, the same real durable CLI completed again with
+`reused: true`, revalidating the retained candidate while the tunnel was inactive.
+The independent private-R2 review reader also verified the current bytes and
+exported the listening copy locally. These prove storage/recovery without another
+GPU purchase, not production owner-review integration: this evaluation uses an
+explicit isolated-operator owner/run namespace rather than a live channel run.
