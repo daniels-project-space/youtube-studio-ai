@@ -202,3 +202,28 @@ The probe passed inside this image on the retained 3090 host, with zero new
 inferences and original hashes preserved. The VM was stopped afterward.
 This is not an externally reachable deployment: persistent app-to-worker
 transport, channel-aware composition and production qualification remain open.
+
+### Private gateway service, 21 September 19:32 UTC
+
+The retained VM now has runtime `bb57888e2e9772131c3acc8deb2e36bb10493341`,
+remote image `sha256:76907285a2568b00a96c78b6be64323b302e8161eaba1f5433cfe14c841a631f`.
+The source service templates are `yue2-worker.service` and `yue2-tunnel.service`.
+Neither is enabled at boot. Admit a guarded budget window and verify live VM
+state before starting the worker, then the controller tunnel. Never automatically
+remove an existing socket or retry a failed generation to make a service ready.
+
+Gateway credentials live under `youtube/YUE2_EVALUATION_TOKEN` and
+`youtube/YUE2_EVALUATION_URL` in the vault. The worker environment maps the token
+to `YUE2_WORKER_TOKEN`; the API key for OpenRelay stays on the controller.
+The worker requires private UID-1000 IPC and gateway directories. Root-owned
+parent directories are preserved; create only those dedicated children with
+the required ownership. Its `worker-image.env` pins the verified image ID and
+`policy.json` declares bounded execution. The existing model and ledger volumes
+are separate from both.
+
+Run `scripts/verify-yue2-gateway.ts` with the expected policy file to verify real
+HTTPS health, exact manifest and policy identity without any POST. This passed
+against the live worker; both services and the VM were stopped afterward.
+The gateway remains online, rejects anonymous requests and reports worker
+offline for authorized callers until the next admitted window. Connecting it
+does not qualify music or activate legacy pipeline replacements.

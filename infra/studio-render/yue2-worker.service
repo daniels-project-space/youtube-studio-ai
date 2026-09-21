@@ -1,0 +1,18 @@
+[Unit]
+Description=YouTube Studio isolated YuE2 worker
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+SupplementaryGroups=docker
+EnvironmentFile=/var/lib/youtube-studio-render/gateway/worker-image.env
+ExecStart=/usr/bin/docker run --rm --name youtube-studio-yue2-worker --pull never --network none --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges --init --gpus all --tmpfs /tmp:rw,nosuid,nodev,size=512m --env-file /var/lib/youtube-studio-render/gateway/worker.env --mount type=bind,src=/var/lib/youtube-studio-render/volumes/yue2/models,dst=/mnt/yue2-hf-cache,readonly --mount type=bind,src=/var/lib/youtube-studio-render/volumes/yue2/state,dst=/home/ubuntu/youtube-studio-music-runtime/var --mount type=bind,src=/var/lib/youtube-studio-render/volumes/yue2/ipc,dst=/ipc --mount type=bind,src=/var/lib/youtube-studio-render/gateway/policy.json,dst=/config/policy.json,readonly ${YUE2_IMAGE} serve --cache-dir /mnt/yue2-hf-cache --unix-socket /ipc/worker.sock --execution-policy /config/policy.json
+ExecStop=/usr/bin/docker stop --time 620 youtube-studio-yue2-worker
+TimeoutStopSec=640
+Restart=no
+UMask=0077
+
+# Deliberately no Install section: start only inside an admitted VM budget window.

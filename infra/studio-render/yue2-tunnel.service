@@ -1,0 +1,16 @@
+[Unit]
+Description=YouTube Studio private YuE2 SSH transport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -i /var/lib/youtube-studio-render/operator/ssh/openrelay_ed25519 -o UserKnownHostsFile=/var/lib/youtube-studio-render/operator/ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -L 127.0.0.1:18787:/var/lib/youtube-studio-render/volumes/yue2/ipc/worker.sock yt-yue2-3090-credential-validati-mubffsqo@ssh.run.openrelay.inc
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+# Deliberately no Install section: stop alongside the budgeted VM window.

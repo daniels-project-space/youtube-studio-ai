@@ -568,3 +568,44 @@ admission body. This is authenticated gateway readiness, not end-to-end worker
 activation. The retained VM was not restarted and no GPU spend occurred.
 Next: install the shutdown-capable image on the retained VM, mount its private
 socket directory, and connect the verified SSH tunnel before admitting work.
+
+## Verified Gateway-to-3090 Connection
+
+The private HTTPS gateway successfully reached the actual retained 3090 worker
+through the project SSH identity and its mounted Unix socket. Runtime revision
+`bb57888e2e9772131c3acc8deb2e36bb10493341` is now installed on the VM; actual
+remote image ID is
+`sha256:76907285a2568b00a96c78b6be64323b302e8161eaba1f5433cfe14c841a631f`.
+Image inspection verified Studio ownership/lane/revision. The running container
+reported network `none`, read-only root, and UID/GID `1000:1000`.
+
+Installed static service units are retained in source:
+`infra/studio-render/yue2-worker.service` on the VM and
+`infra/studio-render/yue2-tunnel.service` on the controller. They are not enabled
+at boot and do not automatically retry. Start them only within an admitted
+budget window. The worker uses its separate model/state/IPC volumes and an
+image-ID environment file; the credential goes only into its protected runtime
+environment file. The tunnel verifies the pinned SSH host identity and binds
+only controller loopback port 18787. No GPU port is publicly exposed.
+
+`scripts/verify-yue2-gateway.ts EXPECTED_POLICY_FILE` made GET-only calls using
+vault-injected credentials. Missing/wrong credentials returned 401. Authorized
+health returned 200/ready, the exact pinned runtime manifest and qualification
+flags matched, and the actual Studio client fetched and verified the execution
+policy against the operator's expected policy. There were zero submitted jobs.
+The first health observation preceded readiness and failed; polling the same
+running services succeeded without restarting them or submitting work.
+Receipt:
+`/var/lib/youtube-studio-render/operator/yue2-gateway-connection-20260921.json`.
+
+The worker and tunnel were stopped after validation; provider inventory then
+confirmed the VM stopped. After shutdown the gateway again returns anonymous
+401 and authenticated `worker_offline` 503. The guarded window reserved 5 cents,
+bringing conservative reservations to 53 cents of the existing $1 approval;
+this is a reservation total, not an invoice. Typecheck, scoped ESLint and
+systemd unit validation passed. No new music or thumbnail generation occurred.
+
+Transport is now verified end to end. Remaining music work is channel-bound
+composition/generation, durable audition and the qualified shared-module
+continuation, plus on-demand orchestration. Production pipelines and the wider
+MVP are not claimed complete by this connectivity check.
