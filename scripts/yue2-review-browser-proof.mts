@@ -13,7 +13,7 @@ import type { YuE2AuditionRecord } from "../src/engine/yue2Audition";
 
 const root = process.cwd();
 const outputDir = await mkdtemp(join(tmpdir(), "yue-review-browser-"));
-const frames = 12 * 48000;
+const frames = 12 * 48000 - 64;
 const wav = Buffer.alloc(44 + frames * 8);
 wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
 wav.writeUInt32LE(16, 16); wav.writeUInt16LE(3, 20); wav.writeUInt16LE(2, 22);
@@ -30,7 +30,7 @@ assert.equal(signal.truePeak?.status, "measured");
 const topic = "A quiet horizon: nocturnal focus";
 const review: YuE2CandidateReview = {
   candidateSha256: "a".repeat(64), jobId: "synthetic-review", nativeWavUrl: "/native.wav",
-  nativeOutput: { sampleRateHz: 48000, channels: 2, codec: "pcm_f32le", frames, durationSec: 12 },
+  nativeOutput: { sampleRateHz: 48000, channels: 2, codec: "pcm_f32le", frames, durationSec: frames / 48000 },
   arrangement: {
     role: "meditation_bed", direction: "Steady, understated texture with no dramatic build or startling changes.",
     requestedDurationSec: 12, form: "continuous", ending: "natural_cadence", playback: "once",
@@ -41,9 +41,10 @@ const review: YuE2CandidateReview = {
     reviewContext: createMusicReviewContext({ topic, family: "music_loop", channelName: "Quiet Horizon",
       promptContext: "Channel persona: intimate, observant, never theatrical.\nStyle grammar: patient understatement.\nAvoid: sentimental uplift, abrupt changes, generic dramatic arcs.\nComposer doctrine: preserve a continuous, unmetered form." }) },
   allocation: { allocatedCostUsdMicros: 1201, providerBilledCostUsdMicros: null },
-  quality: { status: "needs_audition", requestedDurationSec: 12, actualDurationSec: 12, durationMatches: true,
+  quality: { status: "needs_audition", requestedDurationSec: 12, actualDurationSec: frames / 48000, durationMatches: false,
+    nativeDurationMatches: true, expectedNativeFrames: frames,
     nativeFormatVerified: true, signal, productionApproved: false,
-    unresolved: ["perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"] },
+    unresolved: ["exact_delivery_duration", "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"] },
 };
 const require = createRequire(import.meta.url);
 const esbuild = require(require.resolve("esbuild", { paths: [require.resolve("tsx")] })) as {
@@ -95,7 +96,7 @@ const server = createServer((req, res) => {
     if (url.searchParams.get("runId") === "second-run") current.brief.topic = "Second run only";
     if (mode === "missing-context") { current.brief.reviewContext = null; current.brief.contextRetained = false; }
     if (mode === "unnamed") current.brief.reviewContext!.channelName = null;
-    if (mode === "blocked") { current.quality.status = "blocked"; current.quality.durationMatches = false;
+    if (mode === "blocked") { current.quality.status = "blocked"; current.quality.durationMatches = false; current.quality.nativeDurationMatches = false;
       current.quality.actualDurationSec = 0.1; current.quality.signal.reviewReasons = ["digital_silence"]; }
     res.end(JSON.stringify({ ok: true, review: mode === "absent" ? null : current })); return;
   }
@@ -128,6 +129,7 @@ try {
     assert.equal(requests, before, "closed review does not probe storage or sign audio");
     await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByRole("heading", { name: topic }).waitFor();
+    await page.getByText("Native codec timing matches.", { exact: false }).waitFor();
     await page.waitForFunction(() => (document.querySelector("audio")?.readyState ?? 0) >= 2);
     await page.getByRole("button", { name: "Seek to Interval 3", exact: true }).click();
     await page.waitForFunction(() => Math.abs((document.querySelector("audio")?.currentTime ?? 0) - 6) < 0.1);

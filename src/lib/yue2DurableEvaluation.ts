@@ -276,18 +276,22 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
     const signal = await probeAudio(audio, completion, true);
     if (!signal) throw new Error("review signal measurements missing");
     const requestedDurationSec = request.acceptedArrangement.arrangement.requestedDurationSec;
-    // Native exact-duration evidence is a frame-count comparison, not a model's
-    // success flag or an arbitrary percentage allowance for missing content.
+    // The allowlisted VAE decodes T latent frames to 1920*T-64 PCM frames.
+    // Accept that precise native boundary for audition, never as exact delivery
+    // or a percentage tolerance. Receipt verification above pins the decoder.
     const durationMatches = candidate.nativeOutput.frames === requestedDurationSec * 48000;
+    const expectedNativeFrames = requestedDurationSec * 48000 - 64;
+    const nativeDurationMatches = candidate.nativeOutput.frames === expectedNativeFrames;
     return {
       candidate, candidateSha256: yue2Sha256(candidateBytes), request,
       quality: {
-        status: durationMatches && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
+        status: (durationMatches || nativeDurationMatches) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
         requestedDurationSec, actualDurationSec: candidate.nativeOutput.frames / 48000,
-        durationMatches, nativeFormatVerified: true as const,
+        durationMatches, nativeDurationMatches, expectedNativeFrames, nativeFormatVerified: true as const,
         signal,
         productionApproved: false as const,
-        unresolved: [...(!signal.truePeak || signal.truePeak.status === "unavailable" ? ["true_peak"] : []),
+        unresolved: [...(!durationMatches ? ["exact_delivery_duration"] : []),
+          ...(!signal.truePeak || signal.truePeak.status === "unavailable" ? ["true_peak"] : []),
           "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
       },
     };

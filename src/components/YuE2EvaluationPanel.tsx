@@ -77,7 +77,9 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <div><dt>Allocation estimate</dt><dd>${(review.allocation.allocatedCostUsdMicros / 1_000_000).toFixed(6)}</dd></div>
       <div><dt>Provider bill</dt><dd>Unknown</dd></div>
     </dl>
-    {!quality.durationMatches && <p className={styles.warning}>Measured duration does not match the requested source.</p>}
+    {!quality.durationMatches && <p className={styles.warning}>{quality.nativeDurationMatches
+      ? "Native codec timing matches. Exact delivery duration remains unverified (64 samples short)."
+      : "Measured duration does not match the requested source."}</p>}
     {signal.reviewReasons.length > 0 && <ul className={styles.warning} aria-label="Technical findings">
       {signal.reviewReasons.map((reason) => <li key={reason}>{label(reason)}</li>)}
     </ul>}

@@ -440,6 +440,42 @@ async function main() {
     assert.ok(await review(reviewScope));
     assert.equal(current.analyses, 3, "evicted measurement must be recomputed");
   });
+  for (const offset of [-65, -64, -63, -1920, 1, 10966976 - 60 * 48000]) {
+    await test(`native decoder boundary ${offset} samples is classified exactly without repair`, async () => {
+      const frames = 60 * 48000 + offset;
+      current.audio = wav(frames);
+      for (let frame = 0; frame < frames; frame++) {
+        const sample = 0.2 * Math.sin(2 * Math.PI * 1000 * frame / 48000);
+        current.audio.writeFloatLE(sample, 44 + frame * 8);
+        current.audio.writeFloatLE(sample, 48 + frame * 8);
+      }
+      await run(args()); current.offline = true;
+      const before = [current.calls.length, current.writes.length, current.authorizations];
+      const audioHash = yue2Sha256(current.audio);
+      const result = await review(reviewScope);
+      assert.ok(result);
+      assert.equal(result.quality.durationMatches, false);
+      assert.equal(result.quality.nativeDurationMatches, offset === -64);
+      assert.equal(result.quality.expectedNativeFrames, 60 * 48000 - 64);
+      assert.equal(result.quality.status, offset === -64 ? "needs_audition" : "blocked");
+      assert.deepEqual(result.quality.signal.reviewReasons, []);
+      assert.ok(result.quality.unresolved.includes("exact_delivery_duration"));
+      assert.equal(result.quality.productionApproved, false);
+      assert.equal(result.candidate.qualification.exact_duration, "unqualified");
+      assert.equal(yue2Sha256(current.audio), audioHash);
+      assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+    });
+  }
+  await test("codec-aligned silent output is still blocked", async () => {
+    current.audio = wav(60 * 48000 - 64);
+    await run(args()); current.offline = true;
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.quality.nativeDurationMatches, true);
+    assert.equal(result.quality.status, "blocked");
+    assert.deepEqual(result.quality.signal.reviewReasons, ["digital_silence"]);
+    assert.equal(result.quality.productionApproved, false);
+  });
   await test("duration-correct stereo cancellation blocks retained review without repair or worker calls", async () => {
     current.audio = wav(60 * 48000);
     for (let frame = 0; frame < 60 * 48000; frame++) {
@@ -458,9 +494,9 @@ async function main() {
     assert.equal(result.quality.productionApproved, false);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
-  await test("duration-correct intersample overload blocks review despite no full-scale native samples", async () => {
-    current.audio = wav(60 * 48000);
-    for (let frame = 0; frame < 60 * 48000; frame++) {
+  for (const offset of [0, -64]) await test(`duration offset ${offset} intersample overload blocks review despite no full-scale native samples`, async () => {
+    current.audio = wav(60 * 48000 + offset);
+    for (let frame = 0; frame < 60 * 48000 + offset; frame++) {
       const sample = 1.2 * Math.sin(2 * Math.PI * 12000 * frame / 48000 + Math.PI / 4);
       current.audio.writeFloatLE(sample, 44 + frame * 8);
       current.audio.writeFloatLE(sample, 48 + frame * 8);
@@ -469,7 +505,8 @@ async function main() {
     const before = [current.calls.length, current.writes.length, current.authorizations];
     const result = await review(reviewScope);
     assert.ok(result);
-    assert.equal(result.quality.durationMatches, true);
+    assert.equal(result.quality.durationMatches, offset === 0);
+    assert.equal(result.quality.nativeDurationMatches, offset === -64);
     assert.equal(result.quality.signal.samplesAtOrAboveFullScale, 0);
     assert.equal(result.quality.signal.truePeak?.status, "measured");
     assert.ok(result.quality.signal.truePeak!.dbtp! > 0);

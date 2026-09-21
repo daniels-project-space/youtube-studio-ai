@@ -70,6 +70,26 @@ upload was performed. Future work must account for this session before restartin
 
 ## Next Integration Gates
 
+### Native Timing Versus Delivery Timing
+
+Offline inspection of the pinned VAE's actual `natural_output_length` method
+verified all 291 integer durations from 10 through 300 seconds. It returns
+`1920 * latent_frames - 64` samples at 48 kHz. The live output's 5,712 latent
+frames likewise produce exactly 10,966,976 samples. The proof used meta tensors,
+the hash-verified VAE configuration and pinned library, without inference or GPU
+allocation; receipt: `yue2-native-timing-proof.json` in the controller root.
+
+Retained review now distinguishes exact delivery frames from the precise native
+64-sample boundary. Either timing can reach source audition if signal checks pass;
+only exact frame equality sets `durationMatches`. Codec-aligned output retains an
+unresolved `exact_delivery_duration` check. There is no percentage tolerance,
+trimming, padding or production approval. One-sample deviations from the native
+boundary, the live-sized duration mismatch, silence and intersample overload are
+covered through the durable review path with actual FFmpeg signal analysis.
+
+This fixes an impossible native timing gate, not the model's duration planning.
+The real 228-second candidate remains unsuitable for its 30-second request.
+
 1. Review actual audio, vocal leakage, endings and channel-specific fit.
 2. Resolve duration planning before claiming arrangement compliance.
 3. Connect the private worker and immutable evidence to the existing accepted
