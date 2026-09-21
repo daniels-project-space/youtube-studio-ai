@@ -24,7 +24,7 @@ export const openRelayH3IdleReaper = schedules.task({
   queue: { concurrencyLimit: 1 },
   run: async () => {
     await bootstrapSecrets(() => undefined, {
-      services: ["openrelay", "youtube"],
+      services: ["youtube"],
       required: ["OPENRELAY_API_KEY", "MINIMAX_H3_OPENRELAY_VM_ID", "MINIMAX_H3_OPENRELAY_WORKER_URL", "MINIMAX_H3_OPENRELAY_WORKER_TOKEN"],
     });
     const client = new OpenRelayVmClient({ apiKey: required("OPENRELAY_API_KEY", 32) });

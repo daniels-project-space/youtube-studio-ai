@@ -94,11 +94,13 @@ output quality, provider deployment, or production activation.
 
 ## Credential and volume discovery: 21 September 2026
 
-Canonical `openrelay/OPENRELAY_API_KEY` passed `/v1/whoami` with HTTP 200 for
-organization `626c2959-4f58-4779-b867-2a74129e93e5`. The stale Studio copy returned
-401; it was replaced from the canonical vault record and independently read
-back and tested with HTTP 200. Lito's rejected copy was not changed. This
-supersedes the earlier conclusion that no available OpenRelay key worked.
+Studio now uses only `youtube/OPENRELAY_API_KEY` and `youtube/OPENRELAY_ORG_ID`
+from Project Hub. The owner-supplied replacement passed real VM create, SSH,
+stop, restart and retained-disk checks on 21 September. The previous Studio
+record was replaced, not retained as a fallback. Shared `openrelay` records
+belong to other projects and are no longer hydrated by Studio bootstrap.
+Local credential scans found no literal provider keys in 2,687 inspected files;
+Trigger production had no OpenRelay environment override at verification.
 Never copy a key into this document, a build receipt, or the worker image.
 
 Read-only live inventory found eight stopped VMs. Studio-owned retained disks:
@@ -132,7 +134,12 @@ mounts and curated build contexts. Never copy the private key into a worker,
 image, repository, or provider environment variable. Only its public half was
 sent to OpenRelay.
 
-At verification, this key was attached to zero VMs, every previously registered
-key was unchanged, and no compute was started. Use this key ID for a future
-explicitly authorized Studio allocation. Its existence does not establish SSH
-reachability, image deployment, GPU qualification, or production readiness.
+The identity was exercised against the isolated validation VM
+`29e245a2-2e1a-431e-b5b3-654cf0ba1587`. SSH verified an RTX 3090 with 24,576 MiB
+VRAM, 28,634,255,360 bytes available guest RAM, Docker, and the separate 60 GB
+disk. A random probe's SHA-256 matched after stop/restart. The VM was stopped
+again and terminal status verified; no other project's VM or SSH key changed.
+Receipts are under `/var/lib/youtube-studio-render/operator/credential-validation-*`.
+This proves credential/lifecycle/SSH operation, not YuE2 inference, image
+deployment, musical quality or production readiness. The key was supplied in
+chat for temporary testing and must be rotated by the owner after validation.

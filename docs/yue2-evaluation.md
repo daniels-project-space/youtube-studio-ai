@@ -668,7 +668,7 @@ The runtime has 102 passing CPU tests and its own clean, pushed repository.
 Read-only placement inspection is now an executable Studio operator command:
 
 ```sh
-ai-vault openrelay OPENRELAY_API_KEY=OPENRELAY_API_KEY -- \
+ai-vault youtube OPENRELAY_API_KEY=OPENRELAY_API_KEY -- \
   node_modules/.bin/tsx src/scripts/preflight-yue2-openrelay.ts \
   626c2959-4f58-4779-b867-2a74129e93e5 18
 ```

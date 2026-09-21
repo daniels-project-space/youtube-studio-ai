@@ -42,7 +42,7 @@ export const openRelayQwenIdleReaper = schedules.task({
     const log = (message: string, extra?: Record<string, unknown>) =>
       console.log(`[openrelay-qwen-idle-reaper] ${message}`, extra ?? "");
     await bootstrapSecrets(log, {
-      services: ["openrelay", "youtube"],
+      services: ["youtube"],
       required: [
         "OPENRELAY_API_KEY",
         "OPENRELAY_QWEN_VM_ID",

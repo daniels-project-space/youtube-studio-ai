@@ -137,7 +137,7 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
       throw new Error("weekly H3 OpenRelay fallback requires the signed owner and Salad hold start");
     }
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "openrelay", "youtube"],
+      services: ["cloudflare", "youtube"],
       required: [
         "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
         "OPENRELAY_API_KEY", "MINIMAX_H3_OPENRELAY_VM_ID",

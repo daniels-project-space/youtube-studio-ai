@@ -6,6 +6,13 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const require = createRequire(import.meta.url);
+const ts = require("typescript");
+const triggerSource = ts.createSourceFile("trigger.config.ts", readFileSync("trigger.config.ts", "utf8"), ts.ScriptTarget.Latest, true);
+const forwarded = triggerSource.statements.flatMap(statement => ts.isVariableStatement(statement)
+  ? [...statement.declarationList.declarations] : []).find(declaration => declaration.name.getText(triggerSource) === "FORWARDED_ENV");
+assert.ok(forwarded && ts.isArrayLiteralExpression(forwarded.initializer));
+assert.equal(forwarded.initializer.elements.some(element => ts.isStringLiteral(element) && element.text === "OPENRELAY_API_KEY"), false,
+  "OpenRelay rotation must use the Studio vault, not freeze a build-machine key into Trigger environment");
 const yaml = require(require.resolve("js-yaml", { paths: [require.resolve("eslint")] }));
 const ignore = require(require.resolve("ignore", { paths: [require.resolve("eslint")] }));
 const root = process.cwd();

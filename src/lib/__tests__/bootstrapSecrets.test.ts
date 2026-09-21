@@ -7,6 +7,7 @@ async function main() {
     "VAULT_ACCESS_TOKEN", "SALAD_API_KEY", "SALAD_ORG", "SALAD_PROJECT",
     "BOOTSTRAP_SHARED_FIXTURE", "BOOTSTRAP_RETRY_FIXTURE", "BOOTSTRAP_MISSING_FIXTURE",
     "TELEGRAM_CHAT_ID", "TELEGRAM_ADMIN_CHAT_ID",
+    "OPENRELAY_API_KEY", "OPENRELAY_ORG_ID",
   ];
   const savedEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
   const reads = new Map<string, number>();
@@ -37,7 +38,9 @@ async function main() {
         ? { SALAD_API_KEY: secretSentinel, SALAD_ORG: "vault-org", SALAD_PROJECT: "fixture-project" }
         : service === "openrouter"
           ? { BOOTSTRAP_RETRY_FIXTURE: "recovered" }
-          : { BOOTSTRAP_SHARED_FIXTURE: service };
+          : service === "youtube"
+            ? { OPENRELAY_API_KEY: secretSentinel, OPENRELAY_ORG_ID: "studio-org" }
+            : { BOOTSTRAP_SHARED_FIXTURE: service };
       return Response.json({
         status: "success",
         value: Object.entries(entries).map(([keyName, value]) => ({ service, keyName, value })),
@@ -68,6 +71,10 @@ async function main() {
       services: ["cloudflare", "gemini"] as never,
     }), /unsupported vault service/);
     assert.deepEqual([...reads.entries()], beforeRejectedService, "forged service lists fail before any vault request");
+    await assert.rejects(bootstrapSecrets(log, {
+      services: ["openrelay"] as never,
+    }), /unsupported vault service/, "Studio must not read another project's shared OpenRelay key");
+    assert.deepEqual([...reads.entries()], beforeRejectedService);
 
     await Promise.all(Array.from({ length: 4 }, () => bootstrapSecrets(log)));
     assert.ok(reads.size > 10, "exercise the real default service list, not a substitute bootstrap");
@@ -75,6 +82,9 @@ async function main() {
       assert.equal(count, service === "salad" ? 2 : 1, `${service}: concurrent general bootstrap must deduplicate`);
     }
     assert.equal(reads.has("gemini"), false, "generic bootstrap cannot hydrate sealed thumbnail credentials");
+    assert.equal(reads.has("openrelay"), false, "shared provider credentials cannot shadow Studio's key");
+    assert.equal(process.env.OPENRELAY_API_KEY, secretSentinel);
+    assert.equal(process.env.OPENRELAY_ORG_ID, "studio-org");
     assert.equal(process.env.BOOTSTRAP_SHARED_FIXTURE, "cloudflare", "default service order must preserve alias precedence");
     assert.equal(process.env.TELEGRAM_CHAT_ID, "fixture-chat", "existing admin chat fallback remains intact");
 

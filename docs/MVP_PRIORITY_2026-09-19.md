@@ -24,30 +24,30 @@ licensing is not authorized by that confirmation.
 
 ## Live infrastructure correction, 21 September
 
-The historical credential rejection below is superseded. Canonical
-`openrelay/OPENRELAY_API_KEY` works, Studio's stale vault copy was repaired, and
+The historical credential rejection below is superseded. Studio's dedicated
+`youtube/OPENRELAY_API_KEY` and `youtube/OPENRELAY_ORG_ID` are validated, and
 Studio's retained provider disks are populated. Dedicated H3 and YuE2 images,
 worktrees and separate local volumes have been built. The repeatable YuE2 build
 has verified its real retained weights offline; this is not inference proof.
-Studio now has its own verified OpenRelay SSH identity, registered but attached
-to no VM. Exact build commands, identity and evidence locations are in
+Studio now has its own OpenRelay SSH identity, verified inside a real 3090 VM.
+Exact build commands, identity and evidence locations are in
 `infra/studio-render/README.md`. Do not reuse Lito's SSH identity or runtime.
 
 The owner approved up to $1 GPU compute on 21 September. Official VM billing
 documentation confirms disk is included, with no separate storage charge.
-The first bounded allocation attempt was denied by OpenRelay: both valid vault
-keys authenticate to the expected organization, but VM creation returns HTTP
-403, `FORBIDDEN`, `not permitted for this organization`. The current canonical
-key explicitly reports `vms:write`; this is a real endpoint denial, not the
-scope-label false rejection fixed earlier. Provider request ID:
-`881dd082-173b-4d8c-b2b0-2abdfa3cec19`. The exact sanitized request and result are
-retained at `/var/lib/youtube-studio-render/operator/yue2-create-current-key-verification.json`.
-Final inventory confirmed zero Studio YuE2 VMs; no compute budget was spent.
-The pre-armed local watchdog was stopped after that reconciliation. Re-arm
-shutdown protection before a future allocation attempt. The approval remains
-valid within its original $1 cap; do not ask for that same approval again.
+The earlier `vms:write` key returned 403 on create. The replacement reporting
+`clusters:read`/`clusters:write` successfully created isolated VM
+`29e245a2-2e1a-431e-b5b3-654cf0ba1587`, reached SSH, stopped, restarted, retained
+a checksummed disk probe, and stopped again. Its locked rate was 18 cents/hour,
+with no disk charge; this brief lifecycle test used part of the existing $1
+authorization. The terminal receipt is
+`/var/lib/youtube-studio-render/operator/credential-validation-state.json`.
+Studio bootstrap no longer reads the shared provider namespace before its own
+key, and Trigger builds no longer forward an OpenRelay key from build-machine
+environment. Production Trigger environment contained no such override.
+Re-arm shutdown protection before restarting; do not reset the approved budget.
 
-Next: resolve actual VM-create authority, then private worker deployment,
+Next: private worker deployment,
 native generation and musical audition. Do not substitute more build checks
 for that live gate or mark shared production music integration complete.
 
