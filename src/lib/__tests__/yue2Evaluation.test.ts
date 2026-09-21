@@ -9,7 +9,7 @@ import { createAcceptedMusicArrangement, projectAcceptedMusicArrangementToYuESty
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertYuE2Manifest, createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2Endpoint, validateYuE2EvaluationRequest,
-  verifyYuE2Audio, verifyYuE2Completion, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
+  verifyYuE2Audio, verifyYuE2Completion, verifyYuE2PreClampSource, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
   YUE2_RUNTIME_MANIFEST_SHA256, YUE2_WORKER_CONTRACT, YuE2EvaluationClient, YuE2EvaluationError,
   YUE2_ARRANGEMENT_EVALUATION_VERSION, type YuE2SealedReceipt, type YuE2BoundEvaluationRequest,
 } from "@/lib/yue2Evaluation";
@@ -89,6 +89,21 @@ function completed(audio: Uint8Array, req: YuE2BoundEvaluationRequest = request,
     qualification: YUE2_QUALIFICATION, progress: { phase: "terminal", receipt: "terminal.json" },
     receipt, receipt_payloads: { job, config, started, terminal }, error: null,
     artifacts: { "audio-native.wav": `/v1/jobs/${req.job.job_id}/artifacts/audio-native.wav` } };
+}
+
+function withPreClamp(audio: Uint8Array) {
+  const wire = completed(audio);
+  const payload = { schema: "yue2-pre-clamp-source/v1", decode_passes: 1, decoder_sha256: "a".repeat(64),
+    source: "audio-unclipped.wav", official: "audio-native.wav", source_sha256: yue2Sha256(audio),
+    samples_outside_unit_range: 0, raw_sample_peak: 0.25, clamped_samples_equal_reference: true,
+    gain_applied: false, production_approved: false };
+  const receipt = Buffer.from(JSON.stringify({ sha256: seal(payload).sha256, payload }) + "\n");
+  Object.assign(wire.receipt.artifacts, {
+    "audio-unclipped.wav": { sha256: yue2Sha256(audio), bytes: audio.length },
+    "headroom-status.json": { sha256: yue2Sha256(receipt), bytes: receipt.length },
+  });
+  wire.receipt_payloads.terminal = seal(wire.receipt);
+  return { wire, receipt };
 }
 
 function stub(handler: (path: string, init: RequestInit) => Response | Promise<Response>) {
@@ -185,6 +200,64 @@ async function main(): Promise<void> {
       let wrongObservations = 0;
       await rejected(wrong.client.evaluate(request, { afterJobObserved: async () => { wrongObservations++; } }));
       assert.equal(wrongObservations, 0, "wrong job must not be recorded");
+    });
+    await test("pre-clamp delivery verifies terminal-bound bytes and fixed routes without new inference", async () => {
+      const raw = withPreClamp(audio);
+      const fixture = stub(path => path.endsWith("headroom-status.json") ? new Response(raw.receipt) : new Response(audio));
+      const completion = verifyYuE2Completion(request, raw.wire);
+      const downloaded = await fixture.client.fetchPreClampSource(completion);
+      assert.ok(downloaded);
+      verifyYuE2PreClampSource(completion, downloaded.audio, downloaded.receipt);
+      assert.equal(fixture.calls.length, 2);
+      assert.ok(fixture.calls.every(call => call.method === "GET"));
+      assert.ok(fixture.calls[1].path.endsWith("/artifacts/audio-unclipped.wav"));
+      assert.throws(() => verifyYuE2PreClampSource(completion, Buffer.from("bad"), downloaded.receipt));
+      assert.throws(() => verifyYuE2PreClampSource(completion, downloaded.audio, Buffer.from("bad")));
+      assert.equal(await fixture.client.fetchPreClampSource(verifyYuE2Completion(request, wire)), undefined);
+      assert.equal(fixture.calls.length, 2);
+    });
+    await test("incomplete source metadata and corrupted headroom receipt fail closed", async () => {
+      const raw = withPreClamp(audio);
+      const fixture = stub(() => new Response(Buffer.alloc(raw.receipt.length)));
+      await assert.rejects(fixture.client.fetchPreClampSource(verifyYuE2Completion(request, raw.wire)));
+      assert.equal(fixture.calls.length, 1);
+      Reflect.deleteProperty(raw.wire.receipt.artifacts, "headroom-status.json");
+      raw.wire.receipt_payloads.terminal = seal(raw.wire.receipt);
+      assert.throws(() => verifyYuE2Completion(request, raw.wire));
+    });
+    await test("CLI retains pre-clamp source and detects corruption on offline reuse", async () => {
+      const raw = withPreClamp(audio);
+      const fixture = stub(path => path.endsWith("/health") ? Response.json(health()) :
+        path.endsWith("headroom-status.json") ? new Response(raw.receipt) :
+        path.endsWith(".wav") ? new Response(audio) : Response.json(raw.wire));
+      globalThis.fetch = fixture.fetcher;
+      const input = { request, outputRoot: join(directory, "pre-clamp-cli"), endpoint: "https://worker.example", bearerToken: token };
+      const result = await executeYuE2Evaluation(input);
+      assert.equal(result.status, "completed");
+      assert.deepEqual(await readFile(join(result.directory, "audio-unclipped.wav")), audio);
+      const calls = fixture.calls.length;
+      assert.equal((await executeYuE2Evaluation(input)).reused, true);
+      assert.equal(fixture.calls.length, calls);
+      const path = join(result.directory, "headroom-status.json");
+      await chmod(path, 0o600);
+      await writeFile(path, "corrupt");
+      await assert.rejects(executeYuE2Evaluation(input));
+      assert.equal(fixture.calls.length, calls);
+    });
+    await test("terminal-bound headroom still refuses wrong source, gain or approval claims", () => {
+      for (const changes of [{ source_sha256: "0".repeat(64) }, { gain_applied: true },
+        { production_approved: true }, { samples_outside_unit_range: 1000000 }]) {
+        const raw = withPreClamp(audio);
+        const envelope = JSON.parse(raw.receipt.toString());
+        Object.assign(envelope.payload, changes);
+        envelope.sha256 = seal(envelope.payload).sha256;
+        const receipt = Buffer.from(JSON.stringify(envelope));
+        Object.assign(raw.wire.receipt.artifacts, { "headroom-status.json": {
+          sha256: yue2Sha256(receipt), bytes: receipt.length,
+        } });
+        raw.wire.receipt_payloads.terminal = seal(raw.wire.receipt);
+        assert.throws(() => verifyYuE2PreClampSource(verifyYuE2Completion(request, raw.wire), audio, receipt));
+      }
     });
     await test("empty and one-byte audio chunks preserve exact bytes across bounded slabs", async () => {
       const path = join(directory, "multi-slab.wav");

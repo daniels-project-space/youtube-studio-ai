@@ -13,6 +13,7 @@ import {
   createYuE2EvaluationRequest, createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest, verifyYuE2Audio, verifyYuE2Completion, yue2Sha256,
   YUE2_QUALIFICATION, YUE2_ARRANGEMENT_EVALUATION_VERSION, YuE2EvaluationClient, YuE2EvaluationError,
   type YuE2BoundEvaluationRequest,
+  verifyYuE2PreClampSource,
 } from "@/lib/yue2Evaluation";
 
 const MAX_JSON = 4 * 1024 * 1024;
@@ -98,6 +99,7 @@ const CandidateSchema = z.object({
   nativeFormatVerified: z.literal(true), qualified: z.literal(false), productionApproved: z.literal(false),
   manualAudition: z.literal("pending"), costStatus: z.literal("not_measured"), qualification: z.unknown(),
   acceptedArrangement: AcceptedMusicArrangementSchema.optional(),
+  preClampSourceRetained: z.literal(true).optional(),
 }).strict();
 
 export async function reuseYuE2Candidate(directory: string, request: YuE2BoundEvaluationRequest): Promise<boolean> {
@@ -122,6 +124,13 @@ export async function reuseYuE2Candidate(directory: string, request: YuE2BoundEv
   const completion = verifyYuE2Completion(request, saved.statusResponse);
   verifyYuE2Audio(completion, audio);
   await probeYuE2NativeWav(audioPath, completion.result, audio.length);
+  if (candidate.preClampSourceRetained) {
+    const rawPath = join(directory, "audio-unclipped.wav");
+    const raw = await readYuE2File(rawPath, MAX_AUDIO);
+    const headroom = await readYuE2File(join(directory, "headroom-status.json"), 16384);
+    verifyYuE2PreClampSource(completion, raw, headroom);
+    await probeYuE2NativeWav(rawPath, completion.result, raw.length);
+  }
   return true;
 }
 
@@ -155,6 +164,13 @@ export async function executeYuE2Evaluation(input: {
   const audioPath = join(directory, "audio-native.wav");
   await immutable(audioPath, result.audio);
   await probeYuE2NativeWav(audioPath, result.completion.result, result.audio.length);
+  const preClamp = await client.fetchPreClampSource(result.completion);
+  if (preClamp) {
+    const rawPath = join(directory, "audio-unclipped.wav");
+    await immutable(rawPath, preClamp.audio);
+    await probeYuE2NativeWav(rawPath, result.completion.result, preClamp.audio.length);
+    await immutable(join(directory, "headroom-status.json"), preClamp.receipt);
+  }
   const provenance = jsonBytes({ version: "studio-yue2-provenance/v1", request: input.request, statusResponse: result.completion.statusResponse });
   await immutable(join(directory, "provenance.json"), provenance);
   const candidate = CandidateSchema.parse({
@@ -163,6 +179,7 @@ export async function executeYuE2Evaluation(input: {
     audioSha256: result.completion.audio.sha256, audioBytes: result.audio.length,
     nativeFormatVerified: true, qualified: false, productionApproved: false, manualAudition: "pending",
     costStatus: "not_measured", qualification: YUE2_QUALIFICATION,
+    ...(preClamp ? { preClampSourceRetained: true } : {}),
     ...(input.request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION ? { acceptedArrangement: input.request.acceptedArrangement } : {}),
   });
   await immutable(join(directory, "candidate.json"), jsonBytes(candidate));

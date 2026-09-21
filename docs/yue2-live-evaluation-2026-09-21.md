@@ -299,3 +299,40 @@ and exact final video duration remain unqualified. No thumbnail work was done.
 The provider confirmed shutdown after retrieval; the external guard is inactive.
 The five-cent window reservation preserves all earlier reservations within the
 existing $1 authorization.
+
+### Authenticated Source Delivery and Studio Retention
+
+Runtime `7a3eeaec826be487f05b68b54e0f618b98467111` extends the fixed authenticated
+artifact routes with `audio-unclipped.wav` and `headroom-status.json`. They are
+advertised only when the completed terminal ledger contains them. Every download
+verifies the terminal-bound size and SHA-256 before serving bytes. The decoder
+source hash remains `eb8d6320517e15940f2f5603d99d7953c4ba91109d0a5c527c3c242c44fc8e16`;
+no inference settings or model code changed in this transport revision.
+
+Actual retained GPU artifacts were copied to a temporary ledger and served through
+the real loopback HTTP server. Both downloads matched their recorded hashes and
+MIME types; unauthenticated requests returned 401. No dispatcher or new inference
+was started, and the original evidence remained unchanged.
+
+The Studio client verifies both raw-source metadata entries from the completed
+receipt chain, downloads only fixed routes with bounded reads, verifies the exact
+envelope bytes before parsing, and binds the headroom receipt to the raw WAV hash.
+It refuses incomplete metadata, corrupted bytes, wrong source hashes, gain claims
+and production-approval claims. Python JSON float spelling is preserved by checking
+original envelope bytes, not JavaScript reserialization.
+
+The local evaluation command now immutably retains both files and checks native
+FLOAT WAV format, frame count and rate. A candidate marks source retention only
+after successful verification; offline reuse verifies both files again. Older
+candidates without a retained source remain readable and unqualified.
+
+Validation: all 124 runtime tests pass in the pinned dependency container; 68
+Studio client/CLI checks pass; real Python-to-TypeScript HTTP integration passes
+for one legacy request and five shared arrangement fixtures, with exactly six
+explicitly fake CPU inferences. Typecheck, ESLint and Ruff pass. These transport
+tests are not musical quality evidence. No additional GPU rental was used.
+
+The build pin selects the new transport revision. The OpenRelay image has not yet
+been rebuilt/deployed with this revision. The durable application path still needs
+raw-source retention and measured mastering; neither raw audio nor the original
+clamped waveform is automatically approved for production delivery.

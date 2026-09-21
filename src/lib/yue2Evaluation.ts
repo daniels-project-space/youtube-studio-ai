@@ -249,6 +249,7 @@ export interface YuE2VerifiedCompletion {
   statusResponse: unknown;
   result: YuE2CompletedResult;
   audio: z.infer<typeof Artifact>;
+  preClamp?: { audio: z.infer<typeof Artifact>; receipt: z.infer<typeof Artifact> };
   qualification: typeof YUE2_QUALIFICATION;
 }
 
@@ -295,7 +296,28 @@ export function verifyYuE2Completion(requestValue: unknown, value: unknown): YuE
   if (!audio || !savedTerminal.artifacts["song/result.json"] ||
       Math.abs(result.audio_seconds - result.frames / 48000) > 1e-9 ||
       audio.bytes < result.frames * 8 + 44) throw new Error("YuE2 native audio receipt mismatch");
-  return { request, statusResponse: wire, result, audio, qualification: YUE2_QUALIFICATION };
+  const raw = savedTerminal.artifacts["audio-unclipped.wav"];
+  const headroom = savedTerminal.artifacts["headroom-status.json"];
+  if (Boolean(raw) !== Boolean(headroom) || (raw && raw.bytes < result.frames * 8 + 44) ||
+      (headroom && (headroom.bytes < 1 || headroom.bytes > 16384))) throw new Error("Incomplete pre-clamp source evidence");
+  return { request, statusResponse: wire, result, audio, qualification: YUE2_QUALIFICATION,
+    ...(raw && headroom ? { preClamp: { audio: raw, receipt: headroom } } : {}) };
+}
+
+export function verifyYuE2PreClampSource(completion: YuE2VerifiedCompletion, audio: Uint8Array, receipt: Uint8Array): void {
+  const bound = verifyYuE2Completion(completion.request, completion.statusResponse);
+  if (!bound.preClamp || audio.length !== bound.preClamp.audio.bytes ||
+      yue2Sha256(audio) !== bound.preClamp.audio.sha256 || receipt.length !== bound.preClamp.receipt.bytes ||
+      yue2Sha256(receipt) !== bound.preClamp.receipt.sha256) throw new Error("Pre-clamp artifact integrity mismatch");
+  // The verified terminal binds the original envelope bytes, including Python floats.
+  const envelope = z.object({ sha256: Hash, payload: z.object({
+    schema: z.literal("yue2-pre-clamp-source/v1"), decode_passes: z.literal(1), decoder_sha256: Hash,
+    source: z.literal("audio-unclipped.wav"), official: z.literal("audio-native.wav"), source_sha256: Hash,
+    samples_outside_unit_range: z.number().int().min(0).max(bound.result.frames * 2),
+    raw_sample_peak: z.number().finite().nonnegative(), clamped_samples_equal_reference: z.literal(true),
+    gain_applied: z.literal(false), production_approved: z.literal(false),
+  }).strict() }).strict().parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(receipt)));
+  if (envelope.payload.source_sha256 !== bound.preClamp.audio.sha256) throw new Error("Pre-clamp receipt source mismatch");
 }
 
 export function verifyYuE2Audio(completion: YuE2VerifiedCompletion, bytes: Uint8Array): void {
@@ -323,6 +345,23 @@ export class YuE2EvaluationClient {
   private readonly maxAudioBytes: number;
   private readonly executionPolicySha256: string | undefined;
   private readonly attempted = new Set<string>();
+
+  async fetchPreClampSource(completion: YuE2VerifiedCompletion): Promise<{ audio: Uint8Array; receipt: Uint8Array } | undefined> {
+    const id = completion.request.job.job_id;
+    try {
+      const bound = verifyYuE2Completion(completion.request, completion.statusResponse);
+      if (!bound.preClamp) return undefined;
+      if (bound.preClamp.audio.bytes > this.maxAudioBytes) throw new Error("source limit");
+      const path = `/v1/jobs/${id}/artifacts`;
+      const receipt = await this.transfer(`${path}/headroom-status.json`, "GET", bound.preClamp.receipt.bytes);
+      if (receipt.status !== 200 || yue2Sha256(receipt.bytes) !== bound.preClamp.receipt.sha256 ||
+          receipt.bytes.length !== bound.preClamp.receipt.bytes) throw new Error("headroom receipt mismatch");
+      const audio = await this.transfer(`${path}/audio-unclipped.wav`, "GET", bound.preClamp.audio.bytes);
+      if (audio.status !== 200) throw new Error("source status");
+      verifyYuE2PreClampSource(bound, audio.bytes, receipt.bytes);
+      return { audio: audio.bytes, receipt: receipt.bytes };
+    } catch { throw new YuE2EvaluationError("pre_clamp_source_validation_failed", id); }
+  }
 
   constructor(options: YuE2EvaluationClientOptions) {
     this.origin = validateYuE2Endpoint(options.endpoint);

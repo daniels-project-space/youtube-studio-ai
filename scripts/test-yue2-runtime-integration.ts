@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { createChannelMusicProgram } from "../src/engine/channelMusicProgram";
 import { canonicalJson } from "../src/lib/canonicalJson";
 import { sha256Hex } from "../src/lib/sha256";
-import { createYuE2AcceptedArrangementRequest, YUE2_ARRANGEMENT_EVALUATION_VERSION } from "../src/lib/yue2Evaluation";
+import { createYuE2AcceptedArrangementRequest, yue2Sha256, YUE2_ARRANGEMENT_EVALUATION_VERSION } from "../src/lib/yue2Evaluation";
 import { runAcceptedMusicArrangementHandoffTests } from "../src/trigger/blocks/__tests__/acceptedMusicArrangementHandoff.test";
 
 const execute = promisify(execFile);
@@ -74,6 +74,11 @@ async function main(): Promise<void> {
     const candidate = JSON.parse(await readFile(join(directory, "candidate.json"), "utf8"));
     assert.equal(candidate.productionApproved, false);
     assert.equal(candidate.nativeFormatVerified, true);
+    assert.equal(candidate.preClampSourceRetained, true);
+    const sourceBytes = await readFile(join(directory, "audio-unclipped.wav"));
+    const headroom = JSON.parse(await readFile(join(directory, "headroom-status.json"), "utf8"));
+    assert.equal(headroom.payload.source_sha256, yue2Sha256(sourceBytes));
+    assert.equal(headroom.payload.production_approved, false);
     const provenance = JSON.parse(await readFile(join(directory, "provenance.json"), "utf8"));
     assert.ok(provenance.statusResponse.receipt_payloads.terminal.payload_json.includes("1.0"));
     const repeated = await cli(["--submit", "--recover-only"]);
@@ -116,6 +121,7 @@ async function main(): Promise<void> {
       assert.deepEqual(savedCandidate.acceptedArrangement, arrangement);
       assert.equal(savedCandidate.programFingerprint, arrangement.fingerprint);
       assert.equal(savedCandidate.nativeFormatVerified, true);
+      assert.equal(savedCandidate.preClampSourceRetained, true);
       assert.equal(savedCandidate.productionApproved, false);
       assert.equal(savedCandidate.qualification.exact_duration, "unqualified");
       assert.equal(savedCandidate.qualification.instrumental_only, "unqualified");
