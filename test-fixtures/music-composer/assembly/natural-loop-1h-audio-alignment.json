@@ -1,0 +1,14 @@
+{
+  "version": "yue2-assembly-audio-alignment/v2",
+  "reference": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-3600-1080/loop.wav",
+  "master": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-3600-1080/timing-master.mp4",
+  "durationSec": 3600,
+  "results": [
+    { "kind": "body", "repeat": 0, "sample": 480000, "seconds": 10, "correlation": 0.9999917365260425, "rmsRatio": 0.9994014293028674 },
+    { "kind": "body", "repeat": 12, "sample": 81372672, "seconds": 1695.264, "correlation": 0.9999942822589646, "rmsRatio": 0.9995958790795838 },
+    { "kind": "body", "repeat": 25, "sample": 169006400, "seconds": 3520.9666666666667, "correlation": 0.999990247046199, "rmsRatio": 0.999375967451467 },
+    { "kind": "wrap", "repeat": 12, "sample": 80868672, "seconds": 1684.764, "correlation": 0.9999864740258428, "rmsRatio": 0.9995188050821516 },
+    { "kind": "wrap", "repeat": 25, "sample": 168502400, "seconds": 3510.4666666666667, "correlation": 0.99998573524539, "rmsRatio": 0.9994638072255442 }
+  ],
+  "scope": "sample-clock alignment and decoded signal only; not a perceptual music or seam approval"
+}

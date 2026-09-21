@@ -1,0 +1,19 @@
+{
+  "version": "yue2-assembly-timing-proof/v1",
+  "sourceSha256": "74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93",
+  "jobId": "yue2-eval-cb3b5e41babd7634f0b40ebc8ed278297874394b6b6a09052d73291c667fb813",
+  "sourceFrames": 6837056,
+  "loopFrames": 6741056,
+  "durationSec": 3600,
+  "videoFrames": 108000,
+  "width": 1920,
+  "height": 1080,
+  "sampleRateHz": 48000,
+  "assemblyWallMs": 414569,
+  "masterSha256": "51f69343c236e87a5173cbccc12c32df204b2cef1aeab75fb0b0b45f2db9aa4c",
+  "masterPath": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-3600-1080/timing-master.mp4",
+  "visualSource": "synthetic_timing_fixture",
+  "productionApproved": false,
+  "musicalQualityApproved": false,
+  "loopPerceptualQualityApproved": false
+}

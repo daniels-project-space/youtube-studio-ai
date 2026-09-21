@@ -1700,7 +1700,11 @@ export const upscale: Block = {
 
 /* ----------------------------- 7. assemble ------------------------------ */
 
-export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, directory: string) => Promise<string>, mixSampleRateHz?: 44100 | 48000, assertOutputAuthority?: () => Promise<void>): Block {
+export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, directory: string) => Promise<string>, options?: {
+  mixSampleRateHz?: 44100 | 48000;
+  assertOutputAuthority?: () => Promise<void>;
+  exactFinalDuration?: boolean;
+}): Block {
   return {
   id: "assemble",
   consumes: ["loopUnitKey", "musicUrl"],
@@ -1823,16 +1827,21 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       const introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
       introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
       introApplied = Boolean(introCardPath);
-      videoDurationSec = introSec + durationSec;
-      ctx.log(`assemble: prepend card (${introSec}s) + stream_loop 4K unit under music to ${durationSec}s @ ${W}x${H}…`);
+      if (options?.exactFinalDuration && (!Number.isFinite(introSec) || introSec < 0 || introSec >= durationSec ||
+        (introCardPath && introSec === 0))) {
+        throw new Error("assemble: intro must fit inside the exact requested final duration");
+      }
+      const bodySec = options?.exactFinalDuration ? durationSec - introSec : durationSec;
+      videoDurationSec = introSec + bodySec;
+      ctx.log(`assemble: prepend card (${introSec}s) + stream_loop body (${bodySec}s) for ${videoDurationSec}s @ ${W}x${H}…`);
       await composeWithIntro({
         introCardPath: introCardPath || undefined,
         loopBodyPath: loopUnitPath,
         musicPath: audio,
-        audioSampleRateHz: mixSampleRateHz,
+        audioSampleRateHz: options?.mixSampleRateHz,
         outPath: finalPath,
         introSec,
-        bodySec: durationSec,
+        bodySec,
         tailSec: 0,
         fadeOutSec,
         width: W,
@@ -1841,7 +1850,13 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       });
     }
 
-    await assertOutputAuthority?.();
+    if (options?.exactFinalDuration) {
+      const delivered = await probe(finalPath);
+      if (!Number.isFinite(delivered.durationSec) || Math.abs(delivered.durationSec - durationSec) > 0.001) {
+        throw new Error(`assemble: rendered final duration ${delivered.durationSec}s does not match ${durationSec}s`);
+      }
+    }
+    await options?.assertOutputAuthority?.();
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {

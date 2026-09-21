@@ -18,9 +18,13 @@ async function fileHash(path: string) {
 async function main() {
   const { values } = parseArgs({ options: {
     material: { type: "string" }, audio: { type: "string" }, out: { type: "string" }, duration: { type: "string" },
+    width: { type: "string", default: "320" }, height: { type: "string", default: "176" },
   }, strict: true, allowPositionals: false });
   if (!values.material || !values.audio || !values.out || !values.duration) throw new Error("--material --audio --out --duration required");
   const duration = Number(values.duration);
+  const width = Number(values.width), height = Number(values.height);
+  assert.ok(Number.isInteger(width) && width >= 320 && width <= 3840 && width % 2 === 0);
+  assert.ok(Number.isInteger(height) && height >= 176 && height <= 2160 && height % 2 === 0);
   assert.ok(Number.isInteger(duration) && duration >= 10 && duration <= 28800);
   const material = JSON.parse(await readFile(values.material, "utf8"));
   const request = validateYuE2EvaluationRequest(material.request);
@@ -31,7 +35,7 @@ async function main() {
   assert.equal(sourceSha256, material.candidate.headroom?.audioSha256 ?? material.candidate.audioSha256);
   const directory = resolve(values.out);
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "attempt.json"), JSON.stringify({ sourceSha256, duration,
+  await writeFile(join(directory, "attempt.json"), JSON.stringify({ sourceSha256, duration, width, height,
     jobId: request.job.job_id, productionApproved: false, visualSource: "synthetic_timing_fixture" }), { flag: "wx" });
   const ffmpeg = process.env.FFMPEG_BIN ?? "ffmpeg";
   const ffprobe = process.env.FFPROBE_BIN ?? "ffprobe";
@@ -49,10 +53,12 @@ async function main() {
   const master = join(directory, "timing-master.mp4");
   const start = Date.now();
   await composeMusicLoopDeblur({ loopUnitPath: video, musicPath: folded, outPath: master,
-    durationSec: duration, width: 320, height: 176, fps: 30, timeoutMs: 900000 });
+    durationSec: duration, width, height, fps: 30, timeoutMs: 900000 });
   const output = inspect(master);
   const picture = output.streams.find((stream: { codec_type: string }) => stream.codec_type === "video");
   const sound = output.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio");
+  await writeFile(join(directory, "inspection.json"), JSON.stringify(output, null, 2) + "\n", { flag: "wx" });
+  assert.equal(picture.width, width); assert.equal(picture.height, height);
   assert.equal(Number(picture.nb_frames), duration * 30);
   assert.equal(Number(picture.duration), duration);
   assert.equal(Number(sound.duration), duration);
@@ -61,7 +67,7 @@ async function main() {
   assert.equal(hash(await readFile(values.audio)), sourceSha256, "retained listening source must remain unchanged");
   const evidence = { version: "yue2-assembly-timing-proof/v1", sourceSha256, jobId: request.job.job_id,
     sourceFrames: Number(original.duration_ts), loopFrames: Number(loop.duration_ts), durationSec: duration,
-    videoFrames: Number(picture.nb_frames), sampleRateHz: 48000, assemblyWallMs: Date.now() - start,
+    videoFrames: Number(picture.nb_frames), width, height, sampleRateHz: 48000, assemblyWallMs: Date.now() - start,
     masterSha256: await fileHash(master), masterPath: master,
     visualSource: "synthetic_timing_fixture", productionApproved: false, musicalQualityApproved: false,
     loopPerceptualQualityApproved: false };

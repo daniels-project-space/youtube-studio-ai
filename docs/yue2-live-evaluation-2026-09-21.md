@@ -972,3 +972,51 @@ continuation, retained-audio checks before later visual spend, final-release
 approval binding, all-family adoption, actual owner audition and full-length
 Lo-Fi qualification remain unfinished. Approval of the source never grants
 publishing authority.
+
+## Exact Loop Delivery and One-Hour Proof
+
+The reviewed YuE2 loop assembly now treats `durationSec` as the complete final
+clock, including a separate intro card. Previously, a five-second card made a
+requested one-hour delivery 3,605 seconds. The new version uses five seconds
+of intro plus 3,595 seconds of body; legacy assembly deliberately retains its
+previous semantics for before/after comparison. Invalid intro durations are
+rejected, and a finished-file duration check rejects incorrect output before
+upload, including an eight-millisecond overrun fixture.
+
+Module tests cover one-, two- and eight-hour requested clocks with mocked
+encodes. Separate real FFmpeg tests cover no intro, a 3.5-second intro and a
+five-second intro against a 12-second final clock, checking video frames,
+video/audio/container duration, stereo 48 kHz audio and non-silent output after
+the short natural source repeats. These short checks are not long-form
+qualification of the separate-card renderer.
+
+A real default-preset deblur/packet-loop render using the retained Seaside
+listening source completed locally in **414,569 ms**:
+
+- 1920x1080, **108,000 frames**, exactly **3,600 seconds** in all three clocks.
+- Stereo 48 kHz AAC, encoded once under repeated video packets.
+- The retained source hash is unchanged; 6,837,056 source frames become
+  6,741,056 native FLOAT loop frames after the two-second overlap.
+- Folded-source signal inspection found no non-finite/full-scale samples or
+  quiet-window flags; measured true peak remains -1.2 dBTP.
+- An independent decoded-audio oracle checks the source at the beginning,
+  middle and near the end, plus windows crossing middle/late loop joins.
+  All five correlations exceed 0.99998, with near-unity RMS ratios. The wrong
+  unfolded source reference is rejected by the same oracle (correlation 0.023
+  on the earlier five-minute master).
+- Frames at 3,590 and 3,599.9 seconds were decoded and visually inspected;
+  the diagnostic pattern remains present and changes between samples.
+
+Media and raw inspections are under
+`/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-3600-1080/`.
+The exact timing and audio-alignment receipts are checked in under
+`test-fixtures/music-composer/assembly/natural-loop-1h-*.json`.
+The master hash is
+`51f69343c236e87a5173cbccc12c32df204b2cef1aeab75fb0b0b45f2db9aa4c`.
+
+Scope matters: this uses actual retained music and the production compositor,
+but a synthetic low-resolution diagnostic visual scaled to a 1080p delivery.
+It proves one-hour timing and sampled signal retention, not channel visual
+quality, musical/loop perceptual approval, 4K qualification, an eight-hour
+render, a live approved pipeline or production deployment. No GPU was started,
+no owner approval was manufactured and no thumbnail work was performed.

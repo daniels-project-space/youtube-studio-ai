@@ -48,6 +48,7 @@ const material = { ...retained, candidateSha256: candidate.candidateSha256, list
 let approval: unknown = approved, source: Uint8Array = wav, currentMaterial = material;
 let queries = 0, approvalReads = 0, privateReads = 0, durableReads = 0, leases = 0, revoked = false, revokeDuringPreparation = false;
 let uploads = 0, afterEncode = () => {}, afterUpload = () => {};
+let deliveredDurationOffset = 0;
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
 const proofDirectory = process.env.YUE2_ASSEMBLY_PROOF_DIR;
@@ -89,7 +90,12 @@ loader._load = function (id, ...args) {
   if (id.endsWith("/ffmpeg")) {
     const real = actual as typeof import("@/lib/ffmpeg");
     return { ...real,
-    probe: async (path: string) => nativeEncode ? real.probe(path) : ({ durationSec: 10, width: 320, height: 176, hasAudio: true }),
+    probe: async (path: string) => {
+      if (nativeEncode) return real.probe(path);
+      const rendered = renders.find(input => input.outPath === path);
+      const durationSec = rendered ? Number(rendered.durationSec ?? (Number(rendered.introSec) + Number(rendered.bodySec) + Number(rendered.tailSec))) + deliveredDurationOffset : 10;
+      return { durationSec, width: 320, height: 176, hasAudio: true };
+    },
     measureLoopSeamDiff: async () => 0,
     assembleBeatBody: async (input: Parameters<typeof real.assembleBeatBody>[0]) => nativeEncode ? real.assembleBeatBody(input) : encoded(String(input.outPath)),
     normalizeAudioOnly: async (...input: Parameters<typeof real.normalizeAudioOnly>) => nativeEncode ? real.normalizeAudioOnly(...input) : encoded(input[1]),
@@ -109,6 +115,7 @@ loader._load = function (id, ...args) {
 const load = createRequire(__filename);
 function reset() { approval = approved; source = wav; currentMaterial = material; runOwner = candidate.ownerId;
   uploads = 0; afterEncode = () => {}; afterUpload = () => {};
+  deliveredDurationOffset = 0;
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
   const { registerAllBlocks, _resetBlocks } = load("@/engine/blocks") as typeof import("@/engine/blocks");
@@ -202,6 +209,36 @@ async function main() {
     }
   }
   nativeEncode = false;
+  const loopManifest = getManifest("assemble", "3.0.0-yue2-reviewed-loop")!;
+  for (const durationSec of [3600, 7200, 28800]) {
+    reset();
+    const result = await loopManifest.execute({ ...ctx,
+      params: { durationSec, deblurIntro: false }, store: { ...ctx.store, introCardPath: picture, introSec: 5 },
+    });
+    assert.equal(result.videoDurationSec, durationSec, "the authored final clock includes the intro");
+    assert.equal(renders[0].introSec, 5); assert.equal(renders[0].bodySec, durationSec - 5);
+    assert.equal(renders[0].audioSampleRateHz, 48000);
+  }
+  reset();
+  await loopManifest.execute({ ...ctx, params: { durationSec: 3600, deblurIntro: false } });
+  assert.equal(renders[0].introSec, 0); assert.equal(renders[0].bodySec, 3600);
+  for (const offset of [-1, 0.008, 5, NaN]) {
+    reset(); deliveredDurationOffset = offset;
+    await assert.rejects(loopManifest.execute({ ...ctx, params: { durationSec: 3600 } }), /rendered final duration/);
+    assert.equal(uploads, 0, "a wrong physical output clock must be rejected before upload");
+  }
+  for (const introSec of [NaN, Infinity, -1, 0, 3600, 7200]) {
+    reset();
+    await assert.rejects(loopManifest.execute({ ...ctx, params: { durationSec: 3600, deblurIntro: false },
+      store: { ...ctx.store, introCardPath: picture, introSec } }), /intro must fit/);
+    assert.equal(renders.length, 0); assert.equal(uploads, 0);
+  }
+  reset();
+  const { createLoopAssemblyBlock } = load("../lofiBlocks") as typeof import("../lofiBlocks");
+  const legacy = await createLoopAssemblyBlock(async () => narration).run({ ...ctx,
+    params: { durationSec: 3600, deblurIntro: false }, store: { ...ctx.store, introCardPath: picture, introSec: 5 } });
+  assert.equal(legacy.videoDurationSec, 3605, "legacy timing remains unchanged for before/after comparisons");
+  assert.equal(renders[0].bodySec, 3600);
   for (const id of ["assemble", "timeline_assemble"]) {
     const manifest = getManifest(id, "3.0.0-yue2-reviewed-loop")!;
     for (const phase of ["encode", "upload"] as const) {

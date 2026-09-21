@@ -30,7 +30,8 @@ export function createYuE2AssemblyManifest(legacy: ModuleManifest): ModuleManife
       const source = await prepareApprovedYuE2AssemblySource(ctx, params.sourceCrossfadeSec);
       try {
       const delegate = legacy.id === "assemble"
-        ? createLoopAssemblyBlock(async () => source.path, 48000, source.assertCurrent)
+        ? createLoopAssemblyBlock(async () => source.path, { mixSampleRateHz: 48000,
+          assertOutputAuthority: source.assertCurrent, exactFinalDuration: true })
         : createTimelineAssemblyBlock(async () => source.path, 48000, source.assertCurrent);
       const result = await delegate.run(ctx);
       // Storage writes are not atomic with the owner decision. Recheck before
