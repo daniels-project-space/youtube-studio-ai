@@ -233,6 +233,7 @@ const factualReviewCheckpointsApi = (api as unknown as {
 }).factualReviewCheckpoints;
 
 const musicAuditionCheckpointsApi = api.musicAuditionCheckpoints;
+const yue2ContinuationsApi = (api as unknown as { yue2Continuations: { createAwaiting: never; getApproved: never } }).yue2Continuations;
 
 const automaticProviderHealthApi = (api as unknown as {
   readonly automaticProviderHealth: {
@@ -334,6 +335,9 @@ export interface RunPipelineInput {
     qualityReceiptFingerprint: string;
     approvalFingerprint: string;
     invocationSha256: string;
+  };
+  yue2AuditionResume?: {
+    checkpointId: string; checkpointFingerprint: string; approvalFingerprint: string; invocationSha256: string;
   };
   /**
    * Optional one-off pipeline for THIS run only (e.g. a short test render).
@@ -1122,6 +1126,9 @@ export const runPipelineTask = task({
               },
             }
           : {}),
+        ...(payload.yue2AuditionResume ? { yue2AuditionResume: {
+          ...payload.yue2AuditionResume, checkpointId: payload.yue2AuditionResume.checkpointId as Id<"yue2Continuations">,
+        } } : {}),
         ...(payload.musicAuditionResume
           ? {
               musicAuditionResume: {
@@ -1254,6 +1261,8 @@ export const runPipelineTask = task({
     let scheduledPlan: ScheduledPlanRunPayload | undefined;
     let requiresFactualReviewCheckpoint = false;
     let requiresMusicAuditionCheckpoint = false;
+    let requiresYuE2AuditionCheckpoint = false;
+    const resumingYuE2 = Boolean(payload.yue2AuditionResume || durableRun.yue2ContinuationId);
     let observedCostTotal = Number(durableRun.costTotal ?? 0);
     let narrativeSeriesAdmission: NarrativeSeriesRunAdmission | undefined;
     let frozenModuleConfig: Record<string, Record<string, unknown>> | undefined;
@@ -2302,9 +2311,10 @@ export const runPipelineTask = task({
       // retained master rather than creating a second, run-local review gate.
       // The music block revalidates its bytes/program/receipts before use.
       const preparedWeeklyMusic = seedStore["preparedMusic"];
+      requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && entry.version === "3.0.0-yue2-candidate");
       requiresMusicAuditionCheckpoint = entries.some((entry) =>
         entry.block === "music" && entry.params?.provider === "minimax_music3" &&
-        preparedWeeklyMusic === undefined,
+        preparedWeeklyMusic === undefined && !requiresYuE2AuditionCheckpoint,
       );
       const paramsByBlock = snapshotParamsByBlock(entries);
       log(
@@ -2322,6 +2332,13 @@ export const runPipelineTask = task({
       );
 
       const sink = makeConvexSink(convex, ownerId, executionLease);
+      if (resumingYuE2) {
+        await convex.query(yue2ContinuationsApi.getApproved, {
+          ownerId, channelId: payload.channelId, runId: payload.runId,
+          ...(payload.yue2AuditionResume ? { resume: payload.yue2AuditionResume } : {}),
+        } as never);
+        log("YuE2 continuation: exact approved source and frozen stages verified; generation will be restored, not repeated");
+      }
       if (payload.factualReviewResume) {
         // Re-prove that the exact approved narration remains downloadable on
         // this worker before any later visual block can start. A confirmed
@@ -2417,10 +2434,12 @@ export const runPipelineTask = task({
         // New source-data materialization only: persist the deterministic
         // Story Spine/Episode Graph handoff and deliberately return to the
         // owner before any stock, generated visual, or render block starts.
-        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume && !payload.musicAuditionResume
+        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume && !payload.musicAuditionResume && !resumingYuE2
           ? { stopAfterBlockId: "episode_graph" }
           : requiresMusicAuditionCheckpoint && !payload.musicAuditionResume
             ? { stopAfterBlockId: "music" }
+            : requiresYuE2AuditionCheckpoint && !resumingYuE2
+              ? { stopAfterBlockId: "music" }
             : {}),
         defaultRetries: invocation.defaultRetries,
         rehydrate: (
@@ -2556,11 +2575,20 @@ export const runPipelineTask = task({
           payload.factualReviewResume === undefined && result.stoppedAfterBlockId === "episode_graph";
         const isMusicBoundary = requiresMusicAuditionCheckpoint &&
           payload.musicAuditionResume === undefined && result.stoppedAfterBlockId === "music";
-        if (!isFactualBoundary && !isMusicBoundary) {
+        const isYuE2Boundary = requiresYuE2AuditionCheckpoint &&
+          !resumingYuE2 && result.stoppedAfterBlockId === "music";
+        if (!isFactualBoundary && !isMusicBoundary && !isYuE2Boundary) {
           // Do not reinterpret an unexpected runner boundary as a success or
           // feed it into self-heal. It has not reached a visual provider, and
           // must be investigated rather than silently admitted.
           throw new Error("unexpected factual-review runner boundary");
+        }
+        if (isYuE2Boundary) {
+          await logSink.flush();
+          const checkpoint = await convex.mutation(yue2ContinuationsApi.createAwaiting, {
+            ownerId, channelId: payload.channelId, runId: payload.runId, ...executionLease, invocationSha256,
+          } as never) as unknown as { checkpointId: string; checkpointFingerprint: string };
+          return { ok: true, awaitingYuE2Audition: true, runId: payload.runId, ...checkpoint, costTotal: result.costTotal, invocationSha256 };
         }
         if (isMusicBoundary) {
           const programKey = typeof result.store.channelMusicProgramKey === "string" ? result.store.channelMusicProgramKey : "";
@@ -2660,6 +2688,11 @@ export const runPipelineTask = task({
         }
         if (payload.musicAuditionResume !== undefined && plan.rerunBlocks.includes("music")) {
           log("music audition fence: refusing self-heal that would replace the owner-approved native track; manual revision required");
+          break;
+        }
+        if (requiresYuE2AuditionCheckpoint && plan.rerunBlocks.some(id =>
+          id === "music" || resolved.manifests.find(manifest => manifest.id === id)?.produces.acceptedMusicArrangement)) {
+          log("YuE2 audition fence: refusing self-heal that would replace the reviewed source or arrangement");
           break;
         }
         // The plan already fixes the retry boundary. Estimate only the

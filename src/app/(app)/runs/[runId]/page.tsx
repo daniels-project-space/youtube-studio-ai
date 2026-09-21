@@ -267,7 +267,7 @@ export default function RunDetailPage({
       {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
         <FactualReviewPanel runId={String(run._id)} />
       )}
-      {run.status === "awaiting_music_audition" && <MusicAuditionPanel runId={String(run._id)} />}
+      {run.status === "awaiting_music_audition" && run.musicAuditionProvider !== "yue2" && <MusicAuditionPanel runId={String(run._id)} />}
       {stages?.some((stage) => stage.block === "music_arrangement_plan") && <YuE2EvaluationPanel key={runId} runId={String(run._id)} />}
 
       {compactLegacyRecord ? (

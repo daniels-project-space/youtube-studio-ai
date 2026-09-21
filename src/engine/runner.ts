@@ -626,7 +626,7 @@ export async function runPipeline(
         ? "REVIEW_BOUNDARY_UNSAFE: stopAfterBlockId must be a non-empty block id"
         : matchingIndexes.length !== 1
           ? `REVIEW_BOUNDARY_UNSAFE: block "${requestedBoundary}" must occur exactly once in the resolved pipeline`
-          : GROUP_OF.has(requestedBoundary)
+          : GROUP_OF.has(requestedBoundary) && requestedBoundary !== "music"
             ? `REVIEW_BOUNDARY_UNSAFE: block "${requestedBoundary}" belongs to a parallel group and cannot be a review boundary`
             : undefined;
     if (boundaryError) {
@@ -1585,7 +1585,10 @@ export async function runPipeline(
     if (gid !== undefined) {
       const group: Block[] = [];
       let j = i;
-      while (j < resolved.blocks.length && GROUP_OF.get(resolved.blocks[j].id) === gid) {
+      // Music audition is a sequential barrier even though music normally
+      // shares a wave with narration. Never launch the boundary or later
+      // entries as siblings of a pre-review wave.
+      while (j < resolved.blocks.length && (boundaryIndex === undefined || j < boundaryIndex) && GROUP_OF.get(resolved.blocks[j].id) === gid) {
         if (group.some((_member, offset) =>
           !independentWaveMembers(resolved.manifests[i + offset], resolved.manifests[j]))) break;
         group.push(resolved.blocks[j]);

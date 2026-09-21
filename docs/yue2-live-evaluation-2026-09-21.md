@@ -918,3 +918,57 @@ leave an object in storage, but this stage will not return successful artifacts.
 These checks do not yet protect a later cached-artifact resume or replace the
 unfinished final-release approval binding. Automatic audition pause/resume,
 long-duration qualification and production deployment remain open.
+
+## Durable YuE2 Audition Continuation
+
+Implemented the source-to-owner-to-assembly handoff for the explicit shared
+YuE2 music version, without changing legacy channel pipelines:
+
+- The worker stops after the completed `music` stage, seals the exact retained
+  candidate/arrangement and frozen invocation in `yue2Continuations`, and
+  releases its execution lease. This is separate from the Music3 native-WAV
+  checkpoint contract.
+- Saving explicit source approval atomically arms only the matching parked
+  checkpoint. Promising/needs-work/rejected decisions never dispatch it; a
+  later negative decision revokes an unconsumed continuation. Reviews of other
+  candidates cannot revoke this checkpoint accidentally.
+- The existing music recovery tick dispatches the identifier-only continuation
+  with the original worker version, project/environment, channel concurrency
+  key and global idempotency key. No extra cron or waiting task was added.
+  Source/arrangement checks use bounded indexed stage reads, not whole-run
+  scans or repeated audio downloads.
+- Lost acknowledgements reuse the same delivery identity. Enqueue failures and
+  accepted-but-unclaimed delivery expiry are bounded at two attempts. Expired,
+  stale, revoked or corrupted deliveries cannot acquire an execution lease.
+- Successful claim atomically consumes the checkpoint. Both explicit delivery
+  and ordinary worker recovery revalidate the current approval and retained
+  stages. The engine restores the completed music stage; self-heal cannot
+  replace the approved source or accepted arrangement.
+
+The real runner test exposed a pre-existing integration defect: `music` belongs
+to the music/narration parallel wave, but review boundaries rejected every
+parallel-wave member. Music audition now forms a sequential barrier. The wave
+cannot launch the boundary or subsequent narration ahead of review; other
+parallel-group boundaries retain their existing rejection policy.
+
+Verification includes actual Convex handlers and lease claims against an
+in-memory transactional fixture, actual dispatcher logic with mocked Trigger
+transport, and the actual shared planner/music/runner with mocked worker and
+storage transports. Tests cover pause/resume with no new inference calls,
+revocation/re-approval, stale delivery, concurrent claims, lost acknowledgement,
+two-attempt expiry, corrupted stages/decisions and scope/lease rejection.
+Worker orchestration wiring also has static assertions, not a claim of a live
+full Trigger run. Existing factual/Music3 recovery, parallel dependency/wave,
+lease, review route, public projection and module contract checks pass.
+
+Browser review checks passed with synthetic API/audio on desktop, mobile and
+large text; the approved mobile screenshot was inspected. Evidence is under
+`/tmp/yue-review-browser-WFeazh/`. The run page exposes only a provider label,
+not the private checkpoint identity, to avoid presenting the Music3 panel for
+a YuE2 pause. No real owner audition was submitted and no GPU was started.
+
+This is implemented and locally verified, not deployed. Live provider
+continuation, retained-audio checks before later visual spend, final-release
+approval binding, all-family adoption, actual owner audition and full-length
+Lo-Fi qualification remain unfinished. Approval of the source never grants
+publishing authority.

@@ -1,5 +1,6 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
+import { dispatchPendingYuE2Continuations } from "./yue2ContinuationDispatcher";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -84,7 +85,8 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
       log(`music-audition continuation enqueue failed for ${receipt.runId}: ${message}`);
     }
   }
-  return { pending: pending.length, triggered };
+  const yue2 = await dispatchPendingYuE2Continuations({ ownerId, convex, log, dispatchContext: input?.dispatchContext });
+  return { pending: pending.length + yue2.pending, triggered: triggered + yue2.triggered };
 }
 
 export const musicAuditionContinuationDispatcher = schedules.task({

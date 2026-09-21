@@ -192,7 +192,7 @@ try {
   await auditionForm.getByLabel("Audition notes", { exact: true }).fill("Synthetic fixture: complete listening and all section judgments passed.");
   await auditionForm.getByLabel("Verdict", { exact: true }).selectOption("approved_for_assembly");
   await auditionForm.getByRole("button", { name: "Save audition" }).click();
-  await auditionForm.getByRole("status").filter({ hasText: "Source approved. Assembly remains paused; publishing is not authorized." }).waitFor();
+  await auditionForm.getByRole("status").filter({ hasText: "Source approved for assembly; publishing is not authorized." }).waitFor();
   assert.equal((savedAudition as YuE2AuditionRecord | null)?.sourceApprovalFingerprint, "f".repeat(64));
   for (const [name, width, font] of [["approved-desktop", 1440, 16], ["approved-mobile", 390, 16], ["approved-large-text", 320, 24]] as const) {
     await page.setViewportSize({ width, height: 1000 });

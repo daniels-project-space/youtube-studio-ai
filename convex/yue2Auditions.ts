@@ -1,10 +1,12 @@
 import { v } from "convex/values";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import { YuE2AuditionSubmissionSchema } from "../src/engine/yue2Audition";
 import { canonicalJson } from "../src/lib/canonicalJson";
-import { createYuE2SourceApproval, YuE2SourceApprovalBasisSchema, YuE2SourceApprovalSchema } from "../src/engine/yue2SourceApproval";
+import { createYuE2SourceApproval, YuE2SourceApprovalBasisSchema } from "../src/engine/yue2SourceApproval";
+import { verifiedYuE2Approval as verifiedApproval } from "./yue2ApprovalIdentity";
+import { updateYuE2ContinuationDecision } from "./yue2Continuations";
 
 const scope = { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), candidateSha256: v.string() };
 async function owned(ctx: QueryCtx | MutationCtx, args: { ownerId: string; channelId: Id<"channels">; runId: Id<"runs">; candidateSha256: string }) {
@@ -15,17 +17,6 @@ async function owned(ctx: QueryCtx | MutationCtx, args: { ownerId: string; chann
     throw new Error("YuE audition ownership mismatch");
   }
   return run;
-}
-
-function verifiedApproval(row: Doc<"yue2Auditions"> | null, invocationSha256: string | undefined) {
-  if (!row?.sourceApproval || row.submission?.verdict !== "approved_for_assembly") return null;
-  const approval = YuE2SourceApprovalSchema.parse(row.sourceApproval);
-  const expected = createYuE2SourceApproval({ basis: approval.basis, submission: row.submission,
-    reviewedAt: row.reviewedAt, revision: row.revision });
-  if (approval.fingerprint !== expected.fingerprint || approval.basis.ownerId !== row.ownerId ||
-    approval.basis.channelId !== row.channelId || approval.basis.runId !== row.runId ||
-    approval.basis.candidateSha256 !== row.candidateSha256) throw new Error("Source approval audit identity mismatch");
-  return approval.basis.invocationSha256 === invocationSha256 ? approval : null;
 }
 
 export const latest = query({ args: scope, handler: async (ctx, args) => {
@@ -39,7 +30,7 @@ export const latest = query({ args: scope, handler: async (ctx, args) => {
 } });
 
 // Only the authenticated server route may write, after fresh native-byte verification.
-// Source approval is separate from run continuation, generation and publishing authority.
+// Only the matching parked checkpoint may be armed; this grants no publishing authority.
 export const record = mutation({ args: { ...scope, submission: v.any(), sourceBasis: v.optional(v.any()) }, handler: async (ctx, args) => {
   const run = await owned(ctx, args);
   const submission = YuE2AuditionSubmissionSchema.parse(args.submission);
@@ -60,6 +51,7 @@ export const record = mutation({ args: { ...scope, submission: v.any(), sourceBa
     await ctx.db.insert("yue2Auditions", { ownerId: args.ownerId, channelId: args.channelId, runId: args.runId,
       candidateSha256: args.candidateSha256, submission, reviewedAt, revision, ...(sourceApproval ? { sourceApproval } : {}) });
   }
+  await updateYuE2ContinuationDecision(ctx, run, sourceApproval, args.candidateSha256);
   return { ...submission, reviewedAt, reviewerId: args.ownerId, productionApproved: false as const,
     sourceApprovalFingerprint: sourceApproval?.fingerprint ?? null };
 } });

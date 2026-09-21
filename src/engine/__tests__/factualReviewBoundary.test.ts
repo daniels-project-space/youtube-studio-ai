@@ -175,6 +175,18 @@ async function refusesParallelGroupBoundaryBeforeAnyWork(): Promise<void> {
 async function main(): Promise<void> {
   await stopsAfterPersistedEpisodeGraphAndResumesTts();
   await refusesParallelGroupBoundaryBeforeAnyWork();
+  for (const entries of [["music", "narration_tts"], ["narration_tts", "music"]]) {
+    _clear();
+    const calls: string[] = [], persisted: string[] = [];
+    for (const id of entries) registerTestBlock({ id, consumes: [], produces: [], run: async () => { calls.push(id); return {}; } });
+    const result = await runPipeline(validatePipeline(entries.map(block => ({ block }))), {
+      ...base, resume: false, stopAfterBlockId: "music",
+      sink: { upsert: async row => { if (row.status === "ok") persisted.push(row.block); } },
+    });
+    assert.equal(result.status, "awaiting_review", result.error);
+    assert.deepEqual(calls, entries.slice(0, entries.indexOf("music") + 1), "music barrier must split the usual music/narration wave");
+    assert.deepEqual(persisted, calls, "every pre-review result is persisted before returning");
+  }
   console.log("factualReviewBoundary: ok");
 }
 

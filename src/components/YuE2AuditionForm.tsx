@@ -42,7 +42,7 @@ export function YuE2AuditionForm({ runId, review }: { runId: string; review: YuE
         body.audition.verdict !== draft.verdict || body.audition.productionApproved !== false) throw new Error("Invalid save response. Reload review.");
       if (approving && !/^[a-f0-9]{64}$/u.test(body.audition.sourceApprovalFingerprint ?? "")) throw new Error("Source approval was not confirmed. Reload review.");
       if (!requestController.signal.aborted) { setSaved(body.audition); setMessage(approving
-        ? "Source approved. Assembly remains paused; publishing is not authorized."
+        ? "Source approved for assembly; publishing is not authorized."
         : "Audition saved. Production approval remains pending."); }
     } catch (error) {
       if (controller.current === requestController) setMessage(requestController.signal.aborted

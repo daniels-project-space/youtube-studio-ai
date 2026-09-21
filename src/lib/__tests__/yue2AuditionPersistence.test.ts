@@ -5,6 +5,8 @@ import ts from "typescript";
 import * as contracts from "@/engine/yue2Audition";
 import * as canonical from "@/lib/canonicalJson";
 import * as approvals from "@/engine/yue2SourceApproval";
+import * as approvalIdentity from "../../../convex/yue2ApprovalIdentity";
+import { updateYuE2ContinuationDecision } from "../../../convex/yue2Continuations";
 
 type Row = Record<string, unknown>;
 function fixture() {
@@ -34,6 +36,8 @@ function fixture() {
     if (name.endsWith("/yue2Audition")) return contracts;
     if (name.endsWith("/yue2SourceApproval")) return approvals;
     if (name.endsWith("/canonicalJson")) return canonical;
+    if (name === "./yue2ApprovalIdentity") return approvalIdentity;
+    if (name === "./yue2Continuations") return { updateYuE2ContinuationDecision };
     throw new Error(`Unexpected import ${name}`);
   };
   const compiled = ts.transpileModule(readFileSync("convex/yue2Auditions.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;

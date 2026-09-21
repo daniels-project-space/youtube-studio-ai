@@ -4,6 +4,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { v, type Infer } from "convex/values";
+import { assertYuE2Continuation, yue2ResumeValidator } from "./yue2Continuations";
 import { evaluateConvexAuthProbeIdentity } from "../src/lib/convexAuthProbe";
 import {
   decidePipelineInvocationClaim,
@@ -1057,6 +1058,7 @@ export const claimExecutionLease = mutation({
       approvalFingerprint: v.string(),
       invocationSha256: v.string(),
     })),
+    yue2AuditionResume: v.optional(yue2ResumeValidator),
     // Only the dedicated reviewed-data-story outbox may cross its initial
     // manual boundary. The facts remain reload-only in runPipeline.
     reviewedDataStoryInitialAdmission: v.optional(v.object({
@@ -1146,6 +1148,7 @@ export const claimExecutionLease = mutation({
     }
     let factualReviewResuming = false;
     let musicAuditionResuming = false;
+    let yue2Resuming = false;
     let reviewedDataStoryInitialResuming = false;
     let routeQualificationBenchmarkResuming = false;
     if (run.status === "awaiting_route_qualification_benchmark_dispatch") {
@@ -1287,7 +1290,20 @@ export const claimExecutionLease = mutation({
       });
       return { kind: "factual_review_ineligible" as const, error: message };
     }
-    if (run.status === "awaiting_music_audition") {
+    if (run.yue2ContinuationId || args.yue2AuditionResume) {
+      if (run.status === "awaiting_music_audition" && !args.yue2AuditionResume) {
+        return { kind: "music_audition_awaiting" as const, error: "YuE2 source is awaiting its exact owner-approved continuation" };
+      }
+      try {
+        const row = await assertYuE2Continuation(ctx, run, args.yue2AuditionResume);
+        yue2Resuming = run.status === "awaiting_music_audition";
+        if (!yue2Resuming && row.state !== "consumed") throw new Error("YuE2 continuation has not been consumed");
+      } catch (error) {
+        // An obsolete delivery must not terminalize a newer owner decision.
+        return { kind: "music_audition_ineligible" as const, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    if (run.status === "awaiting_music_audition" && !run.yue2ContinuationId) {
       if (!args.musicAuditionResume) {
         return {
           kind: "music_audition_awaiting" as const,
@@ -1358,6 +1374,7 @@ export const claimExecutionLease = mutation({
     if (
       !factualReviewResuming &&
       !musicAuditionResuming &&
+      !yue2Resuming &&
       !reviewedDataStoryInitialResuming &&
       !routeQualificationBenchmarkResuming
     ) {
@@ -1443,6 +1460,9 @@ export const claimExecutionLease = mutation({
     }
     const leaseExpiresAt = args.now + RUN_EXECUTION_LEASE_MS;
     const executionAttempts = (run.executionAttempts ?? 0) + 1;
+    if (yue2Resuming) {
+      await ctx.db.patch(run.yue2ContinuationId!, { state: "consumed", updatedAt: args.now, queueDeadlineAt: undefined, error: undefined });
+    }
     await ctx.db.patch(args.runId, {
       status: "running",
       heartbeatAt: args.now,
@@ -3295,6 +3315,7 @@ export const getRunPresentation = query({
         snapshot: run.pipelineInvocationSnapshot,
         sha256: run.pipelineInvocationSha256,
       }),
+      ...(run.yue2ContinuationId ? { musicAuditionProvider: "yue2" as const } : {}),
     };
   },
 });

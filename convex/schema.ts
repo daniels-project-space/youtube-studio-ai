@@ -1004,6 +1004,7 @@ export default defineSchema({
     musicAuditionResumeQueueDeadlineAt: v.optional(v.number()),
     musicAuditionResumeTriggerRunId: v.optional(v.string()),
     musicAuditionResumeLastError: v.optional(v.string()),
+    yue2ContinuationId: v.optional(v.id("yue2Continuations")),
     // Owner-selected, immutable source-data-story packs use a dedicated
     // initial-dispatch outbox. This is intentionally distinct from ordinary
     // cadence: no scheduled plan may carry factual claims or replace this
@@ -3134,9 +3135,17 @@ export default defineSchema({
     .index("by_owner_decision", ["ownerId", "decision"])
     .index("by_owner_created", ["ownerId", "createdAt"]),
 
-  // Immutable owner-audition identity for a MiniMax Music3 native WAV. The
-  // human decision/continuation is added separately; this row only records
-  // the exact audio whose later quality receipt may be admitted.
+  // YuE2 retains its native 48 kHz source identity separately from Music3.
+  yue2Continuations: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    basis: v.any(), fingerprint: v.string(),
+    state: v.union(v.literal("awaiting"), v.literal("pending"), v.literal("queued"), v.literal("consumed"), v.literal("blocked")),
+    approvalFingerprint: v.optional(v.string()), attempts: v.number(),
+    createdAt: v.number(), updatedAt: v.number(),
+    queueDeadlineAt: v.optional(v.number()), triggerRunId: v.optional(v.string()), error: v.optional(v.string()),
+  }).index("by_run", ["runId"]).index("by_owner_state_deadline", ["ownerId", "state", "queueDeadlineAt"]),
+
+  // Immutable owner-audition identity for a MiniMax Music3 native WAV.
   musicAuditionCheckpoints: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),

@@ -154,6 +154,20 @@ async function main() {
   assert.equal(replay.ok, true, replay.error);
   assert.equal(calls.length, count, "completed stage restores without dispatch");
 
+  reset();
+  let laterWork = 0;
+  registerManifest(manifestFromBlock({ id: "after_audition_fixture", consumes: ["yue2MusicCandidate"], produces: [],
+    run: async () => { laterWork++; return {}; } }));
+  const pausedGraph = validatePipeline([...entries, { block: "after_audition_fixture" }], ["topic"]);
+  const pausedOptions = { ...options, sink: sink().value };
+  const paused = await runPipeline(pausedGraph, { ...pausedOptions, stopAfterBlockId: "music" });
+  assert.equal(paused.status, "awaiting_review", paused.error); assert.equal(paused.stoppedAfterBlockId, "music");
+  assert.equal(laterWork, 0); const dispatchesAtPause = calls.length;
+  const continued = await runPipeline(pausedGraph, pausedOptions);
+  assert.equal(continued.ok, true, continued.error); assert.equal(laterWork, 1);
+  assert.equal(calls.length, dispatchesAtPause, "approved continuation must restore the exact candidate without new inference");
+  assert.deepEqual(continued.store.yue2MusicCandidate, paused.store.yue2MusicCandidate);
+
   for (const fault of ["held", "throw", "mismatch"] as const) {
     reset();
     if (fault === "mismatch") material.request.job.seed++;
