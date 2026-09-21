@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const studio = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const source = '/home/ubuntu/salad-media-infra';
@@ -13,18 +13,19 @@ const run = (command, args, options = {}) => execFileSync(command, args, {
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...options,
 });
 
-function directory(path) {
+export function directory(path) {
   // Refuse redirected roots: no build may write into another project's cache.
   if (!existsSync(path)) {
     directory(dirname(path));
     mkdirSync(path, { mode: 0o700 });
   }
-  if (lstatSync(path).isSymbolicLink() || realpathSync(path) !== path) {
+  if (!lstatSync(path).isDirectory() || realpathSync(path) !== path) {
     throw new Error(`Project path must not contain symlinks: ${path}`);
   }
 }
 
-function worktree(repository, revision, target) {
+export function worktree(repository, revision, target) {
+  if (existsSync(target) && realpathSync(target) !== target) throw new Error('Build worktree must not be redirected');
   if (!existsSync(target)) run('git', ['-C', repository, 'worktree', 'add', '--detach', target, revision]);
   if (run('git', ['-C', target, 'rev-parse', 'HEAD']).trim() !== revision ||
       run('git', ['-C', target, 'status', '--porcelain']).trim()) {
@@ -78,11 +79,18 @@ function main() {
     const details = JSON.parse(run('docker', ['image', 'inspect', image]))[0];
     if (details.Config.Labels['ai.youtube.render.project'] !== project ||
         details.Config.Labels['org.opencontainers.image.revision'] !== revision) throw new Error('Image ownership mismatch');
+    run('docker', ['run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+      '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m',
+      '--mount', `type=bind,src=${join(studioTree, 'infra/studio-render/smoke.py')},dst=/checks/smoke.py,readonly`,
+      '--entrypoint', 'python', details.Id, '/checks/smoke.py'], { stdio: 'inherit' });
     receipt.status = 'built';
     receipt.imageId = details.Id;
+    receipt.apiSmoke = 'passed';
     writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
   }
   console.log(JSON.stringify(receipt, null, 2));
 }
 
-try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+}

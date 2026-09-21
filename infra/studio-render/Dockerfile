@@ -1,14 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385
-ARG SOURCE_REVISION
-ARG STUDIO_REVISION
 ARG COMFYUI_COMMIT=f938505952476e48a12687eac696cdc94d48a3fe
 ARG H3_LATENT_UPSCALER_COMMIT=e98237773011523528353a8beb4863e65b099a38
-LABEL org.opencontainers.image.source="https://github.com/daniels-project-space/youtube-studio-ai" \
-      org.opencontainers.image.revision="${STUDIO_REVISION}" \
-      ai.youtube.render.source-revision="${SOURCE_REVISION}" \
-      ai.youtube.render.project="youtube-studio-ai" \
-      ai.youtube.render.comfy-revision="${COMFYUI_COMMIT}"
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     COMFY_ROOT=/opt/youtube-studio/ComfyUI MODEL_CACHE_MODE=preseeded-only \
     MODEL_MANIFEST_PATH=/models/model-manifest.json \
@@ -39,3 +32,11 @@ RUN chmod 0555 /app/h3/entrypoint.sh \
 WORKDIR /app/h3
 EXPOSE 8080
 ENTRYPOINT ["/app/h3/entrypoint.sh"]
+# Release metadata must not invalidate the expensive dependency layers.
+ARG SOURCE_REVISION
+ARG STUDIO_REVISION
+LABEL org.opencontainers.image.source="https://github.com/daniels-project-space/youtube-studio-ai" \
+      org.opencontainers.image.revision="${STUDIO_REVISION}" \
+      ai.youtube.render.source-revision="${SOURCE_REVISION}" \
+      ai.youtube.render.project="youtube-studio-ai" \
+      ai.youtube.render.comfy-revision="${COMFYUI_COMMIT}"
