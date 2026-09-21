@@ -65,10 +65,10 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <strong className={styles.status}>{quality.status === "blocked" ? "Blocked for review" : "Needs audition"}</strong>
     </header>
     <p className={styles.warning}>Not approved for production. Channel-personality fit is unverified.</p>
-    <audio ref={audio} controls preload="metadata" src={review.nativeWavUrl} onLoadedMetadata={() => setAudioReady(true)} onError={() => setAudioFailed(true)} aria-label="Native YuE candidate" />
+    <audio ref={audio} controls preload="metadata" src={review.nativeWavUrl} onLoadedMetadata={() => setAudioReady(true)} onError={() => setAudioFailed(true)} aria-label={quality.headroomPreparation ? "Headroom-prepared YuE candidate" : "Native YuE candidate"} />
     {audioFailed && <p role="alert">Audio link expired or unavailable.</p>}
     <div className={styles.toolbar}>
-      <span>{review.nativeOutput.sampleRateHz / 1000} kHz / {review.nativeOutput.channels} channels / FLOAT WAV</span>
+      <span>{review.nativeOutput.sampleRateHz / 1000} kHz / {review.nativeOutput.channels} channels / FLOAT WAV{quality.headroomPreparation ? ` / ${quality.headroomPreparation.gainDb.toFixed(2)} dB gain` : ""}</span>
       <button type="button" onClick={reload}>Reload review</button>
     </div>
     <dl className={styles.facts}>

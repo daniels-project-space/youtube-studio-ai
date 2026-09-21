@@ -6,6 +6,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
 import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
+import { prepareYuE2Headroom, inspectYuE2Headroom, YuE2HeadroomReceiptSchema } from "@/lib/yue2Headroom";
 import {
   validateYuE2ExecutionPolicy, verifyYuE2ExecutionPolicy, verifyYuE2ExecutionAccounting,
   type YuE2ExecutionPolicy, type YuE2VerifiedExecutionAccounting,
@@ -35,6 +36,10 @@ const LegacyCandidateSchema = z.object({
   preClampSource: z.object({
     audioKey: z.string(), audioSha256: hash, audioBytes: z.number().int().positive().max(MAX_AUDIO_BYTES),
     receiptKey: z.string(), receiptSha256: hash, receiptBytes: z.number().int().positive().max(16384),
+  }).strict().optional(),
+  headroom: z.object({
+    audioKey: z.string(), audioSha256: hash, audioBytes: z.number().int().positive().max(MAX_AUDIO_BYTES),
+    receiptKey: z.string(), receiptSha256: hash,
   }).strict().optional(),
   nativeOutput: z.object({
     sampleRateHz: z.literal(48000), channels: z.literal(2), codec: z.literal("pcm_f32le"),
@@ -185,8 +190,8 @@ function preClampReference(root: string, completion: YuE2VerifiedCompletion) {
 }
 
 async function verifyRetainedPreClamp(root: string, candidate: YuE2DurableCandidate,
-  completion: YuE2VerifiedCompletion, allowMissing = false): Promise<boolean> {
-  if (!candidate.preClampSource) return true;
+  completion: YuE2VerifiedCompletion, allowMissing = false): Promise<{ audio: Uint8Array; receipt: Uint8Array } | undefined> {
+  if (!candidate.preClampSource) return undefined;
   if (canonicalJson(candidate.preClampSource) !== canonicalJson(preClampReference(root, completion) ?? null)) {
     throw new YuE2EvaluationError("durable_pre_clamp_reference_mismatch");
   }
@@ -194,11 +199,27 @@ async function verifyRetainedPreClamp(root: string, candidate: YuE2DurableCandid
   try {
     receipt = await read(candidate.preClampSource.receiptKey, 16384);
     audio = await read(candidate.preClampSource.audioKey, MAX_AUDIO_BYTES);
-  } catch (error) { if (allowMissing && missing(error)) return false; throw error; }
+  } catch (error) { if (allowMissing && missing(error)) return undefined; throw error; }
   verifyYuE2PreClampSource(completion, audio, receipt);
   // Reuse native container verification against the raw artifact's own identity.
   await probeAudio(audio, { ...completion, audio: completion.preClamp!.audio });
-  return true;
+  return { audio, receipt };
+}
+
+async function verifyRetainedHeadroom(root: string, candidate: YuE2DurableCandidate,
+  completion: YuE2VerifiedCompletion, source: { audio: Uint8Array; receipt: Uint8Array } | undefined) {
+  const ref = candidate.headroom;
+  if (!ref) return undefined;
+  if (!source || ref.receiptKey !== `${root}headroom-preparation.json` ||
+      ref.audioKey !== `${root}audio-headroom-${ref.audioSha256}.wav`) {
+    throw new YuE2EvaluationError("durable_headroom_reference_mismatch");
+  }
+  const receiptBytes = await read(ref.receiptKey);
+  const audio = await read(ref.audioKey, MAX_AUDIO_BYTES);
+  if (yue2Sha256(receiptBytes) !== ref.receiptSha256 || yue2Sha256(audio) !== ref.audioSha256 || audio.length !== ref.audioBytes) {
+    throw new YuE2EvaluationError("durable_headroom_integrity_mismatch");
+  }
+  return { audio, ...await inspectYuE2Headroom(completion, source, audio, parseJson(receiptBytes)) };
 }
 const verifiedSignalCache = new Map<string, { promise: Promise<VerifiedSignal | null>; settled: boolean }>();
 const MAX_VERIFIED_SIGNALS = 8;
@@ -305,8 +326,10 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
       candidate.nativeOutput.frames !== completion.result.frames ||
       candidate.nativeOutput.durationSec !== completion.result.audio_seconds) throw new Error("review audio identity mismatch");
     const audio = await read(candidate.audioKey, MAX_AUDIO_BYTES);
-    await verifyRetainedPreClamp(root, candidate, completion);
-    const signal = await probeAudio(audio, completion, true);
+    const source = await verifyRetainedPreClamp(root, candidate, completion);
+    const headroom = await verifyRetainedHeadroom(root, candidate, completion, source);
+    if (headroom) await probeAudio(audio, completion);
+    const signal = headroom?.signal ?? await probeAudio(audio, completion, true);
     if (!signal) throw new Error("review signal measurements missing");
     const requestedDurationSec = request.acceptedArrangement.arrangement.requestedDurationSec;
     // The allowlisted VAE decodes T latent frames to 1920*T-64 PCM frames.
@@ -321,12 +344,17 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
       (candidate.nativeOutput.frames + 64) % 1920 === 0;
     return {
       candidate, candidateSha256: yue2Sha256(candidateBytes), request,
+      listeningAudioKey: headroom ? candidate.headroom!.audioKey : candidate.audioKey,
       quality: {
         status: (durationMatches || nativeDurationMatches || naturalLoopDurationAccepted) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
         requestedDurationSec, actualDurationSec: candidate.nativeOutput.frames / 48000,
         durationMatches, nativeDurationMatches, expectedNativeFrames, sourceDurationPolicy, naturalLoopDurationAccepted,
         nativeFormatVerified: true as const,
         signal,
+        ...(headroom ? { headroomPreparation: {
+          method: headroom.receipt.method, gainDb: headroom.receipt.gainDb,
+          sourceSha256: headroom.receipt.sourceSha256, audioSha256: headroom.receipt.audioSha256,
+        } } : {}),
         productionApproved: false as const,
         unresolved: [...(!durationMatches ? ["exact_delivery_duration"] : []),
           ...(!signal.truePeak || signal.truePeak.status === "unavailable" ? ["true_peak"] : []),
@@ -440,7 +468,8 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
         }
       }
       // Previously sealed candidates keep their original retention contract.
-      const retainSource = !candidateBytes || YuE2DurableCandidateSchema.parse(parseJson(candidateBytes)).preClampSource !== undefined;
+      const existingCandidate = candidateBytes ? YuE2DurableCandidateSchema.parse(parseJson(candidateBytes)) : undefined;
+      const retainSource = !existingCandidate || existingCandidate.preClampSource !== undefined;
       const preClampSource = retainSource ? preClampReference(root, completion) : undefined;
       return YuE2DurableCandidateSchema.parse({
         version: executionPolicy ? "studio-yue2-durable-candidate/v2" : "studio-yue2-durable-candidate/v1", ownerId, channelId, runId, jobId,
@@ -451,23 +480,45 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
         nativeFormatVerified: true, qualified: false, productionApproved: false, manualAudition: "pending", costStatus: "not_measured",
         qualification: YUE2_QUALIFICATION,
         ...(preClampSource ? { preClampSource } : {}),
+        ...(existingCandidate?.headroom ? { headroom: existingCandidate.headroom } : {}),
         ...(executionPolicy ? { executionAccounting: accountingReference() } : {}),
       });
     };
     const retainPreClamp = async (candidate: YuE2DurableCandidate, completion: YuE2VerifiedCompletion) => {
       if (!candidate.preClampSource) return;
-      if (await verifyRetainedPreClamp(root, candidate, completion, true)) return;
+      const retained = await verifyRetainedPreClamp(root, candidate, completion, true);
+      if (retained) return retained;
       const source = await client.fetchPreClampSource(completion);
       if (!source) throw new YuE2EvaluationError("durable_pre_clamp_source_missing");
       await probeAudio(source.audio, { ...completion, audio: completion.preClamp!.audio });
       await immutable(candidate.preClampSource.audioKey, source.audio, "audio/wav");
       await immutable(candidate.preClampSource.receiptKey, source.receipt, "application/json");
-      await verifyRetainedPreClamp(root, candidate, completion);
+      return await verifyRetainedPreClamp(root, candidate, completion);
+    };
+    const retainHeadroom = async (candidate: YuE2DurableCandidate, completion: YuE2VerifiedCompletion,
+      source: { audio: Uint8Array; receipt: Uint8Array } | undefined): Promise<YuE2DurableCandidate> => {
+      if (!source) return candidate;
+      const receiptKey = `${root}headroom-preparation.json`;
+      let receiptBytes = await optionalRead(receiptKey);
+      if (!receiptBytes) {
+        const prepared = await prepareYuE2Headroom(completion, source);
+        receiptBytes = jsonBytes(prepared.receipt);
+        await immutable(`${root}audio-headroom-${prepared.receipt.audioSha256}.wav`, prepared.audio, "audio/wav");
+        await immutable(receiptKey, receiptBytes, "application/json");
+      }
+      const receipt = YuE2HeadroomReceiptSchema.parse(parseJson(receiptBytes));
+      const retained = YuE2DurableCandidateSchema.parse({ ...candidate, headroom: {
+        receiptKey, receiptSha256: yue2Sha256(receiptBytes),
+        audioKey: `${root}audio-headroom-${receipt.audioSha256}.wav`,
+        audioSha256: receipt.audioSha256, audioBytes: receipt.audioBytes,
+      } });
+      await verifyRetainedHeadroom(root, retained, completion, source);
+      return retained;
     };
     if (savedProvenance) {
       const completion = provenanceCompletion(savedProvenance);
       if (executionPolicy) await recoverAccounting();
-      const candidate = makeCandidate(completion, savedProvenance);
+      let candidate = makeCandidate(completion, savedProvenance);
       if (candidateBytes) {
         YuE2DurableCandidateSchema.parse(parseJson(candidateBytes));
         assertBytes(candidateBytes, jsonBytes(candidate));
@@ -477,8 +528,10 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
       catch (error) { if (candidateBytes || !missing(error)) throw error; }
       if (audio) {
         await probeAudio(audio, completion);
-        if (candidateBytes) await verifyRetainedPreClamp(root, candidate, completion);
-        else await retainPreClamp(candidate, completion);
+        if (candidateBytes) {
+          const source = await verifyRetainedPreClamp(root, candidate, completion);
+          await verifyRetainedHeadroom(root, candidate, completion, source);
+        } else candidate = await retainHeadroom(candidate, completion, await retainPreClamp(candidate, completion));
         if (!candidateBytes) await immutable(candidateKey, jsonBytes(candidate), "application/json");
         return { status: "completed", jobId, reused: true, candidateKey, audioKey: candidate.audioKey, candidate };
       }
@@ -532,10 +585,10 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
     }
     await probeAudio(outcome.audio, outcome.completion);
     const provenance = jsonBytes({ version: "studio-yue2-provenance/v1", bindingSha256, request, statusResponse: outcome.completion.statusResponse });
-    const candidate = makeCandidate(outcome.completion, provenance);
+    let candidate = makeCandidate(outcome.completion, provenance);
     await immutable(provenanceKey, provenance, "application/json");
     await immutable(candidate.audioKey, outcome.audio, "audio/wav");
-    await retainPreClamp(candidate, outcome.completion);
+    candidate = await retainHeadroom(candidate, outcome.completion, await retainPreClamp(candidate, outcome.completion));
     await immutable(candidateKey, jsonBytes(candidate), "application/json");
     return { status: "completed", jobId, reused: false, candidateKey, audioKey: candidate.audioKey, candidate };
   } catch (error) {

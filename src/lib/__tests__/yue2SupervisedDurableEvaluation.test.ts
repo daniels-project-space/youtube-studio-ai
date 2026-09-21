@@ -84,7 +84,12 @@ function evidence(remote: Remote) {
       native_audio: "audio-native.wav", official_result: "song/result.json" } : null,
     error: completed ? null : { type: "FixtureFailure", message: "explicit synthetic failure" }, qualification: YUE2_QUALIFICATION,
     artifacts: completed ? { "audio-native.wav": { sha256: yue2Sha256(current.audio), bytes: current.audio.length },
-      "song/result.json": { sha256: "b".repeat(64), bytes: 17 } } : {} });
+      "song/result.json": { sha256: "b".repeat(64), bytes: 17 },
+      ...(current.preClampAudio ? {
+        "audio-unclipped.wav": { sha256: yue2Sha256(current.preClampAudio), bytes: current.preClampAudio.length },
+        "headroom-status.json": { sha256: yue2Sha256(headroomBytes()), bytes: headroomBytes().length },
+      } : {}),
+    } : {} });
   runnerTerminal.payload_json = runnerTerminal.payload_json.replace('"seconds":1}', '"seconds":1.0}');
   runnerTerminal.sha256 = yue2Sha256(runnerTerminal.payload_json);
   const start = seal({ contract: "yue2-execution-supervision/v1", job_id: request.job.job_id,
@@ -122,12 +127,27 @@ function evidence(remote: Remote) {
 type Bundle = ReturnType<typeof evidence>;
 function fixture() {
   return { objects: new Map<string, Buffer>(), calls: [] as string[], writes: [] as string[], reads: [] as string[],
-    posts: 0, authorizations: 0, probes: 0, analyses: 0, failAnalysis: false, audio, remote: "missing" as Remote, postState: "completed" as Remote,
+    posts: 0, authorizations: 0, probes: 0, analyses: 0, failAnalysis: false, audio, preClampAudio: undefined as Buffer | undefined,
+    remote: "missing" as Remote, postState: "completed" as Remote,
     advertisedPolicy: policy, offline: false, observedPolicy: false, audioFailure: false,
     responseCount: 0, mutateEvidence: undefined as ((value: Bundle, sequence: number) => void) | undefined,
     putFault: undefined as ((key: string, bytes: Uint8Array) => void) | undefined };
 }
 let current = fixture();
+function headroomBytes() {
+  const audio = current.preClampAudio!;
+  let peak = 0, outside = 0;
+  for (let offset = 44; offset < audio.length; offset += 4) {
+    const amplitude = Math.abs(audio.readFloatLE(offset));
+    peak = Math.max(peak, amplitude);
+    if (amplitude > 1) outside++;
+  }
+  const payload = { schema: "yue2-pre-clamp-source/v1", decode_passes: 1, decoder_sha256: "a".repeat(64),
+    source: "audio-unclipped.wav", official: "audio-native.wav", source_sha256: yue2Sha256(audio),
+    samples_outside_unit_range: outside, raw_sample_peak: peak, clamped_samples_equal_reference: true,
+    gain_applied: false, production_approved: false };
+  return Buffer.from(JSON.stringify({ payload, sha256: seal(payload).sha256 }));
+}
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
 const recoveryWaits: Array<{ seconds: number; idempotencyKey: string }> = [];
@@ -200,6 +220,8 @@ globalThis.fetch = async (input, init = {}) => {
     if (current.audioFailure) throw new Error("synthetic download failure after paid-work boundary");
     return new Response(new Uint8Array(current.audio));
   }
+  if (path.endsWith("/artifacts/audio-unclipped.wav")) return new Response(new Uint8Array(current.preClampAudio!));
+  if (path.endsWith("/artifacts/headroom-status.json")) return new Response(headroomBytes());
   const bundle = evidence(current.remote); current.mutateEvidence?.(bundle, ++current.responseCount);
   if (path.endsWith("/accounting")) return Response.json(bundle.accountingResponse);
   assert.ok(path === `/v1/jobs/${request.job.job_id}` || method === "POST");
@@ -395,6 +417,39 @@ async function main() {
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
     assert.deepEqual(result.request.acceptedArrangement.reviewContext, request.acceptedArrangement.reviewContext);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  await test("review measures and selects the retained derivative instead of clipped original audio", async () => {
+    const frames = 60 * 48000 - 64;
+    current.audio = wav(frames);
+    current.preClampAudio = Buffer.from(current.audio);
+    for (let frame = 0; frame < frames; frame++) for (let channel = 0; channel < 2; channel++) {
+      const value = 1.4 * Math.sin(frame * 2 * Math.PI * (channel ? 330 : 220) / 48000);
+      current.preClampAudio.writeFloatLE(value, 44 + frame * 8 + channel * 4);
+      current.audio.writeFloatLE(Math.max(-1, Math.min(1, value)), 44 + frame * 8 + channel * 4);
+    }
+    const retained = await run(args());
+    if (retained.status !== "completed" || !retained.candidate.headroom) throw new Error("expected headroom candidate");
+    current.offline = true;
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.listeningAudioKey, retained.candidate.headroom.audioKey);
+    assert.notEqual(result.listeningAudioKey, retained.candidate.audioKey);
+    assert.equal(result.quality.signal.samplesAtOrAboveFullScale, 0);
+    assert.ok(result.quality.signal.truePeak!.dbtp! <= -1);
+    assert.ok(result.quality.headroomPreparation!.gainDb < 0);
+    assert.equal(result.quality.status, "needs_audition");
+    assert.equal(result.quality.productionApproved, false);
+    assert.ok(result.quality.unresolved.includes("exact_delivery_duration"));
+    assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
+    const analyses = current.analyses;
+    const again = await review(reviewScope);
+    assert.ok(again);
+    assert.equal(current.analyses, analyses, "repeat derivative review reuses measured analysis after hash checks");
+    result.quality.signal.reviewReasons.push("mutated caller copy");
+    assert.ok(!again.quality.signal.reviewReasons.includes("mutated caller copy"));
+    current.objects.set(retained.candidate.headroom.audioKey, Buffer.from("corrupt"));
+    await rejected(review(reviewScope));
+    assert.equal(current.posts, 1);
   });
   await test("repeat and concurrent review reuse analysis but reread bytes and isolate returned measurements", async () => {
     current.audio = wav(4801);

@@ -17,6 +17,7 @@ let unavailable = false;
 let absent = false;
 const calls: string[] = [];
 const material = {
+  listeningAudioKey: "owner/review-owner/runs/review-run/music/yue2-evaluation/verified-headroom.wav",
   candidateSha256: "a".repeat(64),
   candidate: {
     jobId: "job", audioKey: "owner/review-owner/runs/review-run/music/yue2-evaluation/audio.wav",
@@ -60,7 +61,7 @@ loader._load = function (id, ...args) {
   if (id.endsWith("/storage")) return {
     presignDownload: async (key: string, options: unknown) => {
       calls.push("presign");
-      assert.equal(key, material.candidate.audioKey);
+      assert.equal(key, material.listeningAudioKey, "sign the verified listening artifact, not the original clamped audio");
       assert.deepEqual(options, { expiresIn: 600 });
       return "https://signed-fixture.invalid/native.wav";
     },

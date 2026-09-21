@@ -64,7 +64,7 @@ export async function GET(request: Request) {
     const { candidate, candidateSha256, quality } = material;
     const audition = await convex.query(auditionApi.latest, { ownerId: actor.ownerId, channelId: run.channelId,
       runId: run._id, candidateSha256 } as never) as YuE2AuditionRecord | null;
-    const nativeWavUrl = await presignDownload(candidate.audioKey, { expiresIn: 600 });
+    const nativeWavUrl = await presignDownload(material.listeningAudioKey, { expiresIn: 600 });
     return NextResponse.json({ ok: true, review: {
       candidateSha256, audition, jobId: candidate.jobId, nativeWavUrl, nativeOutput: candidate.nativeOutput,
       arrangement: material.request.acceptedArrangement.arrangement,

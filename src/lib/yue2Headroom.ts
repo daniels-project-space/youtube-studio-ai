@@ -26,6 +26,7 @@ export const YuE2HeadroomReceiptSchema = z.object({
   before: meter, after: meter, productionApproved: z.literal(false),
 }).strict();
 export type YuE2HeadroomReceipt = z.infer<typeof YuE2HeadroomReceiptSchema>;
+const inspectedSignals = new Map<string, { promise: Promise<NativeAudioSignal>; settled: boolean }>();
 
 function summary(signal: NativeAudioSignal) {
   if (signal.nonFiniteSamples || !signal.truePeak || signal.truePeak.status === "unavailable") {
@@ -54,6 +55,8 @@ function validateReceipt(completion: YuE2VerifiedCompletion, source: { audio: Ui
       receipt.sourceReceiptSha256 !== yue2Sha256(source.receipt) || receipt.audioSha256 !== yue2Sha256(audio) ||
       receipt.audioBytes !== audio.length || receipt.frames !== completion.result.frames ||
       receipt.gainDb !== gainFor(receipt.before) || receipt.after.fullScaleSamples !== 0 ||
+      receipt.before.status !== receipt.after.status ||
+      (receipt.gainDb === 0 && receipt.audioSha256 !== receipt.sourceSha256) ||
       (receipt.after.status === "measured" && (receipt.after.dbtp === null || receipt.after.dbtp > -1)) ||
       (receipt.after.status === "digital_silence" && receipt.after.dbtp !== null)) {
     throw new Error("Headroom identity, gain or measured ceiling mismatch");
@@ -97,17 +100,44 @@ export async function prepareYuE2Headroom(completion: YuE2VerifiedCompletion,
 }
 
 /** Recheck retained bytes and measured output without rendering another derivative. */
+export async function inspectYuE2Headroom(completion: YuE2VerifiedCompletion,
+  source: { audio: Uint8Array; receipt: Uint8Array }, audio: Uint8Array, value: unknown) {
+  const receipt = validateReceipt(completion, source, audio, value);
+  // validateReceipt hashes this read's source and output before any cache lookup.
+  const key = `${receipt.audioSha256}:${receipt.frames}`;
+  let entry = inspectedSignals.get(key);
+  if (entry) {
+    inspectedSignals.delete(key);
+    inspectedSignals.set(key, entry);
+  } else {
+    const measure = async () => {
+      const directory = await mkdtemp(join(tmpdir(), "yue2-headroom-review-"));
+      try {
+        const path = join(directory, "headroom.wav");
+        await writeFile(path, audio, { flag: "wx", mode: 0o600 });
+        await probeYuE2NativeWav(path, completion.result, audio.length);
+        return await measureNativeAudioSignal({ path, sampleRateHz: 48000, channels: 2,
+          expectedFrames: completion.result.frames, measureTruePeak: true });
+      } finally { await rm(directory, { recursive: true, force: true }); }
+    };
+    if (inspectedSignals.size >= 8) {
+      const settled = [...inspectedSignals].find(([, item]) => item.settled);
+      if (settled) inspectedSignals.delete(settled[0]);
+    }
+    entry = { promise: measure(), settled: false };
+    if (inspectedSignals.size < 8) inspectedSignals.set(key, entry);
+  }
+  let signal: NativeAudioSignal;
+  try { signal = await entry.promise; }
+  catch (error) {
+    if (inspectedSignals.get(key) === entry) inspectedSignals.delete(key);
+    throw error;
+  } finally { entry.settled = true; }
+  if (canonicalJson(summary(signal)) !== canonicalJson(receipt.after)) throw new Error("Retained headroom measurements disagree");
+  return { receipt, signal: structuredClone(signal) };
+}
+
 export async function verifyYuE2Headroom(completion: YuE2VerifiedCompletion,
   source: { audio: Uint8Array; receipt: Uint8Array }, audio: Uint8Array, value: unknown): Promise<YuE2HeadroomReceipt> {
-  const receipt = validateReceipt(completion, source, audio, value);
-  const directory = await mkdtemp(join(tmpdir(), "yue2-headroom-review-"));
-  try {
-    const path = join(directory, "headroom.wav");
-    await writeFile(path, audio, { flag: "wx", mode: 0o600 });
-    await probeYuE2NativeWav(path, completion.result, audio.length);
-    const actual = summary(await measureNativeAudioSignal({ path, sampleRateHz: 48000, channels: 2,
-      expectedFrames: completion.result.frames, measureTruePeak: true }));
-    if (canonicalJson(actual) !== canonicalJson(receipt.after)) throw new Error("Retained headroom measurements disagree");
-    return receipt;
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  return (await inspectYuE2Headroom(completion, source, audio, value)).receipt;
 }

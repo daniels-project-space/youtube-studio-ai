@@ -61,7 +61,7 @@ const built = await esbuild.build({ absWorkingDir: root, bundle: true, write: fa
   ` } });
 const js = built.outputFiles.find((file) => file.path.endsWith(".js"))!.contents;
 const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.contents;
-let mode: "ready" | "absent" | "blocked" | "natural-loop" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
+let mode: "ready" | "absent" | "blocked" | "natural-loop" | "headroom" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
 const methods: string[] = [];
 let savedAudition: YuE2AuditionRecord | null = null;
@@ -97,6 +97,9 @@ const server = createServer((req, res) => {
     if (url.searchParams.get("runId") === "second-run") current.brief.topic = "Second run only";
     if (mode === "missing-context") { current.brief.reviewContext = null; current.brief.contextRetained = false; }
     if (mode === "unnamed") current.brief.reviewContext!.channelName = null;
+    if (mode === "headroom") current.quality.headroomPreparation = {
+      method: "linear_attenuation_only", gainDb: -4.1, sourceSha256: "b".repeat(64), audioSha256: "c".repeat(64),
+    };
     if (mode === "natural-loop") {
       current.arrangement.playback = "repeat";
       current.quality.requestedDurationSec = current.arrangement.requestedDurationSec = 60;
@@ -183,7 +186,7 @@ try {
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
     ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"],
-    ["natural-loop", "Natural-length loop source."]] as const) {
+    ["natural-loop", "Natural-length loop source."], ["headroom", "-4.10 dB gain"]] as const) {
     mode = state; await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByText(expected, { exact: false }).waitFor();
     if (state === "unnamed") assert.equal(await page.getByText("Channel context not retained", { exact: true }).count(), 0);
@@ -192,6 +195,14 @@ try {
       await page.setViewportSize({ width: 390, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: join(outputDir, "natural-loop-mobile.png"), fullPage: true });
+    }
+    if (state === "headroom") {
+      assert.equal(await page.getByLabel("Headroom-prepared YuE candidate", { exact: true }).count(), 1);
+      for (const width of [1366, 390]) {
+        await page.setViewportSize({ width, height: 1000 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await page.screenshot({ path: join(outputDir, `headroom-${width}.png`), fullPage: true });
+      }
     }
     if (state === "unauthorized" || state === "unavailable") {
       mode = "ready"; await page.getByRole("button", { name: "Retry review" }).click();

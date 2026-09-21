@@ -208,6 +208,9 @@ async function main() {
     assert.ok(source);
     assert.deepEqual(current.objects.get(source.audioKey), audio);
     assert.deepEqual(current.objects.get(source.receiptKey), headroom());
+    assert.ok(result.candidate.headroom);
+    assert.ok(current.objects.has(result.candidate.headroom.audioKey));
+    assert.ok(current.objects.has(result.candidate.headroom.receiptKey));
     const counts = [current.calls.length, current.writes.length];
     assert.equal((await run(args({ recoverOnly: true }))).status, "completed");
     assert.deepEqual([current.calls.length, current.writes.length], counts);
@@ -235,6 +238,33 @@ async function main() {
     current.objects.delete(result.candidate.preClampSource.audioKey);
     const calls = current.calls.length;
     await rejected(run(args()));
+    assert.equal(current.calls.length, calls);
+    assert.equal(current.posts, 1);
+  });
+  await test("interrupted preparation publication recovers from retained source without another POST", async () => {
+    current.preClamp = true;
+    current.putFault = key => { if (key.endsWith("headroom-preparation.json")) throw new Error("lost preparation write"); };
+    await rejected(run(args()));
+    assert.equal(current.objects.has(candidateKey), false);
+    assert.ok([...current.objects.keys()].some(key => key.includes("audio-headroom-")));
+    const calls = current.calls.length;
+    current.putFault = undefined;
+    const result = await run(args({ recoverOnly: true }));
+    assert.equal(result.status, "completed");
+    assert.equal(current.calls.length, calls, "retained source recovery requires no worker traffic");
+    assert.equal(current.posts, 1);
+  });
+  await test("corrupted derivative or preparation receipt refuses cached completion without worker traffic", async () => {
+    current.preClamp = true;
+    const result = await run(args());
+    if (result.status !== "completed" || !result.candidate.headroom) throw new Error("expected derivative");
+    const calls = current.calls.length;
+    for (const key of [result.candidate.headroom.audioKey, result.candidate.headroom.receiptKey]) {
+      const saved = current.objects.get(key)!;
+      current.objects.set(key, Buffer.from("corrupt"));
+      await rejected(run(args({ recoverOnly: true })));
+      current.objects.set(key, saved);
+    }
     assert.equal(current.calls.length, calls);
     assert.equal(current.posts, 1);
   });

@@ -431,7 +431,11 @@ async function runIntegration(supervised: boolean, failInference = false): Promi
     assert.equal(workerRequests.length, beforeReuse, "malformed or cross-owner/run candidates never trigger worker HTTP");
 
     const audioEntries = [...s3.objects].filter(([, bytes]) => bytes.subarray(0, 4).toString() === "RIFF");
-    assert.equal(audioEntries.length, 2, "native and pre-clamp source retained separately");
+    assert.equal(audioEntries.length, 3, "native, pre-clamp and prepared audio retained separately");
+    const prepared = candidate.headroom as Record<string, unknown>;
+    assert.ok(prepared);
+    assert.equal(prepared.audioSha256, createHash("sha256").update(s3.objects.get(String(prepared.audioKey))!).digest("hex"));
+    assert.equal(prepared.receiptSha256, createHash("sha256").update(s3.objects.get(String(prepared.receiptKey))!).digest("hex"));
     const source = candidate.preClampSource as Record<string, unknown>;
     assert.ok(source);
     assert.equal(source.audioSha256, createHash("sha256").update(s3.objects.get(String(source.audioKey))!).digest("hex"));

@@ -392,3 +392,41 @@ ESLint pass. These new DSP tests use synthetic audio, not a new GPU composition 
 musical audition. No GPU rental, live storage writes or production deployment
 occurred. The durable application and its listening/review surface still need to
 adopt this derivative explicitly; their listening audio is not silently replaced.
+
+### Durable Prepared Listening Path
+
+New durable candidates with verified raw sources now retain a content-addressed
+headroom WAV and an immutable `headroom-preparation.json`. Candidate references
+bind both files. Interrupted preparation publication recovers from the retained
+source without worker traffic or another purchase. Existing sealed candidates
+keep their original listening contract. Missing/corrupted prepared artifacts on a
+sealed candidate fail closed instead of silently falling back to clipped audio.
+
+Read-only review verifies source, preparation lineage, output bytes, format and
+measurements before returning a listening key. The owner-authenticated review route
+signs that exact verified key. Signal findings and playback now refer to the same
+prepared file; original native and pre-clamp evidence remain unchanged. The review
+projection includes gain and source/output fingerprints, and the player displays
+the applied gain with a distinct accessible label. No layout overhaul was made.
+
+An eight-entry measurement cache shares in-flight analysis and reuses successful
+results only after hashing the current source/output reads. Returned measurements
+are cloned; failed measurements are evicted. Cached measurements never bypass
+current receipt checks. Zero-gain preparation must preserve source bytes exactly,
+and active audio may not be converted to digital silence.
+
+Validation includes 24 durable cases, 41 supervised/review cases, 70 client/CLI
+checks, owner-route tests and all three Python HTTP/S3-wire scenarios. An actual
+FFmpeg test with a synthetic overloaded stereo source proves the review selects
+the derivative, reports zero full-scale samples and a true peak below -1 dBTP,
+while still requiring audition, channel fit and exact final assembly. Corruption
+refuses review without another POST. Wire successes retain three separate WAVs;
+failure accounting still creates no candidate.
+
+Playwright playback/seeking and responsive-state checks pass. Prepared-audio
+desktop/mobile screenshots were inspected at
+`/tmp/yue-review-browser-g9QedS/headroom-1366.png` and
+`/tmp/yue-review-browser-g9QedS/headroom-390.png`. Synthetic API/audio only.
+Typecheck and scoped ESLint pass. No new GPU work, live storage writes, publishing
+or production deployment occurred. Private storage configuration and runtime/app
+deployment remain necessary before production use.
