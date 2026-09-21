@@ -430,3 +430,36 @@ desktop/mobile screenshots were inspected at
 Typecheck and scoped ESLint pass. No new GPU work, live storage writes, publishing
 or production deployment occurred. Private storage configuration and runtime/app
 deployment remain necessary before production use.
+
+## Private Evaluation Storage
+
+Created `youtube-studio-ai-private` in the existing Cloudflare account (EEUR,
+2026-09-21). Live control-plane checks prove its r2.dev access is disabled and
+its custom domain list is empty. The legacy `youtube-studio-ai` bucket remains
+public and unchanged. No user assets were moved or deleted.
+
+Durable evaluation reads, create-only writes and owner review signatures now
+explicitly select the private bucket through `getStudioPrivateBucket`.
+`R2_PRIVATE_BUCKET` can select an isolated deployment bucket; invalid names,
+the known legacy bucket and a bucket equal to `R2_BUCKET` are rejected. There is
+no public-bucket fallback. An override must pass the operator probe before use.
+Existing evaluation data in any other bucket needs a deliberate migration;
+this change does not silently copy receipts or reset admission markers.
+
+`scripts/verify-studio-private-storage.ts` checks live domain settings before
+writing a unique, non-user probe. The successful run verified exact-byte SDK
+readback, atomic duplicate-write refusal, signed download, anonymous S3 denial
+(400 InvalidArgument/Authorization), and anonymous r2.dev denial (401). Its
+single probe was deleted with object-level acknowledgement. URLs and credentials
+are not printed. The Cloudflare vault S3 credentials passed. The YouTube vault
+S3 credentials were refused on the new bucket; do not assume that namespace is
+ready for deployment or delete its keys without checking other live callers.
+
+Validation: private bucket selector tests, 24 durable behavior cases, 41
+supervised/review cases, the owner-authenticated review route, all three actual
+Python HTTP/S3-wire integration scenarios, typecheck and scoped ESLint passed.
+The wire fixture rejects every request to its public default bucket. Existing
+storage credential refresh remains unchanged. Runtime/app deployment and exact
+deployed credential verification are still pending; this is not production
+activation, musical qualification or permission to publish. No GPU work or
+thumbnail generation was performed.

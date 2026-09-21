@@ -5,6 +5,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { presignDownload } from "@/lib/storage";
+import { getStudioPrivateBucket } from "@/lib/studioPrivateStorage";
 import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
 import type { YuE2CandidateReview } from "@/lib/yue2ReviewTypes";
 import { validateYuE2Audition, YuE2AuditionSubmissionSchema, type YuE2AuditionRecord } from "@/engine/yue2Audition";
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
     const { candidate, candidateSha256, quality } = material;
     const audition = await convex.query(auditionApi.latest, { ownerId: actor.ownerId, channelId: run.channelId,
       runId: run._id, candidateSha256 } as never) as YuE2AuditionRecord | null;
-    const nativeWavUrl = await presignDownload(material.listeningAudioKey, { expiresIn: 600 });
+    const nativeWavUrl = await presignDownload(material.listeningAudioKey, { bucket: getStudioPrivateBucket(), expiresIn: 600 });
     return NextResponse.json({ ok: true, review: {
       candidateSha256, audition, jobId: candidate.jobId, nativeWavUrl, nativeOutput: candidate.nativeOutput,
       arrangement: material.request.acceptedArrangement.arrangement,

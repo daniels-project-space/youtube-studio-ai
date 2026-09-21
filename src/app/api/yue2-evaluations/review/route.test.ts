@@ -62,7 +62,7 @@ loader._load = function (id, ...args) {
     presignDownload: async (key: string, options: unknown) => {
       calls.push("presign");
       assert.equal(key, material.listeningAudioKey, "sign the verified listening artifact, not the original clamped audio");
-      assert.deepEqual(options, { expiresIn: 600 });
+      assert.deepEqual(options, { bucket: "youtube-studio-ai-private", expiresIn: 600 });
       return "https://signed-fixture.invalid/native.wav";
     },
   };

@@ -177,7 +177,7 @@ loader._load = function (id, ...args) {
   }
   if (id.endsWith("/storage")) return {
     getObjectBytes: async (key: string, bucket: unknown, options: { timeoutMs: number; maxBytes: number }) => {
-      assert.equal(bucket, undefined); assert.equal(options.timeoutMs, 30_000);
+      assert.equal(bucket, "youtube-studio-ai-private"); assert.equal(options.timeoutMs, 30_000);
       assert.ok(options.maxBytes > 0 && options.maxBytes <= 256 * 1024 * 1024);
       current.reads.push(key);
       const bytes = current.objects.get(key);
@@ -185,7 +185,8 @@ loader._load = function (id, ...args) {
       assert.ok(bytes.length <= options.maxBytes);
       return Buffer.from(bytes);
     },
-    putObject: async (key: string, bytes: Uint8Array, options: { ifNoneMatch?: string }) => {
+    putObject: async (key: string, bytes: Uint8Array, options: { ifNoneMatch?: string; bucket?: string }) => {
+      assert.equal(options.bucket, "youtube-studio-ai-private");
       assert.equal(options.ifNoneMatch, "*");
       assert.ok(!Buffer.from(bytes).includes(Buffer.from(token)), "credentials never enter storage");
       current.writes.push(key); current.putFault?.(key, bytes);

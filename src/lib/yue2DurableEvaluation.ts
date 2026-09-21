@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { getStudioPrivateBucket } from "@/lib/studioPrivateStorage";
 import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
 import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
 import { prepareYuE2Headroom, inspectYuE2Headroom, YuE2HeadroomReceiptSchema } from "@/lib/yue2Headroom";
@@ -116,7 +117,7 @@ function conflict(error: unknown): boolean {
     value?.$metadata?.httpStatusCode === 409 || value?.$metadata?.httpStatusCode === 412;
 }
 async function read(key: string, maximum = MAX_JSON_BYTES): Promise<Uint8Array> {
-  const bytes = await getObjectBytes(key, undefined, { timeoutMs: 30_000, maxBytes: maximum });
+  const bytes = await getObjectBytes(key, getStudioPrivateBucket(), { timeoutMs: 30_000, maxBytes: maximum });
   if (bytes.byteLength > maximum) throw new YuE2EvaluationError("durable_object_limit");
   return bytes;
 }
@@ -162,7 +163,7 @@ export async function loadDurableYuE2Recovery(
 async function boundedPut(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new YuE2EvaluationError("durable_write_timeout")), 30_000);
-    void Promise.resolve().then(() => putObject(key, bytes, { contentType, ifNoneMatch: "*" })).then(
+    void Promise.resolve().then(() => putObject(key, bytes, { bucket: getStudioPrivateBucket(), contentType, ifNoneMatch: "*" })).then(
       () => { clearTimeout(timer); resolve(); },
       (error) => { clearTimeout(timer); reject(error); },
     );

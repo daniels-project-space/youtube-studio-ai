@@ -99,14 +99,15 @@ const originalFetch = globalThis.fetch;
 loader._load = function (id, ...args) {
   if (id.endsWith("/storage")) return {
     getObjectBytes: async (key: string, bucket: unknown, options: { timeoutMs: number; maxBytes: number }) => {
-      assert.equal(bucket, undefined); assert.equal(options.timeoutMs, 30_000);
+      assert.equal(bucket, "youtube-studio-ai-private"); assert.equal(options.timeoutMs, 30_000);
       assert.ok(options.maxBytes > 0 && options.maxBytes <= 256 * 1024 * 1024);
       current.reads.push(key); await current.getFault?.(key);
       const bytes = current.objects.get(key); if (!bytes) throw absent();
       if (bytes.length > options.maxBytes) throw new Error("maxBytes exceeded");
       return Buffer.from(bytes);
     },
-    putObject: async (key: string, value: Uint8Array, options: { ifNoneMatch?: string }) => {
+    putObject: async (key: string, value: Uint8Array, options: { ifNoneMatch?: string; bucket?: string }) => {
+      assert.equal(options.bucket, "youtube-studio-ai-private");
       assert.equal(options.ifNoneMatch, "*", "all output writes are create-only");
       assert.ok(!Buffer.from(value).includes(Buffer.from(token)), "no credentials in durable storage");
       current.writes.push(key); await current.putFault?.(key, value);

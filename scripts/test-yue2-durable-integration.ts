@@ -44,8 +44,8 @@ function memoryS3(runId: string) {
     void (async () => {
       assert.match(request.headers.authorization ?? "", /Credential=testaccess\//);
       const path = new URL(request.url ?? "/", "http://localhost").pathname;
-      assert.ok(path.startsWith("/test/"), "only the synthetic bucket is accessible");
-      const key = decodeURIComponent(path.slice("/test/".length));
+      assert.ok(path.startsWith("/test-private/"), "all evidence must use the private bucket, never the public default");
+      const key = decodeURIComponent(path.slice("/test-private/".length));
       const method = request.method ?? "";
       requests.push({ method, key });
       const reject = (status: number, code: string) => {
@@ -202,7 +202,8 @@ async function runIntegration(supervised: boolean, failInference = false): Promi
     const env = {
       NODE_ENV: "test" as const,
       PATH: process.env.PATH, HOME: root, TMPDIR: root, AWS_EC2_METADATA_DISABLED: "true",
-      R2_ENDPOINT: storageEndpoint, R2_BUCKET: "test", R2_ACCESS_KEY_ID: "testaccess", R2_SECRET_ACCESS_KEY: "testsecret",
+      R2_ENDPOINT: storageEndpoint, R2_BUCKET: "test-public", R2_PRIVATE_BUCKET: "test-private",
+      R2_ACCESS_KEY_ID: "testaccess", R2_SECRET_ACCESS_KEY: "testsecret",
       YUE2_EVALUATION_URL: evaluationEndpoint, YUE2_EVALUATION_TOKEN: token as string,
     };
     const cli = async (flags: string[], input = args, overrides: Record<string, string> = {}) => {
