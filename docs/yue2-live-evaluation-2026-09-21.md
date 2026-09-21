@@ -533,3 +533,38 @@ The host-to-container probe then passed again against its installed code with
 Build receipt:
 `/var/lib/youtube-studio-render/builds/yue2-f9f57fc047be085c7d7f1fdb9f0e3e7491a84d37/context-rkeQRe.json`.
 This proves the local deployable image, not an upgrade of the retained GPU VM.
+
+## Gateway TLS and Restart Lifecycle
+
+Runtime `bb57888e2e9772131c3acc8deb2e36bb10493341` fixes normal SIGTERM shutdown:
+stop admission, close/remove the owned socket, and wait for active work. A real
+Docker stop/start probe passed on the current-source overlay with exit code 0,
+socket removal, authenticated readiness after restart, and zero submitted jobs.
+All 143 runtime tests and Ruff passed. Studio now pins this revision; the
+retained GPU image has not yet been upgraded from `7a3eeae`.
+
+Dedicated gateway `https://yue2-studio.87.106.233.113.nip.io` is live with a
+separate Let's Encrypt certificate valid through 2026-12-20. Existing app
+routes/certificates were not edited. Configuration is installed at
+`/etc/nginx/sites-available/youtube-studio-yue2`; its secret-free equivalent is
+`infra/studio-render/yue2-gateway.nginx.conf`. Certificate renewal has a
+gateway-specific Nginx validation/reload hook. HTTP serves only ACME challenges;
+all worker requests require TLS. The initially rejected map hash configuration
+was corrected to an anchored case-sensitive match, then `nginx -t` and reload
+passed. Nginx remains active; existing unrelated MIME warnings were unchanged.
+
+Created a dedicated worker token and URL in the shared vault's `youtube`
+namespace as `YUE2_EVALUATION_TOKEN` and `YUE2_EVALUATION_URL`. No provider API
+key was reused. The controller environment and generated Nginx auth map are
+mode 0600 under `/var/lib/youtube-studio-render/gateway/`; raw credentials are
+not in source, logs or this document. The vault-injected HTTPS check verified
+missing/wrong authorization returns 401 and valid authorization returns an
+explicit `worker_offline` 503 with private/no-store caching. That 503 is expected:
+the SSH upstream at loopback port 18787 is not connected yet.
+
+The gateway never retries an upstream request and streams artifacts without
+response buffering. Its 128 KiB request limit matches the worker's bounded
+admission body. This is authenticated gateway readiness, not end-to-end worker
+activation. The retained VM was not restarted and no GPU spend occurred.
+Next: install the shutdown-capable image on the retained VM, mount its private
+socket directory, and connect the verified SSH tunnel before admitting work.
