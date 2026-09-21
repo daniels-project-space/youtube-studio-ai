@@ -712,3 +712,11 @@ assembly, mastering, submission admission, composer-aware assembly, shared
 ownership and legacy route handoffs passed, along with TypeScript and scoped
 ESLint. No new text/GPU purchase, thumbnail test or production deployment was
 performed for this work.
+
+The additional 28,800-second diagnostic attempt did not qualify: its single
+CPU AAC encode hit the harness's 900,000 ms FFmpeg deadline. It used the
+ultrafast video preset and unchanged 384 kbps AAC settings. No completed receipt
+or eight-hour alignment proof was produced. The partial local file is not a
+deliverable. No automatic retry was launched; a future eight-hour verification
+needs a deliberately larger bounded CPU window. The 60/300-second results do
+not establish eight-hour correctness or acceptable long-duration render cost.
