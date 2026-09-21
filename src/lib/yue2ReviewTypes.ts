@@ -7,6 +7,8 @@ type Material = NonNullable<Awaited<ReturnType<typeof readDurableYuE2Candidate>>
 export type YuE2CandidateReview = {
   candidateSha256: string;
   audition?: YuE2AuditionRecord | null;
+  sourceApprovalAvailable?: boolean;
+  sourceApprovalBasisFingerprint?: string | null;
   jobId: string;
   nativeWavUrl: string;
   nativeOutput: Material["candidate"]["nativeOutput"];

@@ -29,6 +29,8 @@ const signal = await measureNativeAudioSignal({ path: audioPath, sampleRateHz: 4
 assert.equal(signal.truePeak?.status, "measured");
 const topic = "A quiet horizon: nocturnal focus";
 const review: YuE2CandidateReview = {
+  sourceApprovalAvailable: true,
+  sourceApprovalBasisFingerprint: "b".repeat(64),
   candidateSha256: "a".repeat(64), jobId: "synthetic-review", nativeWavUrl: "/native.wav",
   nativeOutput: { sampleRateHz: 48000, channels: 2, codec: "pcm_f32le", frames, durationSec: frames / 48000 },
   arrangement: {
@@ -61,7 +63,7 @@ const built = await esbuild.build({ absWorkingDir: root, bundle: true, write: fa
   ` } });
 const js = built.outputFiles.find((file) => file.path.endsWith(".js"))!.contents;
 const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.contents;
-let mode: "ready" | "absent" | "blocked" | "natural-loop" | "headroom" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
+let mode: "ready" | "absent" | "blocked" | "natural-loop" | "headroom" | "missing-context" | "unfrozen" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
 const methods: string[] = [];
 let savedAudition: YuE2AuditionRecord | null = null;
@@ -83,7 +85,9 @@ const server = createServer((req, res) => {
         const parsed = JSON.parse(body);
         assert.equal(parsed.runId, "first-run");
         assert.equal(parsed.audition.candidateSha256, review.candidateSha256);
-        savedAudition = { ...parsed.audition, reviewedAt: 123456789, reviewerId: "fixture-owner", productionApproved: false };
+        assert.equal(parsed.sourceApprovalBasisFingerprint, parsed.audition.verdict === "approved_for_assembly" ? review.sourceApprovalBasisFingerprint : undefined);
+        savedAudition = { ...parsed.audition, reviewedAt: 123456789, reviewerId: "fixture-owner", productionApproved: false,
+          sourceApprovalFingerprint: parsed.audition.verdict === "approved_for_assembly" ? "f".repeat(64) : null };
         res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: true, audition: savedAudition }));
       }); return;
     }
@@ -93,6 +97,7 @@ const server = createServer((req, res) => {
     if (mode === "unauthorized" || mode === "unavailable") { res.statusCode = mode === "unauthorized" ? 401 : 503; res.end('{"ok":false}'); return; }
     const current = structuredClone(review);
     current.audition = savedAudition;
+    if (mode === "unfrozen") current.sourceApprovalAvailable = false;
     current.nativeWavUrl = `/native.wav?receipt=${requests}`;
     if (url.searchParams.get("runId") === "second-run") current.brief.topic = "Second run only";
     if (mode === "missing-context") { current.brief.reviewContext = null; current.brief.contextRetained = false; }
@@ -183,6 +188,34 @@ try {
   assert.ok(recorded);
   assert.equal(recorded.verdict, "promising");
   assert.equal(recorded.productionApproved, false);
+  assert.equal(recorded.sourceApprovalFingerprint, null);
+  await auditionForm.getByLabel("Audition notes", { exact: true }).fill("Synthetic fixture: complete listening and all section judgments passed.");
+  await auditionForm.getByLabel("Verdict", { exact: true }).selectOption("approved_for_assembly");
+  await auditionForm.getByRole("button", { name: "Save audition" }).click();
+  await auditionForm.getByRole("status").filter({ hasText: "Source approved. Assembly remains paused; publishing is not authorized." }).waitFor();
+  assert.equal((savedAudition as YuE2AuditionRecord | null)?.sourceApprovalFingerprint, "f".repeat(64));
+  for (const [name, width, font] of [["approved-desktop", 1440, 16], ["approved-mobile", 390, 16], ["approved-large-text", 320, 24]] as const) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: join(outputDir, `${name}.png`), fullPage: true });
+  }
+  for (const state of ["blocked", "missing-context", "unfrozen"] as const) {
+    mode = state;
+    await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
+    await page.getByRole("heading", { name: topic }).waitFor();
+    await page.getByText("Record audition", { exact: true }).click();
+    assert.equal(await page.getByRole("option", { name: "Approve source for assembly" }).evaluate((option: HTMLOptionElement) => option.disabled), true);
+    assert.equal(await page.getByRole("button", { name: "Save audition" }).isDisabled(), true);
+  }
+  mode = "ready";
+  await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
+  await page.getByRole("heading", { name: topic }).waitFor();
+  await page.getByText("Record audition", { exact: true }).click();
+  await page.getByLabel("Verdict", { exact: true }).selectOption("needs_work");
+  await page.getByRole("button", { name: "Save audition" }).click();
+  await page.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
+  assert.equal((savedAudition as YuE2AuditionRecord | null)?.sourceApprovalFingerprint, null);
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
     ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"],

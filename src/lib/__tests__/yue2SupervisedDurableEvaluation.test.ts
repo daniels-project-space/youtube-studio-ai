@@ -626,8 +626,10 @@ async function main() {
       notes: "Synthetic gate fixture with complete claimed listening, not an artistic approval." };
     const evidence = { candidateSha256: result.candidateSha256, sectionIds,
       technicallyBlocked: result.quality.status === "blocked", contextRetained: true };
-    if (stuck) assert.throws(() => validateYuE2Audition(submission, evidence), /Promising requires/);
-    else assert.doesNotThrow(() => validateYuE2Audition(submission, evidence));
+    for (const verdict of ["promising", "approved_for_assembly"]) {
+      if (stuck) assert.throws(() => validateYuE2Audition({ ...submission, verdict }, evidence), /Positive audition requires/);
+      else assert.doesNotThrow(() => validateYuE2Audition({ ...submission, verdict }, evidence));
+    }
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
   await test("read-only review refuses unsafe scope before storage and never follows foreign candidate keys", async () => {

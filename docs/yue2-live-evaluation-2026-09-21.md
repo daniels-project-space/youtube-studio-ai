@@ -789,3 +789,43 @@ Live submission through this new module/Trigger checkpoint path, paid-failure
 cost reconciliation into a real run, owner-approved promotion/continuation,
 on-demand VM orchestration, all-family audio qualification and production
 deployment remain open. The storage-only proof does not stand in for them.
+
+## Explicit source approval for assembly
+
+The existing owner audition form and authenticated review route now support
+`approved_for_assembly` separately from `promising`. Neither verdict grants
+publishing authority. Approval requires complete claimed listening, all seven
+passing judgments, documented passing judgments for the exact ordered sections,
+retained channel context and an unblocked technical result. Historical promising
+reviews are not upgraded automatically.
+
+The server re-verifies the durable source bytes and derives the approval basis:
+owner/channel/run, frozen pipeline invocation SHA, accepted arrangement, job,
+candidate SHA, exact private listening key/audio SHA, native frame count, 48 kHz
+stereo format and section coverage. The browser receives only a basis fingerprint
+and must return it on explicit approval. A pipeline/source change while the page
+is open is rejected rather than silently approving a different basis. The sealed
+audit record additionally binds normalized audition content, reviewer, time and
+revision. A hash is an integrity binding, not a substitute for owner authentication.
+
+The actual Convex handlers append audit revisions, deduplicate identical retries
+and expose only the current approval through a service-authenticated query.
+Later needs-work, rejected or merely promising decisions supersede approval;
+earlier records remain available as history. A changed invocation invalidates
+the prior approval, and audit tampering is rejected. Browser responses contain
+no private storage keys or source authority payloads.
+
+Verification covers the actual route with real session/same-origin authentication
+and mocked storage/Convex transport; actual Convex handler code against an
+in-memory database; pure approval contracts; and the real browser components
+against synthetic API/audio fixtures. Browser approval/rejection and disabled
+states were exercised at desktop, mobile and enlarged-text widths. These are
+not real owner approvals or deployed-provider persistence evidence. Source
+generation, storage recovery and technical stuck-channel rejection regressions
+are also checked. No thumbnail or paid model/GPU test was added.
+
+This is an approval-record boundary, not a completed continuation workflow.
+It neither starts assembly nor mutates a run/outbox, dispatches a provider,
+publishes media, or approves the retained Seaside candidate. Private source
+adoption by assembly, exact checkpointed continuation, production deployment,
+real owner audition and full-length final-video qualification remain open.

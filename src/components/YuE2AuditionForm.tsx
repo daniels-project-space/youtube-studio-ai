@@ -24,6 +24,8 @@ export function YuE2AuditionForm({ runId, review }: { runId: string; review: YuE
   useEffect(() => () => { controller.current?.abort(); controller.current = null; }, []);
   const promising = review.quality.status !== "blocked" && review.brief.contextRetained && draft.listenedEntireSource &&
     Object.values(draft.checks).every(value => value === "pass") && draft.sections.every(section => section.judgment === "pass" && section.notes.trim());
+  const approving = draft.verdict === "approved_for_assembly";
+  const approvalAvailable = review.sourceApprovalAvailable && /^[a-f0-9]{64}$/u.test(review.sourceApprovalBasisFingerprint ?? "");
   return <form className={styles.audition} aria-label="YuE audition record" onSubmit={async event => {
     event.preventDefault();
     if (busy) return;
@@ -32,11 +34,16 @@ export function YuE2AuditionForm({ runId, review }: { runId: string; review: YuE
     const timer = window.setTimeout(() => requestController.abort(), 120_000);
     try {
       const response = await fetch("/api/yue2-evaluations/review", { method: "POST", signal: requestController.signal,
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runId, audition: draft }) });
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runId, audition: draft,
+          ...(approving ? { sourceApprovalBasisFingerprint: review.sourceApprovalBasisFingerprint } : {}) }) });
       if (!response.ok) throw new Error(response.status === 409 ? "Candidate changed or audition incomplete. Reload review." : "Audition could not be saved. Reload before retrying.");
       const body = await response.json() as { ok?: boolean; audition?: YuE2AuditionRecord };
-      if (!body.ok || !body.audition || body.audition.candidateSha256 !== review.candidateSha256) throw new Error("Invalid save response. Reload review.");
-      if (!requestController.signal.aborted) { setSaved(body.audition); setMessage("Audition saved. Production approval remains pending."); }
+      if (!body.ok || !body.audition || body.audition.candidateSha256 !== review.candidateSha256 ||
+        body.audition.verdict !== draft.verdict || body.audition.productionApproved !== false) throw new Error("Invalid save response. Reload review.");
+      if (approving && !/^[a-f0-9]{64}$/u.test(body.audition.sourceApprovalFingerprint ?? "")) throw new Error("Source approval was not confirmed. Reload review.");
+      if (!requestController.signal.aborted) { setSaved(body.audition); setMessage(approving
+        ? "Source approved. Assembly remains paused; publishing is not authorized."
+        : "Audition saved. Production approval remains pending."); }
     } catch (error) {
       if (controller.current === requestController) setMessage(requestController.signal.aborted
         ? "Save timed out. Reload to check whether it was recorded." : error instanceof Error ? error.message : "Save failed.");
@@ -47,6 +54,7 @@ export function YuE2AuditionForm({ runId, review }: { runId: string; review: YuE
   }}>
     <h3>Owner audition</h3>
     {saved && <p>Last saved: {label(saved.verdict)} / {new Date(saved.reviewedAt).toLocaleString()}</p>}
+    {saved?.verdict === "approved_for_assembly" && !saved.sourceApprovalFingerprint && <p>Previous source approval is no longer active for this pipeline.</p>}
     <fieldset disabled={busy}>
       <label><input type="checkbox" checked={draft.listenedEntireSource} onChange={event => setDraft({ ...draft, listenedEntireSource: event.target.checked })} /> Listened to the entire native source</label>
       {YUE2_AUDITION_CHECKS.map(key => <label key={key}>{checkLabels[key]}
@@ -67,8 +75,11 @@ export function YuE2AuditionForm({ runId, review }: { runId: string; review: YuE
       <label>Audition notes<textarea aria-label="Audition notes" required minLength={10} maxLength={4000} value={draft.notes} onChange={event => setDraft({ ...draft, notes: event.target.value })} /></label>
       <label>Verdict<select aria-label="Verdict" value={draft.verdict} onChange={event => setDraft({ ...draft, verdict: event.target.value as YuE2AuditionSubmission["verdict"] })}>
         <option value="needs_work">Needs work</option><option value="rejected">Rejected</option><option value="promising" disabled={!promising}>Promising, not production-approved</option>
+        <option value="approved_for_assembly" disabled={!promising || !approvalAvailable}
+          title={!approvalAvailable ? "Verified source and frozen pipeline invocation required" : !promising ? "Complete the full-source audition first" : "Approve this source only, not publishing"}>Approve source for assembly</option>
       </select></label>
-      <button type="submit" disabled={draft.notes.trim().length < 10 || (draft.verdict === "promising" && !promising)}>{busy ? "Saving audition..." : "Save audition"}</button>
+      <button type="submit" disabled={draft.notes.trim().length < 10 || (["promising", "approved_for_assembly"].includes(draft.verdict) && !promising)
+        || (approving && !approvalAvailable)}>{busy ? "Saving audition..." : "Save audition"}</button>
     </fieldset>
     {message && <p role="status">{message}</p>}
   </form>;

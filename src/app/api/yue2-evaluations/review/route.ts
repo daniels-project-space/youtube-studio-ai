@@ -9,12 +9,28 @@ import { getStudioPrivateBucket } from "@/lib/studioPrivateStorage";
 import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
 import type { YuE2CandidateReview } from "@/lib/yue2ReviewTypes";
 import { validateYuE2Audition, YuE2AuditionSubmissionSchema, type YuE2AuditionRecord } from "@/engine/yue2Audition";
+import { YuE2SourceApprovalBasisSchema } from "@/engine/yue2SourceApproval";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 const auditionApi = (api as unknown as { yue2Auditions: { latest: never; record: never } }).yue2Auditions;
 
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
 const runIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
+
+function sourceApprovalBasis(material: NonNullable<Awaited<ReturnType<typeof readDurableYuE2Candidate>>>,
+  run: { _id: string; channelId: string; pipelineInvocationSha256?: string }, ownerId: string) {
+  return YuE2SourceApprovalBasisSchema.safeParse({ ownerId, channelId: run.channelId, runId: run._id,
+    invocationSha256: run.pipelineInvocationSha256, candidateSha256: material.candidateSha256,
+    arrangementFingerprint: material.request.acceptedArrangement.fingerprint, jobId: material.candidate.jobId,
+    listeningAudioKey: material.listeningAudioKey,
+    listeningAudioSha256: material.candidate.headroom?.audioSha256 ?? material.candidate.audioSha256,
+    nativeFrames: material.candidate.nativeOutput.frames, sampleRateHz: material.candidate.nativeOutput.sampleRateHz,
+    channels: material.candidate.nativeOutput.channels,
+    sectionIds: material.request.acceptedArrangement.arrangement.sections.map(section => section.id),
+    technicalStatus: material.quality.status, contextRetained: material.request.acceptedArrangement.reviewContext !== undefined });
+}
 
 class AuditionBodyError extends Error {
   constructor(readonly status: 400 | 408 | 413) { super("Invalid audition request body"); }
@@ -63,11 +79,14 @@ export async function GET(request: Request) {
     const material = await readDurableYuE2Candidate({ ownerId: actor.ownerId, channelId: run.channelId, runId: run._id });
     if (!material) return NextResponse.json({ ok: true, review: null }, { headers });
     const { candidate, candidateSha256, quality } = material;
+    const basis = sourceApprovalBasis(material, run, actor.ownerId);
     const audition = await convex.query(auditionApi.latest, { ownerId: actor.ownerId, channelId: run.channelId,
       runId: run._id, candidateSha256 } as never) as YuE2AuditionRecord | null;
     const nativeWavUrl = await presignDownload(material.listeningAudioKey, { bucket: getStudioPrivateBucket(), expiresIn: 600 });
     return NextResponse.json({ ok: true, review: {
       candidateSha256, audition, jobId: candidate.jobId, nativeWavUrl, nativeOutput: candidate.nativeOutput,
+      sourceApprovalAvailable: basis.success,
+      sourceApprovalBasisFingerprint: basis.success ? sha256Hex(canonicalJson(basis.data)) : null,
       arrangement: material.request.acceptedArrangement.arrangement,
       brief: {
         topic: material.request.acceptedArrangement.topic,
@@ -94,7 +113,8 @@ export async function POST(request: Request) {
     const actor = await requireStudioActor(request);
     if (actor.authKind !== "session") throw new StudioAuthError("Owner session required", 403);
     const body = await readAuditionBody(request);
-    const parsed = z.object({ runId: runIdSchema, audition: YuE2AuditionSubmissionSchema }).strict().safeParse(body);
+    const parsed = z.object({ runId: runIdSchema, audition: YuE2AuditionSubmissionSchema,
+      sourceApprovalBasisFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).optional() }).strict().safeParse(body);
     if (!parsed.success) return NextResponse.json({ ok: false, error: "Invalid audition" }, { status: 400, headers });
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("Review service unavailable");
@@ -109,17 +129,26 @@ export async function POST(request: Request) {
     }
     const material = await readDurableYuE2Candidate({ ownerId: actor.ownerId, channelId: run.channelId, runId: run._id });
     if (!material) return NextResponse.json({ ok: false, error: "Candidate unavailable" }, { status: 409, headers });
-    let submission;
+    let submission, sourceBasis;
     try {
       submission = validateYuE2Audition(parsed.data.audition, { candidateSha256: material.candidateSha256,
         sectionIds: material.request.acceptedArrangement.arrangement.sections.map(section => section.id),
         technicallyBlocked: material.quality.status === "blocked",
         contextRetained: material.request.acceptedArrangement.reviewContext !== undefined });
+      if (submission.verdict === "approved_for_assembly") {
+        const basis = sourceApprovalBasis(material, run, actor.ownerId);
+        if (!basis.success || parsed.data.sourceApprovalBasisFingerprint !== sha256Hex(canonicalJson(basis.data))) {
+          throw new Error("Source or frozen invocation changed since review");
+        }
+        sourceBasis = basis.data;
+      } else if (parsed.data.sourceApprovalBasisFingerprint !== undefined) {
+        throw new Error("Source authority requires an explicit approval verdict");
+      }
     } catch {
       return NextResponse.json({ ok: false, error: "Audition does not match the verified candidate or is incomplete" }, { status: 409, headers });
     }
     const audition = await convex.mutation(auditionApi.record, { ownerId: actor.ownerId, channelId: run.channelId,
-      runId: run._id, candidateSha256: material.candidateSha256, submission } as never);
+      runId: run._id, candidateSha256: material.candidateSha256, submission, ...(sourceBasis ? { sourceBasis } : {}) } as never);
     return NextResponse.json({ ok: true, audition }, { headers });
   } catch (error) {
     const status = error instanceof StudioAuthError || error instanceof AuditionBodyError ? error.status : 503;

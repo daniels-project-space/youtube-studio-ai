@@ -3239,6 +3239,7 @@ export default defineSchema({
   yue2Auditions: defineTable({
     ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
     candidateSha256: v.string(), submission: v.any(), reviewedAt: v.number(), revision: v.number(),
+    sourceApproval: v.optional(v.any()),
   }).index("by_owner_run_candidate", ["ownerId", "runId", "candidateSha256", "revision"]),
 
   // Single project-wide goal; latest updatedAt is authoritative.

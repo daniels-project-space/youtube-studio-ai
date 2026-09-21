@@ -16,17 +16,19 @@ let channel: Record<string, unknown> | null = { _id: "review-channel", ownerId: 
 let unavailable = false;
 let absent = false;
 const calls: string[] = [];
+let recordedBasis: unknown;
 const material = {
-  listeningAudioKey: "owner/review-owner/runs/review-run/music/yue2-evaluation/verified-headroom.wav",
+  listeningAudioKey: `owner/review-owner/runs/review-run/music/yue2-evaluation/audio-headroom-${"e".repeat(64)}.wav`,
   candidateSha256: "a".repeat(64),
   candidate: {
-    jobId: "job", audioKey: "owner/review-owner/runs/review-run/music/yue2-evaluation/audio.wav",
+    jobId: `yue2-eval-${"d".repeat(64)}`, audioKey: "owner/review-owner/runs/review-run/music/yue2-evaluation/audio.wav",
+    audioSha256: "f".repeat(64), headroom: { audioSha256: "e".repeat(64) },
     nativeOutput: { sampleRateHz: 48000, channels: 2, codec: "pcm_f32le", frames: 4800, durationSec: 0.1 },
     executionAccounting: { allocatedCostUsdMicros: 1001 },
     bindingKey: "private-binding-key", endpoint: "https://private-worker.invalid",
   },
   request: { acceptedArrangement: {
-    topic: "Quiet overnight rain", sourceBriefFingerprint: "b".repeat(64),
+    topic: "Quiet overnight rain", sourceBriefFingerprint: "b".repeat(64), fingerprint: "c".repeat(64),
     reviewContext: undefined as ReturnType<typeof createMusicReviewContext> | undefined,
     arrangement: { direction: "Steady, no startling changes", requestedDurationSec: 60, sections: [{ id: "opening" }] },
   } },
@@ -45,9 +47,11 @@ loader._load = function (id, ...args) {
       assert.deepEqual(input, { channelId: "review-channel" });
       return channel;
     }
-    async mutation(reference: Parameters<typeof getFunctionName>[0], input: { submission: unknown }) {
+    async mutation(reference: Parameters<typeof getFunctionName>[0], input: { submission: unknown; sourceBasis?: unknown }) {
       assert.equal(getFunctionName(reference), "yue2Auditions:record"); calls.push("save-audition");
-      return { ...input.submission as object, reviewedAt: 123, reviewerId: "review-owner", productionApproved: false };
+      recordedBasis = input.sourceBasis;
+      return { ...input.submission as object, reviewedAt: 123, reviewerId: "review-owner", productionApproved: false,
+        sourceApprovalFingerprint: input.sourceBasis ? "9".repeat(64) : null };
     }
   } };
   if (id.endsWith("/yue2DurableEvaluation")) return {
@@ -107,6 +111,7 @@ async function main() {
   assert.equal(body.review.quality.status, "blocked");
   assert.equal(body.review.brief.channelPersonalityVerified, false);
   assert.equal(body.review.brief.contextRetained, false);
+  assert.equal(body.review.sourceApprovalAvailable, false);
   assert.equal(body.review.brief.reviewContext, null);
   assert.equal(body.review.allocation.providerBilledCostUsdMicros, null);
   assert.equal(body.review.nativeWavUrl, "https://signed-fixture.invalid/native.wav");
@@ -123,9 +128,11 @@ async function main() {
   const audition = { candidateSha256: material.candidateSha256, verdict: "needs_work", listenedEntireSource: false,
     checks: Object.fromEntries(YUE2_AUDITION_CHECKS.map(key => [key, "unreviewed"])),
     sections: [{ id: "opening", judgment: "unreviewed", notes: "" }], notes: "Opening needs a closer listen." };
-  const post = (patch = {}, origin = "https://studio.invalid") => POST(new Request("https://studio.invalid/api/yue2-evaluations/review", {
+  const displayedReview: { fingerprint?: string } = {};
+  const post = (patch: Record<string, unknown> = {}, origin = "https://studio.invalid") => POST(new Request("https://studio.invalid/api/yue2-evaluations/review", {
     method: "POST", headers: { cookie: `studio_session=${token}`, origin, "Content-Type": "application/json" },
-    body: JSON.stringify({ runId: "review-run", audition: { ...audition, ...patch } }),
+    body: JSON.stringify({ runId: "review-run", audition: { ...audition, ...patch },
+      ...(patch.verdict === "approved_for_assembly" ? { sourceApprovalBasisFingerprint: displayedReview.fingerprint } : {}) }),
   }));
   assert.equal((await post({}, "https://foreign.invalid")).status, 403);
   const beforeBodyFailures = calls.length;
@@ -147,7 +154,44 @@ async function main() {
   assert.equal(saved.status, 200);
   assert.equal((await saved.json()).audition.productionApproved, false);
   assert.deepEqual(calls.slice(-4), ["runs:getRun", "channels:getChannel", "material", "save-audition"]);
-  console.log("YuE review route PASS: real session auth, ownership, verified-material-only signing, private projection, no approval");
+  const positive = { verdict: "approved_for_assembly", listenedEntireSource: true,
+    checks: Object.fromEntries(YUE2_AUDITION_CHECKS.map(key => [key, "pass"])),
+    sections: [{ id: "opening", judgment: "pass", notes: "Restrained texture fits the retained channel personality." }] };
+  const saves = () => calls.filter(call => call === "save-audition").length;
+  const beforeInvalidApprovals = saves();
+  assert.equal((await post(positive)).status, 409, "blocked source cannot be approved");
+  material.quality.status = "needs_audition";
+  assert.equal((await post(positive)).status, 409, "a frozen invocation is required");
+  run.pipelineInvocationSha256 = "8".repeat(64);
+  const approvableReview = (await (await GET(request())).json()).review;
+  assert.equal(approvableReview.sourceApprovalAvailable, true);
+  assert.equal((await post(positive)).status, 409, "review confirmation cannot be omitted");
+  displayedReview.fingerprint = approvableReview.sourceApprovalBasisFingerprint;
+  run.pipelineInvocationSha256 = "7".repeat(64);
+  assert.equal((await post(positive)).status, 409, "stale browser cannot approve a changed invocation");
+  run.pipelineInvocationSha256 = "8".repeat(64);
+  const context = material.request.acceptedArrangement.reviewContext;
+  material.request.acceptedArrangement.reviewContext = undefined;
+  assert.equal((await post(positive)).status, 409, "channel context cannot be waived");
+  material.request.acceptedArrangement.reviewContext = context;
+  assert.equal((await post({ ...positive, sourceBasis: {} })).status, 400);
+  assert.equal((await post({ ...positive, sourceApprovalFingerprint: "9".repeat(64) })).status, 400);
+  assert.equal(saves(), beforeInvalidApprovals);
+  const approved = await post(positive);
+  assert.equal(approved.status, 200);
+  const approvedBody = await approved.json();
+  assert.equal(approvedBody.audition.sourceApprovalFingerprint, "9".repeat(64));
+  assert.equal(approvedBody.audition.productionApproved, false);
+  assert.doesNotMatch(JSON.stringify(approvedBody), /listeningAudioKey|invocationSha256|owner\//u);
+  assert.deepEqual(recordedBasis, {
+    ownerId: "review-owner", channelId: "review-channel", runId: "review-run", invocationSha256: run.pipelineInvocationSha256,
+    candidateSha256: material.candidateSha256, arrangementFingerprint: material.request.acceptedArrangement.fingerprint,
+    jobId: material.candidate.jobId, listeningAudioKey: material.listeningAudioKey, listeningAudioSha256: "e".repeat(64),
+    nativeFrames: 4800, sampleRateHz: 48000, channels: 2, sectionIds: ["opening"], technicalStatus: "needs_audition", contextRetained: true,
+  });
+  assert.equal((await post({ ...positive, verdict: "promising" })).status, 200);
+  assert.equal(recordedBasis, undefined, "historical promising verdict is never source authority");
+  console.log("YuE review route PASS: real session auth, ownership, private projection, server-bound source approval, no publishing authority");
 }
 
 main().finally(() => {
