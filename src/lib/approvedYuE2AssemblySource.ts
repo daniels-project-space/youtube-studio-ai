@@ -44,6 +44,12 @@ export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, cross
     candidateSha256: candidate.candidateSha256, invocationSha256: run.pipelineInvocationSha256 };
   const readApproval = async () => YuE2SourceApprovalSchema.parse(await convex.query(approvalApi.getSourceApproval, scope as never));
   const approval = await readApproval();
+  const assertCurrent = async () => {
+    if ((await readApproval()).fingerprint !== approval.fingerprint) {
+      throw new Error("YuE2 source approval changed during assembly");
+    }
+    await assertLease();
+  };
   const basis = approval.basis;
   if (basis.ownerId !== ctx.ownerId || basis.channelId !== ctx.channelId || basis.runId !== ctx.runId ||
     basis.invocationSha256 !== run.pipelineInvocationSha256 || basis.candidateSha256 !== candidate.candidateSha256 ||
@@ -74,9 +80,8 @@ export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, cross
   const preparedFrames = candidate.nativeFrames - Math.round(crossfadeSec * 48000);
   await probeYuE2NativeWav(path, { frames: preparedFrames }, loopBytes.byteLength);
   // Recheck after storage/CPU work: a changed owner decision cannot slip into encoding.
-  if ((await readApproval()).fingerprint !== approval.fingerprint) throw new Error("YuE2 source approval changed during preparation");
-  await assertLease();
-  return { path, cleanup, evidence: {
+  await assertCurrent();
+  return { path, cleanup, assertCurrent, evidence: {
     version: "yue2-assembly-source/v1", approvalFingerprint: approval.fingerprint,
     candidateSha256: candidate.candidateSha256, arrangementFingerprint: arrangement.fingerprint,
     listeningAudioSha256: candidate.listeningAudioSha256, nativeFrames: candidate.nativeFrames,

@@ -3138,7 +3138,7 @@ export const quoteOverlaysBlock: Block = {
   },
 };
 
-export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) => Promise<string>, mixSampleRateHz?: 44100 | 48000): Block {
+export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) => Promise<string>, mixSampleRateHz?: 44100 | 48000, assertOutputAuthority?: () => Promise<void>): Block {
   return {
   id: "timeline_assemble",
   consumes: [
@@ -3605,7 +3605,7 @@ export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) =
         ctx.log(`timeline_assemble: SURGICAL HEAL — re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
         // The pre-overlay video already contains the folded outro (it is the
         // compose output), so outroApplied mirrors the original build.
-        const finished = await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2 });
+        const finished = await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2, assertOutputAuthority });
         return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
           ? finished
           : { ...finished, onScreenTextCues: finalMasterFootageOnScreenTextCues });
@@ -3895,6 +3895,7 @@ export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) =
     const finished = await finishFromComposed(ctx, out, tmp, {
       W, H, introSec, videoSec,
       outroApplied: Boolean(outroCardPath),
+      assertOutputAuthority,
     });
     return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
       ? finished
@@ -3917,7 +3918,7 @@ async function finishFromComposed(
   ctx: StageContext,
   composed: string,
   tmp: string,
-  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean },
+  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean; assertOutputAuthority?: () => Promise<void> },
 ): Promise<Record<string, unknown>> {
   const { W, H, introSec, videoSec } = o;
   const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
@@ -4074,6 +4075,7 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
+  await o.assertOutputAuthority?.();
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
   await putObjectFromFile(videoKey, finalVideo, { contentType: "video/mp4" });
   // Persist the PRE-OVERLAY composed video (body + outro, NO captions/cards) so

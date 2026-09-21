@@ -1700,7 +1700,7 @@ export const upscale: Block = {
 
 /* ----------------------------- 7. assemble ------------------------------ */
 
-export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, directory: string) => Promise<string>, mixSampleRateHz?: 44100 | 48000): Block {
+export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, directory: string) => Promise<string>, mixSampleRateHz?: 44100 | 48000, assertOutputAuthority?: () => Promise<void>): Block {
   return {
   id: "assemble",
   consumes: ["loopUnitKey", "musicUrl"],
@@ -1841,6 +1841,7 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       });
     }
 
+    await assertOutputAuthority?.();
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {

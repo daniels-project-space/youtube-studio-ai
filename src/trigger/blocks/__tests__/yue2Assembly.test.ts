@@ -47,6 +47,7 @@ const material = { ...retained, candidateSha256: candidate.candidateSha256, list
     nativeOutput: { ...retained.candidate.nativeOutput, frames } } };
 let approval: unknown = approved, source: Uint8Array = wav, currentMaterial = material;
 let queries = 0, approvalReads = 0, privateReads = 0, durableReads = 0, leases = 0, revoked = false, revokeDuringPreparation = false;
+let uploads = 0, afterEncode = () => {}, afterUpload = () => {};
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
 const proofDirectory = process.env.YUE2_ASSEMBLY_PROOF_DIR;
@@ -80,7 +81,8 @@ loader._load = function (id, ...args) {
       assert.equal(key, candidate.listeningAudioKey, "no legacy/default music key fallback");
       assert.equal(bucket, "youtube-studio-ai-private"); privateReads++; return source;
     },
-    putObjectFromFile: async (_key: string, path: string) => { assert.ok((await readFile(path)).length); },
+    putObjectFromFile: async (_key: string, path: string) => { assert.ok((await readFile(path)).length); uploads++; afterUpload(); },
+    putObject: async () => { uploads++; },
     publicUrl: (key: string) => `https://fixture.invalid/${key}`,
   };
   const actual = originalLoad.call(this, id, ...args);
@@ -93,18 +95,20 @@ loader._load = function (id, ...args) {
     normalizeAudioOnly: async (...input: Parameters<typeof real.normalizeAudioOnly>) => nativeEncode ? real.normalizeAudioOnly(...input) : encoded(input[1]),
     composeWithIntro: async (input: Parameters<typeof real.composeWithIntro>[0]) => {
       renders.push(input); temporary.add(dirname(input.outPath));
-      return nativeEncode ? real.composeWithIntro(input) : encoded(input.outPath);
+      const result = await (nativeEncode ? real.composeWithIntro(input) : encoded(input.outPath));
+      afterEncode(); return result;
     },
     composeMusicLoopDeblur: async (input: Record<string, unknown>) => {
       const audio = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-of", "json", String(input.musicPath)], { encoding: "utf8" })).streams[0];
       assert.equal(audio.codec_name, "pcm_f32le"); assert.equal(audio.sample_rate, "48000"); assert.equal(audio.duration_ts, frames - 96000);
-      renders.push(input); return encoded(String(input.outPath));
+      renders.push(input); const result = await encoded(String(input.outPath)); afterEncode(); return result;
     },
   }; }
   return actual;
 };
 const load = createRequire(__filename);
 function reset() { approval = approved; source = wav; currentMaterial = material; runOwner = candidate.ownerId;
+  uploads = 0; afterEncode = () => {}; afterUpload = () => {};
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
   const { registerAllBlocks, _resetBlocks } = load("@/engine/blocks") as typeof import("@/engine/blocks");
@@ -156,7 +160,7 @@ async function main() {
     const evidence = validateArtifact(manifest.produces.yue2AssemblySource, result.yue2AssemblySource) as Record<string, unknown>;
     assert.equal(evidence.approvalFingerprint, approved.fingerprint); assert.equal(evidence.publishingApproved, false);
     assert.equal(evidence.preparedFrames, frames - 96000); assert.equal(renders.length, 1);
-    assert.equal(privateReads, 1); assert.equal(approvalReads, 2); assert.equal(durableReads, 1); assert.equal(leases, 2);
+    assert.equal(privateReads, 1); assert.equal(approvalReads, 4); assert.equal(durableReads, 1); assert.equal(leases, 4);
     assert.ok(!("musicUrl" in result) && !("musicKey" in result));
     await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/, "private local source cleaned after render");
     if (id === "timeline_assemble") assert.equal(renders[0].bodyMusicVol, 0.04, "composer intent reaches real narrated compositor");
@@ -198,6 +202,28 @@ async function main() {
     }
   }
   nativeEncode = false;
+  for (const id of ["assemble", "timeline_assemble"]) {
+    const manifest = getManifest(id, "3.0.0-yue2-reviewed-loop")!;
+    for (const phase of ["encode", "upload"] as const) {
+      for (const change of [
+        () => { approval = null; },
+        () => { approval = createYuE2SourceApproval({ basis, submission, reviewedAt: 23456, revision: 2 }); },
+        () => { revoked = true; },
+        () => { approval = { ...approved, basis: { ...basis, invocationSha256: "c".repeat(64) } }; },
+      ]) {
+        reset();
+        if (phase === "encode") afterEncode = change; else afterUpload = change;
+        await assert.rejects(manifest.execute({ ...ctx,
+          params: { durationSec: 3600, tailSec: 0, burnCaptions: false, transitions: "hardcut" },
+        }), `${id} must not return successful artifacts after authority changes during ${phase}`);
+        assert.equal(renders.length, 1, "failure must exercise the post-encode boundary");
+        if (phase === "encode") assert.equal(uploads, 0, "revoked source must not enter output storage");
+        else assert.ok(uploads > 0, "mid-upload revocation must reject the completed stage");
+        assert.equal(privateReads, 1); assert.equal(durableReads, 1, "no repeated large storage downloads or regeneration");
+        await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/, "private source cleaned on authority failure");
+      }
+    }
+  }
   for (const change of [() => { approval = null; }, () => { runOwner = "foreign"; },
     () => { approval = { ...approved, fingerprint: "f".repeat(64) }; }, () => { revoked = true; }]) {
     reset(); change(); await assert.rejects(prepareApprovedYuE2AssemblySource(ctx, 2));

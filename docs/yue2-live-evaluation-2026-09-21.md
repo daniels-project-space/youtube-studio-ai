@@ -891,3 +891,30 @@ approval-to-resume, final-release review binding, all-family source adoption,
 actual owner audition, real-run provider persistence, full-length Lo-Fi output
 and production deployment remain open. No real candidate was approved, no GPU
 was started and no thumbnail generation/test was performed in this batch.
+
+## Revocation During Assembly
+
+The reviewed YuE2 assembly versions now recheck the exact approval fingerprint
+and current execution lease after rendering/finishing, before output storage,
+and again before returning successful artifacts. Both the Lo-Fi and narrated
+renderers use these checks; legacy assembly keeps its existing behavior.
+
+- Sixteen adversarial cases cover both renderers, revocation during encoding
+  and upload, missing approval, replacement approval, revoked execution, and
+  changed invocation evidence. Before-upload failures write no output; all
+  cases reject the stage and clean up the private local source.
+- Each successful stage adds two small approval/lease checks, without polling,
+  repeated audio downloads, worker dispatch, or GPU inference.
+- The native narrated proof was rerun under
+  `/var/lib/youtube-studio-render/operator/reviewed-source-revocation-20260921/`.
+  The actual production FFmpeg output remains 1920x1080, 300 frames, exactly
+  10 seconds, stereo 48 kHz. Its hash remains
+  `b4728c643a6a2b3a787e77dbd39959ca94c49ea16d6cad7c773397863747c06d`.
+  Source audio, owner approval and provider/database transport are fixtures;
+  this is not owner approval of the retained Seaside candidate.
+
+Storage and owner decisions are not atomic: a revocation during upload may
+leave an object in storage, but this stage will not return successful artifacts.
+These checks do not yet protect a later cached-artifact resume or replace the
+unfinished final-release approval binding. Automatic audition pause/resume,
+long-duration qualification and production deployment remain open.
