@@ -568,6 +568,21 @@ export const VERIFIED_PARALLEL_GROUPS: readonly (readonly string[])[] =
 const GROUP_OF = new Map<string, number>();
 PARALLEL_GROUPS.forEach((g, i) => g.forEach((id) => GROUP_OF.set(id, i)));
 
+function independentWaveMembers(left: ModuleManifest, right: ModuleManifest): boolean {
+  const writes = (manifest: ModuleManifest) => new Set([
+    ...Object.keys(manifest.produces), ...Object.keys(manifest.optionalProduces),
+  ]);
+  const reads = (manifest: ModuleManifest) => [
+    ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
+  ];
+  const leftWrites = writes(left), rightWrites = writes(right);
+  return !reads(left).some(key => rightWrites.has(key))
+    && !reads(right).some(key => leftWrites.has(key))
+    && ![...leftWrites].some(key => rightWrites.has(key))
+    && !left.requiredCapabilities.some(capability => right.capabilities.includes(capability))
+    && !right.requiredCapabilities.some(capability => left.capabilities.includes(capability));
+}
+
 export async function runPipeline(
   resolved: ResolvedPipeline,
   opts: RunPipelineOptions,
@@ -1564,12 +1579,15 @@ export async function runPipeline(
     const block = resolved.blocks[i];
     const gid = GROUP_OF.get(block.id);
 
-    // Maximal contiguous run of same-group blocks → co-schedule. Members that
-    // fail don't cancel siblings: completed work persists for resume/heal.
+    // Curated IDs permit concurrency, but the selected versions must still be
+    // independent. Split at the first dependency without reordering entries.
+    // Members that fail don't cancel siblings: completed work persists.
     if (gid !== undefined) {
       const group: Block[] = [];
       let j = i;
       while (j < resolved.blocks.length && GROUP_OF.get(resolved.blocks[j].id) === gid) {
+        if (group.some((_member, offset) =>
+          !independentWaveMembers(resolved.manifests[i + offset], resolved.manifests[j]))) break;
         group.push(resolved.blocks[j]);
         j++;
       }

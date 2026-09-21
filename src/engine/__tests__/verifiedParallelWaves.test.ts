@@ -35,6 +35,10 @@ for (const group of VERIFIED_PARALLEL_GROUPS) {
     }
   }
   for (const manifest of manifests) {
+    for (const capability of manifest.requiredCapabilities) {
+      assert.equal(manifests.some(sibling => sibling.id !== manifest.id && sibling.capabilities.includes(capability)), false,
+        `${manifest.id} requires capability ${capability} from a sibling in its parallel wave`);
+    }
     for (const key of [...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes)]) {
       assert.equal(
         produced.has(key),
