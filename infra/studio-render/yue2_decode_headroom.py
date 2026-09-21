@@ -39,12 +39,12 @@ def main():
     _contain_child(os.getppid())
     signal.alarm(180)
     from music_runtime.config import MANIFEST, effective_config
-    from music_runtime.official import OfficialBackend, require_precision
+    from music_runtime.official import OfficialBackend
+    from music_runtime import decoder
     from music_runtime.runner import inspect_job
     from music_runtime.store import file_hash, inventory, seal
     import numpy as np
     import soundfile as sf
-    import torch
     from yue2 import YuE2Pipeline
     from yue2.protocol import GenerationConfig
 
@@ -72,6 +72,7 @@ def main():
             "source_terminal_sha256": file_hash(attempt / "terminal.json"),
             "latent_sha256": file_hash(evidence / "latent.npy"),
             "reference_wav_sha256": file_hash(evidence / "audio-native.wav"),
+            "decoder_sha256": file_hash(Path(decoder.__file__)),
             "script_sha256": file_hash(Path(__file__)), "deadline_seconds": 180})
         try:
             runtime = OfficialBackend().preflight(effective_config("/mnt/yue2-hf-cache"))
@@ -83,18 +84,14 @@ def main():
                 offload_ar=False, verify_hashes=True, vae_core_frames=1024,
                 generation_config=GenerationConfig.from_dict(MANIFEST["preset"]["generation"]), progress=False,
             ) as pipe:
+                decode_started = time.monotonic()
+                adapter_official, raw = decoder.decode_with_source(pipe, latents)
+                adapter_seconds = time.monotonic() - decode_started
+                if not np.array_equal(adapter_official, reference):
+                    raise ValueError("Runtime adapter differs from retained native samples")
                 official = pipe.decode(latents)
                 if not np.array_equal(official, reference):
                     raise ValueError("Official re-decode differs from retained native samples")
-                require_precision(pipe._vae, "torch.float32")
-                model = pipe._vae.to("cuda:0")
-                try:
-                    z = torch.as_tensor(latents, dtype=torch.float32).T.unsqueeze(0)
-                    with torch.inference_mode():
-                        decoded = model.decode_tiled(z, core_frames=1024, halo_frames=16, output_device="cpu")
-                    raw = decoded[0].float().T.contiguous().numpy()
-                finally:
-                    model.to("cpu")
                 comparison = compare_decoder_output(raw, reference)
             np.save(args.output / "audio-unclipped.npy", raw, allow_pickle=False)
             sf.write(args.output / "audio-unclipped.wav", raw, 48000, subtype="FLOAT")
@@ -105,6 +102,7 @@ def main():
             result = {"schema": "studio-yue2-unclipped-comparison/v1", "status": "completed",
                 "source_job_id": args.job_id, "sample_rate": 48000, "channels": 2, "frames": len(raw),
                 "comparison": comparison, "runtime": runtime, "artifacts": artifacts,
+                "adapter_seconds": adapter_seconds, "adapter_decode_passes": 1,
                 "elapsed_seconds": time.monotonic() - started, "composition_generated": False,
                 "production_approved": False}
             seal(args.output / "result.json", result)
