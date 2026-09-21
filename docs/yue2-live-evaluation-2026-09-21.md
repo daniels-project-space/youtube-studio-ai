@@ -499,3 +499,28 @@ switch to host networking merely to expose the loopback listener, and do not
 enable legacy pipeline replacements or claim production activation from this
 test. The shared production music block still requires the qualified YuE2
 continuation and channel-bound output approval.
+
+## Network-Isolated Host Transport
+
+Studio's builder now pins runtime `f9f57fc047be085c7d7f1fdb9f0e3e7491a84d37`.
+Its `serve --unix-socket /ipc/worker.sock` mode carries the existing authenticated
+HTTP contract over a mounted Unix socket, so a host gateway can reach the worker
+without adding container networking. The directory must be worker-owned and
+private (0700), the socket is 0600, symlinked parents and existing paths are
+refused, and normal close removes only the server's own socket inode. Legacy
+loopback TCP behavior remains unchanged. No inference settings, model pins or
+qualification flags changed.
+
+All 143 runtime tests passed in the pinned-dependency CPU container, including
+the same real supervised execution, accounting, duplicate-header and restart
+tests over Unix sockets. The wheel builds and Ruff passes. A real host-to-container
+probe passed with Docker reporting `network=none` and read-only root: anonymous
+health returned 401, authenticated health returned 200, zero jobs were submitted.
+That probe used the explicit current-source overlay on the existing local image;
+it does not prove the installed GPU image has been upgraded. The probe is
+`deploy/probe_unix_transport.py` in the runtime repository.
+
+The retained GPU image is still the earlier `7a3eeae` revision. Installing the
+new image and configuring the authenticated gateway/tunnel remain pending.
+No GPU restart or spending occurred for this transport implementation. Legacy
+pipelines, publishing and thumbnail generation remain untouched.
