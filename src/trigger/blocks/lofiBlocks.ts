@@ -97,6 +97,7 @@ import {
 } from "@/lib/narrationTranscriptProof";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
+import { canonicalJson } from "@/lib/canonicalJson";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaImage } from "@/lib/novitaMedia";
@@ -2331,6 +2332,7 @@ async function selectNarrativeShortSource(input: {
 
 async function persistShortReleaseEvidence(args: {
   ctx: StageContext;
+  parentCertificate: FinalMasterReleaseCertificate;
   filePath: string;
   shortKey: string;
   title: string;
@@ -2365,6 +2367,8 @@ async function persistShortReleaseEvidence(args: {
     args.captionCues,
     structural.durationSec,
   );
+  const yue2AssemblySource = args.parentCertificate.yue2AssemblySource;
+  if (yue2AssemblySource) await verifyCurrentYuE2ReleaseSource(convex(), ctx, yue2AssemblySource);
 
   const beforeReviewSha256 = await fileSha256(args.filePath);
   const contentLane = resolveContentLane({
@@ -2579,8 +2583,11 @@ async function persistShortReleaseEvidence(args: {
   // The certificate deliberately carries no inherited reference-quality V1/V2
   // claim. Its audio proof is only the real, local transcript audit and
   // deterministic final-mix meter measured on these derivative bytes.
+  if (yue2AssemblySource) await verifyCurrentYuE2ReleaseSource(convex(), ctx, yue2AssemblySource);
   const certificate = createFinalMasterReleaseCertificate({
     version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
+    // Source permission is inherited, but output-quality evidence is not.
+    ...(yue2AssemblySource ? { yue2AssemblySource } : {}),
     finalMaster: {
       r2Key: args.shortKey,
       sha256: afterReviewSha256,
@@ -2645,6 +2652,7 @@ async function persistShortReleaseEvidence(args: {
 
 async function verifyShortReleaseEvidenceForUpload(args: {
   ctx: StageContext;
+  parentCertificate: FinalMasterReleaseCertificate;
   filePath: string;
   shortKey: string;
   certificateKey: string;
@@ -2657,6 +2665,9 @@ async function verifyShortReleaseEvidenceForUpload(args: {
   );
   if (args.certificateKey !== expectedCertificateKey || certificate.finalMaster.r2Key !== args.shortKey) {
     throw new Error("shorts_spinoff: post-transform release certificate is not bound to this Short object");
+  }
+  if (canonicalJson(certificate.yue2AssemblySource ?? null) !== canonicalJson(args.parentCertificate.yue2AssemblySource ?? null)) {
+    throw new Error("shorts_spinoff: derivative music source differs from its verified parent");
   }
   if (
     !certificate.onScreenText ||
@@ -2681,6 +2692,9 @@ async function verifyShortReleaseEvidenceForUpload(args: {
     headObjectMetadata,
   });
   await verifyFinalMasterNarrationAuditIfPresent(certificate, "shorts_spinoff");
+  if (certificate.yue2AssemblySource) {
+    await verifyCurrentYuE2ReleaseSource(convex(), args.ctx, certificate.yue2AssemblySource);
+  }
   return certificate;
 }
 
@@ -3298,6 +3312,7 @@ export const shortsSpinoff: Block = {
     // therefore a prerequisite, never a substitute for this actual output.
     const shortRelease = await persistShortReleaseEvidence({
       ctx,
+      parentCertificate,
       filePath: final,
       shortKey,
       title,
@@ -3319,8 +3334,9 @@ export const shortsSpinoff: Block = {
           : [];
       }),
     });
-    await verifyShortReleaseEvidenceForUpload({
+    const shortCertificate = await verifyShortReleaseEvidenceForUpload({
       ctx,
+      parentCertificate,
       filePath: final,
       shortKey,
       certificateKey: shortRelease.certificateKey,
@@ -3355,6 +3371,9 @@ export const shortsSpinoff: Block = {
         action: "youtube_short_public",
         convex: client,
       });
+    }
+    if (shortCertificate.yue2AssemblySource) {
+      await verifyCurrentYuE2ReleaseSource(client, ctx, shortCertificate.yue2AssemblySource);
     }
     const res = await uploadDurableVideo({
       convex: client,
@@ -3404,6 +3423,9 @@ export const shortsSpinoff: Block = {
         convex: client,
       });
       try {
+        if (shortCertificate.yue2AssemblySource) {
+          await verifyCurrentYuE2ReleaseSource(client, ctx, shortCertificate.yue2AssemblySource);
+        }
         const platforms = (ctx.params["platforms"] as string[] | undefined) ?? ["tiktok", "instagram"];
         const r = await ayrCrosspost({ mediaUrl: publicUrl(shortKey), caption: title.slice(0, 2000), platforms });
         ctx.log(`shorts_spinoff: crosspost ${r.ok ? "ok" : "failed"} → ${r.ids.join(", ") || "(none)"}`);

@@ -1041,9 +1041,12 @@ an old cached master. Source adoption still grants no publishing authorization.
 This adds bounded indexed metadata reads, with no audio download, inference,
 new scheduled task or polling loop. Existing YouTube publishing policy remains
 independent. It is not an atomic lock across an in-flight YouTube transfer and
-does not retract a video already uploaded. Derived-short certificates do not
-yet propagate this source binding and therefore cannot release YuE2 output
-through a missing-binding fallback.
+does not retract a video already uploaded. Correction from the subsequent
+Short-caller audit: the previous claim that missing derivative bindings would
+prevent Short release was too broad. The parent was checked before cropping,
+but the separate Short upload helper did not call the source-authority query.
+Revocation during transformation/review could therefore miss that boundary.
+The follow-up below closes it; earlier parent-only tests did not prove it.
 
 Validation uses actual authenticated Convex handlers against an in-memory,
 rollback-capable database, client transport tests, certificate hashing and
