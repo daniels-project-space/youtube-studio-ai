@@ -20,6 +20,7 @@ import {
   headObjectMetadata,
 } from "@/lib/storage";
 import { parseFinalMasterReleaseCertificateBytes } from "@/lib/finalMasterReleaseCertificate";
+import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 import {
   PublishReleaseEvidenceError,
   verifyPublishIntentReleaseEvidence,
@@ -470,6 +471,14 @@ export async function dispatchPublishIntent(args: {
       headObjectMetadata,
       localFilePath: localPath,
     });
+    try {
+      if (!intent.runId) throw new Error("YuE2 release source requires an owning run");
+      await verifyCurrentYuE2ReleaseSource(convex, {
+        ownerId: intent.ownerId, channelId: intent.channelId, runId: intent.runId,
+      }, releaseEvidence.certificate.yue2AssemblySource);
+    } catch (error) {
+      throw new PublishReleaseEvidenceError(`source approval no longer verifies: ${error instanceof Error ? error.message : String(error)}`);
+    }
     log(
       `publish ${intent._id}: revalidated release evidence (${releaseEvidence.binding.certificateFingerprint.slice(0, 12)})`,
     );

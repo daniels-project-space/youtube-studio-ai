@@ -794,6 +794,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // final QA rebinds this sealed plan to the active route/lane/topic as
       // plan-only provenance; it is never treated as final-master coverage.
       "selfContainedStoryReceipt",
+      "yue2AssemblySource",
     ],
     // Draft probes may return a non-passing/unran review. Production QA mints
     // these publish-grade artifacts; upload still consumes them as required.

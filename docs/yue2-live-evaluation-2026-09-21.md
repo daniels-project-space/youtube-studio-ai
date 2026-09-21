@@ -1020,3 +1020,34 @@ It proves one-hour timing and sampled signal retention, not channel visual
 quality, musical/loop perceptual approval, 4K qualification, an eight-hour
 render, a live approved pipeline or production deployment. No GPU was started,
 no owner approval was manufactured and no thumbnail work was performed.
+
+## Cached release source authority
+
+The final-master certificate now optionally seals the complete YuE2 assembly
+source receipt, including the precise approval fingerprint and folded-audio
+identity. Historical certificates without this field retain their fingerprints.
+Production final QA checks authority before review and again before sealing;
+draft probes do not gain a new database dependency.
+
+Upload and the delayed publish dispatcher recheck against authoritative Convex
+state, not the presence of a store key. A YuE2 continuation or frozen music
+module selection requires the receipt even if cached output omitted it. The
+read validates the consumed continuation, current owner decision, frozen
+candidate/arrangement stages and the single successful assembly-stage receipt.
+A changed/revoked approval, altered folded source, missing receipt, duplicate
+assembly stage or changed invocation fails closed. Re-approval does not bless
+an old cached master. Source adoption still grants no publishing authorization.
+
+This adds bounded indexed metadata reads, with no audio download, inference,
+new scheduled task or polling loop. Existing YouTube publishing policy remains
+independent. It is not an atomic lock across an in-flight YouTube transfer and
+does not retract a video already uploaded. Derived-short certificates do not
+yet propagate this source binding and therefore cannot release YuE2 output
+through a missing-binding fallback.
+
+Validation uses actual authenticated Convex handlers against an in-memory,
+rollback-capable database, client transport tests, certificate hashing and
+tamper tests, existing release-byte integrity/retry tests, and static checks of
+QA/upload/dispatcher ordering. No real owner decision was written and no
+provider upload was performed. Deployment must install the new Convex query
+before workers that call it; this batch is not a production deployment.

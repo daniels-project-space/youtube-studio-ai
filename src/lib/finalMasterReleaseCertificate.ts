@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { z } from "zod";
+import { YuE2AssemblySourceSchema } from "@/engine/yue2AssemblySource";
 
 import {
   assertReferenceQualityMechanicsLedger,
@@ -165,6 +166,7 @@ const visualReviewReceiptSchema = z.object({
 export type VisualReviewReleaseReceipt = z.infer<typeof visualReviewReceiptSchema>;
 
 export const FinalMasterReleaseCertificateSchema = z.object({
+  yue2AssemblySource: YuE2AssemblySourceSchema.optional(),
   version: z.literal(FINAL_MASTER_RELEASE_CERTIFICATE_VERSION),
   finalMaster: finalMasterSchema,
   visualReview: z.object({

@@ -11,6 +11,7 @@ import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import type { PipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapshot";
 import * as deployment from "@/lib/pipelineWorkerDeployment";
 import { YUE2_AUDITION_CHECKS } from "@/engine/yue2Audition";
+import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 
 type Row = Record<string, unknown>;
 const material = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-after/gpu-material.json", "utf8"));
@@ -189,4 +190,76 @@ test("worker wiring parks after persisted music and keeps recovery and self-heal
   assert.match(worker, /requiresYuE2AuditionCheckpoint && plan\.rerunBlocks\.some/u);
   const dispatcher = readFileSync("src/trigger/musicAuditionContinuationDispatcher.ts", "utf8");
   assert.match(dispatcher, /await dispatchPendingYuE2Continuations\(\{ ownerId, convex, log, dispatchContext: input\?\.dispatchContext \}\)/u);
+});
+
+async function assembledFixture(block = "assemble") {
+  const f = fixture(); await f.park(); const approval = await f.review(); const [delivery] = await f.pending();
+  assert.equal((await f.claim(delivery.yue2AuditionResume)).kind, "claimed");
+  const source = { version: "yue2-assembly-source/v1", approvalFingerprint: approval.sourceApprovalFingerprint,
+    candidateSha256: candidate.candidateSha256, arrangementFingerprint: arrangement.fingerprint,
+    listeningAudioSha256: candidate.listeningAudioSha256, preparedAudioSha256: "a".repeat(64),
+    nativeFrames: candidate.nativeFrames, preparedFrames: candidate.nativeFrames - 96000, preparedAudioBytes: 1024,
+    crossfadeSec: 2, sampleRateHz: 48000, channels: 2, playback: "repeat", publishingApproved: false };
+  f.tables.runStages.push({ _id: "stage-assembly", runId, block, status: "ok", outputs: { yue2AssemblySource: source } });
+  const client = { query: async (ref: Parameters<typeof getFunctionName>[0], args: Row) => {
+    assert.equal(getFunctionName(ref), "yue2Continuations:verifyReleaseSource");
+    assert.deepEqual(Object.keys(args).sort(), ["channelId", "ownerId", "runId", "source"], "never serialize a StageContext or its secrets/callbacks");
+    return f.call(continuations.verifyReleaseSource, args);
+  } } as unknown as Parameters<typeof verifyCurrentYuE2ReleaseSource>[0];
+  const stageScope = { ...scope, log: () => {}, store: { unrelated: "not-for-transport" } };
+  return { ...f, source, verify: (value: unknown = source) => verifyCurrentYuE2ReleaseSource(client, stageScope, value) };
+}
+
+test("release source binds both assemblers and remains read-only through repeated cached QA/upload/retry checks", async () => {
+  for (const block of ["assemble", "timeline_assemble"]) {
+    const f = await assembledFixture(block), before = structuredClone(f.tables);
+    for (let attempt = 0; attempt < 3; attempt++) assert.deepEqual(await f.verify(), f.source);
+    assert.deepEqual(f.tables, before);
+    await f.review("rejected", "f".repeat(64)); assert.deepEqual(await f.verify(), f.source);
+    await f.review("needs_work"); await assert.rejects(f.verify(), /current explicit owner approval/);
+    await f.review(); await assert.rejects(f.verify(), /current explicit owner approval/, "new approval cannot bless a cached old render");
+  }
+});
+
+test("release rejects missing, corrupt, foreign, unconsumed, or substituted approval and assembly evidence", async () => {
+  for (const corrupt of [
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { delete f.run.yue2ContinuationId; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.yue2Continuations[0].state = "pending"; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.channels[0].ownerId = "foreign"; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.run.pipelineInvocationSha256 = "b".repeat(64); },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.runStages[2].status = "running"; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.runStages.pop(); },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.runStages.push({ ...f.tables.runStages[2], _id: "duplicate" }); },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.runStages[2].outputs = {}; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.tables.runStages[2].outputs = { yue2AssemblySource: { ...f.source, preparedAudioSha256: "b".repeat(64) } }; },
+    (f: Awaited<ReturnType<typeof assembledFixture>>) => { f.forbid(); },
+  ]) {
+    const f = await assembledFixture(); corrupt(f); await assert.rejects(f.verify());
+  }
+  const f = await assembledFixture();
+  await assert.rejects(f.call(continuations.verifyReleaseSource));
+  for (const key of ["candidateSha256", "arrangementFingerprint", "listeningAudioSha256", "approvalFingerprint", "preparedAudioSha256"]) {
+    await assert.rejects(f.verify({ ...f.source, [key]: "f".repeat(64) }));
+  }
+  await assert.rejects(f.verify({ ...f.source, preparedFrames: f.source.preparedFrames + 1 }));
+  await assert.rejects(f.verify({ ...f.source, publishingApproved: true }));
+});
+
+test("historical non-YuE2 runs remain readable without inventing a source approval", async () => {
+  const f = fixture(); delete f.run.pipelineInvocationSnapshot; delete f.run.pipelineInvocationSha256;
+  assert.equal(await f.call(continuations.verifyReleaseSource), null);
+  await assert.rejects(f.call(continuations.verifyReleaseSource, { source: {} }));
+});
+
+test("QA seals the checked source and both upload boundaries recheck before connector access", () => {
+  const qa = readFileSync("src/trigger/blocks/narratedBlocks.ts", "utf8");
+  assert.match(qa, /const yue2AssemblySource = ctx\.params\["qaProfile"\] === "draft" \? null\s*: await verifyCurrentYuE2ReleaseSource\(convex\(\), ctx, ctx\.store\["yue2AssemblySource"\]\)/u);
+  assert.match(qa, /if \(yue2AssemblySource\) await verifyCurrentYuE2ReleaseSource\(convex\(\), ctx, yue2AssemblySource\);\s*const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate\(\{\s*\.\.\.\(yue2AssemblySource \? \{ yue2AssemblySource \} : \{\}\)/u);
+  const upload = readFileSync("src/trigger/blocks/lofiBlocks.ts", "utf8");
+  assert.match(upload, /await verifyCurrentYuE2ReleaseSource\(convex\(\), ctx, durableCertificate\.yue2AssemblySource\);\s*return durableCertificate/u);
+  const dispatcher = readFileSync("src/lib/publishDispatcher.ts", "utf8");
+  const checkAt = dispatcher.indexOf("await verifyCurrentYuE2ReleaseSource(convex,");
+  assert.ok(checkAt > dispatcher.indexOf("const releaseEvidence = await verifyPublishIntentReleaseEvidence"));
+  assert.ok(checkAt < dispatcher.indexOf("const connector = await requireYouTubeConnector", checkAt));
+  assert.match(dispatcher.slice(checkAt), /throw new PublishReleaseEvidenceError\(`source approval no longer verifies/u);
 });

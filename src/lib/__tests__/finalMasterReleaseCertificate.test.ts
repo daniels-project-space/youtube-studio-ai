@@ -351,6 +351,25 @@ assert.doesNotThrow(
   "a release certificate retains only pacing evidence bound to the same master, review, lane, and QA receipt",
 );
 
+const yue2AssemblySource = {
+  version: "yue2-assembly-source/v1" as const, approvalFingerprint: "1".repeat(64),
+  candidateSha256: "2".repeat(64), arrangementFingerprint: "3".repeat(64),
+  listeningAudioSha256: "4".repeat(64), preparedAudioSha256: "5".repeat(64),
+  nativeFrames: 480000, preparedFrames: 384000, preparedAudioBytes: 3072044,
+  crossfadeSec: 2, sampleRateHz: 48000 as const, channels: 2 as const,
+  playback: "repeat" as const, publishingApproved: false as const,
+};
+const { certificateFingerprint: _originalFingerprint, ...sourceBindingInput } = certificate;
+void _originalFingerprint;
+const yue2Certificate = createFinalMasterReleaseCertificate({ ...sourceBindingInput, yue2AssemblySource });
+assert.notEqual(yue2Certificate.certificateFingerprint, certificate.certificateFingerprint);
+assert.deepEqual(parseFinalMasterReleaseCertificateBytes(Buffer.from(JSON.stringify(yue2Certificate))), yue2Certificate);
+assert.throws(() => assertFinalMasterReleaseCertificate({ ...yue2Certificate, yue2AssemblySource: undefined }));
+assert.throws(() => assertFinalMasterReleaseCertificate({ ...yue2Certificate,
+  yue2AssemblySource: { ...yue2AssemblySource, approvalFingerprint: "6".repeat(64) } }));
+assert.equal(createFinalMasterReleaseCertificate(sourceBindingInput).certificateFingerprint, certificate.certificateFingerprint,
+  "absent optional source binding preserves historical certificate identity");
+
 const certificateKey = finalMasterReleaseCertificateKey(
   keyPrefix,
   runId,

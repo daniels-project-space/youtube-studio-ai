@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 import {
   planWeekPreparationPrompt,
   type PlanWeekPreparedNarration,
@@ -4370,6 +4371,8 @@ export const qaVisual: Block = {
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
   run: async (ctx) => {
+    const yue2AssemblySource = ctx.params["qaProfile"] === "draft" ? null
+      : await verifyCurrentYuE2ReleaseSource(convex(), ctx, ctx.store["yue2AssemblySource"]);
     // A legacy fictional route remains readable for audit, but must not mint
     // a new QA/certificate path without the sealed visual treatment that
     // binds its independently publishable thumbnail.
@@ -7035,7 +7038,9 @@ export const qaVisual: Block = {
           uses: studioAssetReleaseUses,
         })
       : undefined;
+    if (yue2AssemblySource) await verifyCurrentYuE2ReleaseSource(convex(), ctx, yue2AssemblySource);
     const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate({
+      ...(yue2AssemblySource ? { yue2AssemblySource } : {}),
       version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
       finalMaster: {
         r2Key: str(ctx, "videoKey"),

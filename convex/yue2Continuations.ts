@@ -10,6 +10,8 @@ import { sha256Hex } from "../src/lib/sha256";
 import { assertRunExecutionWriteFence, RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { verifiedWorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 import { verifiedYuE2Approval } from "./yue2ApprovalIdentity";
+import { YuE2AssemblySourceSchema } from "../src/engine/yue2AssemblySource";
+import type { PipelineInvocationSnapshot } from "../src/lib/pipelineInvocationSnapshot";
 
 type Ctx = QueryCtx | MutationCtx;
 const scope = { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs") };
@@ -119,6 +121,38 @@ export const getApproved = query({ args: { ...scope, resume: v.optional(yue2Resu
   const row = await assertYuE2Continuation(ctx, run, args.resume);
   if (!args.resume && row.state !== "consumed") throw new Error("YuE2 continuation has not been consumed");
   return row;
+} });
+
+/** Small authoritative read at release boundaries; cached artifacts never grandfather a revoked decision. */
+export const verifyReleaseSource = query({ args: { ...scope, source: v.optional(v.any()) }, handler: async (ctx, args) => {
+  await requireStudioServiceIdentity(ctx, args.ownerId, "YuE2 release source");
+  const run = await ctx.db.get(args.runId), channel = await ctx.db.get(args.channelId);
+  if (!run || !channel || run.ownerId !== args.ownerId || channel.ownerId !== args.ownerId || run.channelId !== args.channelId) {
+    throw new Error("YuE2 release source scope mismatch");
+  }
+  verifiedWorkerDeploymentFields(run);
+  const invocation = run.pipelineInvocationSnapshot as PipelineInvocationSnapshot | undefined;
+  const required = Boolean(run.yue2ContinuationId || invocation?.entries.some(entry =>
+    entry.block === "music" && entry.version === "3.0.0-yue2-candidate") ||
+    (Array.isArray(invocation?.compilationModules) && invocation.compilationModules.some(module =>
+      module?.id === "music" && module.version === "3.0.0-yue2-candidate")));
+  if (!required && args.source === undefined) return null;
+  const source = YuE2AssemblySourceSchema.parse(args.source);
+  const row = await assertYuE2Continuation(ctx, run);
+  if (row.state !== "consumed" || source.approvalFingerprint !== row.approvalFingerprint ||
+    source.candidateSha256 !== row.basis.candidateSha256 || source.arrangementFingerprint !== row.basis.arrangementFingerprint ||
+    source.listeningAudioSha256 !== row.basis.listeningAudioSha256 || source.nativeFrames !== row.basis.nativeFrames) {
+    throw new Error("YuE2 release source no longer matches the consumed approval");
+  }
+  const stages = [];
+  for (const block of ["assemble", "timeline_assemble"]) {
+    stages.push(...await ctx.db.query("runStages").withIndex("by_run_block", q => q.eq("runId", run._id).eq("block", block)).take(2));
+  }
+  if (stages.length !== 1 || stages[0].status !== "ok" ||
+    canonicalJson(YuE2AssemblySourceSchema.parse(stages[0].outputs?.yue2AssemblySource)) !== canonicalJson(source)) {
+    throw new Error("YuE2 release source differs from the retained assembly receipt");
+  }
+  return source;
 } });
 
 export const prepareDispatch = mutation({ args: { ownerId: v.string() }, handler: async (ctx, args) => {

@@ -96,6 +96,7 @@ import {
   sha256NarrationTranscriptSource,
 } from "@/lib/narrationTranscriptProof";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaImage } from "@/lib/novitaMedia";
@@ -2005,6 +2006,7 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
       throw new Error("upload_draft: local final master no longer matches its durable release certificate");
     }
   }
+  await verifyCurrentYuE2ReleaseSource(convex(), ctx, durableCertificate.yue2AssemblySource);
   return durableCertificate;
 }
 
