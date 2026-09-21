@@ -208,6 +208,32 @@ function slimValue(value: unknown): unknown {
   return value;
 }
 
+/** Narrow, service-only handoff to the explicit YuE evaluator; no run scan. */
+export const getAcceptedMusicArrangement = query({
+  args: { ownerId: v.string(), runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "Music arrangement evaluation handoff");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId) throw new Error("Music arrangement run unavailable");
+    const channel = await ctx.db.get(run.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) throw new Error("Music arrangement channel unavailable");
+    const rows = await ctx.db.query("runStages")
+      .withIndex("by_run_block", q => q.eq("runId", args.runId).eq("block", "music_arrangement_plan"))
+      .take(2);
+    if (rows.length !== 1 || rows[0].ownerId !== args.ownerId || rows[0].status !== "ok") {
+      throw new Error("Music arrangement stage is absent, ambiguous or not accepted");
+    }
+    const arrangement: unknown = rows[0].outputs?.acceptedMusicArrangement;
+    if (!arrangement || typeof arrangement !== "object" || Array.isArray(arrangement)
+      || new TextEncoder().encode(JSON.stringify(arrangement)).byteLength > 256 * 1024) {
+      throw new Error("Music arrangement artifact unavailable or oversized");
+    }
+    // The Node evaluator validates the full schema and content hashes. Do not
+    // import its Node crypto implementation into a Convex query runtime.
+    return { ownerId: args.ownerId, channelId: run.channelId, runId: run._id, arrangement };
+  },
+});
+
 export const listRunStages = query({
   args: {
     runId: v.id("runs"),

@@ -71,6 +71,58 @@ does not establish production readiness or real generated-audio quality.
 
 ## Accepted arrangement entry
 
+### Read an accepted Studio run directly
+
+The evaluator can now consume the saved `music_arrangement_plan` output without
+exporting or reconstructing its JSON first:
+
+```bash
+npx tsx src/scripts/evaluate-yue2-music.ts \
+  --run-id RUN_ID --owner-id OWNER_ID \
+  --seed 42 --personal-creator --durable-r2
+```
+
+This explicit input mode performs one authenticated Convex query, then validates
+the complete artifact, its fingerprints and exact owner/channel/run scope. It
+requires the configured Studio service signing credentials and
+`NEXT_PUBLIC_CONVEX_URL` (or `CONVEX_URL`). It does not bootstrap new credentials.
+The request has a 30-second transport deadline. The query uses the existing
+`by_run_block` index, reads at most two matching stages to detect duplicates and
+returns only the arrangement plus scope, not the other stage inputs/outputs.
+Only a unique `ok` planner stage is eligible; missing, failed, superseded,
+foreign-owner or oversized records are refused. Owner/viewer browser identities
+cannot invoke this service-only handoff.
+
+Without `--submit`, this mode contacts no worker or R2 service and performs no
+generation. Its JSON reports the one Convex request and zero worker requests;
+file-input validation remains entirely offline. `--run-id` and `--owner-id`
+must appear together and cannot be combined with a separate arrangement, program
+or style file. Invalid arguments fail before the query.
+
+For an explicitly authorized supervised evaluation, the existing
+`--execution-policy POLICY.json --submit` controls and worker credentials still
+apply. Recovery uses the same input with `--submit --recover-only`; the original
+durable run binding and submission marker remain authoritative. If the saved
+arrangement has changed, durable recovery refuses the mismatch rather than
+replacing the original take. The saved artifact does not grant generation,
+production or publishing approval.
+
+21 September local evidence: five real compiler/composer/planner outputs pass
+unchanged through the real signed Convex HTTP client, authenticated query handler
+and CLI request constructor using offline storage/HTTP fixtures. Negative cases
+cover auth, scope, stage state, duplicate rows, oversize and fingerprint damage.
+A stubbed worker additionally receives one exact job POST; recovery is GET-only,
+and loss of its job record cannot erase the local submission marker. No cloud
+deployment, GPU generation, thumbnail generation or musical-quality claim is
+part of this evidence. Deploy the new Convex query before using this CLI input
+against production; the existing file path remains available.
+
+The 61 evaluator, 19 durable-storage, shared stage-projection and security-boundary
+regressions also passed offline, alongside TypeScript and scoped lint. The full
+repository release gate was not rerun for this additive read-only query/CLI path;
+the previous 842-file run covers the unchanged infrastructure batch, not this new
+input mode. No deployment readiness is inferred from these focused checks.
+
 `createYuE2AcceptedArrangementRequest({ arrangement, seed, personalCreatorAcknowledged })`
 uses Studio request version `studio-yue2-arrangement-evaluation/v1`. It retains the
 full `acceptedArrangement` artifact and sets `programFingerprint` to that artifact's

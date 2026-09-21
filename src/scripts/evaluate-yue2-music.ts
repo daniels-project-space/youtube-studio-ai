@@ -18,6 +18,26 @@ import {
 const MAX_JSON = 4 * 1024 * 1024;
 const MAX_AUDIO = 256 * 1024 * 1024;
 
+async function readRunArrangement(ownerId: string, runId: string, environment: Readonly<Record<string, string | undefined>>) {
+  const url = environment.NEXT_PUBLIC_CONVEX_URL ?? environment.CONVEX_URL;
+  if (!url) throw new Error("Convex URL is required for --run-id");
+  const { StudioConvexHttpClient } = await import("@/lib/studioConvexHttpClient");
+  const { api } = await import("../../convex/_generated/api");
+  const deadline = AbortSignal.timeout(30_000);
+  const client = new StudioConvexHttpClient(url, {
+    fetch: (input, init) => fetch(input, { ...init, cache: "no-store",
+      signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline }),
+  });
+  const result = await client.query(api.runStages.getAcceptedMusicArrangement, {
+    ownerId, runId: runId as import("../../convex/_generated/dataModel").Id<"runs">,
+  });
+  const saved = z.object({ ownerId: z.literal(ownerId), runId: z.literal(runId), channelId: z.string().min(1),
+    arrangement: AcceptedMusicArrangementSchema }).strict().parse(result);
+  if (saved.arrangement.ownerId !== ownerId || saved.arrangement.runId !== runId
+    || saved.arrangement.channelId !== saved.channelId) throw new Error("Saved music arrangement scope mismatch");
+  return saved.arrangement;
+}
+
 export async function readYuE2File(path: string, maximum: number): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -158,27 +178,35 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
-    } else if (["--arrangement", "--program", "--style-file", "--seed", "--out", "--execution-policy"].includes(key)) {
+    } else if (["--arrangement", "--run-id", "--owner-id", "--program", "--style-file", "--seed", "--out", "--execution-policy"].includes(key)) {
       if (values[key] !== undefined || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Invalid evaluation argument");
       values[key] = argv[++index];
     } else { throw new Error("Unknown evaluation argument"); }
   }
   if (flags.has("--help")) {
-    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2 [--execution-policy POLICY.json]] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. --execution-policy requires --durable-r2 and validates a bounded local policy before credentials or network access; its exact terms are bound to durable evaluation. Default: local validation only, no GPU or network. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending. Supervised accounting is an operator-configured allocation estimate, not provider billing or a hard VM bill cap; provider billing remains unknown. Without a policy, cost is not measured.");
+    console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --run-id RUN_ID --owner-id OWNER_ID | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2 [--execution-policy POLICY.json]] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --run-id reads one accepted, owner-scoped saved arrangement from Convex using configured Studio service credentials; it forbids --arrangement and does not authorize GPU submission. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. --execution-policy requires --durable-r2 and validates a bounded local policy before credentials or network access; its exact terms are bound to durable evaluation. Default for file inputs: local validation only, no GPU or network. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending. Supervised accounting is an operator-configured allocation estimate, not provider billing or a hard VM bill cap; provider billing remains unknown. Without a policy, cost is not measured.");
     return;
   }
-  const arrangementMode = values["--arrangement"] !== undefined;
+  const runMode = values["--run-id"] !== undefined;
+  const arrangementMode = values["--arrangement"] !== undefined || runMode;
+  if (runMode !== (values["--owner-id"] !== undefined)) throw new Error("--run-id and --owner-id are required together");
+  if (runMode) {
+    const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
+    id.parse(values["--run-id"]); id.parse(values["--owner-id"]);
+    if (values["--arrangement"] !== undefined) throw new Error("--run-id forbids an independent --arrangement");
+  }
   const durableMode = flags.has("--durable-r2");
   if (values["--execution-policy"] !== undefined && !durableMode) {
     throw new Error("--execution-policy requires --durable-r2");
   }
   if (durableMode && (!arrangementMode || values["--out"] !== undefined)) {
-    throw new Error("--durable-r2 requires --arrangement and forbids --out");
+    throw new Error("--durable-r2 requires --arrangement or --run-id and forbids --out");
   }
   if (arrangementMode && (values["--program"] !== undefined || values["--style-file"] !== undefined)) {
     throw new Error("--arrangement is mutually exclusive with --program and independent style files");
   }
-  if ((!arrangementMode && (!values["--program"] || !values["--style-file"])) || !/^\d+$/u.test(values["--seed"] ?? "") || !flags.has("--personal-creator")) {
+  if ((!arrangementMode && (!values["--program"] || !values["--style-file"])) || !/^\d+$/u.test(values["--seed"] ?? "")
+    || !Number.isSafeInteger(Number(values["--seed"])) || !flags.has("--personal-creator")) {
     throw new Error("Explicit arrangement or program/style files, seed and --personal-creator acknowledgement are required");
   }
   if (flags.has("--recover-only") && !flags.has("--submit")) throw new Error("--recover-only requires explicit --submit to enable network access");
@@ -186,7 +214,8 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     : validateYuE2ExecutionPolicy(parseFileJson(await readYuE2File(resolve(values["--execution-policy"]), 65536)));
   const request = arrangementMode
     ? createYuE2AcceptedArrangementRequest({
-        arrangement: parseFileJson(await readYuE2File(resolve(values["--arrangement"]), 256 * 1024)),
+        arrangement: runMode ? await readRunArrangement(values["--owner-id"], values["--run-id"], environment)
+          : parseFileJson(await readYuE2File(resolve(values["--arrangement"]), 256 * 1024)),
         seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
       })
     : createYuE2EvaluationRequest({
@@ -195,7 +224,8 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
         seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
       });
   if (!flags.has("--submit")) {
-    console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
+    console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: runMode ? 1 : 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
+      ...(runMode ? { source: "accepted_studio_run", workerRequests: 0 } : {}),
       ...(durableMode ? { storage: "r2", costStatus: "not_measured" } : {}),
       ...(expectedExecutionPolicy ? { expectedExecutionPolicy,
         costBasis: "operator_configured_allocation_estimate", providerBilling: "unknown" } : {}),
