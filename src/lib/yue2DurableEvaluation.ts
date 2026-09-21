@@ -282,12 +282,17 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
     const durationMatches = candidate.nativeOutput.frames === requestedDurationSec * 48000;
     const expectedNativeFrames = requestedDurationSec * 48000 - 64;
     const nativeDurationMatches = candidate.nativeOutput.frames === expectedNativeFrames;
+    const sourceDurationPolicy = request.job.schema_version === 2 ? request.job.source_duration_policy ?? "exact" : "exact";
+    const naturalLoopDurationAccepted = sourceDurationPolicy === "natural_loop" &&
+      candidate.nativeOutput.frames >= 10 * 48000 - 64 && candidate.nativeOutput.frames <= 300 * 48000 - 64 &&
+      (candidate.nativeOutput.frames + 64) % 1920 === 0;
     return {
       candidate, candidateSha256: yue2Sha256(candidateBytes), request,
       quality: {
-        status: (durationMatches || nativeDurationMatches) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
+        status: (durationMatches || nativeDurationMatches || naturalLoopDurationAccepted) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
         requestedDurationSec, actualDurationSec: candidate.nativeOutput.frames / 48000,
-        durationMatches, nativeDurationMatches, expectedNativeFrames, nativeFormatVerified: true as const,
+        durationMatches, nativeDurationMatches, expectedNativeFrames, sourceDurationPolicy, naturalLoopDurationAccepted,
+        nativeFormatVerified: true as const,
         signal,
         productionApproved: false as const,
         unresolved: [...(!durationMatches ? ["exact_delivery_duration"] : []),

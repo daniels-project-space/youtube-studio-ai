@@ -94,6 +94,7 @@ const LegacyYuE2JobSchema = z.object({
 export const YuE2JobSchema = z.discriminatedUnion("schema_version", [LegacyYuE2JobSchema,
   LegacyYuE2JobSchema.extend({ schema_version: z.literal(2),
     requested_duration_sec: z.number().int().min(10).max(300),
+    source_duration_policy: z.enum(["exact", "natural_loop"]).optional(),
     abc: Text.refine((value) => value.trim().length > 0).optional(),
   }).strict(),
 ]);
@@ -115,6 +116,12 @@ export interface YuE2AcceptedArrangementRequest {
 }
 
 export type YuE2BoundEvaluationRequest = YuE2EvaluationRequest | YuE2AcceptedArrangementRequest;
+
+function sourceDurationPolicy(accepted: z.infer<typeof AcceptedMusicArrangementSchema>) {
+  const arrangement = accepted.arrangement;
+  return arrangement.playback === "repeat" && ["primary_music", "meditation_bed"].includes(arrangement.role)
+    ? "natural_loop" as const : "exact" as const;
+}
 
 export function createYuE2EvaluationRequest(input: {
   program: unknown; style: string; seed: number; personalCreatorAcknowledged: boolean;
@@ -145,6 +152,7 @@ export function createYuE2AcceptedArrangementRequest(input: {
   const body = {
     schema_version: 2 as const,
     requested_duration_sec: acceptedArrangement.arrangement.requestedDurationSec,
+    source_duration_policy: sourceDurationPolicy(acceptedArrangement),
     ...(parsed.symbolicScore !== undefined ? { abc: parsed.symbolicScore } : {}),
     style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
     lyrics: "" as const,
@@ -172,6 +180,8 @@ export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluati
   if (request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION && (
     request.programFingerprint !== request.acceptedArrangement.fingerprint ||
     (request.job.schema_version === 2 && request.job.requested_duration_sec !== request.acceptedArrangement.arrangement.requestedDurationSec) ||
+    (request.job.schema_version === 2 && request.job.source_duration_policy === "natural_loop" &&
+      sourceDurationPolicy(request.acceptedArrangement) !== "natural_loop") ||
     request.job.style !== projectAcceptedMusicArrangementToYuEStyle(request.acceptedArrangement)
   )) {
     throw new Error("YuE2 evaluation must preserve the accepted arrangement fingerprint and exact projected style");

@@ -26,7 +26,7 @@ const policy: YuE2ExecutionPolicy = {
   runtime_id: "supervised-durable-fixture", hourly_rate_usd_micros: 3_600_001,
   max_execution_seconds: 60, termination_grace_seconds: 5, reserved_allocation_usd_micros: 65001,
 };
-const request = createYuE2AcceptedArrangementRequest({
+const initialRequest = createYuE2AcceptedArrangementRequest({
   arrangement: createAcceptedMusicArrangement({ ownerId: "supervised-owner", channelId: "supervised-channel", runId: "supervised-run",
     topic: "Synthetic supervised evaluation", sourceBrief: { musicPrompt: "Hold steady", reviewContext: createMusicReviewContext({
       topic: "Synthetic supervised evaluation", family: "music_loop", channelName: "Supervised fixture",
@@ -38,6 +38,7 @@ const request = createYuE2AcceptedArrangementRequest({
         startFraction: i / 4, endFraction: (i + 1) / 4, energy: 0.2, instruction: "Remain steady" })) },
   }), seed: 42, personalCreatorAcknowledged: true,
 });
+let request = initialRequest;
 type Receipt = { sha256: string; payload_json: string };
 type RecordValue = Record<string, unknown>;
 function record(value: unknown): RecordValue {
@@ -248,7 +249,7 @@ async function recoverChild(path: string) {
 async function main() {
   let passed = 0;
   async function test(name: string, fn: () => Promise<void> | void) {
-    current = fixture(); await fn(); passed++; console.log(`PASS ${name}`);
+    request = initialRequest; current = fixture(); await fn(); passed++; console.log(`PASS ${name}`);
   }
   await test("checkpointed task recovers the exact submitted job without new generation", async () => {
     current.postState = "pending"; await run(args());
@@ -440,6 +441,35 @@ async function main() {
     assert.ok(await review(reviewScope));
     assert.equal(current.analyses, 3, "evicted measurement must be recomputed");
   });
+  for (const variant of ["clean", "silent", "misaligned"] as const) {
+    await test(`natural loop source ${variant} preserves exact delivery and quality gates`, async () => {
+      const accepted = initialRequest.acceptedArrangement;
+      request = createYuE2AcceptedArrangementRequest({ arrangement: createAcceptedMusicArrangement({
+        ownerId: accepted.ownerId, channelId: accepted.channelId, runId: accepted.runId, topic: accepted.topic,
+        sourceBrief: { reviewContext: accepted.reviewContext },
+        arrangement: { ...accepted.arrangement, playback: "repeat" },
+      }), seed: 42, personalCreatorAcknowledged: true });
+      const frames = 911 * 1920 - 64 + (variant === "misaligned" ? 1 : 0);
+      current.audio = wav(frames);
+      for (let frame = 0; variant !== "silent" && frame < frames; frame++) {
+        const sample = 0.2 * Math.sin(2 * Math.PI * 1000 * frame / 48000);
+        current.audio.writeFloatLE(sample, 44 + frame * 8);
+        current.audio.writeFloatLE(sample, 48 + frame * 8);
+      }
+      await run(args()); current.offline = true;
+      const before = [current.calls.length, current.writes.length, current.authorizations];
+      const result = await review(reviewScope);
+      assert.ok(result);
+      assert.equal(result.quality.sourceDurationPolicy, "natural_loop");
+      assert.equal(result.quality.durationMatches, false);
+      assert.equal(result.quality.nativeDurationMatches, false);
+      assert.equal(result.quality.naturalLoopDurationAccepted, variant !== "misaligned");
+      assert.equal(result.quality.status, variant === "clean" ? "needs_audition" : "blocked");
+      assert.equal(result.quality.productionApproved, false);
+      assert.ok(result.quality.unresolved.includes("exact_delivery_duration"));
+      assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+    });
+  }
   for (const offset of [-65, -64, -63, -1920, 1, 10966976 - 60 * 48000]) {
     await test(`native decoder boundary ${offset} samples is classified exactly without repair`, async () => {
       const frames = 60 * 48000 + offset;

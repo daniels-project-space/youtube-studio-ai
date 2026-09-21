@@ -134,3 +134,43 @@ and private-worker deployment remain open.
 3. Connect the private worker and immutable evidence to the existing accepted
    shared-music handoff and owner review path without bypassing its gates.
 4. Keep `production_approved` false until output-specific admission is satisfied.
+
+## Live Supplied-Score Evaluation
+
+Two score jobs ran on the same isolated RTX 3090 on 2026-09-21:
+
+- `studio-lofi-yue2-3090-score-20260921-01` exposed a lazy-load assumption:
+  the official external-score path leaves `_model` unset until semantic work.
+  Runtime `53d5a804d604d048fbb2e16b113e66a9817bec05` fixes precision verification
+  by loading the same pinned BF16 model first. Its regression fixture now models
+  the real lazy state. The failed attempt remains retained.
+- `studio-lofi-yue2-3090-score-20260921-02` used the identical score, style,
+  seed and quality settings. Image:
+  `sha256:c620276e1b0510b41249e428220ee50f9bc7a42f7e2664a531121abb860618a6`.
+  Full semantic generation completed without truncation: 911 content frames,
+  not the requested 750. The pinned decoder predicts 1,749,056 PCM frames,
+  or 36.438667 seconds. The strict duration gate refused before NAR/VAE; no
+  new audio exists for these attempts and no musical audition is claimed.
+- Supervised wall times were 18.640 and 30.632 seconds; configured-rate
+  allocation estimates were USD 0.000932 and USD 0.001532, excluding build,
+  idle and transfer rental. These are not provider invoices.
+
+Both jobs and supervision ledgers were retrieved to
+`/var/lib/youtube-studio-render/operator/yue2-score-evidence-20260921/` and
+independently verified with the runtime's artifact and supervision inspectors.
+The provider confirmed VM shutdown after retrieval. The external shutdown guard
+is inactive only after terminal shutdown verification.
+
+### Approved Loop Timing Policy
+
+Daniel explicitly chose: "Allow natural-length loop sources; keep final video
+duration exact". New repeat-playback primary-music and meditation-bed jobs now
+bind `source_duration_policy: natural_loop` into their job identity. One-shot,
+narration-bed and short-form jobs retain strict timing. Older saved jobs default
+to their original exact policy; no retained request is reinterpreted or overwritten.
+
+Natural-loop source review accepts only the supported 10-300-second native codec
+geometry. Signal checks, full-source audition, channel fit, endings and production
+approval remain separate gates. Source duration can vary; exact final video
+duration remains unresolved until verified by assembly. This policy must not be
+used to silently crop music or call an unreviewed ending seamless.

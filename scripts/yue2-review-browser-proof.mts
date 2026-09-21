@@ -43,6 +43,7 @@ const review: YuE2CandidateReview = {
   allocation: { allocatedCostUsdMicros: 1201, providerBilledCostUsdMicros: null },
   quality: { status: "needs_audition", requestedDurationSec: 12, actualDurationSec: frames / 48000, durationMatches: false,
     nativeDurationMatches: true, expectedNativeFrames: frames,
+    sourceDurationPolicy: "exact", naturalLoopDurationAccepted: false,
     nativeFormatVerified: true, signal, productionApproved: false,
     unresolved: ["exact_delivery_duration", "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"] },
 };
@@ -60,7 +61,7 @@ const built = await esbuild.build({ absWorkingDir: root, bundle: true, write: fa
   ` } });
 const js = built.outputFiles.find((file) => file.path.endsWith(".js"))!.contents;
 const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.contents;
-let mode: "ready" | "absent" | "blocked" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
+let mode: "ready" | "absent" | "blocked" | "natural-loop" | "missing-context" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
 const methods: string[] = [];
 let savedAudition: YuE2AuditionRecord | null = null;
@@ -96,6 +97,14 @@ const server = createServer((req, res) => {
     if (url.searchParams.get("runId") === "second-run") current.brief.topic = "Second run only";
     if (mode === "missing-context") { current.brief.reviewContext = null; current.brief.contextRetained = false; }
     if (mode === "unnamed") current.brief.reviewContext!.channelName = null;
+    if (mode === "natural-loop") {
+      current.arrangement.playback = "repeat";
+      current.quality.requestedDurationSec = current.arrangement.requestedDurationSec = 60;
+      current.quality.expectedNativeFrames = 60 * 48000 - 64;
+      current.quality.nativeDurationMatches = false;
+      current.quality.sourceDurationPolicy = "natural_loop";
+      current.quality.naturalLoopDurationAccepted = true;
+    }
     if (mode === "blocked") { current.quality.status = "blocked"; current.quality.durationMatches = false; current.quality.nativeDurationMatches = false;
       current.quality.actualDurationSec = 0.1; current.quality.signal.reviewReasons = ["digital_silence"]; }
     res.end(JSON.stringify({ ok: true, review: mode === "absent" ? null : current })); return;
@@ -173,11 +182,17 @@ try {
   assert.equal(recorded.productionApproved, false);
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
-    ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"]] as const) {
+    ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"],
+    ["natural-loop", "Natural-length loop source."]] as const) {
     mode = state; await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByText(expected, { exact: false }).waitFor();
     if (state === "unnamed") assert.equal(await page.getByText("Channel context not retained", { exact: true }).count(), 0);
     if (state === "blocked") assert.equal(await page.getByRole("button", { name: "Seek to Interval 2", exact: true }).isDisabled(), true);
+    if (state === "natural-loop") {
+      await page.setViewportSize({ width: 390, height: 1000 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.screenshot({ path: join(outputDir, "natural-loop-mobile.png"), fullPage: true });
+    }
     if (state === "unauthorized" || state === "unavailable") {
       mode = "ready"; await page.getByRole("button", { name: "Retry review" }).click();
       await page.getByRole("heading", { name: topic }).waitFor();

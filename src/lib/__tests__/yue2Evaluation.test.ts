@@ -509,7 +509,8 @@ async function main(): Promise<void> {
     });
     await test("duration is bound independently of prose and retained v1 jobs remain readable", () => {
       assert.ok(arrangementRequest.job.schema_version === 2);
-      const { requested_duration_sec: duration, ...legacyFields } = arrangementRequest.job;
+      const { requested_duration_sec: duration, source_duration_policy: policy, ...legacyFields } = arrangementRequest.job;
+      assert.equal(policy, "exact");
       const legacy = { ...arrangementRequest, job: { ...legacyFields, schema_version: 1 as const } };
       const rehash = (value: typeof arrangementRequest) => {
         const { job_id, ...body } = value.job;
@@ -540,6 +541,22 @@ async function main(): Promise<void> {
       assert.throws(() => validateYuE2EvaluationRequest({ ...scored, job: { ...scored.job, abc: `${symbolicScore}\n` } }));
       for (const score of [" ", "a".repeat(32001), "\u00e9".repeat(16001)]) {
         assert.throws(() => createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true, symbolicScore: score }));
+      }
+    });
+    await test("natural source timing is restricted to repeat-playback primary and meditation music", () => {
+      for (const role of ["primary_music", "meditation_bed", "narration_bed", "short_form_bed"] as const) {
+        for (const playback of ["once", "repeat"] as const) {
+          const accepted = createAcceptedMusicArrangement({ ownerId: arrangement.ownerId, channelId: arrangement.channelId,
+            runId: arrangement.runId, topic: arrangement.topic, sourceBrief: {},
+            arrangement: { ...arrangement.arrangement, role, playback } });
+          const scoped = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
+          assert.ok(scoped.job.schema_version === 2);
+          const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed");
+          assert.equal(scoped.job.source_duration_policy, natural ? "natural_loop" : "exact");
+          assert.deepEqual(validateYuE2EvaluationRequest(scoped), scoped);
+          if (!natural) assert.throws(() => validateYuE2EvaluationRequest({ ...scoped,
+            job: { ...scoped.job, source_duration_policy: "natural_loop" } }), /accepted arrangement/);
+        }
       }
     });
     await test("tampered arrangement, fingerprint and independently rehashed style fail before any HTTP or output directory", async () => {
