@@ -253,3 +253,49 @@ previous reservations inside the existing $1 authorization; it is not an invoice
 The provider confirmed shutdown after artifact retrieval and the guard is inactive.
 Three CPU comparison tests and Ruff pass; the GPU result supplies the actual
 decoder-equivalence evidence those CPU tests cannot provide.
+
+### Integrated Single-Pass Decoder Validated
+
+Runtime `d912fdd72b6aad0d382ca3a4ac0a9b40856cae92` was built from an isolated,
+tracked-input-only worktree on the RTX 3090 host. Independently inspected image:
+`sha256:a84565ccc0b6efda2f81d8963d27338555d08db91c01cf07ca637989326d7be6`.
+Image project, lane and revision labels match. Model/source pins, precision,
+sampling, tiling and persistent volumes are unchanged.
+
+The revised probe first called the runtime's `decode_with_source` with a lazy
+VAE, then compared against the official decoder and retained reference. It passed:
+every clamped sample matches, and every raw float also matches the earlier
+pre-clamp diagnostic. The adapter took 6.911241 seconds including decoder loading;
+the complete comparison took 20.414217 seconds. Decoder file SHA-256:
+`eb8d6320517e15940f2f5603d99d7953c4ba91109d0a5c527c3c242c44fc8e16`.
+Evidence: `/var/lib/youtube-studio-render/operator/yue2-integrated-decoder-evidence-20260921/`.
+
+The normal supervisor then completed a fresh job,
+`studio-lofi-yue2-3090-integrated-20260921-01`, with the same score, style and seed.
+Its semantic and latent arrays match the preceding evaluation exactly. The
+copied ledger, all artifacts and supervision receipts passed independent runtime
+inspection. Its raw samples match the independently verified decoder output;
+clamping them reproduces the official samples exactly.
+
+- Native output remains 1,749,056 frames / 36.438667 seconds, 48 kHz stereo FLOAT.
+- One VAE pass retains both unclipped and official audio. No gain is applied.
+- `headroom-status.json` binds the decoder and raw WAV hashes, records the 474
+  over-range samples and peak 1.1233507395, and explicitly denies production approval.
+- Generation-stage time: 28.199562 seconds; VAE stage: 4.089125 seconds.
+- Supervisor: 38.879906 seconds; configured-rate allocation estimate USD 0.001944,
+  excluding rental idle/build/transfer and not a provider invoice.
+- Generated raw WAV SHA-256:
+  `61125a71f620913d550615530a875dfc330aeb72f41005e0671df68483ac8b67`.
+  WAV file hashes may differ between exports despite identical sample arrays;
+  both file integrity and actual sample equality were checked separately.
+
+Generation evidence:
+`/var/lib/youtube-studio-render/operator/yue2-integrated-generation-evidence-20260921/`.
+The Studio build pin now selects this validated runtime. This is not a production
+service deployment: the HTTP client still retrieves the official clamped audio.
+The next integration must transport the verified raw source and mastering lineage
+to the shared music path. Musical quality, channel personality, seam suitability
+and exact final video duration remain unqualified. No thumbnail work was done.
+The provider confirmed shutdown after retrieval; the external guard is inactive.
+The five-cent window reservation preserves all earlier reservations within the
+existing $1 authorization.
