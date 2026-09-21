@@ -48,6 +48,28 @@ async function main() {
   const report = await inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org, maximumHourlyCents: 18, fetchImpl });
   assert.equal(report.existingVm, null); assert.ok(!JSON.stringify(report).includes(key));
   assert.deepEqual(calls, ["/v1/whoami", "/v1/gpu-availability", "/v1/pricing", `/v1/orgs/${org}/vms`]);
+  for (const scopes of [["clusters:read", "clusters:write"], []]) {
+    const observed: string[] = [];
+    const actualAccess: typeof fetch = async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      observed.push(path);
+      return path === "/v1/whoami" ? Response.json({ organizationId: org, scopes }) : fetchImpl(url, init);
+    };
+    const accepted = await inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org,
+      maximumHourlyCents: 18, fetchImpl: actualAccess });
+    assert.deepEqual(accepted.reportedScopes, scopes);
+    assert.equal(accepted.readAccessVerified, true);
+    assert.ok(observed.includes(`/v1/orgs/${org}/vms`), "scope metadata never substitutes for actual VM reads");
+    assert.equal(accepted.authorizedToCreate, false, "successful reads cannot grant writes or spending");
+  }
+  for (const deniedPath of ["/v1/gpu-availability", "/v1/pricing", `/v1/orgs/${org}/vms`]) {
+    await assert.rejects(() => inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org,
+      maximumHourlyCents: 18, fetchImpl: async (url, init) => new URL(String(url)).pathname === deniedPath
+        ? new Response(key, { status: 403 }) : fetchImpl(url, init) }), error => {
+      assert.ok(error instanceof Error && error.message.includes("HTTP 403") && !error.message.includes(key));
+      return true;
+    });
+  }
   await assert.rejects(() => inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org,
     maximumHourlyCents: 18, fetchImpl: async () => new Response(key, { status: 401 }) }), error => {
     assert.ok(error instanceof Error && !error.message.includes(key)); return true;

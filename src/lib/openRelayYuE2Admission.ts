@@ -72,7 +72,9 @@ export async function inspectYuE2OpenRelayAdmission(options: {
   }
   const identity = z.object({ organizationId: z.literal(organizationId), scopes: z.array(z.string()) })
     .parse(await read("/v1/whoami"));
-  if (!identity.scopes.includes("vms:read")) throw new Error("OpenRelay identity lacks VM read access");
+  // Scope labels are advisory: cluster-scoped keys can currently read VM APIs.
+  // Let the authenticated endpoints enforce access instead of guessing from
+  // labels. Successful reads never establish write authority or spend consent.
   const liveAvailability = await read("/v1/gpu-availability");
   const pricing = await read("/v1/pricing");
   const plan = planYuE2OpenRelayAdmission({ availability: liveAvailability, pricing,
@@ -93,5 +95,6 @@ export async function inspectYuE2OpenRelayAdmission(options: {
   }
   const existing = vms.filter(vm => vm.name === plan.shape.name);
   if (existing.length > 1) throw new Error("Multiple Studio YuE2 VMs require reconciliation");
-  return { ...plan, organizationId, observedAt: new Date().toISOString(), existingVm: existing[0] ?? null };
+  return { ...plan, organizationId, reportedScopes: identity.scopes, readAccessVerified: true as const,
+    observedAt: new Date().toISOString(), existingVm: existing[0] ?? null };
 }

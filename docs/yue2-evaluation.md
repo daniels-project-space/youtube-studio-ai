@@ -686,6 +686,15 @@ evidence, duplicate matches, wrong account, and insufficient joint resources
 refuse a plan. No create/restart/stop or inference endpoint is called. Keys and
 raw provider error bodies are never printed.
 
+The 11:24 UTC recheck exposed a scope-label false rejection: the canonical key
+reported `clusters:read`/`clusters:write`, while the real availability, pricing,
+VM inventory and SSH-key endpoints all returned HTTP 200. Preflight now records
+the reported labels but establishes read access through the actual authenticated
+GETs. A wrong organization, HTTP denial or invalid response still fails. Read
+access is not write authority or spend authorization; all creation/qualification
+flags stay false. The Studio-scoped vault copy also passed independently. No
+key was replaced or weakened to work around a server-side denial.
+
 The live 10:55 UTC check found one compatible offer at 18 cents/hour, and no
 existing Studio YuE2 VM. Its retained report is
 `/var/lib/youtube-studio-render/builds/yue2-373e139/openrelay-preflight.json`.
