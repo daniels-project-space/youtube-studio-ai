@@ -416,7 +416,38 @@ decode additionally measures per-channel sample peak, RMS, DC offset, non-finite
 values, nonzero samples, samples at/above full scale and consecutive full-scale
 runs. Digital silence, constant signals, dead stereo channels, non-finite data,
 and full-scale samples require review. This is not a claim that every full-scale
-sample is audibly clipped, and it does not replace true-peak measurement.
+sample is audibly clipped; sample counts alone cannot detect intersample overload.
+
+The YuE reader now opts into FFmpeg's `ebur128=peak=true` meter on a parallel
+analysis branch in the same decoder process. Its internally oversampled signal
+goes only to a null sink; the raw native-sample branch and stored WAV are unchanged.
+This uses the existing process deadline, decoded-byte ceiling, 64 KiB diagnostic
+bound and hash-keyed analysis cache, with no extra worker job, R2 write or decoded
+output file. It adds CPU work inside that process; no CPU/billing reduction is
+claimed. Other callers retain sample-only behavior unless explicitly opted in.
+See [FFmpeg's ebur128 reference](https://ffmpeg.org/ffmpeg-filters.html#ebur128)
+and [the final-summary implementation](https://ffmpeg.org/doxygen/7.1/f__ebur128_8c_source.html).
+
+The final true-peak summary has 0.1 dB resolution, exposed alongside the reading.
+A reported value at or above 0.0 dBTP requires review, conservatively including
+the rounding interval around zero; this is not a universal mastering target or
+a claim of audible clipping. Missing/duplicate summaries, invalid samples or a
+reading below the independently measured native sample peak beyond rounding
+tolerance are unavailable and block review. Negative infinity is represented as
+digital silence only when the native decoder independently confirms every sample
+is zero. A measured result removes `true_peak` from unresolved checks, but never
+grants production approval or certifies the subsequent mix/encoded delivery.
+
+21 September offline evidence includes a 12 kHz phase-offset FLOAT fixture whose
+stored samples stay below full scale but whose measured true peak exceeds it.
+The old sample-only check accepts that counterexample; the new meter flags it,
+and the actual retained-candidate reader blocks a duration-correct 60-second
+version without writes or worker calls. Clean tone, silence, nonfinite input,
+partial tails, absent/duplicate/incoherent meter records and native-byte identity
+are also covered. Real Chromium playback/seek and desktop/mobile/enlarged-text
+review checks pass with synthetic audio; desktop/mobile screenshots were inspected
+at `/tmp/yue-review-browser-safsFv`. This is technical regression evidence, not a
+real YuE music audition or a production deployment.
 
 The same native decode measures an equal-weight mono fold-down, with finite
 frame count, nonzero frame count, peak and RMS. Complete cancellation of varying
@@ -433,7 +464,7 @@ streams rather than retaining a second decoded file, and enforces the exact
 probed sample count, a 256 MiB decode ceiling, a 30-second deadline and bounded
 diagnostics. The review runtime needs FFmpeg as well as FFprobe.
 
-True peak, perceptual artifacts, unwanted
+Perceptual artifacts, unwanted
 vocals, channel-personality fit, arrangement fidelity, repetition, ending and
 listening quality remain unresolved, not invented passing scores. New opt-in
 composer outputs retain `music-review-context/v1`: the exact prompt context

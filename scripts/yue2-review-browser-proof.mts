@@ -25,7 +25,8 @@ for (let frame = 0; frame < frames; frame++) {
 }
 const audioPath = join(outputDir, "synthetic-tone.wav");
 await writeFile(audioPath, wav);
-const signal = await measureNativeAudioSignal({ path: audioPath, sampleRateHz: 48000, channels: 2, expectedFrames: frames });
+const signal = await measureNativeAudioSignal({ path: audioPath, sampleRateHz: 48000, channels: 2, expectedFrames: frames, measureTruePeak: true });
+assert.equal(signal.truePeak?.status, "measured");
 const topic = "A quiet horizon: nocturnal focus";
 const review: YuE2CandidateReview = {
   candidateSha256: "a".repeat(64), jobId: "synthetic-review", nativeWavUrl: "/native.wav",
@@ -42,7 +43,7 @@ const review: YuE2CandidateReview = {
   allocation: { allocatedCostUsdMicros: 1201, providerBilledCostUsdMicros: null },
   quality: { status: "needs_audition", requestedDurationSec: 12, actualDurationSec: 12, durationMatches: true,
     nativeFormatVerified: true, signal, productionApproved: false,
-    unresolved: ["true_peak", "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"] },
+    unresolved: ["perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"] },
 };
 const require = createRequire(import.meta.url);
 const esbuild = require(require.resolve("esbuild", { paths: [require.resolve("tsx")] })) as {
@@ -137,6 +138,7 @@ try {
     assert.ok(played, "native WAV decodes, seeks and plays");
     await page.evaluate((size) => { document.documentElement.style.fontSize = `${size}px`; }, font);
     await page.getByText("Signal measurements", { exact: true }).click();
+    assert.ok(await page.getByText(`${signal.truePeak!.dbtp!.toFixed(1)} dBTP`, { exact: true }).isVisible());
     await page.getByText("Unresolved checks and provenance", { exact: true }).click();
     await page.getByText("Record audition", { exact: true }).click();
     const form = page.getByRole("form", { name: "YuE audition record" });

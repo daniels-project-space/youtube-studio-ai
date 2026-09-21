@@ -158,7 +158,7 @@ async function probeAudio(audio: Uint8Array, completion: YuE2VerifiedCompletion,
       await writeFile(path, audio, { mode: 0o600, flag: "wx" });
       await probeYuE2NativeWav(path, completion.result, audio.byteLength);
       return analyzeSignal ? await measureNativeAudioSignal({
-        path, sampleRateHz: 48000, channels: 2, expectedFrames: completion.result.frames,
+        path, sampleRateHz: 48000, channels: 2, expectedFrames: completion.result.frames, measureTruePeak: true,
       }) : null;
     } finally { await rm(directory, { recursive: true, force: true }); }
   };
@@ -257,7 +257,8 @@ export async function readDurableYuE2Candidate(scope: { ownerId: string; channel
         durationMatches, nativeFormatVerified: true as const,
         signal,
         productionApproved: false as const,
-        unresolved: ["true_peak", "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
+        unresolved: [...(!signal.truePeak || signal.truePeak.status === "unavailable" ? ["true_peak"] : []),
+          "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
       },
     };
   } catch {

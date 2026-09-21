@@ -316,6 +316,8 @@ async function main() {
     assert.deepEqual(result.quality.signal.reviewReasons, ["digital_silence"]);
     assert.equal(result.quality.signal.frames, 4800);
     assert.equal(result.quality.signal.longestQuietWindowRunSec, 0.1);
+    assert.equal(result.quality.signal.truePeak?.status, "digital_silence");
+    assert.equal(result.quality.unresolved.includes("true_peak"), false);
     assert.ok(result.quality.unresolved.includes("channel_personality_fit"));
     assert.deepEqual(result.request.acceptedArrangement.reviewContext, request.acceptedArrangement.reviewContext);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
@@ -380,6 +382,27 @@ async function main() {
     assert.equal(result.quality.status, "blocked");
     assert.deepEqual(result.quality.signal.reviewReasons, ["mono_cancellation_requires_review"]);
     assert.equal(result.quality.signal.monoFoldDown.rmsAmplitude, 0);
+    assert.equal(result.quality.productionApproved, false);
+    assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  await test("duration-correct intersample overload blocks review despite no full-scale native samples", async () => {
+    current.audio = wav(60 * 48000);
+    for (let frame = 0; frame < 60 * 48000; frame++) {
+      const sample = 1.2 * Math.sin(2 * Math.PI * 12000 * frame / 48000 + Math.PI / 4);
+      current.audio.writeFloatLE(sample, 44 + frame * 8);
+      current.audio.writeFloatLE(sample, 48 + frame * 8);
+    }
+    await run(args()); current.offline = true;
+    const before = [current.calls.length, current.writes.length, current.authorizations];
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.quality.durationMatches, true);
+    assert.equal(result.quality.signal.samplesAtOrAboveFullScale, 0);
+    assert.equal(result.quality.signal.truePeak?.status, "measured");
+    assert.ok(result.quality.signal.truePeak!.dbtp! > 0);
+    assert.equal(result.quality.status, "blocked");
+    assert.deepEqual(result.quality.signal.reviewReasons, ["true_peak_at_or_near_full_scale_requires_review"]);
+    assert.equal(result.quality.unresolved.includes("true_peak"), false);
     assert.equal(result.quality.productionApproved, false);
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });

@@ -26,12 +26,19 @@ export type NativeAudioSignal = {
     finiteSamples: number;
     nonZeroSamples: number;
   }>;
+  truePeak?: {
+    method: "ffmpeg_ebur128_oversampled";
+    status: "measured" | "digital_silence" | "unavailable";
+    dbtp: number | null;
+    resolutionDb: 0.1;
+  };
   reviewReasons: string[];
 };
 
-/** Full-file signal measurements, not an aesthetic score or a true-peak meter. */
+/** Full-file signal measurements; optional oversampled metering never repairs audio. */
 export async function measureNativeAudioSignal(input: {
   path: string; sampleRateHz: number; channels: number; expectedFrames: number;
+  measureTruePeak?: boolean;
 }): Promise<NativeAudioSignal> {
   const { path, sampleRateHz, channels, expectedFrames } = input;
   const expectedBytes = expectedFrames * channels * 4;
@@ -54,6 +61,7 @@ export async function measureNativeAudioSignal(input: {
   const quietAmplitude = 10 ** (-60 / 20);
   let windowPeak = 0, framesInWindow = 0, windows = 0, quietWindows = 0;
   let quietFrames = 0, longestQuietFrames = 0;
+  const diagnostics: Buffer[] = [];
   function finishWindow() {
     if (!framesInWindow) return;
     windows++;
@@ -114,12 +122,15 @@ export async function measureNativeAudioSignal(input: {
     carry = Buffer.from(bytes.subarray(completeBytes));
   }
   await new Promise<void>((resolve, reject) => {
-    // No resampling, remixing, normalisation or repair: inspect the native
-    // samples. The caller separately verifies the container's rate/channels.
+    // Keep raw sample inspection on its own unchanged output. The optional
+    // parallel meter oversamples internally but writes only to the null sink.
     // FFmpeg is installed by the runtime, not bundled from project files.
     const child = spawn(/* turbopackIgnore: true */ process.env.FFMPEG_BIN ?? "ffmpeg", [
-      "-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1", "-i", path,
+      "-nostdin", "-hide_banner", "-nostats", "-loglevel", input.measureTruePeak ? "info" : "error", "-threads", "1", "-i", path,
+      ...(input.measureTruePeak ? ["-filter_complex_threads", "1", "-filter_complex",
+        "[0:a:0]ebur128=peak=true:framelog=verbose[truepeak]"] : []),
       "-map", "0:a:0", "-vn", "-sn", "-dn", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1",
+      ...(input.measureTruePeak ? ["-map", "[truepeak]", "-c:a", "pcm_f64le", "-f", "null", "-"] : []),
     ], { stdio: ["ignore", "pipe", "pipe"] });
     let failure: Error | undefined;
     let errorBytes = 0;
@@ -135,6 +146,7 @@ export async function measureNativeAudioSignal(input: {
     child.stderr.on("data", (chunk: Buffer) => {
       errorBytes += chunk.length;
       if (errorBytes > 65536) stop("Native signal decoder exceeded its diagnostic bound");
+      else if (input.measureTruePeak) diagnostics.push(chunk);
     });
     child.once("error", () => { failure ??= new Error("Native signal decoder unavailable"); });
     child.once("close", (code) => {
@@ -156,6 +168,24 @@ export async function measureNativeAudioSignal(input: {
     channelStats.some((channel) => channel.minimum !== channel.maximum)) {
     reviewReasons.push("mono_cancellation_requires_review");
   }
+  let truePeak: NativeAudioSignal["truePeak"];
+  if (input.measureTruePeak) {
+    // FFmpeg's final summary is rounded to 0.1 dB. Require one complete meter
+    // summary; a missing/reinitialized/invalid meter is not evidence of headroom.
+    const readings = [...Buffer.concat(diagnostics).toString("utf8")
+      .matchAll(/True peak:\s*\r?\n\s*Peak:\s*(-?(?:\d+(?:\.\d+)?|inf))\s+dBFS/gu)];
+    const reading = readings.length === 1 ? readings[0][1] : undefined;
+    const silent = channelStats.every(channel => channel.finite === expectedFrames && channel.nonZero === 0);
+    const dbtp = reading !== undefined && reading !== "-inf" ? Number(reading) : NaN;
+    const samplePeakDb = 20 * Math.log10(Math.max(...channelStats.map(channel => channel.peak)));
+    const measured = !nonFiniteSamples && Number.isFinite(dbtp) && dbtp + 0.051 >= samplePeakDb;
+    truePeak = { method: "ffmpeg_ebur128_oversampled", resolutionDb: 0.1,
+      status: measured ? "measured"
+        : !nonFiniteSamples && silent && reading === "-inf" ? "digital_silence" : "unavailable",
+      dbtp: measured ? dbtp : null };
+    if (truePeak.status === "unavailable") reviewReasons.push("true_peak_measurement_unavailable");
+    else if (truePeak.dbtp !== null && truePeak.dbtp >= 0) reviewReasons.push("true_peak_at_or_near_full_scale_requires_review");
+  }
   return {
     version: "native-audio-signal/v1", frames: expectedFrames, sampleRateHz, channels,
     nonFiniteSamples, samplesAtOrAboveFullScale, maximumConsecutiveFullScaleSamples,
@@ -172,6 +202,7 @@ export async function measureNativeAudioSignal(input: {
       dcOffset: channel.finite ? channel.sum / channel.finite : null,
       finiteSamples: channel.finite, nonZeroSamples: channel.nonZero,
     })),
+    ...(truePeak ? { truePeak } : {}),
     reviewReasons,
   };
 }

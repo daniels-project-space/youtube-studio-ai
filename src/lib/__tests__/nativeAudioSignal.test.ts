@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
 
 const sampleRateHz = 48000, channels = 2, frames = 48000;
-function wav(sample: (frame: number, channel: number) => number) {
-  const bytes = Buffer.alloc(44 + frames * channels * 4);
+function wav(sample: (frame: number, channel: number) => number, frameCount = frames) {
+  const bytes = Buffer.alloc(44 + frameCount * channels * 4);
   bytes.write("RIFF"); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
   bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(3, 20); bytes.writeUInt16LE(channels, 22);
   bytes.writeUInt32LE(sampleRateHz, 24); bytes.writeUInt32LE(sampleRateHz * channels * 4, 28);
   bytes.writeUInt16LE(channels * 4, 32); bytes.writeUInt16LE(32, 34);
-  bytes.write("data", 36); bytes.writeUInt32LE(frames * channels * 4, 40);
-  for (let frame = 0; frame < frames; frame++) for (let channel = 0; channel < channels; channel++) {
+  bytes.write("data", 36); bytes.writeUInt32LE(frameCount * channels * 4, 40);
+  for (let frame = 0; frame < frameCount; frame++) for (let channel = 0; channel < channels; channel++) {
     bytes.writeFloatLE(sample(frame, channel), 44 + (frame * channels + channel) * 4);
   }
   return bytes;
@@ -77,6 +77,37 @@ async function main() {
     result = await analyze((frame) => tone(frame) / 10000);
     assert.deepEqual(result.reviewReasons, [], "very quiet music is not automatically bad for every channel role");
     assert.equal(result.quietWindowFraction, 1);
+    const measuredTone = await analyze(tone);
+    const peakTone = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+    assert.equal(peakTone.truePeak?.status, "measured");
+    assert.ok(peakTone.truePeak!.dbtp! < -13 && peakTone.truePeak!.dbtp! > -15);
+    const { truePeak: _peak, ...rawTone } = peakTone;
+    void _peak;
+    assert.deepEqual(rawTone, measuredTone, "parallel metering must not change any native sample measurement");
+    const intersampleBytes = wav(frame => 1.2 * Math.sin(2 * Math.PI * 12000 * frame / sampleRateHz + Math.PI / 4));
+    await writeFile(path, intersampleBytes);
+    const sampleOnly = await measureNativeAudioSignal(input);
+    assert.equal(sampleOnly.samplesAtOrAboveFullScale, 0);
+    assert.deepEqual(sampleOnly.reviewReasons, [], "counterexample passes the previous sample-only gate");
+    const intersample = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+    assert.equal(intersample.truePeak?.status, "measured");
+    assert.ok(intersample.truePeak!.dbtp! > 0, "oversampled meter must catch a peak hidden between stored samples");
+    assert.deepEqual(intersample.reviewReasons, ["true_peak_at_or_near_full_scale_requires_review"]);
+    assert.deepEqual(await readFile(path), intersampleBytes, "meter never normalizes or rewrites the source");
+    await writeFile(path, wav(frame => frame === 4800 ? 0.8 : tone(frame), 4801));
+    const tailPeak = await measureNativeAudioSignal({ ...input, expectedFrames: 4801, measureTruePeak: true });
+    assert.ok(tailPeak.truePeak?.status === "unavailable" || tailPeak.truePeak!.dbtp! + 0.051 >= 20 * Math.log10(0.8),
+      "a peak in a partial final meter window cannot be certified below the independently measured native peak");
+    await analyze(() => 0);
+    const silentPeak = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+    assert.equal(silentPeak.truePeak?.status, "digital_silence");
+    assert.equal(silentPeak.truePeak?.dbtp, null, "JSON must not coerce negative infinity into a misleading numeric zero");
+    assert.deepEqual(silentPeak.reviewReasons, ["digital_silence"]);
+    await analyze(() => NaN);
+    const invalidPeak = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+    assert.equal(invalidPeak.truePeak?.status, "unavailable");
+    assert.ok(invalidPeak.reviewReasons.includes("true_peak_measurement_unavailable"));
+    await analyze(tone);
     await assert.rejects(measureNativeAudioSignal({ ...input, expectedFrames: frames - 1 }), /frame bound/);
     await assert.rejects(measureNativeAudioSignal({ ...input, expectedFrames: frames + 1 }), /frame count/);
     await assert.rejects(measureNativeAudioSignal({ ...input, expectedFrames: Number.MAX_SAFE_INTEGER }), /bounded/);
@@ -94,6 +125,11 @@ async function decoderFailureBoundaries(directory: string) {
 const fs = require("node:fs");
 fs.writeFileSync(process.env.NATIVE_SIGNAL_FIXTURE_PID, String(process.pid));
 const mode = process.env.NATIVE_SIGNAL_FIXTURE_MODE;
+if (mode.startsWith("meter-")) {
+  const value = mode === "meter-silent" ? "-inf" : mode === "meter-low" ? "-40.0" : mode === "meter-ceiling" ? "0.0" : "-6.0";
+  const summary = "True peak:\\n    Peak: " + value + " dBFS\\n";
+  process.stderr.write(mode === "meter-duplicate" ? summary + summary : summary);
+}
 const audio = Buffer.alloc(64);
 for (let i = 0; i < 16; i++) audio.writeFloatLE(Math.sin(i) / 4, i * 4);
 if (mode === "diagnostics") { process.stderr.write(Buffer.alloc(65537)); setInterval(() => {}, 1000); }
@@ -116,6 +152,23 @@ else {
     const measured = await measureNativeAudioSignal(input);
     assert.equal(measured.channelMeasurements[0].finiteSamples, 8);
     assert.deepEqual(measured.reviewReasons, []);
+    const missingMeter = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+    assert.equal(missingMeter.truePeak?.status, "unavailable");
+    assert.deepEqual(missingMeter.reviewReasons, ["true_peak_measurement_unavailable"], "successful PCM decode alone cannot prove true peak");
+    for (const mode of ["meter-valid", "meter-ceiling", "meter-duplicate", "meter-silent", "meter-low"]) {
+      process.env.NATIVE_SIGNAL_FIXTURE_MODE = mode;
+      const result = await measureNativeAudioSignal({ ...input, measureTruePeak: true });
+      if (mode === "meter-valid") {
+        assert.equal(result.truePeak?.dbtp, -6); assert.deepEqual(result.reviewReasons, []);
+      } else if (mode === "meter-ceiling") {
+        assert.equal(result.truePeak?.dbtp, 0);
+        assert.deepEqual(result.reviewReasons, ["true_peak_at_or_near_full_scale_requires_review"]);
+      } else {
+        assert.equal(result.truePeak?.status, "unavailable"); assert.equal(result.truePeak?.dbtp, null);
+        assert.deepEqual(result.reviewReasons, ["true_peak_measurement_unavailable"]);
+      }
+    }
+    process.env.NATIVE_SIGNAL_FIXTURE_MODE = "bytes";
     const expectedMono = Array.from({ length: 8 }, (_, i) =>
       (Math.fround(Math.sin(i * 2) / 4) + Math.fround(Math.sin(i * 2 + 1) / 4)) / 2);
     assert.equal(measured.monoFoldDown.finiteFrames, 8);

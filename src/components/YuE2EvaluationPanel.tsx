@@ -115,6 +115,8 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <dl className={styles.facts}>
         <div><dt>Invalid samples</dt><dd>{signal.nonFiniteSamples}</dd></div>
         <div><dt>Full-scale samples</dt><dd>{signal.samplesAtOrAboveFullScale}</dd></div>
+        <div><dt>True peak (0.1 dB resolution)</dt><dd>{signal.truePeak?.status === "measured"
+          ? `${signal.truePeak.dbtp?.toFixed(1)} dBTP` : signal.truePeak?.status === "digital_silence" ? "Digital silence" : "Unknown"}</dd></div>
         <div><dt>Longest quiet run</dt><dd>{signal.longestQuietWindowRunSec.toFixed(3)} s</dd></div>
         <div><dt>Mono fold-down RMS</dt><dd>{measured(signal.monoFoldDown.rmsAmplitude)}</dd></div>
         {signal.channelMeasurements.map((channel, index) => <div key={index}>
