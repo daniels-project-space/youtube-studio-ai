@@ -316,7 +316,7 @@ async function readSidecar(key: string, audioKey: string, manifest: PlanWeekPrep
   let bytes: Uint8Array;
   try { bytes = await getObjectBytes(key, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
   const prepared = assertPlanWeekPreparedNarrationBinding({ prepared: decodePreparedMetadata(bytes), manifest });
-  const audio = await getObjectBytes(audioKey);
+  const audio = await getObjectBytes(audioKey, undefined, { maxBytes: prepared.audioByteLength, timeoutMs: 300_000 });
   if (audio.byteLength !== prepared.audioByteLength || sha256BytesHex(audio) !== prepared.audioSha256) {
     throw new Error("weekly prepared narration retained audio failed its immutable receipt check");
   }
@@ -417,7 +417,6 @@ export const planWeekPreparedNarrationTask = task({
     if (estimatedUpperCost > payload.maxCostUsd) {
       throw new Error(`weekly prepared narration conservative cost ${estimatedUpperCost} exceeds its ${payload.maxCostUsd} USD ceiling`);
     }
-    if (provider === "qwen3") await bootstrapSecrets(() => undefined, { services: ["cloudflare"] });
     if (provider === "fish") await bootstrapSecrets(() => undefined, { services: ["fish-audio"] });
     if (provider === "elevenlabs") await bootstrapSecrets(() => undefined, { services: ["elevenlabs"] });
 
@@ -510,7 +509,7 @@ export const planWeekPreparedNarrationTask = task({
       }
       const audioCreated = await persistCreateOnly(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-narration": "v1" });
       if (!audioCreated) {
-        const winner = await getObjectBytes(audioKey);
+        const winner = await getObjectBytes(audioKey, undefined, { maxBytes: finalBytes.byteLength, timeoutMs: 300_000 });
         if (sha256BytesHex(winner) !== audioSha256) throw new Error("weekly prepared narration audio collision has different bytes");
       }
       const prepared: PlanWeekPreparedNarration = {

@@ -385,7 +385,7 @@ export const planWeekPreparedImagesTask = task({
   run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
     const payload = assertPlanWeekPreparedImagesArgs(rawPayload);
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "novita"],
+      services: ["cloudflare"],
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
@@ -410,6 +410,7 @@ export const planWeekPreparedImagesTask = task({
       ...(shot.seed === undefined ? {} : { seed: shot.seed }),
       ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
     }));
+    await bootstrapSecrets(() => undefined, { services: ["novita"] });
     const result = await renderImages({
       prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
       shots,

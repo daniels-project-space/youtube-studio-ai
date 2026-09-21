@@ -212,8 +212,8 @@ export const planWeekPreparedScriptTask = task({
   run: async (rawPayload: PlanWeekPreparedScriptArgs) => {
     const payload = assertPlanWeekPreparedScriptArgs(rawPayload);
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "openrouter"],
-      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "OPENROUTER_API_KEY"],
+      services: ["cloudflare"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
     assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script");
@@ -229,6 +229,7 @@ export const planWeekPreparedScriptTask = task({
       return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
     }
 
+    await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
     const usage = createModelUsageScope();
     let script: Script;
     await usage.run(async () => {

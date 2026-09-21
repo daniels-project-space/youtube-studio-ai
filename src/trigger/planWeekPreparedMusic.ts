@@ -239,7 +239,7 @@ async function readSidecar(sidecarKey: string, audioKey: string, manifest: PlanW
   let bytes: Uint8Array;
   try { bytes = await getObjectBytes(sidecarKey, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
   const prepared = assertPlanWeekPreparedMusicBinding({ prepared: decodePreparedMetadata(bytes), manifest });
-  const audio = await getObjectBytes(audioKey);
+  const audio = await getObjectBytes(audioKey, undefined, { maxBytes: prepared.audioByteLength, timeoutMs: 300_000 });
   if (audio.byteLength !== prepared.audioByteLength || sha256BytesHex(audio) !== prepared.audioSha256) throw new Error("weekly prepared music retained audio failed its immutable receipt check");
   return prepared;
 }
@@ -280,7 +280,7 @@ export const planWeekPreparedMusicTask = task({
     const generations = provider === "suno" ? Math.ceil(trackCount / 2) : 1;
     const estimatedCost = PRICE.musicTrackUsd * generations;
     if (!Number.isFinite(estimatedCost) || estimatedCost > payload.maxCostUsd) throw new Error(`weekly prepared music conservative cost ${estimatedCost} exceeds its ${payload.maxCostUsd} USD ceiling`);
-    await bootstrapSecrets(() => undefined, { services: ["cloudflare", provider === "suno" ? "suno" : "mureka"] });
+    await bootstrapSecrets(() => undefined, { services: [provider === "suno" ? "suno" : "mureka"] });
 
     const workDir = await mkdtemp(join(tmpdir(), "plan-week-music-"));
     try {
@@ -316,7 +316,7 @@ export const planWeekPreparedMusicTask = task({
       const audioSha256 = sha256BytesHex(finalBytes);
       const audioCreated = await persistCreateOnly(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-music": "v1" });
       if (!audioCreated) {
-        const winner = await getObjectBytes(audioKey);
+        const winner = await getObjectBytes(audioKey, undefined, { maxBytes: finalBytes.byteLength, timeoutMs: 300_000 });
         if (sha256BytesHex(winner) !== audioSha256) throw new Error("weekly prepared music audio collision has different bytes");
       }
       const prepared: PlanWeekPreparedMusic = {

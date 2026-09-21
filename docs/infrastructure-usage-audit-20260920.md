@@ -949,3 +949,45 @@ and four focused companion suites passed (21 test-runner cases, including the
 17 storage-stream cases). The full sweep was not repeated after this fixture-only
 correction. TypeScript, scoped lint and whitespace checks passed. This remains
 partial offline evidence, not a production release or full MVP qualification.
+
+## Batch 23: Reuse prepared assets without generation-provider access
+
+The script producer required OpenRouter credentials before reading its saved
+script, so an unavailable text provider stranded an already-complete result.
+The image producer similarly hydrated Novita before checking retained images.
+Both now bootstrap storage first, verify/reuse the existing receipt, and acquire
+generation-provider credentials only on the fresh-work path. Script generation
+still requires its OpenRouter key; image generation still follows the existing
+Novita admission. Normal idempotent downstream dispatch is retained, not skipped.
+
+Music and narration retained-audio reads now pass the validated receipt's exact
+byte length to the shared streaming reader with a 300-second deadline. Their
+create-only collision reads use the locally generated candidate's exact length
+and the same deadline, before the unchanged SHA-256 comparison. This enforces
+existing identity/size expectations during download instead of only after an
+unbounded allocation. No source is shortened or transformed. Redundant second
+Cloudflare bootstrap calls on fresh music/Qwen paths were removed; successful
+bootstrap was already process-cached, so these removals alone are not claimed as
+saved healthy vault HTTP requests.
+
+A new offline test executes all four real producers with the real bootstrap and
+an unavailable-generation-provider vault fixture. All four restore saved results,
+perform one shared Cloudflare hydration, make no generation call or R2 write,
+and retain the script's downstream narration dispatch. Nine changed/truncated/
+timed-out media cases refuse without purchasing replacements. Fresh script work
+still refuses a missing credential, then reaches one stubbed generation when a
+credential is supplied; fresh image work requests Novita before its stubbed
+render. Temporarily restoring the old script bootstrap order makes this same
+test fail on the missing OpenRouter key; the corrected order is restored.
+Binary fixtures prove integrity and control flow, not artistic/media quality.
+The actual streaming reader's existing 17 cases separately cover cancellation,
+overflow and deadline enforcement; collision-path caller changes are inspected,
+not claimed as new end-to-end concurrent-generation proof.
+
+Ten focused test files passed (26 test-runner cases), including preparation
+bindings, four producer contracts, music-direction preservation, metadata holds,
+image transfer bounds and storage streams. TypeScript, scoped lint and whitespace
+checks passed. The preceding full-suite evidence is not relabelled as a new
+full gate. No thumbnail generation, paid request, deployment, real GPU inference
+or fleet billing measurement occurred. Exactly-once first generation and the
+broader music/MVP qualification remain open.
