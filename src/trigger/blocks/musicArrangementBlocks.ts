@@ -1,6 +1,7 @@
 import {
   createAcceptedMusicArrangement,
   MusicArrangementIntentSchema,
+  MusicSymbolicScoreSchema,
 } from "@/engine/acceptedMusicArrangement";
 import { z } from "zod";
 import {
@@ -15,10 +16,11 @@ import { arrangementComposerReservation, assertArrangementComposerAdmission } fr
 import { createComposerBriefBlock } from "./crewBlocks";
 
 export const ARRANGEMENT_COMPOSER_VERSION = "2.0.0-accepted-arrangement";
+export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.0.0-yue2-score";
 
-export function createArrangementComposerManifest(legacy: ModuleManifest): ModuleManifest {
+export function createArrangementComposerManifest(legacy: ModuleManifest, includeSymbolicScore = false): ModuleManifest {
   if (legacy.id !== "composer_brief") throw new Error("arrangement composer requires composer_brief");
-  const reservation = () => arrangementComposerReservation(agentJsonConfiguration("composer_arrangement").model);
+  const reservation = () => arrangementComposerReservation(agentJsonConfiguration("composer_arrangement").model, includeSymbolicScore);
   const producer = createComposerBriefBlock();
   const block: Block = {
     ...producer,
@@ -29,9 +31,9 @@ export function createArrangementComposerManifest(legacy: ModuleManifest): Modul
         budgetUsd: ctx.budgetUsd, stageBudgetUsd: ctx.stageBudgetUsd,
         beforeDispatch: ctx.assertInlinePaidExecutionLease,
       };
-      assertArrangementComposerAdmission(agentJsonConfiguration("composer_arrangement").model, admission);
+      assertArrangementComposerAdmission(agentJsonConfiguration("composer_arrangement").model, admission, includeSymbolicScore);
       const boundProducer = createComposerBriefBlock((bible, crewContext) =>
-        briefComposerWithArrangement(bible, { ...crewContext, ...(musicIntent ? { musicIntent } : {}) }, admission));
+        briefComposerWithArrangement(bible, { ...crewContext, ...(musicIntent ? { musicIntent } : {}) }, admission, includeSymbolicScore));
       const patch = await boundProducer.run(ctx);
       const brief = patch.musicBrief as { directives: ComposerDirectives };
       const { voiceFx, ...directives } = brief.directives;
@@ -45,9 +47,9 @@ export function createArrangementComposerManifest(legacy: ModuleManifest): Modul
   };
   return {
     ...legacy,
-    version: ARRANGEMENT_COMPOSER_VERSION,
+    version: includeSymbolicScore ? SCORED_ARRANGEMENT_COMPOSER_VERSION : ARRANGEMENT_COMPOSER_VERSION,
     configSchema: legacy.configSchema.and(z.object({ musicIntent: MusicArrangementIntentSchema.optional() }).passthrough()),
-    capabilities: [...legacy.capabilities, "crew.accepted_music_arrangement"],
+    capabilities: [...legacy.capabilities, "crew.accepted_music_arrangement", ...(includeSymbolicScore ? ["crew.symbolic_music_score"] : [])],
     providerProfiles: [{
       id: agentJsonConfiguration("composer_arrangement").model,
       provider: "openrouter", quality: "production", allowFallback: false,
@@ -67,7 +69,8 @@ export function createArrangementComposerManifest(legacy: ModuleManifest): Modul
       ...legacy.produces,
       musicBrief: {
         ...legacy.produces.musicBrief,
-        schema: legacy.produces.musicBrief.schema.and(ComposerBriefWithArrangementSchema),
+        schema: legacy.produces.musicBrief.schema.and(ComposerBriefWithArrangementSchema)
+          .and(includeSymbolicScore ? z.object({ symbolicScore: MusicSymbolicScoreSchema }) : z.unknown()),
       },
     },
     certification: {

@@ -270,7 +270,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
       });
   if (!flags.has("--submit")) {
     console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: runMode ? 1 : 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
-      ...(values["--score-file"] !== undefined ? { symbolicScoreValidation: "runtime_pending" } : {}),
+      ...(request.job.schema_version === 2 && request.job.abc !== undefined ? { symbolicScoreValidation: "runtime_pending" } : {}),
       ...(runMode ? { source: "accepted_studio_run", workerRequests: 0 } : {}),
       ...(durableMode ? { storage: "r2", costStatus: "not_measured" } : {}),
       ...(expectedExecutionPolicy ? { expectedExecutionPolicy,

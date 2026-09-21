@@ -149,11 +149,16 @@ export function createYuE2AcceptedArrangementRequest(input: {
     symbolicScore: Text.refine((value) => value.trim().length > 0).optional(),
   }).strict().parse(input);
   const acceptedArrangement = parsed.arrangement;
+  if (acceptedArrangement.symbolicScore !== undefined && parsed.symbolicScore !== undefined &&
+      acceptedArrangement.symbolicScore !== parsed.symbolicScore) {
+    throw new Error("YuE2 evaluation cannot replace the composer's accepted symbolic score");
+  }
+  const symbolicScore = acceptedArrangement.symbolicScore ?? parsed.symbolicScore;
   const body = {
     schema_version: 2 as const,
     requested_duration_sec: acceptedArrangement.arrangement.requestedDurationSec,
     source_duration_policy: sourceDurationPolicy(acceptedArrangement),
-    ...(parsed.symbolicScore !== undefined ? { abc: parsed.symbolicScore } : {}),
+    ...(symbolicScore !== undefined ? { abc: symbolicScore } : {}),
     style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
     lyrics: "" as const,
     seed: parsed.seed,
@@ -179,6 +184,8 @@ export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluati
   }).strict()]).parse(value);
   if (request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION && (
     request.programFingerprint !== request.acceptedArrangement.fingerprint ||
+    (request.acceptedArrangement.symbolicScore !== undefined &&
+      (request.job.schema_version !== 2 || request.job.abc !== request.acceptedArrangement.symbolicScore)) ||
     (request.job.schema_version === 2 && request.job.requested_duration_sec !== request.acceptedArrangement.arrangement.requestedDurationSec) ||
     (request.job.schema_version === 2 && request.job.source_duration_policy === "natural_loop" &&
       sourceDurationPolicy(request.acceptedArrangement) !== "natural_loop") ||

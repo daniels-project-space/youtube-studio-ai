@@ -77,6 +77,7 @@ export function registerAllBlocks(): void {
   // editor_brief, composer_brief, critic_spec.
   for (const b of CREW_BLOCKS) register(b);
   registerManifestVersion(createArrangementComposerManifest(getManifest("composer_brief")!));
+  registerManifestVersion(createArrangementComposerManifest(getManifest("composer_brief")!, true));
   register(musicArrangementPlan);
   // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
   for (const b of STORY_SPINE_BLOCKS) register(b);

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import Module, { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import type { z } from "zod";
 import type { ShowBible } from "@/engine/creative/types";
 import {
@@ -11,6 +13,7 @@ import { sha256Hex } from "@/lib/sha256";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { arrangementComposerReservation } from "@/lib/arrangementComposerBudget";
 import { openRouterModel } from "@/lib/openRouter";
+import { createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
 
 type AgentRequest = { role: string; prompt: string; maxTokens: number; temperature: number; schema: z.ZodType; beforeDispatch?: () => Promise<void> };
@@ -93,7 +96,7 @@ async function main() {
   const { validatePipeline } = load("@/engine/validate") as typeof import("@/engine/validate");
   const { validateArtifact } = load("@/engine/artifactSchemas") as typeof import("@/engine/artifactSchemas");
   const { composerBriefBlock } = load("../crewBlocks") as typeof import("../crewBlocks");
-  const { ARRANGEMENT_COMPOSER_VERSION, musicArrangementPlan } = load("../musicArrangementBlocks") as typeof import("../musicArrangementBlocks");
+  const { ARRANGEMENT_COMPOSER_VERSION, SCORED_ARRANGEMENT_COMPOSER_VERSION, musicArrangementPlan } = load("../musicArrangementBlocks") as typeof import("../musicArrangementBlocks");
   const { ComposerBriefWithArrangementSchema } = load("@/engine/creative/crew") as typeof import("@/engine/creative/crew");
   _resetBlocks();
   registerAllBlocks();
@@ -283,6 +286,53 @@ async function main() {
   assert.equal(failed.store.acceptedMusicArrangement, undefined);
   assert.ok(failedStages.some((row) => row.status === "failed" && row.cost === fixtureChargeUsd));
   fixtureChargeUsd = undefined;
+  const scored = registry.getManifest("composer_brief", SCORED_ARRANGEMENT_COMPOSER_VERSION)!;
+  assert.ok(scored.capabilities.includes("crew.symbolic_music_score"));
+  assert.ok(!registry.allManifests().includes(scored), "scored composer never replaces a default legacy route");
+  assert.equal(scored.costAndLatency.maxCostUsd, arrangementComposerReservation(openRouterModel("intelligence"), true));
+  assert.ok(scored.costAndLatency.maxCostUsd > selected.costAndLatency.maxCostUsd);
+  const symbolicScore = "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=60\n" +
+    'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"\nV: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\n' +
+    flat.sections.map(section => `% ${section.id}\nV: Vocal\nz32|z32|z32|z32|\nV: Ins\nc32|c32|c32|c32|\n`).join("");
+  const scoredArrangement = { ...flat, requestedDurationSec: 64 };
+  response = { arrangement: scoredArrangement, symbolicScore, duckDb: -15, bedLufs: -20 };
+  const beforeScored = calls.length;
+  await assert.rejects(scored.execute(stageContext()), /stage budget/);
+  assert.equal(calls.length, beforeScored, "legacy text reservation cannot admit the larger scored response");
+  const scoredContext = { ...stageContext(), stageBudgetUsd: scored.costAndLatency.maxCostUsd };
+  const scoredResult = await runPipeline(validatePipeline([
+    { block: "composer_brief", version: SCORED_ARRANGEMENT_COMPOSER_VERSION },
+    { block: "music_arrangement_plan" },
+  ], Object.keys(seedStore)), { ...scoredContext, seedStore, defaultRetries: 0, sink: { upsert: async () => {} } });
+  assert.equal(scoredResult.ok, true, scoredResult.error);
+  assert.equal(calls.length, beforeScored + 1);
+  assert.equal(calls.at(-1)!.maxTokens, 12000);
+  assert.match(calls.at(-1)!.prompt, /No vocals or lyrics/);
+  assert.match(calls.at(-1)!.prompt, /symbolicScore.*complete original YuE2 native ABC/);
+  assert.ok(calls.at(-1)!.prompt.includes(seedStore.persona));
+  assert.ok(calls.at(-1)!.prompt.includes(seedStore.styleGrammar));
+  const scoredAccepted = AcceptedMusicArrangementSchema.parse(scoredResult.store.acceptedMusicArrangement);
+  assert.equal(scoredAccepted.symbolicScore, symbolicScore);
+  const scoredRequest = createYuE2AcceptedArrangementRequest({ arrangement: scoredAccepted, seed: 42, personalCreatorAcknowledged: true });
+  assert.ok(scoredRequest.job.schema_version === 2);
+  assert.equal(scoredRequest.job.abc, symbolicScore);
+  assert.deepEqual(validateYuE2EvaluationRequest(scoredRequest), scoredRequest);
+  if (process.env.YUE2_TEST_RUNTIME) {
+    const runtime = process.env.YUE2_TEST_RUNTIME;
+    const native = spawnSync(join(runtime, ".venv-test/bin/python"), ["-c",
+      "import json,sys; from music_runtime.config import validate_job; job=validate_job(json.load(sys.stdin)); print(json.dumps({'validated':True,'duration':job['requested_duration_sec']}))"], {
+      input: JSON.stringify(scoredRequest.job), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
+      env: { NODE_ENV: "test", PATH: process.env.PATH, PYTHONPATH: join(runtime, "src"), PYTHONDONTWRITEBYTECODE: "1" },
+    });
+    assert.equal(native.status, 0, native.stderr);
+    assert.deepEqual(JSON.parse(native.stdout), { validated: true, duration: 64 });
+  }
+  for (const invalid of [undefined, " ", "x".repeat(32001), "\u00e9".repeat(16001)]) {
+    response = { arrangement: scoredArrangement, ...(invalid === undefined ? {} : { symbolicScore: invalid }), duckDb: -15, bedLufs: -20 };
+    const count = calls.length;
+    await assert.rejects(scored.execute(scoredContext), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+    assert.equal(calls.length, count + 1, "invalid scored output is held, never silently retried or downgraded");
+  }
   response = { musicPrompt: "Legacy prose remains unchanged", duckDb: -12, bedLufs: -22 };
   const legacyOutput = await legacy.execute(stageContext());
   assert.equal((legacyOutput.musicBrief as { musicPrompt: string }).musicPrompt, "Legacy prose remains unchanged");

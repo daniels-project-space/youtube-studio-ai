@@ -10,6 +10,10 @@ function nonblankText(maximum?: number) {
 }
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/u);
 const fraction = z.number().finite().min(0).max(1);
+export const MusicSymbolicScoreSchema = z.string().min(1).max(32000).refine(
+  (value) => value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= 32000,
+  "symbolic score must be nonblank and at most 32000 UTF-8 bytes",
+);
 
 const MusicReviewContextBodySchema = z.object({
   version: z.literal("music-review-context/v1"),
@@ -105,6 +109,7 @@ const AcceptedMusicArrangementBodySchema = z.object({
   arrangement: AcceptedMusicArrangementDraftSchema,
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
+  symbolicScore: MusicSymbolicScoreSchema.optional(),
 }).strict();
 
 export const AcceptedMusicArrangementSchema = AcceptedMusicArrangementBodySchema.extend({
@@ -168,6 +173,9 @@ export function createAcceptedMusicArrangement(input: {
   const musicIntent = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
     Object.hasOwn(input.sourceBrief, "musicIntent")
     ? MusicArrangementIntentSchema.parse((input.sourceBrief as Record<string, unknown>).musicIntent) : undefined;
+  const symbolicScore = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
+    Object.hasOwn(input.sourceBrief, "symbolicScore")
+    ? MusicSymbolicScoreSchema.parse((input.sourceBrief as Record<string, unknown>).symbolicScore) : undefined;
   const body = AcceptedMusicArrangementBodySchema.parse({
     version: ACCEPTED_MUSIC_ARRANGEMENT_VERSION,
     ownerId: input.ownerId,
@@ -178,6 +186,7 @@ export function createAcceptedMusicArrangement(input: {
     arrangement: input.arrangement,
     ...(musicIntent ? { musicIntent } : {}),
     ...(reviewContext ? { reviewContext } : {}),
+    ...(symbolicScore === undefined ? {} : { symbolicScore }),
   });
   return AcceptedMusicArrangementSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
 }

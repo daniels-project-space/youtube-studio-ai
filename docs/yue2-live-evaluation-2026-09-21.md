@@ -609,3 +609,32 @@ Transport is now verified end to end. Remaining music work is channel-bound
 composition/generation, durable audition and the qualified shared-module
 continuation, plus on-demand orchestration. Production pipelines and the wider
 MVP are not claimed complete by this connectivity check.
+
+## Composer-Owned Symbolic Score
+
+Added explicit opt-in composer version `3.0.0-yue2-score`; default legacy
+selection and version `2.0.0-accepted-arrangement` remain unchanged. The new
+version authors the arrangement and native ABC together using the existing
+channel/persona/style context. It requires a nonblank score bounded to 32000
+UTF-8 bytes. The accepted artifact fingerprints the exact score; the YuE2
+request consumes it automatically and rejects substitution or deletion even
+when a caller recomputes the job ID. Manual score inputs remain available for
+older unscored artifacts, but cannot override an accepted composer's score.
+
+The scored version reserves 12000 output tokens instead of 6000, priced before
+dispatch using the same model. Existing versions retain their previous budget.
+Missing or oversized scores after paid dispatch require reconciliation rather
+than automatic retry or fallback. CLI validation reports native score checking
+as pending for automatic scores as well as manually supplied scores.
+
+The real versioned compiler/runner/planner test passed with the pinned runtime's
+CPU-only `validate_job` parser enabled. That check caught an invalid partial
+measure in the first fixture; the prompt now explicitly requires complete
+measures and matching voice grids. The corrected 64-second fixture passed the
+native syntax and exact symbolic-duration checks. This fixture uses mocked text
+transport and is not proof of live composer reliability or musical quality.
+
+Natural-length eligible loop performances remain allowed; exact final video
+duration is assembly's responsibility. No live text or GPU generation occurred
+for this change. Channel-fit audition, loop-seam qualification and exact final
+assembly verification remain open, and no production pipeline was switched.

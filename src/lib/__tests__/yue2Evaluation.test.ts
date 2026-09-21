@@ -677,6 +677,27 @@ async function main(): Promise<void> {
         assert.throws(() => createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true, symbolicScore: score }));
       }
     });
+    await test("composer-owned score travels automatically and cannot be dropped or replaced even with a new job hash", () => {
+      const symbolicScore = "CPU fixture: native notation is checked by the runtime, not this binding test.";
+      const accepted = createAcceptedMusicArrangement({ ...arrangement, sourceBrief: { symbolicScore } });
+      const scored = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
+      assert.ok(scored.job.schema_version === 2);
+      assert.equal(scored.job.abc, symbolicScore);
+      assert.deepEqual(validateYuE2EvaluationRequest(scored), scored);
+      assert.notEqual(accepted.fingerprint, arrangement.fingerprint);
+      assert.throws(() => createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42,
+        personalCreatorAcknowledged: true, symbolicScore: symbolicScore + "\n" }), /cannot replace/);
+      for (const abc of [undefined, symbolicScore + "\n"]) {
+        const changed = clone(scored);
+        assert.ok(changed.job.schema_version === 2);
+        if (abc === undefined) delete changed.job.abc; else changed.job.abc = abc;
+        const { job_id: oldId, ...body } = changed.job;
+        changed.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({ version: changed.version,
+          programFingerprint: changed.programFingerprint, manifestSha256: changed.manifestSha256, request: body }))}`;
+        assert.notEqual(changed.job.job_id, oldId);
+        assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/);
+      }
+    });
     await test("natural source timing is restricted to repeat-playback primary and meditation music", () => {
       for (const role of ["primary_music", "meditation_bed", "narration_bed", "short_form_bed"] as const) {
         for (const playback of ["once", "repeat"] as const) {

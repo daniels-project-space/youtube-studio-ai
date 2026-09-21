@@ -11,12 +11,13 @@ import { z } from "zod";
 import { agentJson, agentJsonConfiguration } from "@/agents/mastra";
 import {
   ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
+  SCORED_ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
   assertArrangementComposerAdmission,
   assertArrangementComposerInput,
   type ArrangementComposerAdmission,
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
-import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema,
+import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema, MusicSymbolicScoreSchema,
   MusicArrangementIntentSchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
@@ -302,6 +303,7 @@ export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
+  symbolicScore: MusicSymbolicScoreSchema.optional(),
   audio: z.object({
     duckDb: z.number().finite(),
     bedLufs: z.number().finite(),
@@ -324,10 +326,14 @@ export async function briefComposerWithArrangement(
   bible: ShowBible,
   ctx: CrewContext,
   admission: ArrangementComposerAdmission,
+  includeSymbolicScore = false,
 ): Promise<z.infer<typeof ComposerBriefWithArrangementSchema>> {
   const musicIntent = ctx.musicIntent === undefined ? undefined : MusicArrangementIntentSchema.parse(ctx.musicIntent);
   const config = agentJsonConfiguration("composer_arrangement");
-  assertArrangementComposerAdmission(config.model, admission);
+  assertArrangementComposerAdmission(config.model, admission, includeSymbolicScore);
+  const responseSchema = includeSymbolicScore
+    ? arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema })
+    : arrangementComposerResponseSchema;
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
     musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",
@@ -358,25 +364,48 @@ export async function briefComposerWithArrangement(
       `Return STRICT JSON {"arrangement":{"role":string,"direction":string,"requestedDurationSec":number,` +
       `"form":string,"ending":string,"playback":string,"sections":[{"id":string,"label":string,` +
       `"startFraction":number,"endFraction":number,"energy":number,"instruction":string}]},` +
-      `"duckDb":number,"bedLufs":number,"voiceFx":string?}.`;
+      `"duckDb":number,"bedLufs":number,"voiceFx":string?${includeSymbolicScore ? ',"symbolicScore":string' : ""}}.` +
+      (includeSymbolicScore ? `\n\nAuthor symbolicScore as a complete original YuE2 native ABC composition, not prose or Markdown. ` +
+        `Bind every musical choice to this channel, topic, and the arrangement you just authored. The score is the ` +
+        `generator's executable composition: preserve its form, section proportions, energy, instrumentation, exclusions ` +
+        `and ending; do not substitute a generic chord loop. Use native headers X:1, T:, M:, L:1/32, Q:1/4=<tempo>, ` +
+        `V: Vocal clef=treble name="Vocal Melody" snm="Vocal", ` +
+        `V: Ins clef=treble name="Ins Melody" snm="Inst.", and K:<key>. ` +
+        `Use paired V: Vocal and V: Ins groups, with % section-id comments matching the arrangement. Each voice in ` +
+        `a group has exactly one music line containing 1 to 4 complete measures and ending with a plain | barline. ` +
+        `Use additional paired groups for longer sections; do not add blank lines, double barlines or arbitrary header fields. ` +
+        `Vocal bars must contain rests only (z) with optional quoted chord symbols; no lyrics or vocal notes. ` +
+        `Author instrumental notes/rests in Ins; quoted chord symbols belong only in Vocal. Both voices must have the same ` +
+        `number of measures and matching meter/key/time grids in every group. ` +
+        `All note/rest lengths use L:1/32, including sustained notes; do not use repeats or abbreviated omitted bars. ` +
+        `Calculate symbolic duration from total beats and the quarter-note tempo: total quarter-note beats * 60 / tempo ` +
+        `must equal requestedDurationSec exactly. Q must be a positive integer. Every bar must sum exactly to its meter; ` +
+        `partial final bars are invalid. When needed, use matching M: changes immediately after each voice marker for a ` +
+        `complete final measure with a different meter, without changing the requested musical identity or duration. ` +
+        `Check all duration arithmetic before answering. A notation time grid does not authorize audible pulse, drums or melodic ` +
+        `development in an unmetered drone or static sleep texture; use sustained tones/rests to preserve those intentions. ` +
+        `A requested natural ending must resolve; do not truncate a phrase merely to hit a number. The performance may ` +
+        `end naturally under the permitted source policy; final video looping and duration belong to assembly. ` +
+        `Keep the exact score below 32000 UTF-8 bytes. Its native syntax and symbolic duration will be independently ` +
+        `checked before GPU work; writing a score does not certify instrumental-only audio, channel fit or a seamless loop.` : "");
   assertArrangementComposerInput(prompt, config.system);
   const reviewContext = createMusicReviewContext({
     topic: ctx.topic, family: ctx.family, channelName: ctx.channelName ?? null, promptContext,
   });
   let dispatchAdmitted = false;
   try {
-    const raw = arrangementComposerResponseSchema.parse(await agentJson({
+    const raw = responseSchema.parse(await agentJson({
       role: "composer_arrangement",
-      schema: arrangementComposerResponseSchema,
+      schema: responseSchema,
       log: ctx.log,
       // Eight section objects plus full direction and reasoning need more
       // headroom than the legacy paragraph. This same bound prices admission.
-      maxTokens: ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
+      maxTokens: includeSymbolicScore ? SCORED_ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS : ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
       temperature: 0.8,
       prompt,
       beforeDispatch: async () => {
         assertArrangementComposerInput(prompt, config.system);
-        assertArrangementComposerAdmission(config.model, admission);
+        assertArrangementComposerAdmission(config.model, admission, includeSymbolicScore);
         if (!admission.beforeDispatch) {
           throw new ExecutionError("INLINE_PAID_EXECUTION_LEASE_REQUIRED: arrangement composer has no execution authority", {
             code: "INLINE_PAID_EXECUTION_LEASE_REQUIRED", retryable: false,
@@ -390,6 +419,7 @@ export async function briefComposerWithArrangement(
       reviewContext,
       ...(musicIntent ? { musicIntent } : {}),
       arrangement: raw.arrangement,
+      ...("symbolicScore" in raw ? { symbolicScore: MusicSymbolicScoreSchema.parse(raw.symbolicScore) } : {}),
       musicPrompt: raw.arrangement.direction,
       audio: {
         duckDb: raw.duckDb,
