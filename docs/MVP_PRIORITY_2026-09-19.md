@@ -22,6 +22,23 @@ its sound requirements to the shared music module rather than owning music
 generation. The owner explicitly confirmed personal creator use. Company SaaS
 licensing is not authorized by that confirmation.
 
+## Live infrastructure correction, 21 September
+
+The historical credential rejection below is superseded. Canonical
+`openrelay/OPENRELAY_API_KEY` works, Studio's stale vault copy was repaired, and
+Studio's retained provider disks are populated. Dedicated H3 and YuE2 images,
+worktrees and separate local volumes have been built. The repeatable YuE2 build
+has verified its real retained weights offline; this is not inference proof.
+Studio now has its own verified OpenRelay SSH identity, registered but attached
+to no VM. Exact build commands, identity and evidence locations are in
+`infra/studio-render/README.md`. Do not reuse Lito's SSH identity or runtime.
+
+The next live YuE2 gate remains an explicitly authorized bounded GPU allocation,
+private worker deployment, actual native generation and musical audition. The
+pending up-to-$1 compute request is not approval, and new persistent storage
+charges still need checking. Do not substitute more build checks for that live
+gate or mark the shared production music integration complete.
+
 ## MVP acceptance
 
 - Owner clarification: every channel is different. One successful video or

@@ -113,3 +113,26 @@ These are populated disks, not missing infrastructure. All three reported SSH
 offline while stopped. Disk usage does not attest individual file hashes or
 runtime health. No VM was restarted, resized, deleted, or moved between apps
 by this build/discovery operation.
+
+## Studio deployment identity: 21 September 2026
+
+Studio now has a separate registered OpenRelay SSH public key, rather than
+borrowing the existing Lito identity:
+
+- Name: `youtube-studio-openrelay-20260921`.
+- Provider key ID: `09214611-edeb-432a-8657-415b9b400f25`.
+- Fingerprint: `SHA256:txq9MwrqytgLlYueelWcv9LWio5br57PDH81CCa+7yU`.
+- Local private key: `/var/lib/youtube-studio-render/operator/ssh/openrelay_ed25519`.
+- Public metadata receipt: `/var/lib/youtube-studio-render/operator/openrelay-ssh.json`.
+
+Registration was read back from the canonical organization and matched against
+the public key derived from the local private key. The private file has no
+group/other permissions; operator directories are outside all model/state
+mounts and curated build contexts. Never copy the private key into a worker,
+image, repository, or provider environment variable. Only its public half was
+sent to OpenRelay.
+
+At verification, this key was attached to zero VMs, every previously registered
+key was unchanged, and no compute was started. Use this key ID for a future
+explicitly authorized Studio allocation. Its existence does not establish SSH
+reachability, image deployment, GPU qualification, or production readiness.
