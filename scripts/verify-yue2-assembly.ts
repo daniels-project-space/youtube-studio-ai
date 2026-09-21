@@ -5,7 +5,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { composeMusicLoopDeblur } from "../src/lib/ffmpeg";
+import { composeMusicLoopDeblur, MUSIC_LOOP_RENDER_TIMEOUT_MS } from "../src/lib/ffmpeg";
 import { selfLoopAudio } from "../src/lib/music";
 import { validateYuE2EvaluationRequest } from "../src/lib/yue2Evaluation";
 
@@ -36,7 +36,8 @@ async function main() {
   const directory = resolve(values.out);
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "attempt.json"), JSON.stringify({ sourceSha256, duration, width, height,
-    jobId: request.job.job_id, productionApproved: false, visualSource: "synthetic_timing_fixture" }), { flag: "wx" });
+    jobId: request.job.job_id, renderBudgetMs: MUSIC_LOOP_RENDER_TIMEOUT_MS,
+    productionApproved: false, visualSource: "synthetic_timing_fixture" }), { flag: "wx" });
   const ffmpeg = process.env.FFMPEG_BIN ?? "ffmpeg";
   const ffprobe = process.env.FFPROBE_BIN ?? "ffprobe";
   const inspect = (path: string) => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", path], { encoding: "utf8" }));
@@ -53,7 +54,7 @@ async function main() {
   const master = join(directory, "timing-master.mp4");
   const start = Date.now();
   await composeMusicLoopDeblur({ loopUnitPath: video, musicPath: folded, outPath: master,
-    durationSec: duration, width, height, fps: 30, timeoutMs: 900000 });
+    durationSec: duration, width, height, fps: 30 });
   const output = inspect(master);
   const picture = output.streams.find((stream: { codec_type: string }) => stream.codec_type === "video");
   const sound = output.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio");
@@ -68,6 +69,7 @@ async function main() {
   const evidence = { version: "yue2-assembly-timing-proof/v1", sourceSha256, jobId: request.job.job_id,
     sourceFrames: Number(original.duration_ts), loopFrames: Number(loop.duration_ts), durationSec: duration,
     videoFrames: Number(picture.nb_frames), width, height, sampleRateHz: 48000, assemblyWallMs: Date.now() - start,
+    renderBudgetMs: MUSIC_LOOP_RENDER_TIMEOUT_MS,
     masterSha256: await fileHash(master), masterPath: master,
     visualSource: "synthetic_timing_fixture", productionApproved: false, musicalQualityApproved: false,
     loopPerceptualQualityApproved: false };

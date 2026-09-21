@@ -2698,6 +2698,8 @@ export async function applyOverlaysAndCaptions(
   return outPath;
 }
 
+export const MUSIC_LOOP_RENDER_TIMEOUT_MS = 3_600_000;
+
 /**
  * GOLDEN music-loop assembler (v1 lofi `video_builder._build_with_overlay`):
  * stream-loop the seamless animated unit under the full music, and over the first
@@ -2717,8 +2719,21 @@ export async function composeMusicLoopDeblur(args: {
   fps?: number;
   preset?: string;
   fontFile?: string;
+  /** Total wall-clock budget shared by all encoding and muxing passes. */
   timeoutMs?: number;
 }): Promise<string> {
+  const timeoutMs = args.timeoutMs ?? MUSIC_LOOP_RENDER_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MUSIC_LOOP_RENDER_TIMEOUT_MS) {
+    throw new FfmpegError("music-loop render budget must be an integer between 1 and 3600000ms");
+  }
+  // AAC encoding scales with final duration even when video packets are reused.
+  // Keep all passes within one hour, below the pipeline's 70-minute ceiling.
+  const deadline = performance.now() + timeoutMs;
+  const remainingMs = () => {
+    const remaining = Math.floor(deadline - performance.now());
+    if (remaining <= 0) throw new FfmpegError(`music-loop render exhausted its ${timeoutMs}ms total budget`);
+    return remaining;
+  };
   const W = args.width ?? 1920;
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
@@ -2793,7 +2808,7 @@ export async function composeMusicLoopDeblur(args: {
         ...codec,
         bodyPath,
       ],
-      args.timeoutMs ?? 2_700_000,
+      remainingMs(),
     );
     await run(
       FFMPEG,
@@ -2803,7 +2818,7 @@ export async function composeMusicLoopDeblur(args: {
         ...codec,
         introPath,
       ],
-      args.timeoutMs ?? 2_700_000,
+      remainingMs(),
     );
     for (const path of [introPath, bodyPath]) {
       if (/[\r\n']/.test(path)) {
@@ -2832,7 +2847,7 @@ export async function composeMusicLoopDeblur(args: {
         "-movflags", "+faststart",
         args.outPath,
       ],
-      args.timeoutMs ?? 2_700_000,
+      remainingMs(),
     );
     return args.outPath;
   }
@@ -2850,7 +2865,7 @@ export async function composeMusicLoopDeblur(args: {
       "-c:a", "aac", "-b:a", "384k", "-movflags", "+faststart",
       args.outPath,
     ],
-    args.timeoutMs ?? 2_700_000,
+    remainingMs(),
   );
   return args.outPath;
 }
