@@ -1,5 +1,32 @@
 # YouTube Studio isolated render build
 
+## Dedicated YuE2 rebuild
+
+From a clean committed Studio checkout, the music lane has its own executable
+build command, pinned to runtime source `373e13933d0127847d266740153ac22769b4a2a9`:
+
+```sh
+node scripts/studio-yue2-build.mjs build-and-verify-cache
+node --test scripts/__tests__/studio-yue2-build.test.mjs
+```
+
+`prepare` creates only the detached worktrees and curated Docker context.
+`build` additionally builds the image and compares its actual offline manifest
+with the source manifest. `build-and-verify-cache` also hashes every retained
+weight in the real image with networking disabled and the model volume mounted
+read-only. An empty or corrupt cache fails; the command never downloads weights,
+allocates a GPU, starts generation, or changes qualification. Use the runtime's
+explicit operator staging command to populate an empty cache first.
+
+Each attempt retains its own receipt under
+`/var/lib/youtube-studio-render/builds/yue2-<runtime-revision>/`. Receipts bind both
+Studio and runtime revisions, immutable local image ID, manifest verification,
+separate `volumes/yue2/models` and `volumes/yue2/state` paths, and any cache proof.
+No H3/other-project state is mounted. Only allowlisted tracked runtime sources
+enter the build, even if credentials or job data were accidentally tracked.
+
+## H3 build
+
 This builds Studio's existing H3 API contract with its own pinned ComfyUI
 installation. It does not borrow Book Forge or Lito's image, Python environment,
 custom nodes, writable model cache, request queue, or receipts. It does not
