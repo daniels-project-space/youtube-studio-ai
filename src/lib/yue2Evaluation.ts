@@ -94,6 +94,7 @@ const LegacyYuE2JobSchema = z.object({
 export const YuE2JobSchema = z.discriminatedUnion("schema_version", [LegacyYuE2JobSchema,
   LegacyYuE2JobSchema.extend({ schema_version: z.literal(2),
     requested_duration_sec: z.number().int().min(10).max(300),
+    abc: Text.refine((value) => value.trim().length > 0).optional(),
   }).strict(),
 ]);
 export type YuE2Job = z.infer<typeof YuE2JobSchema>;
@@ -132,17 +133,19 @@ export function createYuE2EvaluationRequest(input: {
 }
 
 export function createYuE2AcceptedArrangementRequest(input: {
-  arrangement: unknown; seed: number; personalCreatorAcknowledged: boolean;
+  arrangement: unknown; seed: number; personalCreatorAcknowledged: boolean; symbolicScore?: string;
 }): YuE2AcceptedArrangementRequest {
   const parsed = z.object({
     arrangement: AcceptedMusicArrangementSchema,
     seed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     personalCreatorAcknowledged: z.literal(true),
+    symbolicScore: Text.refine((value) => value.trim().length > 0).optional(),
   }).strict().parse(input);
   const acceptedArrangement = parsed.arrangement;
   const body = {
     schema_version: 2 as const,
     requested_duration_sec: acceptedArrangement.arrangement.requestedDurationSec,
+    ...(parsed.symbolicScore !== undefined ? { abc: parsed.symbolicScore } : {}),
     style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
     lyrics: "" as const,
     seed: parsed.seed,

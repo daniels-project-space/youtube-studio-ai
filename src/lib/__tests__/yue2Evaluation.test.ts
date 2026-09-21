@@ -528,6 +528,20 @@ async function main(): Promise<void> {
       }
       assert.notEqual(legacy.job.job_id, arrangementRequest.job.job_id);
     });
+    await test("explicit symbolic score binds exact bytes without replacing accepted direction", () => {
+      const symbolicScore = "Explicit CPU text fixture; native structural validation belongs to the runtime.";
+      const scored = createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true, symbolicScore });
+      assert.ok(scored.job.schema_version === 2);
+      assert.equal(scored.job.abc, symbolicScore);
+      assert.equal(scored.job.style, arrangementRequest.job.style);
+      assert.deepEqual(scored.acceptedArrangement, arrangementRequest.acceptedArrangement);
+      assert.notEqual(scored.job.job_id, arrangementRequest.job.job_id);
+      assert.deepEqual(validateYuE2EvaluationRequest(scored), scored);
+      assert.throws(() => validateYuE2EvaluationRequest({ ...scored, job: { ...scored.job, abc: `${symbolicScore}\n` } }));
+      for (const score of [" ", "a".repeat(32001), "\u00e9".repeat(16001)]) {
+        assert.throws(() => createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true, symbolicScore: score }));
+      }
+    });
     await test("tampered arrangement, fingerprint and independently rehashed style fail before any HTTP or output directory", async () => {
       const changedArtifact = clone(arrangementRequest);
       changedArtifact.acceptedArrangement.arrangement.sections[0].energy = 0.9;
@@ -574,6 +588,15 @@ async function main(): Promise<void> {
       const cli = await execute(process.execPath, ["--import", "tsx", "src/scripts/evaluate-yue2-music.ts", ...args]);
       assert.deepEqual(JSON.parse(cli.stdout).request, arrangementRequest);
       assert.equal(JSON.parse(cli.stdout).mode, "validate_only");
+      const scorePath = join(directory, "explicit-score.abc");
+      const symbolicScore = "CPU fixture: runtime structural validation remains pending.";
+      await writeFile(scorePath, symbolicScore);
+      const scoredCli = await execute(process.execPath, ["--import", "tsx", "src/scripts/evaluate-yue2-music.ts", ...args, "--score-file", scorePath]);
+      const scoredOutput = JSON.parse(scoredCli.stdout);
+      assert.equal(scoredOutput.symbolicScoreValidation, "runtime_pending");
+      assert.equal(scoredOutput.request.job.abc, symbolicScore);
+      assert.notEqual(scoredOutput.request.job.job_id, arrangementRequest.job.job_id);
+      assert.equal(scoredOutput.networkRequests, 0);
       await assert.rejects(stat(outputRoot), { code: "ENOENT" });
       for (const extra of [["--program", "unused.json"], ["--style-file", "unused.txt"], ["--style", "unused.txt"], ["--recover-only"], ["--durable-r2"]]) {
         await assert.rejects(runYuE2EvaluationCli([...args, ...extra], {}));

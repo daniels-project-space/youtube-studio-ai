@@ -29,6 +29,7 @@ function fixture(t) {
   const runtime = repository('runtime', Object.fromEntries([
     'Dockerfile', '.dockerignore', 'pyproject.toml', 'MANIFEST.in', 'requirements-inference.lock',
     'deploy/stage_cache.py', 'src/music_runtime/manifest.json', 'src/music_runtime/worker.py',
+    'src/music_runtime/UPSTREAM_ABC_LICENSE.txt', 'src/music_runtime/UPSTREAM_ABC_NOTICE.txt',
     'var/job.json', 'graphify-out/graph.json', '.env', 'deploy/private.txt',
   ].map((file) => [file, 'fixture'])));
   return { base, git, paths: { studio, runtime, runtimeRevision: git(runtime, 'rev-parse', 'HEAD'), root: join(base, 'render') } };
@@ -39,7 +40,8 @@ test('prepares pinned isolated worktrees and excludes even tracked private/runti
   const { receipt, receiptFile } = prepareYuE2Build(paths);
   assert.equal(git(receipt.runtimeTree, 'rev-parse', 'HEAD'), paths.runtimeRevision);
   assert.equal(git(receipt.studioTree, 'rev-parse', 'HEAD'), receipt.studioRevision);
-  for (const file of ['Dockerfile', 'src/music_runtime/worker.py', 'deploy/stage_cache.py']) {
+  for (const file of ['Dockerfile', 'src/music_runtime/worker.py', 'deploy/stage_cache.py',
+    'src/music_runtime/UPSTREAM_ABC_LICENSE.txt', 'src/music_runtime/UPSTREAM_ABC_NOTICE.txt']) {
     assert.equal(readFileSync(join(receipt.context, file), 'utf8'), 'fixture');
   }
   for (const file of ['.env', 'var', 'graphify-out', 'deploy/private.txt', '.git']) {

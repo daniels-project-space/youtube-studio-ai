@@ -105,6 +105,30 @@ runtime must be deployed before new arrangement submissions; the previous image
 rejects the new field. This contract is CPU/wire-tested, not yet GPU-deployed.
 Actual duration-conditioned composition and private-worker deployment remain open.
 
+### Explicit Score Path
+
+The pinned upstream native ABC helper parses the actual retained score as 73 bars
+at 73 BPM: exactly 240 symbolic seconds. It contains 220 sounding notes in the
+Vocal voice and 142 in Ins. These are notation facts, not proof of audible vocals.
+The roughly 228-second performance also shows that symbolic timing and measured
+audio timing differ. Inspection is retained in `yue2-live-score-inspection.json`.
+
+Studio now accepts an optional `--score-file` with an accepted arrangement. Exact
+score text is bound into the job ID and passed through the official `SongRequest.abc`
+API. The runtime uses the pinned, unmodified upstream parser to reject malformed
+notation or wrong symbolic duration before GPU preflight, then preserves the
+score through full melody-and-chord conditioning. Existing semantic-duration and
+audio-quality gates remain in place. Local CLI validation explicitly labels native
+score validation as pending until the runtime checks it.
+
+The sibling runtime includes a nine-bar, 72-BPM, 30-second diagnostic composition
+with a resting Vocal staff, instrumental melody and natural cadence. Its musical
+quality and generated timing are not qualified; it is neither a channel-specific
+track nor a loop. CPU tests and a real local Python HTTP exchange verify this
+request path, including pre-admission rejection of a wrong-duration score. No GPU
+run of this score has occurred yet, and the channel-aware automatic score planner
+and private-worker deployment remain open.
+
 1. Review actual audio, vocal leakage, endings and channel-specific fit.
 2. Resolve duration planning before claiming arrangement compliance.
 3. Connect the private worker and immutable evidence to the existing accepted

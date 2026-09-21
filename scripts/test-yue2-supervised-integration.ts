@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -57,7 +57,11 @@ async function main(): Promise<void> {
           energy: 0.2, instruction: "Hold steady",
         })) },
     });
-    const request = createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true });
+    // The 30-second native score at half tempo is a 60-second wire fixture,
+    // not a musical recommendation or a real generated performance.
+    const symbolicScore = (await readFile(join(runtime, "examples/thirty-second-instrumental.abc"), "utf8"))
+      .replace("Q:1/4=72", "Q:1/4=36");
+    const request = createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true, symbolicScore });
     assert.deepEqual(request.acceptedArrangement.musicIntent, musicIntent);
     const client = new YuE2EvaluationClient({ endpoint: endpoint as string, bearerToken: token as string,
       executionPolicySha256: verifiedPolicy.submissionPolicySha256, fetch: observedFetch });
@@ -82,6 +86,12 @@ async function main(): Promise<void> {
       await response.arrayBuffer();
     }
     stage = "supervised execution";
+    const invalidScore = await fetch(`${endpoint}/v1/jobs`, { method: "POST", signal: AbortSignal.timeout(5000),
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json",
+        "X-YuE2-Execution-Policy-SHA256": verifiedPolicy.submissionPolicySha256 },
+      body: JSON.stringify({ ...request.job, abc: symbolicScore.replace("Q:1/4=36", "Q:1/4=72") }) });
+    assert.equal(invalidScore.status, 400, "wrong-duration score must be refused before worker admission");
+    await invalidScore.arrayBuffer();
     let result = await client.evaluate(request, { submit: true });
     const deadline = Date.now() + 20000;
     while (result.status === "pending" && Date.now() < deadline) {

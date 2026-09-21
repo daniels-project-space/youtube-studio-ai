@@ -8,7 +8,7 @@ import { directory, worktree } from './studio-render-build.mjs';
 
 const studio = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtime = '/home/ubuntu/youtube-studio-music-runtime';
-const runtimeRevision = '3148041eb1de91113fbfcde6ab11add247e83b8d';
+const runtimeRevision = 'd1c7a06065a232d8982c2b5f64cea9a4a8ceb244';
 const root = '/var/lib/youtube-studio-render';
 const project = 'youtube-studio-ai';
 const run = (command, args, options = {}) => execFileSync(command, args, {
@@ -37,7 +37,8 @@ export function prepareYuE2Build(paths) {
   directory(build);
   const context = mkdtempSync(join(build, 'context-'));
   const required = ['Dockerfile', '.dockerignore', 'pyproject.toml', 'MANIFEST.in',
-    'requirements-inference.lock', 'deploy/stage_cache.py', 'src/music_runtime/manifest.json'];
+    'requirements-inference.lock', 'deploy/stage_cache.py', 'src/music_runtime/manifest.json',
+    'src/music_runtime/UPSTREAM_ABC_LICENSE.txt', 'src/music_runtime/UPSTREAM_ABC_NOTICE.txt'];
   const tracked = run('git', ['-C', runtimeTree, 'ls-files', '-z']).split('\0').filter(Boolean);
   for (const path of required) if (!tracked.includes(path)) throw new Error(`Missing runtime build input: ${path}`);
   // Copy only tracked deployment inputs, never ignored credentials or job data.

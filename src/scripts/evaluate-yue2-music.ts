@@ -178,7 +178,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--queue-recovery", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
-    } else if (["--arrangement", "--run-id", "--owner-id", "--program", "--style-file", "--seed", "--out", "--execution-policy"].includes(key)) {
+    } else if (["--arrangement", "--run-id", "--owner-id", "--program", "--style-file", "--score-file", "--seed", "--out", "--execution-policy"].includes(key)) {
       if (values[key] !== undefined || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Invalid evaluation argument");
       values[key] = argv[++index];
     } else { throw new Error("Unknown evaluation argument"); }
@@ -186,10 +186,12 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   if (flags.has("--help")) {
     console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --run-id RUN_ID --owner-id OWNER_ID | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2 [--execution-policy POLICY.json]] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --run-id reads one accepted, owner-scoped saved arrangement from Convex using configured Studio service credentials; it forbids --arrangement and does not authorize GPU submission. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. --execution-policy requires --durable-r2 and validates a bounded local policy before credentials or network access; its exact terms are bound to durable evaluation. Default for file inputs: local validation only, no GPU or network. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending. Supervised accounting is an operator-configured allocation estimate, not provider billing or a hard VM bill cap; provider billing remains unknown. Without a policy, cost is not measured.");
     console.log("--queue-recovery optionally queues GET-only Trigger recovery after a pending supervised --durable-r2 --submit result; requires --execution-policy and TRIGGER_SECRET_KEY. It does not provision a GPU, authorize another generation, approve music or publish.");
+    console.log("--score-file SCORE.abc optionally supplies an explicit composition in arrangement mode. Its exact bytes are bound to the job; the runtime checks native notation and symbolic duration before GPU work. Local validate-only checks text bounds, not musical structure. Audio timing and quality remain unverified.");
     return;
   }
   const runMode = values["--run-id"] !== undefined;
   const arrangementMode = values["--arrangement"] !== undefined || runMode;
+  if (values["--score-file"] !== undefined && !arrangementMode) throw new Error("--score-file requires an accepted arrangement");
   if (runMode !== (values["--owner-id"] !== undefined)) throw new Error("--run-id and --owner-id are required together");
   if (runMode) {
     const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
@@ -223,6 +225,8 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
         arrangement: runMode ? await readRunArrangement(values["--owner-id"], values["--run-id"], environment)
           : parseFileJson(await readYuE2File(resolve(values["--arrangement"]), 256 * 1024)),
         seed: Number(values["--seed"]), personalCreatorAcknowledged: true,
+        ...(values["--score-file"] !== undefined ? { symbolicScore: new TextDecoder("utf-8", { fatal: true })
+          .decode(await readYuE2File(resolve(values["--score-file"]), 32000)) } : {}),
       })
     : createYuE2EvaluationRequest({
         program: parseFileJson(await readYuE2File(resolve(values["--program"]), 256 * 1024)),
@@ -231,6 +235,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
       });
   if (!flags.has("--submit")) {
     console.log(JSON.stringify({ mode: "validate_only", request, networkRequests: runMode ? 1 : 0, qualification: YUE2_QUALIFICATION, manualAudition: "pending",
+      ...(values["--score-file"] !== undefined ? { symbolicScoreValidation: "runtime_pending" } : {}),
       ...(runMode ? { source: "accepted_studio_run", workerRequests: 0 } : {}),
       ...(durableMode ? { storage: "r2", costStatus: "not_measured" } : {}),
       ...(expectedExecutionPolicy ? { expectedExecutionPolicy,
