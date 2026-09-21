@@ -5,6 +5,7 @@ import Module from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAcceptedMusicArrangement, createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
+import { YUE2_AUDITION_CHECKS, validateYuE2Audition } from "@/engine/yue2Audition";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   createYuE2AcceptedArrangementRequest, yue2Sha256, YUE2_MANIFEST, YUE2_QUALIFICATION,
@@ -404,6 +405,34 @@ async function main() {
     assert.deepEqual(result.quality.signal.reviewReasons, ["true_peak_at_or_near_full_scale_requires_review"]);
     assert.equal(result.quality.unresolved.includes("true_peak"), false);
     assert.equal(result.quality.productionApproved, false);
+    assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
+  });
+  for (const stuck of [false, true]) await test(`duration-correct source with stuck channel ${stuck} reaches the correct audition gate`, async () => {
+    current.audio = wav(60 * 48000);
+    for (let frame = 0; frame < 60 * 48000; frame++) {
+      const sample = 0.2 * Math.sin(2 * Math.PI * 1000 * frame / 48000);
+      current.audio.writeFloatLE(stuck ? 0.2 : sample, 44 + frame * 8);
+      current.audio.writeFloatLE(sample, 48 + frame * 8);
+    }
+    await run(args()); current.offline = true;
+    const before = [current.calls.length, current.writes.length, current.authorizations];
+    const result = await review(reviewScope);
+    assert.ok(result);
+    assert.equal(result.quality.durationMatches, true);
+    assert.equal(result.quality.status, stuck ? "blocked" : "needs_audition");
+    assert.deepEqual(result.quality.signal.reviewReasons, stuck ? ["constant_channel_requires_review"] : []);
+    assert.equal(result.quality.signal.truePeak?.status, "measured");
+    assert.equal(result.quality.signal.samplesAtOrAboveFullScale, 0);
+    assert.equal(result.quality.productionApproved, false);
+    const sectionIds = result.request.acceptedArrangement.arrangement.sections.map(section => section.id);
+    const submission = { candidateSha256: result.candidateSha256, verdict: "promising", listenedEntireSource: true,
+      checks: Object.fromEntries(YUE2_AUDITION_CHECKS.map(key => [key, "pass"])),
+      sections: sectionIds.map(id => ({ id, judgment: "pass", notes: "Synthetic gate fixture, not an artistic approval." })),
+      notes: "Synthetic gate fixture with complete claimed listening, not an artistic approval." };
+    const evidence = { candidateSha256: result.candidateSha256, sectionIds,
+      technicallyBlocked: result.quality.status === "blocked", contextRetained: true };
+    if (stuck) assert.throws(() => validateYuE2Audition(submission, evidence), /Promising requires/);
+    else assert.doesNotThrow(() => validateYuE2Audition(submission, evidence));
     assert.deepEqual([current.calls.length, current.writes.length, current.authorizations], before);
   });
   await test("read-only review refuses unsafe scope before storage and never follows foreign candidate keys", async () => {

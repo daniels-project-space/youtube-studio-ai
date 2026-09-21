@@ -57,6 +57,20 @@ async function main() {
     assert.deepEqual(result.reviewReasons, ["constant_signal"]);
     result = await analyze((frame, channel) => channel ? 0 : tone(frame));
     assert.deepEqual(result.reviewReasons, ["silent_channel_requires_review"]);
+    for (const stuckChannel of [0, 1]) {
+      for (const dc of [-0.2, 0.2]) {
+        result = await analyze((frame, channel) => channel === stuckChannel ? dc : tone(frame));
+        assert.deepEqual(result.reviewReasons, ["constant_channel_requires_review"]);
+        assert.equal(result.channelMeasurements[stuckChannel].finiteSamples, frames);
+        assert.equal(result.channelMeasurements[stuckChannel].dcOffset, Math.fround(dc));
+        assert.equal(result.nonFiniteSamples, 0);
+        assert.equal(result.samplesAtOrAboveFullScale, 0);
+      }
+    }
+    result = await analyze((frame, channel) => tone(frame) + (channel ? 0.01 : 0));
+    assert.deepEqual(result.reviewReasons, [], "a DC offset in a varying channel is not the same as a completely stuck channel");
+    result = await analyze((frame, channel) => channel ? tone(frame) : tone(frame) / 10000);
+    assert.deepEqual(result.reviewReasons, [], "a quiet but varying channel is not a stuck channel");
     result = await analyze((frame, channel) => frame >= 100 && frame < 110 && !channel ? 1.1 : tone(frame));
     assert.deepEqual(result.reviewReasons, ["full_scale_samples_require_review"]);
     assert.equal(result.samplesAtOrAboveFullScale, 10);

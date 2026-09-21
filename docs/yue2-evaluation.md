@@ -590,3 +590,30 @@ stage budgets. Execution authority is checked immediately before dispatch.
 Observed usage is recorded separately from the reservation, and an unsuccessful
 paid dispatch is held for reconciliation rather than automatically repurchased.
 The legacy composer remains the default; this does not activate a channel route.
+
+### Per-channel native signal admission (21 September)
+
+The native analyzer previously rejected wholly constant audio and a completely
+silent stereo channel, but missed one channel stuck at a nonzero constant while
+the other channel varied. A real FLOAT WAV regression failed under that gate:
+the damaged channel produced no review reason despite containing no variation.
+The analyzer now reports `constant_channel_requires_review` for that case using
+the existing full-file finite-sample/minimum/maximum measurements. No additional
+decoder process, provider call, storage read, or numerical threshold is added.
+The original file is not repaired or normalized.
+
+Real FFmpeg fixtures cover either channel stuck at positive or negative DC.
+Quiet but varying channels, varying audio with a small DC offset, wide stereo,
+partial mono cancellation and the existing clean/silent/full-scale cases retain
+their prior admission. This is an exact stuck-signal check, not a calibrated
+general DC-offset, stereo-balance or artistic-quality classifier.
+
+Two complete 60-second retained-candidate fixtures traverse native probing,
+signal measurement, durable identity/accounting checks and audition validation.
+The healthy fixture remains `needs_audition`; the stuck-channel fixture is
+`blocked`, and even a submission claiming every human check passed cannot mark
+it `promising`. Review causes no worker request, authorization or storage write.
+Both remain production-unapproved. Five focused test files pass, including all
+26 supervised durable integration contracts, the authenticated review route and
+audition persistence handlers; TypeScript and scoped lint pass.
+This uses synthetic audio only, with no thumbnail/GPU generation or deployment.

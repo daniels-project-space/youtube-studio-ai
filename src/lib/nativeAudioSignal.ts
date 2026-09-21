@@ -163,6 +163,7 @@ export async function measureNativeAudioSignal(input: {
   if (channelStats.every((channel) => channel.finite === expectedFrames && channel.nonZero === 0)) reviewReasons.push("digital_silence");
   else if (channelStats.every((channel) => channel.finite === expectedFrames && channel.minimum === channel.maximum)) reviewReasons.push("constant_signal");
   else if (channelStats.some((channel) => channel.finite === expectedFrames && channel.nonZero === 0)) reviewReasons.push("silent_channel_requires_review");
+  else if (channelStats.some((channel) => channel.finite === expectedFrames && channel.minimum === channel.maximum)) reviewReasons.push("constant_channel_requires_review");
   if (samplesAtOrAboveFullScale) reviewReasons.push("full_scale_samples_require_review");
   if (channels === 2 && monoFinite === expectedFrames && monoNonZero === 0 &&
     channelStats.some((channel) => channel.minimum !== channel.maximum)) {
