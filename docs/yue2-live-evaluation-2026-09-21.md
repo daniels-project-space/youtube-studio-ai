@@ -1051,3 +1051,28 @@ tamper tests, existing release-byte integrity/retry tests, and static checks of
 QA/upload/dispatcher ordering. No real owner decision was written and no
 provider upload was performed. Deployment must install the new Convex query
 before workers that call it; this batch is not a production deployment.
+
+## Resume pre-spend audio check
+
+Both an explicit YuE2 audition continuation and an ordinary recovered run now
+check the retained approved listening WAV before constructing/running the
+engine. The worker checks its execution lease and consumed checkpoint, reads
+only the exact private listening object, verifies byte length and SHA-256,
+then checks the current checkpoint and lease again. The read has a 120-second
+deadline and a frame-derived size ceiling capped below 256 MiB. Missing or
+changed audio cannot fall through to visual work or regenerate music.
+
+This preflight does not repeat native/pre-clamp analysis, make a public copy,
+start a GPU or replace the fuller assembly validation. It adds one WAV read
+per resumed attempt, plus bounded authority queries, to avoid downstream spend
+on an unavailable source. No cache treats old approval as permanent authority.
+
+Hostile tests cover wrong scope/invocation, unconsumed checkpoints, excessive
+sizes, unavailable/truncated/oversized/changed bytes, approval changes during
+the read, and lost execution leases. The live private R2 read also passed:
+54,696,562 bytes with listening SHA-256
+`74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93`.
+That storage-only test simulated the approval and lease callbacks (two reads
+each); it did not write an owner decision, claim a real run, publish anything
+or prove a live approved continuation. The retained track still needs actual
+owner listening approval. No thumbnail work or GPU spend was involved.

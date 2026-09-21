@@ -41,7 +41,9 @@ async function main() {
   await assert.rejects(outage(), (error: unknown) => error instanceof Error && error.message.includes("database unavailable") &&
     (error as Error & { retryable?: boolean }).retryable === false);
   const triggerSource = readFileSync("src/trigger/runPipeline.ts", "utf8");
-  assert.match(triggerSource, /assertInlinePaidExecutionLease:\s*createInlinePaidExecutionLeaseCheck\(convex,\s*\{\s*ownerId, channelId: payload\.channelId, runId: payload\.runId, \.\.\.executionLease/);
+  assert.match(triggerSource, /const assertInlinePaidExecutionLease = createInlinePaidExecutionLeaseCheck\(convex,\s*\{\s*ownerId, channelId: payload\.channelId, runId: payload\.runId, \.\.\.executionLease/);
+  assert.match(triggerSource, /assertLease: assertInlinePaidExecutionLease/);
+  assert.match(triggerSource.slice(triggerSource.indexOf("const engineOpts =")), /executionLease,\s*keyPrefix: invocation\.keyPrefix,\s*assertInlinePaidExecutionLease,/);
   assert.doesNotMatch(readFileSync("src/trigger/inlinePaidExecutionLease.ts", "utf8"), /heartbeatExecutionLease|\.mutation\(|consistentQuery\(/);
   console.log("Inline lease callback: immutable identity, uncached requests, server-time/round-trip validation and production binding passed");
 }

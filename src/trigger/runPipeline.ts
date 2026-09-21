@@ -74,6 +74,7 @@ import { configuredMaxCostUsd } from "@/engine/moduleManifest";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
+import { verifyYuE2ResumeSource } from "@/lib/yue2ResumeSource";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
@@ -2332,12 +2333,19 @@ export const runPipelineTask = task({
       );
 
       const sink = makeConvexSink(convex, ownerId, executionLease);
+      const assertInlinePaidExecutionLease = createInlinePaidExecutionLeaseCheck(convex, {
+        ownerId, channelId: payload.channelId, runId: payload.runId, ...executionLease,
+      });
       if (resumingYuE2) {
-        await convex.query(yue2ContinuationsApi.getApproved, {
-          ownerId, channelId: payload.channelId, runId: payload.runId,
-          ...(payload.yue2AuditionResume ? { resume: payload.yue2AuditionResume } : {}),
-        } as never);
-        log("YuE2 continuation: exact approved source and frozen stages verified; generation will be restored, not repeated");
+        await verifyYuE2ResumeSource({
+          ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+          assertLease: assertInlinePaidExecutionLease,
+          readApproved: () => convex.query(yue2ContinuationsApi.getApproved, {
+            ownerId, channelId: payload.channelId, runId: payload.runId,
+            ...(payload.yue2AuditionResume ? { resume: payload.yue2AuditionResume } : {}),
+          } as never),
+        });
+        log("YuE2 continuation: exact approved listening bytes and current authority verified before visual work; generation will not repeat");
       }
       if (payload.factualReviewResume) {
         // Re-prove that the exact approved narration remains downloadable on
@@ -2419,9 +2427,7 @@ export const runPipelineTask = task({
         channelId: payload.channelId,
         executionLease,
         keyPrefix: invocation.keyPrefix,
-        assertInlinePaidExecutionLease: createInlinePaidExecutionLeaseCheck(convex, {
-          ownerId, channelId: payload.channelId, runId: payload.runId, ...executionLease,
-        }),
+        assertInlinePaidExecutionLease,
         budgetUsd: invocation.budgetUsd,
         paramsByBlock,
         sink,
