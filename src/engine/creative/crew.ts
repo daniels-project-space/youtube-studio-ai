@@ -368,14 +368,24 @@ export async function briefComposerWithArrangement(
       (includeSymbolicScore ? `\n\nAuthor symbolicScore as a complete original YuE2 native ABC composition, not prose or Markdown. ` +
         `Bind every musical choice to this channel, topic, and the arrangement you just authored. The score is the ` +
         `generator's executable composition: preserve its form, section proportions, energy, instrumentation, exclusions ` +
-        `and ending; do not substitute a generic chord loop. Use native headers X:1, T:, M:, L:1/32, Q:1/4=<tempo>, ` +
+        `and ending; do not substitute a generic chord loop. This is a restricted native dialect, NOT general ABC. ` +
+        `The first two lines must be exactly X:1 and T: (blank title; never append a song name). ` +
+        `Continue in this exact order with M:<meter>, L:1/32, Q:1/4=<tempo>, ` +
         `V: Vocal clef=treble name="Vocal Melody" snm="Vocal", ` +
         `V: Ins clef=treble name="Ins Melody" snm="Inst.", and K:<key>. ` +
         `Use paired V: Vocal and V: Ins groups, with % section-id comments matching the arrangement. Each voice in ` +
         `a group has exactly one music line containing 1 to 4 complete measures and ending with a plain | barline. ` +
         `Use additional paired groups for longer sections; do not add blank lines, double barlines or arbitrary header fields. ` +
         `Vocal bars must contain rests only (z) with optional quoted chord symbols; no lyrics or vocal notes. ` +
-        `Author instrumental notes/rests in Ins; quoted chord symbols belong only in Vocal. Both voices must have the same ` +
+        `Author sequential instrumental notes/rests in Ins; simultaneous bracketed note chords such as [CEG]8 are INVALID. ` +
+        `Ins represents the instrumental melodic/reduced line; put harmony in Vocal's quoted chord symbols and rich ` +
+        `instrumentation/voicings in the arrangement direction. Chord quotes contain a bare chord name such as "Fmaj7", ` +
+        `never "[Fmaj7]". Supported chord qualities are major (no suffix), m, dim, aug, 7, maj7, m7, dim7, m7b5, ` +
+        `sus4, sus2, 6, m6, 7sus4 and m(maj7), with optional slash bass. ` +
+        `Use standard major/minor K: values such as F, Bb, Am; not mode names. ` +
+        `Allowed note/rest length suffixes are only 1,2,3,4,6,8,12,16,24,32,48. Split other lengths into supported ` +
+        `tied notes or separate rests; no fractional lengths, tuplets, decorations or velocity directives. ` +
+        `Quoted chord symbols belong only in Vocal. Both voices must have the same ` +
         `number of measures and matching meter/key/time grids in every group. ` +
         `All note/rest lengths use L:1/32, including sustained notes; do not use repeats or abbreviated omitted bars. ` +
         `Calculate symbolic duration from total beats and the quarter-note tempo: total quarter-note beats * 60 / tempo ` +

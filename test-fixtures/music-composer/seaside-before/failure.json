@@ -1,0 +1,36 @@
+{
+  "status": "held",
+  "inputFingerprint": "74ac8e6419e29b0d47c623cf2c88b4ab0cb3b9fba432f63edc54c7d6f6402dd2",
+  "dispatched": true,
+  "usage": {
+    "calls": 1,
+    "cacheHits": 0,
+    "inputTokens": 1316,
+    "outputTokens": 1030,
+    "reasoningTokens": 1960,
+    "cachedInputTokens": 0,
+    "totalTokens": 4306,
+    "costUsd": 0.0121995,
+    "unpricedCalls": 0,
+    "groups": [
+      {
+        "provider": "openrouter",
+        "model": "gemini-3.7-flash",
+        "kind": "text",
+        "calls": 1,
+        "cacheHits": 0,
+        "inputTokens": 1316,
+        "outputTokens": 1030,
+        "reasoningTokens": 1960,
+        "cachedInputTokens": 0,
+        "totalTokens": 4306,
+        "costUsd": 0.0121995,
+        "unpricedCalls": 0,
+        "unpricedReasons": []
+      }
+    ]
+  },
+  "error": "native score validation failed: Traceback (most recent call last):\n  File \"/home/ubuntu/youtube-studio-music-runtime/src/music_runtime/config.py\", line 52, in validate_job\n    score = parse_abc(abc)\n            ^^^^^^^^^^^^^^\n  File \"/home/ubuntu/youtube-studio-music-runtime/src/music_runtime/upstream_abc.py\", line 235, in parse_abc\n    return parse(text)\n           ^^^^^^^^^^^\n  File \"/home/ubuntu/youtube-studio-music-runtime/src/music_runtime/upstream_abc.py\", line 157, in parse\n    fail(lines[0:2] != [\"X:1\", \"T:\"], \"Expected native X:1 and blank T: header\")\n  File \"/home/ubuntu/youtube-studio-music-runtime/src/music_runtime/upstream_abc.py\", line 46, in fail\n    raise AbcError(message)\nmusic_runtime.upstream_abc.AbcError: Expected native X:1 and blank T: header\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/home/ubuntu/youtube-studio-music-runtime/src/music_runtime/config.py\", line 54, in validate_job\n    raise Refused(\"Unsupported or invalid native symbolic score\") from error\nmusic_runtime.config.Refused: Unsupported or invalid native symbolic score\n",
+  "gpuCalls": 0,
+  "automaticRetryAllowed": false
+}

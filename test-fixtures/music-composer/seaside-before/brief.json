@@ -1,0 +1,77 @@
+{
+  "musicBrief": {
+    "musicPrompt": "Warm, nostalgic seaside Ghibli-inspired lo-fi instrumental. Cozy electric piano, vinyl tape hiss, soft muted bass, and distant rain ambience. Gentle organic pacing reminiscent of a peaceful night inside a lighthouse keeper's warm quarters. Excludes brass, aggressive percussion, harsh synths, and vocals.",
+    "musicIntent": {
+      "role": "primary_music",
+      "requestedDurationSec": 30,
+      "ending": "natural_cadence",
+      "playback": "repeat"
+    },
+    "reviewContext": {
+      "version": "music-review-context/v1",
+      "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+      "family": "music_loop",
+      "channelName": "Seaside Ghibli Lofi",
+      "promptContext": "Channel: Seaside Ghibli Lofi (Lo-Fi Music).\nPositioning: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\nVibe: \nIconic motif: \nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Rainy Lighthouse Keeper's Desk Lofi\".\n\nContent family: music_loop.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"primary_music\",\"requestedDurationSec\":30,\"ending\":\"natural_cadence\",\"playback\":\"repeat\"}\n\nChannel persona: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): null\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+      "fingerprint": "d0e3fd2c54ac6fc12bdeb89cbe1aa23aa491063346f458880f73254354a05bec"
+    },
+    "symbolicScore": "X:1\nT:Rainy Lighthouse Keeper's Desk Lofi\nM:4/4\nL:1/32\nQ:1/4=72\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:F\n% intro-rain\nV: Vocal\n\"[Fmaj7]\"z32 | \"[Dm7]\"z32 |\nV: Ins\n[F4A4c4e4]8 [C4G4]8 [A4c4]8 [C4E4]8 | [D4F4A4c4]8 [A4c4]8 [F4A4]8 [D4F4]8 |\n% keeper-melody\nV: Vocal\n\"[Bbmaj7]\"z32 | \"[Am7]\"z32 | \"[Gm7]\"z32 |\nV: Ins\n[B,4D4F4A4]8 [D4F4]4 d4 [F4A4c4]8 [D4F4]8 | [A,4C4E4G4]8 [C4E4]4 c4 [E4G4B4]8 [C4E4]8 | [G,4B,4D4F4]8 [B,4D4]4 B4 [D4F4A4]8 [C4E4G4]8 |\n% warm-reflection\nV: Vocal\n\"[C7sus4]\"z32 | \"[Bbmaj7]\"z32 |\nV: Ins\n[C4F4G4_B4]16 [C4E4G4_B4]16 | [B,4D4F4A4]8 [D4F4]8 [F4A4c4]8 [D4F4]8 |\n% candlelight-cadence\nV: Vocal\n\"[Gm7/C]\"z32 | \"[Fmaj7]\"z32 |\nV: Ins\n[C4F4A4]16 [C4E4G4]16 | [F,32A,32C32E32A32] |",
+    "audio": {
+      "duckDb": -14,
+      "bedLufs": -14
+    },
+    "arrangement": {
+      "role": "primary_music",
+      "requestedDurationSec": 30,
+      "form": "sectional",
+      "ending": "natural_cadence",
+      "playback": "repeat",
+      "direction": "Warm, nostalgic seaside Ghibli-inspired lo-fi instrumental. Cozy electric piano, vinyl tape hiss, soft muted bass, and distant rain ambience. Gentle organic pacing reminiscent of a peaceful night inside a lighthouse keeper's warm quarters. Excludes brass, aggressive percussion, harsh synths, and vocals.",
+      "sections": [
+        {
+          "id": "intro-rain",
+          "label": "Rain at the Window",
+          "startFraction": 0,
+          "endFraction": 0.2222,
+          "energy": 0.35,
+          "instruction": "Open with soft Rhodes voicings, gentle vinyl texture, and mellow chord arpeggios establishing the quiet lighthouse desk atmosphere."
+        },
+        {
+          "id": "keeper-melody",
+          "label": "Lighthouse Melody",
+          "startFraction": 0.2222,
+          "endFraction": 0.5556,
+          "energy": 0.45,
+          "instruction": "Introduce the wistful, lyrical piano motif with warm low-end bass support and cozy, unhurried harmonic movement."
+        },
+        {
+          "id": "warm-reflection",
+          "label": "Warm Lamp Reflection",
+          "startFraction": 0.5556,
+          "endFraction": 0.7778,
+          "energy": 0.42,
+          "instruction": "Maintain cozy harmonic warmth with suspended chords and gentle descending fills evoking distant foghorn echoes and soft candlelight."
+        },
+        {
+          "id": "candlelight-cadence",
+          "label": "Candlelight Cadence",
+          "startFraction": 0.7778,
+          "endFraction": 1,
+          "energy": 0.3,
+          "instruction": "Subtly wind down with a tender resolution, letting a lush Fmaj7 chord decay naturally into gentle room warmth."
+        }
+      ]
+    },
+    "config": {
+      "musicMood": "neutral",
+      "bodyMusicVol": 0.1026,
+      "targetLufs": -14,
+      "voiceFx": "none"
+    },
+    "directives": {
+      "bodyMusicVol": 0.1026,
+      "targetLufs": -14
+    },
+    "configVersion": "composer@1.0.0"
+  }
+}

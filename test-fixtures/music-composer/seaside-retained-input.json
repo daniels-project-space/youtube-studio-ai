@@ -1,0 +1,22 @@
+{
+  "ownerId": "isolated-operator-evaluation",
+  "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+  "runId": "seaside-composer-evaluation-20260921-01",
+  "provenance": "Retained source corpus test-fixtures/title-baseline/js743qy08vp7z2rb367cg8spgd88aaye.json, SHA256 f26b9ad6bb7922fb02d91b7d532e98b7721a0e7ddd59a6490378a70aa4c2dfec. Exact retained channel name, slug, niche, persona and metadata input topic. Historical source, not a current channel export or exact invocation replay; no audio DNA/show bible was retained. Evaluation-only owner/run identifiers. Native source duration and playback are explicit evaluation controls, not an edit to the legacy channel.",
+  "family": "music_loop",
+  "musicIntent": {
+    "role": "primary_music",
+    "requestedDurationSec": 30,
+    "ending": "natural_cadence",
+    "playback": "repeat"
+  },
+  "seed": 42,
+  "budgetUsd": 1,
+  "seedStore": {
+    "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+    "channelName": "Seaside Ghibli Lofi",
+    "channelSlug": "rainy-desk-lofi-1781024512939",
+    "niche": "Lo-Fi Music",
+    "persona": "A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion."
+  }
+}

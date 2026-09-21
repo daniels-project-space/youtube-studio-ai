@@ -71,6 +71,38 @@ does not establish production readiness or real generated-audio quality.
 
 ## Accepted arrangement entry
 
+### Isolated live composer evaluation
+
+`src/scripts/evaluate-music-composer.ts` invokes the actual opt-in
+`3.0.0-yue2-score` composer and deterministic arrangement planner from a frozen
+local input. It never mutates a channel/run or submits GPU work. The input names
+its provenance, owner/channel/evaluation-run IDs, frozen seed store, family,
+music intent, seed and text budget. A channel slug is required to prevent the
+legacy live-channel fallback. Validate-only mode makes no provider call:
+
+```bash
+node --import tsx src/scripts/evaluate-music-composer.ts \
+  --input test-fixtures/music-composer/seaside-retained-input.json
+```
+
+Explicit `--submit --out /absolute/new-attempt --runtime /absolute/runtime`
+admits one text evaluation, with `OPENROUTER_API_KEY` injected from the vault.
+The runtime's `.venv-test/bin/python` must import its current `src` parser before
+text dispatch; after generation the same `validate_job` validates the exact
+request score and symbolic duration locally. No GPU/model weights are loaded.
+The exclusive `attempt.json` and `dispatch.json` claims prevent replay, including
+after ambiguous failures. Existing attempt directories are never overwritten or
+automatically retried. Brief, arrangement and request are retained before native
+validation; rejection preserves the failure and known usage. A successful result
+requires one priced call within budget and still grants no quality/production
+approval. This local operator authority is not a production execution lease.
+
+The real retained Seaside before/after comparison is in
+`test-fixtures/music-composer/README.md`: first score rejected, corrected prompt
+produced an unchanged native-valid score; two reported text charges total
+$0.02599875, with no GPU spend. This is one source-backed case, not reliability
+or personality calibration across channels.
+
 ### Read an accepted Studio run directly
 
 The evaluator can now consume the saved `music_arrangement_plan` output without

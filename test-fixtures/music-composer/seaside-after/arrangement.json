@@ -1,0 +1,66 @@
+{
+  "version": "accepted-music-arrangement/v1",
+  "ownerId": "isolated-operator-evaluation",
+  "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+  "runId": "seaside-composer-evaluation-20260921-01",
+  "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+  "sourceBriefFingerprint": "3a68510428c39faac4b828804ce6344a9e6ea216d2f30302e3c02302a5986924",
+  "arrangement": {
+    "role": "primary_music",
+    "requestedDurationSec": 30,
+    "form": "sectional",
+    "ending": "natural_cadence",
+    "playback": "repeat",
+    "direction": "Cozy, nostalgic Ghibli-inspired lofi hip-hop. Soft felt upright piano playing gentle, warm jazz-inflected chords, accompanied by distant tape rain sounds, soft ocean swells against a lighthouse tower, mellow Rhodes piano accents, subtle upright acoustic bass, and lazy unquantized brushed lofi hip-hop drums. No vocals, no harsh synths, relaxing and contemplative atmosphere.",
+    "sections": [
+      {
+        "id": "intro-mist",
+        "label": "Rain on the Glass (Intro)",
+        "startFraction": 0,
+        "endFraction": 0.2,
+        "energy": 0.3,
+        "instruction": "Establish quiet atmosphere with gentle tape hiss, soft ocean rain, and an intimate solo felt piano phrase."
+      },
+      {
+        "id": "desk-rain-a",
+        "label": "Warm Lamp & Ledger (Theme A)",
+        "startFraction": 0.2,
+        "endFraction": 0.5,
+        "energy": 0.45,
+        "instruction": "Introduce subtle dusty kick-snare brush groove, round warm sub-bass, and Rhodes harmonic counterpoint."
+      },
+      {
+        "id": "beacon-glow-b",
+        "label": "Turning Light (Theme B)",
+        "startFraction": 0.5,
+        "endFraction": 0.8,
+        "energy": 0.5,
+        "instruction": "Rich Ghibli-esque harmonic progression with delicate melodic phrasing on upper piano register."
+      },
+      {
+        "id": "calm-cadence",
+        "label": "Midnight Solitude (Outro)",
+        "startFraction": 0.8,
+        "endFraction": 1,
+        "energy": 0.25,
+        "instruction": "Rhythm drops out gently, letting a warm resolving major 7th chord ring out beneath gentle rain."
+      }
+    ]
+  },
+  "musicIntent": {
+    "role": "primary_music",
+    "requestedDurationSec": 30,
+    "ending": "natural_cadence",
+    "playback": "repeat"
+  },
+  "reviewContext": {
+    "version": "music-review-context/v1",
+    "topic": "Rainy Lighthouse Keeper's Desk Lofi",
+    "family": "music_loop",
+    "channelName": "Seaside Ghibli Lofi",
+    "promptContext": "Channel: Seaside Ghibli Lofi (Lo-Fi Music).\nPositioning: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\nVibe: \nIconic motif: \nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Rainy Lighthouse Keeper's Desk Lofi\".\n\nContent family: music_loop.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"primary_music\",\"requestedDurationSec\":30,\"ending\":\"natural_cadence\",\"playback\":\"repeat\"}\n\nChannel persona: A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): null\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+    "fingerprint": "d0e3fd2c54ac6fc12bdeb89cbe1aa23aa491063346f458880f73254354a05bec"
+  },
+  "symbolicScore": "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=80\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:F\n% intro-mist\nV: Vocal\n\"Fmaj7\" z32 | \"Am7\" z16 \"Bbmaj7\" z16 |\nV: Ins\nF8 A8 c8 e8 | e8 d8 c8 A8 |\n% desk-rain-a\nV: Vocal\n\"Gm7\" z16 \"C7\" z16 | \"Fmaj7\" z16 \"Dm7\" z16 | \"Gm7\" z16 \"C7sus4\" z8 \"C7\" z8 |\nV: Ins\nG8 B8 d8 f8 | e8 c8 A8 F8 | G8 A8 B8 c8 |\n% beacon-glow-b\nV: Vocal\n\"Bbmaj7\" z16 \"Am7\" z16 | \"Gm7\" z16 \"Am7\" z16 | \"Bbmaj7\" z16 \"C7\" z16 |\nV: Ins\nd8 f8 e8 c8 | B8 d8 c8 A8 | B8 c8 d8 e8 |\n% calm-cadence\nV: Vocal\n\"Bbmaj7\" z16 \"C7sus4\" z8 \"C7\" z8 | \"Fmaj7\" z32 |\nV: Ins\nd8 c8 B8 G8 | F32 |",
+  "fingerprint": "3673bce7f5a461ed3bac7a010427a7def23896d7d5cbac5ad2f4890d55556e02"
+}
