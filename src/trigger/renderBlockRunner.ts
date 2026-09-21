@@ -182,7 +182,7 @@ export async function executeRenderBlock(
   // This precedes secret bootstrap, registry/provider execution, and any R2
   // work. A child that sat in Trigger's queue past its parent's bounded wait
   // cannot spend or mutate a recovered execution.
-  await convex.mutation(api.runs.assertRemoteChildWaitLease, {
+  const { run, channel } = await convex.mutation(api.runs.admitRemoteChild, {
     ownerId: payload.ownerId,
     channelId: payload.channelId as Id<"channels">,
     runId: payload.runId as Id<"runs">,
@@ -196,12 +196,6 @@ export async function executeRenderBlock(
   // Authenticate the complete execution tuple before rehydration, worker
   // billing, or block execution. The parent marks the run `running` before
   // dispatching this child, including on retries.
-  const [run, channel] = await Promise.all([
-    convex.query(api.runs.getRun, { runId: payload.runId as Id<"runs"> }),
-    convex.query(api.channels.getChannel, {
-      channelId: payload.channelId as Id<"channels">,
-    }),
-  ]);
   const admission = {
     blockId: payload.blockId,
     run,

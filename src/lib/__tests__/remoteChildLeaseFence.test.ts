@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   advanceSelfHealGeneration,
+  admitRemoteChild,
   assertRemoteChildWaitLease,
   beginRemoteChildWait,
   claimExecutionLease,
@@ -101,7 +102,12 @@ async function main() {
     selfHealGeneration: 0,
     heartbeatAt: Date.now(),
     leaseExpiresAt: Date.now() + 60_000,
+    pipelineInvocationSnapshot: { frozen: "exact invocation retained" },
+    pipelineInvocationSha256: "a".repeat(64),
+    outputs: { largeUnrelatedOutput: "x".repeat(200_000) },
   };
+  const channel = { _id: "channels:test", ownerId: "owner-test", architectContext: "x".repeat(400_000) };
+  let channelAvailable = true;
   const stages: StageRow[] = [
     {
       _id: "runStages:h0-render",
@@ -127,7 +133,7 @@ async function main() {
       normalizeId: (_table: string, id: string) => id,
       get: async (id: string) => {
         if (id === run._id) return run;
-        if (id === "channels:test") return { _id: id, ownerId: "owner-test" };
+        if (id === "channels:test") return channelAvailable ? channel : null;
         return null;
       },
       patch: async (id: string, patch: Record<string, unknown>) => {
@@ -224,6 +230,37 @@ async function main() {
     invoke<number>(assertRemoteChildWaitLease, ctx, { ...base, now: Date.now() }),
     "the current child starts only while its exact parent wait receipt is live",
   );
+  const admission = await invoke<{ run: RunRow; channel: { _id: string; ownerId: string } }>(
+    admitRemoteChild, ctx, { ...base, now: Date.now() },
+  );
+  assert.deepEqual(admission, {
+    run: {
+      _id: run._id, ownerId: run.ownerId, channelId: run.channelId, status: run.status,
+      pipelineInvocationSnapshot: run.pipelineInvocationSnapshot,
+      pipelineInvocationSha256: run.pipelineInvocationSha256,
+    },
+    channel: { _id: channel._id, ownerId: channel.ownerId },
+  }, "atomic admission preserves the complete frozen invocation, not mutable channel settings");
+  assert.ok(JSON.stringify(admission).length < JSON.stringify({ run, channel }).length * 0.01,
+    "large live channel and unrelated run outputs stay out of worker admission transport");
+  for (const endpoint of [admitRemoteChild, assertRemoteChildWaitLease]) {
+    for (const changed of [
+      { executionLeaseToken: 3 }, { leaseOwner: "other" }, { dispatchKey: "other" },
+      { blockId: "other" }, { now: waitUntil }, { now: deadline },
+      { ownerId: "foreign" }, { channelId: "channels:foreign" },
+    ]) await assert.rejects(invoke(endpoint, ctx, { ...base, now: Date.now(), ...changed }));
+  }
+  channelAvailable = false;
+  await assert.rejects(invoke(admitRemoteChild, ctx, { ...base, now: Date.now() }), /channel|not found|access denied/);
+  channelAvailable = true;
+  channel.ownerId = "foreign";
+  await assert.rejects(invoke(admitRemoteChild, ctx, { ...base, now: Date.now() }), /owner|access denied/);
+  channel.ownerId = base.ownerId;
+  await assert.rejects(invoke(admitRemoteChild, {
+    ...ctx, auth: { getUserIdentity: async () => ({ subject: "owner", role: "owner", owner_id: base.ownerId }) },
+  }, { ...base, now: Date.now() }), /service|identity|authentication/i);
+  delete run.pipelineInvocationSnapshot;
+  delete run.pipelineInvocationSha256;
   await assert.rejects(
     invoke<number>(assertRemoteChildWaitLease, ctx, {
       ...base,

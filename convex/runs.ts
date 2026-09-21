@@ -1,8 +1,9 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { internalMutation, query as publicQuery } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { evaluateConvexAuthProbeIdentity } from "../src/lib/convexAuthProbe";
 import {
   decidePipelineInvocationClaim,
@@ -2041,8 +2042,7 @@ export const beginRemoteChildWait = mutation({
  * check intentionally does not turn a checkpointed child into a long static
  * lease.
  */
-export const assertRemoteChildWaitLease = mutation({
-  args: {
+const remoteChildAdmissionArgs = v.object({
     ownerId: v.string(),
     channelId: v.id("channels"),
     runId: v.id("runs"),
@@ -2051,9 +2051,11 @@ export const assertRemoteChildWaitLease = mutation({
     blockId: v.string(),
     dispatchKey: v.string(),
     now: v.number(),
-  },
-  returns: v.number(),
-  handler: async (ctx, args) => {
+});
+async function readFencedRemoteChildRun(
+  ctx: MutationCtx,
+  args: Infer<typeof remoteChildAdmissionArgs>,
+) {
     await requireStudioServiceIdentity(ctx, args.ownerId, "remote child execution fence");
     if (!Number.isFinite(args.now) || !args.blockId.trim() || !args.dispatchKey.trim()) {
       throw new Error("remote child execution fence is invalid");
@@ -2085,7 +2087,32 @@ export const assertRemoteChildWaitLease = mutation({
     ) {
       throw new Error("remote child execution fence is stale or lacks a live bounded work window");
     }
-    return remoteChildWaitUntil;
+    return run;
+}
+
+// Retained for existing workers. New workers use the compact atomic admission.
+export const assertRemoteChildWaitLease = mutation({
+  args: remoteChildAdmissionArgs,
+  returns: v.number(),
+  handler: async (ctx, args) => (await readFencedRemoteChildRun(ctx, args)).remoteChildWaitUntil!,
+});
+
+export const admitRemoteChild = mutation({
+  args: remoteChildAdmissionArgs,
+  handler: async (ctx, args) => {
+    const run = await readFencedRemoteChildRun(ctx, args);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("remote child admission channel unavailable or ownership mismatch");
+    }
+    return {
+      run: {
+        _id: run._id, ownerId: run.ownerId, channelId: run.channelId, status: run.status,
+        pipelineInvocationSnapshot: run.pipelineInvocationSnapshot,
+        pipelineInvocationSha256: run.pipelineInvocationSha256,
+      },
+      channel: { _id: channel._id, ownerId: channel.ownerId },
+    };
   },
 });
 

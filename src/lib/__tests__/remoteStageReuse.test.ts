@@ -65,7 +65,7 @@ type Mutation = "seed" | "output" | "missing-receipt" | "params" | "module" | "r
 type VersionCase = "v2" | "missing-v2" | "fingerprint-drift" | "historical-v1";
 type WorkerMutation = "wrong-version" | "missing-actual" | "missing-context" | "project" | "environment" | "run-version" | "deployment-version" | "missing-binding";
 function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?: WorkerMutation) {
-  const calls = { stages: 0, bootstrap: 0, rehydrate: 0, paid: 0, begin: 0, finish: 0, artifactQueries: 0,
+  const calls = { admission: 0, stages: 0, bootstrap: 0, rehydrate: 0, paid: 0, begin: 0, finish: 0, artifactQueries: 0,
     defaultExecution: 0, alternateExecution: 0, reconstruction: 0 };
   const writtenArtifacts: NonNullable<Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0]>[] = [];
   let observedStore: Record<string, unknown> | undefined;
@@ -213,23 +213,24 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
   if (mutation === "module") manifests[0]!.version = "2.0.0";
   const savedRowsBefore = structuredClone(rows);
   const fakeApi = {
-    runs: { assertRemoteChildWaitLease: "lease", getRun: "run", renewRemoteChildWaitLease: "renew" },
-    channels: { getChannel: "channel" },
+    runs: { admitRemoteChild: "admission", renewRemoteChildWaitLease: "renew" },
     remoteChildCosts: { begin: "begin", finish: "finish" },
     runArtifacts: { listForRun: "artifact-list" },
   };
   class Client {
     async query(name: string) {
-      if (name === "run") return {
-        _id: scope.runId, ownerId: scope.ownerId, channelId: scope.channelId, status: "running",
-        pipelineInvocationSnapshot: snapshot, pipelineInvocationSha256: pipelineInvocationSha256(snapshot),
-      };
-      if (name === "channel") return { _id: scope.channelId, ownerId: scope.ownerId };
       if (name === "artifact-list") calls.artifactQueries++;
       throw new Error(`unexpected query ${name}`);
     }
     async mutation(name: string, input: { costUsd?: number; complete?: boolean }) {
-      if (name === "lease" || name === "renew") return {};
+      if (name === "admission") { calls.admission++; return {
+        run: {
+          _id: scope.runId, ownerId: scope.ownerId, channelId: scope.channelId, status: "running",
+          pipelineInvocationSnapshot: snapshot, pipelineInvocationSha256: pipelineInvocationSha256(snapshot),
+        },
+        channel: { _id: scope.channelId, ownerId: scope.ownerId },
+      }; }
+      if (name === "renew") return {};
       if (name === "begin") { calls.begin++; return {}; }
       if (name === "finish") { calls.finish++; acceptedCost = input.costUsd; return { costUsd: input.costUsd, complete: input.complete, attempts: 1 }; }
       throw new Error(`unexpected mutation ${name}`);
@@ -323,6 +324,7 @@ async function main() {
   assert.equal(unchanged.calls.begin, 1);
   assert.equal(unchanged.calls.finish, 1);
   assert.equal(unchanged.calls.stages, 1, "reuse adds no stage query round trips");
+  assert.equal(unchanged.calls.admission, 1, "one fenced admission replaces the lease mutation and two full-document queries");
   assert.equal(unchanged.calls.artifactQueries, 0, "historical artifacts must not replace selected identities");
   assert.equal(unchanged.observedStore()!.narrationLocalPath, "/new-worker/narration.mp3");
   assert.equal(unchanged.observedStore()!.scriptApproved, true);
@@ -403,7 +405,8 @@ async function main() {
       const candidate = harness(undefined, "v2", mutation);
       await assert.rejects(candidate.run(), expected);
       for (const [key, value] of Object.entries(candidate.calls)) {
-        assert.equal(value, 0, `${mutation}: refuse before ${key}, including compilation/reconstruction`);
+        assert.equal(value, key === "admission" ? 1 : 0,
+          `${mutation}: only durable admission may run before worker-version rejection`);
       }
       assert.equal(candidate.writtenArtifacts.length, 0);
       assert.equal(candidate.acceptedCost(), undefined);

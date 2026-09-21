@@ -1122,3 +1122,39 @@ the broad run began before that follow-up, so this is not a frozen release gate.
 The extracted helper bundles without Node-only dependencies, and the code graph
 was refreshed after final source changes. No production build, deployment, paid
 generation, real GPU qualification or production billing measurement is claimed.
+
+## Batch 27: Atomic Compact Remote-Child Admission
+
+Remote render children previously performed a lease-fence mutation followed by
+separate full-run and full-channel queries. They now call `runs.admitRemoteChild`
+once. The same service-only lease validator is shared with the unchanged legacy
+endpoint. The new transaction verifies the channel and returns only its identity
+plus the run identity, status, complete frozen invocation and invocation hash.
+Live channel settings, unrelated run outputs and release-presentation work are
+not needed for this execution boundary and no longer cross it.
+
+This removes two Convex function calls per remote-child start (three to one,
+66.7% for admission only). The full frozen invocation is preserved: this is not
+prompt compression, a smaller model, changed render settings or reduced quality
+validation. Worker allowlists, invocation equality, deployment-version binding,
+rehydration receipts, renewable provider fences and spend accounting remain.
+The channel and lease now come from the same transaction snapshot. Provider-time
+renewal remains necessary; admission is not a long-lived permission to spend.
+
+Actual handler fixtures cover both endpoints' stale generation/lease/dispatch/
+block/expiry and ownership refusals, absent/foreign channels and non-service
+callers. A large-context fixture has over 99% smaller serialized admission data;
+real savings depend on frozen invocation size. Actual worker tests require one
+admission call and reject the removed full-document queries, while retaining
+replay, lineage, version-binding and budget checks. No new polling, cache, index,
+thumbnail testing or paid generation is introduced.
+
+Deploy the Convex endpoint before the matching Trigger worker revision; older
+workers retain their original endpoint. There is deliberately no fallback to
+unfenced execution when the new endpoint is unavailable. Production deployment,
+database/cache effects and billing savings remain unverified.
+
+Validation: five focused files pass in an external-network-disabled serial run,
+including authorization, remote lease lifecycle, actual worker replay/version
+binding, render admission and frozen budget admission. TypeScript, scoped lint
+and whitespace checks pass. No full release gate or deployed API test is claimed.
