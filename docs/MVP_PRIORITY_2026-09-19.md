@@ -33,11 +33,23 @@ Studio now has its own verified OpenRelay SSH identity, registered but attached
 to no VM. Exact build commands, identity and evidence locations are in
 `infra/studio-render/README.md`. Do not reuse Lito's SSH identity or runtime.
 
-The next live YuE2 gate remains an explicitly authorized bounded GPU allocation,
-private worker deployment, actual native generation and musical audition. The
-pending up-to-$1 compute request is not approval, and new persistent storage
-charges still need checking. Do not substitute more build checks for that live
-gate or mark the shared production music integration complete.
+The owner approved up to $1 GPU compute on 21 September. Official VM billing
+documentation confirms disk is included, with no separate storage charge.
+The first bounded allocation attempt was denied by OpenRelay: both valid vault
+keys authenticate to the expected organization, but VM creation returns HTTP
+403, `FORBIDDEN`, `not permitted for this organization`. The current canonical
+key explicitly reports `vms:write`; this is a real endpoint denial, not the
+scope-label false rejection fixed earlier. Provider request ID:
+`881dd082-173b-4d8c-b2b0-2abdfa3cec19`. The exact sanitized request and result are
+retained at `/var/lib/youtube-studio-render/operator/yue2-create-current-key-verification.json`.
+Final inventory confirmed zero Studio YuE2 VMs; no compute budget was spent.
+The pre-armed local watchdog was stopped after that reconciliation. Re-arm
+shutdown protection before a future allocation attempt. The approval remains
+valid within its original $1 cap; do not ask for that same approval again.
+
+Next: resolve actual VM-create authority, then private worker deployment,
+native generation and musical audition. Do not substitute more build checks
+for that live gate or mark shared production music integration complete.
 
 ## MVP acceptance
 
