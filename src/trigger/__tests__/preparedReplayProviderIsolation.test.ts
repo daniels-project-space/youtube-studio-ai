@@ -57,6 +57,7 @@ const savedEnv = new Map(["OPENROUTER_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_A
 const vaultReads: string[] = [], events: string[] = [];
 let missingKey = "", mediaMode: "good" | "changed" | "short" | "timeout" = "good";
 let paidCalls = 0, writes = 0, mediaReads = 0, dispatches = 0;
+const claims = new Map<string, Uint8Array>();
 const timeout = new Error("bounded media deadline");
 async function main() {
   delete process.env.OPENROUTER_API_KEY;
@@ -74,6 +75,10 @@ async function main() {
     if (id === "@/lib/storage") return {
       getObjectBytes: async (key: string, _bucket: unknown, options: unknown) => {
         events.push(`read:${key}`);
+        if (claims.has(key)) {
+          assert.deepEqual(options, { maxBytes: claims.get(key)!.byteLength, timeoutMs: 30_000 });
+          return claims.get(key)!;
+        }
         if ([narrationKey, musicKey, imageKey].includes(key)) {
           assert.deepEqual(options, { maxBytes: media.length, timeoutMs: 300_000 });
           mediaReads++;
@@ -88,7 +93,14 @@ async function main() {
         assert.ok(sidecars.has(key), `unexpected storage read ${key}`);
         return sidecars.get(key)!;
       },
-      putObject: async () => { writes++; throw new Error("replay must not write"); },
+      putObject: async (key: string, bytes: Uint8Array, options: { ifNoneMatch?: string }) => {
+        if (key.endsWith(".dispatch.json")) {
+          assert.equal(options.ifNoneMatch, "*");
+          if (claims.has(key)) throw Object.assign(new Error("already claimed"), { $metadata: { httpStatusCode: 412 } });
+          claims.set(key, bytes); return key;
+        }
+        writes++; throw new Error("replay must not write");
+      },
     };
     const actual = originalLoad.call(this, id, ...args);
     const stop = async () => { paidCalls++; events.push("generation"); throw new Error("stubbed generation boundary"); };
@@ -118,6 +130,7 @@ async function main() {
       for (const task of tasks.slice(1)) await assert.rejects(() => task.run(payload));
     }
     assert.equal(paidCalls, 0); assert.equal(writes, 0); assert.equal(dispatches, 1);
+    assert.equal(claims.size, 0, "completed or rejected reuse never claims fresh generation");
     assert.deepEqual(vaultReads, ["cloudflare"]);
     mediaMode = "good";
     missingKey = planWeekPreparedScriptKey(manifest); events.length = 0;
@@ -127,11 +140,29 @@ async function main() {
     process.env.OPENROUTER_API_KEY = "fixture";
     await assert.rejects(() => tasks[0].run(payload), /stubbed generation boundary/);
     assert.equal(paidCalls, 1);
+    await assert.rejects(() => tasks[0].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+    assert.equal(paidCalls, 1, "a lost script result cannot buy another attempt");
     missingKey = planWeekPreparedImagesKey(manifest); events.length = 0;
     await assert.rejects(() => tasks[3].run(payload), /stubbed generation boundary/);
     assert.ok(events.indexOf(`read:${missingKey}`) < events.indexOf("vault:novita"));
     assert.ok(events.indexOf("vault:novita") < events.indexOf("generation"));
     assert.equal(paidCalls, 2); assert.equal(writes, 0);
+    await assert.rejects(() => tasks[3].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+    assert.equal(paidCalls, 2, "a lost image result cannot buy another wave");
+    assert.equal(claims.size, 2);
+    for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)], [2, planWeekPreparedMusicKey(manifest)]] as const) {
+      missingKey = key;
+      const fresh = { ...payload, speaker: "fixture-voice" };
+      const before: number = paidCalls;
+      await assert.rejects(() => tasks[index].run(fresh), /stubbed generation boundary/);
+      assert.equal(paidCalls, before + 1);
+      await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+      assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
+    }
+    assert.equal(claims.size, 4);
+    missingKey = "";
+    for (const task of tasks) assert.equal((await task.run(payload)).reused, true,
+      "a completed sidecar replays even when the dispatch claim exists");
     console.log("PREPARED REPLAY ISOLATION PASS: four real producers and real bootstrap, no generation credentials on reuse, bounded retained bytes, nine bad-media holds, fresh-work credential ordering");
   } finally {
     loader._load = originalLoad; globalThis.fetch = originalFetch;

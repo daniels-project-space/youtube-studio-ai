@@ -34,6 +34,7 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { downloadTo, readBytes } from "@/lib/files";
 import { crossfadeConcatAudio, masterAudioTransparentGain, probe } from "@/lib/ffmpeg";
 import { generateMureka, generateSuno, selfLoopAudio, type MusicProvider, type MusicTrack } from "@/lib/music";
@@ -258,8 +259,7 @@ async function persistCreateOnly(key: string, body: Uint8Array, contentType: str
 export const planWeekPreparedMusicTask = task({
   id: "plan-week-prepared-music",
   maxDuration: 3_600,
-  // The create-only audio/sidecar pair makes a bounded retry safe after a
-  // transport failure, while avoiding an unbounded paid retry loop.
+  // Completed audio replays; an incomplete dispatch claim prevents repurchase.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedMusicArgs) => {
@@ -284,6 +284,7 @@ export const planWeekPreparedMusicTask = task({
 
     const workDir = await mkdtemp(join(tmpdir(), "plan-week-music-"));
     try {
+      await claimPreparedGeneration("music", manifest, { payload, program, trackCount, generations });
       const tracks: MusicTrack[] = [];
       const prompt = program.generation.structuredCaption;
       if (provider === "suno") {

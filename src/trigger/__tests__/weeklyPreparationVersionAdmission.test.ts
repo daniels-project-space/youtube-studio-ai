@@ -30,6 +30,7 @@ let writes = 0;
 let dispatches = 0;
 let mutations = 0;
 let networkCalls = 0;
+const claims = new Map<string, Uint8Array>();
 let sidecarMode: "existing" | "missing" | "stop" | "error" | "bytes" = "existing";
 let sidecarError: unknown;
 let sidecarBytes = Buffer.from("{}");
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
     };
     if (id === "@/lib/storage") return {
       getObjectBytes: async (key: string, _bucket?: string, options?: unknown) => {
+        if (claims.has(key)) return claims.get(key)!;
         assert.deepEqual(options, PREPARED_METADATA_READ, "every preparation metadata read must bound transfer and time");
         reads.push(key);
         if (key === manifestKey) return manifestBytes;
@@ -68,7 +70,10 @@ async function main(): Promise<void> {
         if (sidecarMode === "bytes") return sidecarBytes;
         return Buffer.from("{}");
       },
-      putObject: async () => { writes++; throw new Error("write forbidden"); },
+      putObject: async (key: string, bytes: Uint8Array, options: { ifNoneMatch?: string }) => {
+        if (key.endsWith(".dispatch.json")) { assert.equal(options.ifNoneMatch, "*"); claims.set(key, bytes); return key; }
+        writes++; throw new Error("write forbidden");
+      },
     };
     const actual = originalLoad.call(this, id, ...args);
     if (id === "@/lib/music") return { ...actual as object, generateSuno: paid, generateMureka: paid };

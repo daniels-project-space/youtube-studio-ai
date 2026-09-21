@@ -991,3 +991,51 @@ checks passed. The preceding full-suite evidence is not relabelled as a new
 full gate. No thumbnail generation, paid request, deployment, real GPU inference
 or fleet billing measurement occurred. Exactly-once first generation and the
 broader music/MVP qualification remain open.
+
+## Batch 24: Fence fresh weekly generation before provider work
+
+Create-only result files did not prevent two workers from buying generation
+before either result existed. They also did not prevent a whole-stage retry after
+a paid response was lost or the final result write failed. Script, narration,
+music and image preparation now claim one deterministic stage/episode R2 key
+before the first provider call. This is shared preparation control, not a new
+renderer, provider fallback or channel-specific pipeline.
+
+The claim contains the manifest and effective-request fingerprints, exact scope,
+stage and explicitly unknown cost. Its key does not change with a different
+prompt, budget or request hash. Only a newly acknowledged conditional PUT followed
+by exact byte readback admits generation. Existing claims, lost acknowledgements,
+failed/mismatched readback and a 30-second write timeout raise the existing
+non-retryable task-abort error with `PAID_STAGE_RECONCILIATION_REQUIRED`. Claims
+have no automatic expiry, release or deletion. A late SDK write may still commit;
+it cannot admit generation after this caller's deadline.
+
+This deliberately trades automatic whole-stage retry for an explicit hold when
+the provider outcome is uncertain. It adds one small conditional R2 write and
+one verification read per fresh stage. Completed result reuse remains first and
+does not acquire another claim; downstream idempotent handoffs still run. The
+claim is acquired after deterministic preflight and provider bootstrap, and
+inside existing audio temp-directory cleanup boundaries. It does not stop a
+successfully admitted stage's legitimate multi-call generation or alter model,
+prompt, sampling, media quality, or internal provider retry contracts.
+
+Local evidence: 32 simultaneous claim contenders admit one caller; stage keys
+remain separate; changed requests cannot bypass an existing claim; storage
+failure, lost-write acknowledgement, readback failure/substitution and a late
+commit after a virtual 30-second deadline admit no new work. The four real
+producer bodies each reach one stubbed provider call, lose their result, and
+refuse a second purchase on replay. Supplying a completed valid sidecar then
+restores normal reuse despite the existing claim. No paid provider is called.
+
+This is not exactly-once provider execution, automatic recovery of partial
+sentence/image work, durable reconciliation of the actual charge, or GPU/music
+quality qualification. It protects attempts made by this implementation, not
+unrecorded historical attempts or concurrently running older workers. Deployment
+must drain older workers and reconcile incomplete legacy preparations before
+resubmission; do not delete claims as a retry mechanism. The full MVP and
+production rollout remain open.
+
+Final local gate: all 846 selected readiness files passed with external
+networking disabled and 30 thumbnail-named files excluded. TypeScript, scoped
+lint, whitespace checks and the post-edit Graphify refresh passed. This remains
+a partial offline gate, not production readiness or approval to provision GPUs.

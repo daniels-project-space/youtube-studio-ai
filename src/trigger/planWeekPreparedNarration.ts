@@ -32,6 +32,7 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { concatAudioWithGaps, probe } from "@/lib/ffmpeg";
 import { writeBytes } from "@/lib/files";
 import {
@@ -360,9 +361,8 @@ async function persistCreateOnly(key: string, body: Uint8Array, contentType: str
 export const planWeekPreparedNarrationTask = task({
   id: "plan-week-prepared-narration",
   maxDuration: 3_600,
-  // Sentence audio and its receipt are immutable. A short provider or R2
-  // interruption can therefore be retried safely; a replay validates the
-  // retained bytes and dispatches the next prepared stages without respend.
+  // Completed audio/handoffs replay without TTS. An incomplete claimed take
+  // is held even when only part of its sentence generation completed.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedNarrationArgs) => {
@@ -427,6 +427,8 @@ export const planWeekPreparedNarrationTask = task({
     const qwenReceipts: QwenTtsReceipt[] = [];
     let billableCharacters = 0;
     try {
+      await claimPreparedGeneration("narration", manifest, { payload, scriptSha256: preparedScript.scriptSha256,
+        provider, speed, cadence, speaker, language, instruction });
       let observedQwenCost = 0;
       for (const [index, sentence] of sentences.entries()) {
         const path = join(workDir, `sentence-${String(index).padStart(4, "0")}.mp3`);

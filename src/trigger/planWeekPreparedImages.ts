@@ -34,6 +34,7 @@ import { getObjectBytes, putObject } from "@/lib/storage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 
 export interface PlanWeekPreparedImageShot {
@@ -377,9 +378,8 @@ export async function dispatchPreparedFootage(
 export const planWeekPreparedImagesTask = task({
   id: "plan-week-prepared-images",
   maxDuration: 3_600,
-  // Retained stills and the H3 handoff are create-only and digest-checked, so
-  // one bounded retry can recover a transient Novita/R2/Trigger interruption
-  // without duplicating a completed image wave.
+  // Completed waves/handoffs can recover; an incomplete claimed generation
+  // requires reconciliation instead of buying another image wave.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
@@ -411,6 +411,7 @@ export const planWeekPreparedImagesTask = task({
       ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
     }));
     await bootstrapSecrets(() => undefined, { services: ["novita"] });
+    await claimPreparedGeneration("images", manifest, { payload, shots, profile });
     const result = await renderImages({
       prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
       shots,

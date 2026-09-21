@@ -16,6 +16,7 @@ let dispatched: { provider: Provider; prompt: string; program?: ChannelMusicProg
 let persisted: ChannelMusicProgram | undefined;
 let manifestBytes: Uint8Array = new Uint8Array();
 let manifestKey = "";
+const claims = new Map<string, Uint8Array>();
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
@@ -30,9 +31,13 @@ loader._load = function (id, ...args) {
   if (id === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
   if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
   if (id === "@/lib/storage") return {
-    putObject: async (_key: string, bytes: Uint8Array) => { persisted = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(bytes).toString())); },
+    putObject: async (key: string, bytes: Uint8Array) => {
+      if (key.endsWith(".dispatch.json")) { claims.set(key, bytes); return key; }
+      persisted = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(bytes).toString()));
+    },
     getObjectBytes: async (key: string) => {
       if (key === manifestKey) return manifestBytes;
+      if (claims.has(key)) return claims.get(key)!;
       throw Object.assign(new Error("missing sidecar"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
     },
   };
@@ -92,6 +97,7 @@ async function main() {
     return dispatched[0].prompt;
   }
   async function weekly(prompt: string, seed: Record<string, unknown> = {}, config: Record<string, unknown> = {}) {
+    claims.clear(); // Each direction comparison is an independent fixture run.
     dispatched = [];
     const manifest: PlanWeekPreparationManifest = {
       version: PLAN_WEEK_PREPARATION_VERSION, ownerId: "owner-direction", channelId: "channel-direction",

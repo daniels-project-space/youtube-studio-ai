@@ -25,6 +25,7 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
@@ -203,10 +204,8 @@ async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, 
 export const planWeekPreparedScriptTask = task({
   id: "plan-week-prepared-script",
   maxDuration: 1_800,
-  // A transient model/R2 failure must not strand the weekly slate. The
-  // producer is create-only and the sidecar is content-addressed, so a retry
-  // after a completed write reuses the exact script without another model
-  // call; the bounded two-attempt policy keeps failures and spend visible.
+  // Retry storage/dispatch and reuse completed results. An incomplete claimed
+  // generation is held for reconciliation, never purchased again by a retry.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedScriptArgs) => {
@@ -230,10 +229,12 @@ export const planWeekPreparedScriptTask = task({
     }
 
     await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
+    const request = scriptRequest(manifest, payload);
+    await claimPreparedGeneration("script", manifest, { payload, request });
     const usage = createModelUsageScope();
     let script: Script;
     await usage.run(async () => {
-      script = await synthScript(scriptRequest(manifest, payload));
+      script = await synthScript(request);
     });
     const modelUsage = usage.snapshot();
     if (modelUsage.unpricedCalls > 0) {
