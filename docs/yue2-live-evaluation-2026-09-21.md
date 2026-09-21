@@ -174,3 +174,41 @@ geometry. Signal checks, full-source audition, channel fit, endings and producti
 approval remain separate gates. Source duration can vary; exact final video
 duration remains unresolved until verified by assembly. This policy must not be
 used to silently crop music or call an unreviewed ending seamless.
+
+### Completed Natural-Length Evaluation
+
+Job `studio-lofi-yue2-3090-natural-loop-20260921-01` completed under the approved
+policy using runtime `15cf466c5b28fcec4e1bd5fab6ddbd2167db8e78` and remote image
+`sha256:619c625fc14587524a1336989889d65f1c029633220465f9f5acad19dcae6ee9`.
+Only the job ID and explicit duration policy changed from the strict score retry.
+The semantic array hash is identical across those two runs, proving this policy
+did not silently alter, shorten or regenerate a different token sequence.
+
+- Native output: 1,749,056 frames, 36.438667 seconds, 48 kHz stereo `pcm_f32le`.
+- WAV: 13,992,536 bytes; SHA-256
+  `4cfb91af194c2120a68d4d596252ef2cc5742a7a60823c870a31d2a2a6b5d8d7`.
+- Both truncation flags false; 911 complete semantic frames, unchanged BF16
+  model, FP32 VAE and 32 midpoint ODE steps.
+- Supervisor elapsed 44.077489 seconds; generation-stage elapsed 29.665121
+  seconds, including 8.487415 semantic, 4.780524 NAR and 4.262287 VAE seconds.
+- Configured-rate allocation estimate USD 0.002204, not a provider invoice and
+  excluding build, idle and transfer rental.
+- Full-file measurements: zero non-finite samples, 474 full-scale samples,
+  longest full-scale run 41 samples, +0.1 dBTP, no below-60-dBFS quiet windows,
+  and nonzero mono fold-down. Both full-scale and true-peak review flags remain.
+
+**Rendering works; output quality remains on hold.** No musical audition,
+instrumental-only guarantee, channel fit, seamless wrap or exact assembled-video
+duration is claimed. The current official `pipeline.decode` explicitly clamps
+decoded floats to [-1, 1]. Lowering the retained WAV's gain cannot restore clipped
+transients. The preserved latents permit a separately recorded decoder/headroom
+investigation without purchasing another composition; no decoder behavior was
+changed in this evaluation.
+
+Artifacts: `/var/lib/youtube-studio-render/operator/yue2-natural-loop-evidence-20260921/`.
+The complete copied ledger and artifact hashes passed independent runtime
+inspection; ffprobe confirmed the actual WAV container and frame count. Listening
+derivative: `/var/lib/youtube-studio-render/operator/yue2-natural-loop-preview.mp3`.
+Native WAV unchanged. VM shutdown was verified after retrieval; its external
+guard is inactive. No thumbnail work, legacy pipeline changes or production
+Vercel/Trigger/Convex deployment occurred.
