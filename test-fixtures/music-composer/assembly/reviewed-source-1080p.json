@@ -1,0 +1,32 @@
+{
+  "version": "reviewed-yue2-assembly-native-proof/v1",
+  "sourceEvidence": {
+    "version": "yue2-assembly-source/v1",
+    "approvalFingerprint": "040dec02033a6a0139e0473fe8c89c0e096447133af6ca60e4a427a8f6154f40",
+    "candidateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arrangementFingerprint": "3673bce7f5a461ed3bac7a010427a7def23896d7d5cbac5ad2f4890d55556e02",
+    "listeningAudioSha256": "c411248aec6e73f9239a1bb1f566b010bc9041cffb138eee2379d15881c0f51f",
+    "preparedAudioSha256": "1b91678a7a5cd344c301dcbed77465b2592c4443152cafd2a1b7b4df32369126",
+    "nativeFrames": 576000,
+    "preparedFrames": 480000,
+    "preparedAudioBytes": 3840114,
+    "crossfadeSec": 2,
+    "sampleRateHz": 48000,
+    "channels": 2,
+    "playback": "repeat",
+    "publishingApproved": false
+  },
+  "videoFrames": 300,
+  "width": 1920,
+  "height": 1080,
+  "durationSec": 10,
+  "audioSampleRateHz": 48000,
+  "masterSha256": "b4728c643a6a2b3a787e77dbd39959ca94c49ea16d6cad7c773397863747c06d",
+  "sourceToneAmplitude": 0.010374816129770089,
+  "narrationToneAmplitude": 0.2592247353617822,
+  "wrongSourceToneRejected": true,
+  "sourceAndApproval": "synthetic_fixture",
+  "providerAndDatabase": "mocked_transport",
+  "encoder": "actual_production_ffmpeg",
+  "productionApproved": false
+}

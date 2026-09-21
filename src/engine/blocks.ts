@@ -10,6 +10,7 @@ import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
+import { createYuE2AssemblyManifest } from "@/trigger/blocks/yue2Assembly";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
@@ -71,6 +72,8 @@ export function registerAllBlocks(): void {
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
   registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
+  registerManifestVersion(createYuE2AssemblyManifest(getManifest("assemble")!));
+  registerManifestVersion(createYuE2AssemblyManifest(getManifest("timeline_assemble")!));
   // Compliance gates (Phase 4): originality_gate + compliance_check.
   for (const b of complianceBlocks) register(b);
   // Growth blocks (Phase 8, opt-in): crosspost.

@@ -3138,7 +3138,8 @@ export const quoteOverlaysBlock: Block = {
   },
 };
 
-export const timelineAssemble: Block = {
+export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) => Promise<string>, mixSampleRateHz?: 44100 | 48000): Block {
+  return {
   id: "timeline_assemble",
   consumes: [
     "footageClips",
@@ -3166,6 +3167,7 @@ export const timelineAssemble: Block = {
     "studioReusableMediaAcceptedCaptureCandidates",
   ],
   run: async (ctx) => {
+    const preparedMusicPath = prepareMusic ? await prepareMusic(ctx) : undefined;
     const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
       treatment: ctx.store["scenarioVisualTreatment"],
       route: ctx.store["channelProgramRoute"],
@@ -3269,6 +3271,7 @@ export const timelineAssemble: Block = {
     // Params-only is the configuration the render-parity matrix proves.
     // ========================================================================
     if (ctx.params["useAssemblyEdl"] === true) {
+      if (prepareMusic) throw new Error("Private YuE2 source is not admitted to the separate EDL cutover");
       const reusableUsed = ctx.store["studioReusableMediaUsedAssetFingerprints"];
       if (Array.isArray(reusableUsed) && reusableUsed.length > 0) {
         throw new Error("timeline_assemble: typed EDL cutover cannot consume reusable media without exact per-asset screen-time receipts");
@@ -3816,9 +3819,11 @@ export const timelineAssemble: Block = {
     // Music bed (full during the intro, ducked low under narration). Prefer the
     // R2 copy (musicKey = the mastered mix, never expires); provider URL is the
     // legacy fallback.
-    const musicKey = opt(ctx, "musicKey");
+    const musicKey = prepareMusic ? undefined : opt(ctx, "musicKey");
     let musicPath: string;
-    if (musicKey) {
+    if (preparedMusicPath) {
+      musicPath = preparedMusicPath;
+    } else if (musicKey) {
       const { writeFile } = await import("node:fs/promises");
       musicPath = join(tmp, "music.mp3");
       await writeFile(musicPath, await getObjectBytes(musicKey));
@@ -3866,6 +3871,7 @@ export const timelineAssemble: Block = {
       introCardPath: introCardPath || undefined,
       loopBodyPath: concat,
       musicPath,
+      audioSampleRateHz: mixSampleRateHz,
       narrationPath: narration,
       outPath: out,
       introSec,
@@ -3895,6 +3901,9 @@ export const timelineAssemble: Block = {
       : { ...finished, onScreenTextCues: finalMasterFootageOnScreenTextCues });
   },
 };
+
+}
+export const timelineAssemble: Block = createTimelineAssemblyBlock();
 
 /**
  * FINISHING PASS (shared by the full build and the surgical heal): burn

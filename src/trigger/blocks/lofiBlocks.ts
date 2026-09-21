@@ -1700,7 +1700,8 @@ export const upscale: Block = {
 
 /* ----------------------------- 7. assemble ------------------------------ */
 
-export const assemble: Block = {
+export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, directory: string) => Promise<string>, mixSampleRateHz?: 44100 | 48000): Block {
+  return {
   id: "assemble",
   consumes: ["loopUnitKey", "musicUrl"],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "introApplied", "loopSeamDiff"],
@@ -1739,7 +1740,6 @@ export const assemble: Block = {
     ) {
       throw new Error("assemble: the exact 2×15s source unit and both continuity proofs are required");
     }
-    const musicUrl = str(ctx, "musicUrl");
     // upscale stashed the loop-unit local path in loopUnitUrl; if absent (e.g.
     // resumed run), fall back to the R2 key via a fresh download.
     const loopUnitLocal = ctx.store["loopUnitUrl"] as string | undefined;
@@ -1749,11 +1749,13 @@ export const assemble: Block = {
     // (loudnorm'd), and it never expires like a provider CDN link. The provider
     // URL is only the legacy fallback.
     let audio: string;
-    const mk = opt(ctx, "musicKey");
-    if (mk) {
+    const mk = prepareMusic ? undefined : opt(ctx, "musicKey");
+    if (prepareMusic) {
+      audio = await prepareMusic(ctx, tmp);
+    } else if (mk) {
       audio = await writeBytes(join(tmp, "music.mp3"), await getObjectBytes(mk));
     } else {
-      audio = await downloadTo(musicUrl, join(tmp, "music.mp3"));
+      audio = await downloadTo(str(ctx, "musicUrl"), join(tmp, "music.mp3"));
     }
 
     let loopUnitPath: string;
@@ -1827,6 +1829,7 @@ export const assemble: Block = {
         introCardPath: introCardPath || undefined,
         loopBodyPath: loopUnitPath,
         musicPath: audio,
+        audioSampleRateHz: mixSampleRateHz,
         outPath: finalPath,
         introSec,
         bodySec: durationSec,
@@ -1856,6 +1859,9 @@ export const assemble: Block = {
     };
   },
 };
+
+}
+export const assemble: Block = createLoopAssemblyBlock();
 
 /* --------------------------- 10. upload_draft --------------------------- */
 

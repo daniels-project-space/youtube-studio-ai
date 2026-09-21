@@ -6,7 +6,7 @@ import type { YuE2CompletedResult } from "@/lib/yue2Evaluation";
 const execute = promisify(execFile);
 
 /** Inspect the retained native container, not just the worker's claimed format. */
-export async function probeYuE2NativeWav(path: string, result: YuE2CompletedResult, expectedBytes: number): Promise<void> {
+export async function probeYuE2NativeWav(path: string, result: Pick<YuE2CompletedResult, "frames">, expectedBytes: number): Promise<void> {
   let stdout: string;
   try {
     ({ stdout } = await execute("ffprobe", [

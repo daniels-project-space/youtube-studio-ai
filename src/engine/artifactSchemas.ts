@@ -346,6 +346,15 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     persist: "reference",
   },
   yue2MusicCandidate: { type: "YuE2MusicCandidate", schema: YuE2MusicCandidateSchema },
+  yue2AssemblySource: { type: "YuE2AssemblySource", schema: z.object({
+    version: z.literal("yue2-assembly-source/v1"),
+    approvalFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    candidateSha256: z.string().regex(/^[a-f0-9]{64}$/u), arrangementFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+    listeningAudioSha256: z.string().regex(/^[a-f0-9]{64}$/u), preparedAudioSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    nativeFrames: z.number().int().positive(), preparedFrames: z.number().int().positive(), preparedAudioBytes: z.number().int().positive(),
+    crossfadeSec: z.number().finite().min(0.5).max(4), sampleRateHz: z.literal(48000), channels: z.literal(2),
+    playback: z.literal("repeat"), publishingApproved: z.literal(false),
+  }).strict().refine(value => value.preparedFrames === value.nativeFrames - Math.round(value.crossfadeSec * 48000), "Loop frame clock mismatch") },
   validationSpec: {
     type: "CriticValidationSpec",
     schema: z.object({ assertions: z.array(z.record(z.string(), jsonValue)).min(1) }).passthrough(),

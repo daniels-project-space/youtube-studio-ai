@@ -829,3 +829,65 @@ It neither starts assembly nor mutates a run/outbox, dispatches a provider,
 publishes media, or approves the retained Seaside candidate. Private source
 adoption by assembly, exact checkpointed continuation, production deployment,
 real owner audition and full-length final-video qualification remain open.
+
+## Reviewed private source into both assembly consumers
+
+Both `assemble` and `timeline_assemble` now have explicit version
+`3.0.0-yue2-reviewed-loop`. These versions consume `yue2MusicCandidate` and
+`acceptedMusicArrangement` instead of a public/provider music URL. They reuse
+the existing renderers through an injected local music source; existing channel
+pipelines and default versions are unchanged. Narrated assembly also retains
+the composer's existing mix-directive contract.
+
+The shared source reader requires execution authority and the current service-
+verified owner approval for the frozen invocation, checks every source identity,
+revalidates the retained durable evidence, then re-hashes the exact private-bucket
+listening bytes. It performs no inference, worker HTTP, storage writes, public
+copy or database mutation. Source folding stays native 48 kHz stereo FLOAT WAV;
+FFprobe independently checks source and folded frame clocks. Approval and lease
+are rechecked after preparation, before encoding. Per-attempt private local
+files are cleaned up, and the assembly output records the exact source/fold
+hashes, frame counts and approval fingerprint without publishing authority.
+
+These versions currently accept repeatable arrangements only. They reject the
+separate EDL cutover and surgical reuse of already mixed pre-overlay videos,
+which have not yet proved this new source identity. They do not silently fall
+back to old music keys. The existing unversioned consumers still reject a bare
+candidate, and removing/reordering its required producers fails graph validation.
+
+### Native proof and shared timing repair
+
+- A real 1080p narrated render through the new manifest exposed final audio
+  duration **10.008005 seconds** against **10 seconds / 300 video frames**.
+  Before-repair media and inspection are retained under
+  `/var/lib/youtube-studio-render/operator/reviewed-source-assembly-20260921-before/`.
+- The shared audio-only loudness pass now uses the exact source video clock,
+  trims AAC decode padding and explicitly preserves the source audio rate.
+  It still copies video packets and uses the existing measured loudness method.
+  Four native 44.1/48 kHz, 3.5/10-second regressions verify exact duration and
+  unchanged encoded video. This fix benefits existing assembly consumers too;
+  it does not rewrite historical masters.
+- The narrated compositor now accepts an explicit 48 kHz mix clock for this
+  source version. The default remains 44.1 kHz. The final real proof has
+  **1920x1080, 300 frames, 10 seconds, stereo 48 kHz audio**, with video/audio/
+  container clocks agreeing. Decoded audio contains both the expected 233 Hz
+  source and 523 Hz narration; an unrelated 317 Hz source fails the same oracle.
+  The rendered diagnostic frame was inspected. This proves media consumption,
+  not musical quality or a real owner decision: audio/approval are synthetic,
+  provider/database transports are mocked, and the production encoder is real.
+- Final media, raw inspection and evidence live under
+  `/var/lib/youtube-studio-render/operator/reviewed-source-assembly-20260921-final/`;
+  the compact receipt is checked in as
+  `test-fixtures/music-composer/assembly/reviewed-source-1080p.json`.
+  Reproduce with `YUE2_ASSEMBLY_PROOF_DIR=/absolute/output/directory node --import tsx src/trigger/blocks/__tests__/yue2Assembly.test.ts`.
+- Actual loop and narrated block tests reject missing/revoked approval, changed
+  bytes, wrong scope/frames, stale execution, non-repeatable arrangements and
+  unqualified alternate render paths. Lo-Fi encoding is mocked in this new
+  test; it is not a new one-to-eight-hour qualification. The existing hermetic
+  assembly smoke now reports exactly **31 seconds**, with no warnings.
+
+The broad MVP is still unfinished: durable pre-assembly pause and automatic
+approval-to-resume, final-release review binding, all-family source adoption,
+actual owner audition, real-run provider persistence, full-length Lo-Fi output
+and production deployment remain open. No real candidate was approved, no GPU
+was started and no thumbnail generation/test was performed in this batch.

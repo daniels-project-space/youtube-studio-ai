@@ -1774,6 +1774,8 @@ export async function composeWithIntro(args: {
    * prior output for every existing caller.
    */
   filmGrain?: { grain: number; vignette: number };
+  /** Explicit native-rate mix; omitted preserves the legacy 44.1 kHz graph. */
+  audioSampleRateHz?: 44100 | 48000;
   preset?: string;
   timeoutMs?: number;
 }): Promise<string> {
@@ -1785,6 +1787,8 @@ export async function composeWithIntro(args: {
   const fade = Math.max(0, args.fadeOutSec ?? 0);
   const afade = Math.max(0, args.audioFadeOutSec ?? fade); // music fade (can outlast the video fade)
   const bodyTail = args.bodySec + tail;
+  const audioSampleRate = args.audioSampleRateHz ?? 44100;
+  if (audioSampleRate !== 44100 && audioSampleRate !== 48000) throw new FfmpegError("Unsupported composition audio rate");
   const total = intro + args.bodySec + tail;
   const fadeSt = Math.max(0, total - fade);
   const afadeSt = Math.max(0, total - afade);
@@ -1895,21 +1899,21 @@ export async function composeWithIntro(args: {
     `if(lt(t,${dStart}),${introVol},` +
     `if(lt(t,${dEnd}),${introVol}+(${bodyVol}-${introVol})*(t-${dStart})/${duckRamp.toFixed(3)},${bodyVol}))`;
   aparts.push(
-    `[${musicIdx}:a]aresample=44100,atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
+    `[${musicIdx}:a]aresample=${audioSampleRate},atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
   );
   if (includeBodyAudio) {
     // LTX's audio VAE creates in-world sound for the take. It begins with the
     // body (never under the title card), then gets aggressively ducked by the
     // spoken track below. This is a distinct narration-safe layer, not score.
     aparts.push(
-      `[${bodyIdx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay=${introMs}:all=1,` +
+      `[${bodyIdx}:a]aresample=${audioSampleRate},aformat=channel_layouts=stereo,adelay=${introMs}:all=1,` +
         `atrim=0:${total.toFixed(3)},volume=${diegeticVol.toFixed(3)}[diegeticbase]`,
     );
   }
   let amixOut: string;
   if (narrIdx >= 0) {
     aparts.push(
-      `[${narrIdx}:a]aresample=44100,adelay=${introMs}:all=1,` +
+      `[${narrIdx}:a]aresample=${audioSampleRate},adelay=${introMs}:all=1,` +
         // Keep the sidechain alive through the body. Without this padded silent
         // tail, FFmpeg ends sidechaincompress when narration ends and erases
         // every later LTX sound instead of letting it recover naturally.
@@ -2441,6 +2445,19 @@ export async function normalizeAudioOnly(
   outPath: string,
   targetLufs = -14,
 ): Promise<string> {
+  const { stdout: clockJson } = await run(FFPROBE, [
+    "-v", "error", "-show_entries", "stream=codec_type,duration_ts,time_base,sample_rate", "-of", "json", inPath,
+  ], 30_000);
+  const clock = JSON.parse(clockJson) as { streams?: Array<{ codec_type?: string; duration_ts?: number; time_base?: string; sample_rate?: string }> };
+  const picture = clock.streams?.find(stream => stream.codec_type === "video");
+  const sound = clock.streams?.find(stream => stream.codec_type === "audio");
+  const timebase = picture?.time_base?.match(/^(\d+)\/(\d+)$/u);
+  const sampleRate = Number(sound?.sample_rate);
+  const duration = timebase && picture?.duration_ts !== undefined
+    ? picture.duration_ts * Number(timebase[1]) / Number(timebase[2]) : NaN;
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isSafeInteger(sampleRate) || sampleRate <= 0) {
+    throw new FfmpegError("normalizeAudioOnly: exact video clock and native audio rate are required");
+  }
   // Pass 1: measure.
   const { stderr } = await run(FFMPEG, [
     "-nostats", "-i", inPath, "-map", "a:0",
@@ -2462,7 +2479,11 @@ export async function normalizeAudioOnly(
     "-filter:a",
     `loudnorm=I=${targetLufs}:TP=-1.5:LRA=11:linear=true:` +
       `measured_I=${j["input_i"]}:measured_TP=${j["input_tp"]}:` +
-      `measured_LRA=${j["input_lra"]}:measured_thresh=${j["input_thresh"]}`,
+      `measured_LRA=${j["input_lra"]}:measured_thresh=${j["input_thresh"]},` +
+      `aresample=${sampleRate},atrim=end=${duration}`,
+    // AAC decoding exposes padded tail samples; never let normalization extend
+    // the master. Keep the source rate when loudnorm internally oversamples.
+    "-ar", String(sampleRate), "-t", String(duration),
     "-c:a", "aac", "-b:a", "384k",
     "-movflags", "+faststart",
     outPath,
