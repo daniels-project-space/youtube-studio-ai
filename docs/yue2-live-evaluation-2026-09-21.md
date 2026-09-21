@@ -524,3 +524,12 @@ The retained GPU image is still the earlier `7a3eeae` revision. Installing the
 new image and configuring the authenticated gateway/tunnel remain pending.
 No GPU restart or spending occurred for this transport implementation. Legacy
 pipelines, publishing and thumbnail generation remain untouched.
+
+The immutable local build subsequently completed from Studio `3c09129b` and
+runtime `f9f57fc`, with manifest and image ownership/revision verification.
+Image: `sha256:fd58c7cf44d16e803d5c8a7d2013a090c97e1fe20d857449eca211dfc421c6fa`.
+The host-to-container probe then passed again against its installed code with
+`sourceOverlay=false`, network disabled, anonymous 401 and authenticated 200.
+Build receipt:
+`/var/lib/youtube-studio-render/builds/yue2-f9f57fc047be085c7d7f1fdb9f0e3e7491a84d37/context-rkeQRe.json`.
+This proves the local deployable image, not an upgrade of the retained GPU VM.
