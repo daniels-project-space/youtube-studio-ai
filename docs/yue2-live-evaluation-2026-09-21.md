@@ -212,3 +212,44 @@ derivative: `/var/lib/youtube-studio-render/operator/yue2-natural-loop-preview.m
 Native WAV unchanged. VM shutdown was verified after retrieval; its external
 guard is inactive. No thumbnail work, legacy pipeline changes or production
 Vercel/Trigger/Convex deployment occurred.
+
+### Verified Pre-Clamp Recovery
+
+`infra/studio-render/yue2_decode_headroom.py` decoded the retained natural-loop
+latents on the same RTX 3090 and pinned image, without composing again. The
+original ledger and models were read-only, with a source-ledger lock, no container
+network, a 180-second process deadline and external bounded shutdown guard.
+
+The official re-decode was sample-identical to the retained WAV. Calling the
+same FP32 VAE's tiled decoder before its output clamp recovered 474 samples
+outside [-1, 1], with a raw peak of 1.1233507395 (+1.010308 dBFS). Clamping these
+recovered floats reproduces **every original sample exactly**. This proves the
+official output clamp explains this candidate's measured full-scale samples;
+it does not establish that all possible distortion or musical defects are gone.
+
+The decode-only diagnostic completed in 20.332717 seconds. Original source,
+precision, weights, tiling, frame count and duration were unchanged. Its sealed
+receipt and all artifact hashes were independently verified after retrieval.
+Evidence: `/var/lib/youtube-studio-render/operator/yue2-headroom-evidence-20260921/comparison/`.
+
+- Unclipped FLOAT WAV SHA-256:
+  `d9ff35524fbfca09e96b66c565ed0fd3fc06e438e065e0136b37ecca8f42bc5b`.
+- Sealed result file SHA-256:
+  `814f2ae484073ae653a09a172112fbad1009a15c855cb931392ee3dd61d45ec0`.
+- A separate local listening derivative applies only `ffmpeg -af volume=-3dB`
+  to the **unclipped** WAV, retaining 48 kHz stereo FLOAT and 1,749,056 frames.
+  Full-file measurements: zero non-finite or full-scale samples, -2.0 dBTP,
+  no signal-review reasons, and unchanged 36.438667-second duration.
+- Derivative `/var/lib/youtube-studio-render/operator/yue2-headroom-minus3db.wav`
+  SHA-256 `d33412abaaf851be6bf41c177a34bd55b2eedb969c54d3974d74733ed3b22499`.
+  Listening MP3: `/var/lib/youtube-studio-render/operator/yue2-headroom-preview.mp3`.
+
+This is a diagnostic and listening derivative, **not a production decoder change
+or automatic approval**. Future integration must preserve pre-clamp floats and
+explicit mastering lineage; lowering the already-clipped original is not a fix.
+Channel personality, musical audition, loop seams and exact final assembly still
+need their own checks. The five-cent maximum window reservation retained all
+previous reservations inside the existing $1 authorization; it is not an invoice.
+The provider confirmed shutdown after artifact retrieval and the guard is inactive.
+Three CPU comparison tests and Ruff pass; the GPU result supplies the actual
+decoder-equivalence evidence those CPU tests cannot provide.
