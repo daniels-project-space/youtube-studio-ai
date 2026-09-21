@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AcceptedMusicArrangementSchema } from "./acceptedMusicArrangement";
+import { YuE2MusicCandidateSchema } from "./yue2MusicCandidate";
 import {
   ContinuityLedgerSchema,
   DPVisualSpecSchema,
@@ -344,6 +345,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     schema: AcceptedMusicArrangementSchema,
     persist: "reference",
   },
+  yue2MusicCandidate: { type: "YuE2MusicCandidate", schema: YuE2MusicCandidateSchema },
   validationSpec: {
     type: "CriticValidationSpec",
     schema: z.object({ assertions: z.array(z.record(z.string(), jsonValue)).min(1) }).passthrough(),

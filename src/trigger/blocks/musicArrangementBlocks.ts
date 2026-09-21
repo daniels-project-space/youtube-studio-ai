@@ -84,8 +84,8 @@ export function createArrangementComposerManifest(legacy: ModuleManifest, includ
 
 /**
  * Deterministic acceptance only: no text generation, inferred form, or provider authority.
- * acceptedMusicArrangement is terminal evaluation evidence for the explicit CLI
- * handoff, not yet an input to a production block (audit-inert-produces baseline).
+ * acceptedMusicArrangement feeds the explicit CLI and opt-in shared YuE2 source
+ * version. Neither acceptance nor a generated candidate grants release approval.
  */
 export const musicArrangementPlan: Block = {
   id: "music_arrangement_plan",

@@ -720,3 +720,72 @@ or eight-hour alignment proof was produced. The partial local file is not a
 deliverable. No automatic retry was launched; a future eight-hour verification
 needs a deliberately larger bounded CPU window. The 60/300-second results do
 not establish eight-hour correctness or acceptable long-duration render cost.
+
+## Shared Music Source Module
+
+`music@3.0.0-yue2-candidate` now executes the existing durable YuE2 client from
+the shared module registry. This is an explicit source-generation version, not
+a replacement default or a completed production music pipeline. It consumes
+`topic` and `acceptedMusicArrangement` from the real deterministic arrangement
+planner, requires the composer's exact symbolic score and retained channel
+context, and rejects another owner/channel/run/topic before I/O. It does not
+invent music intent, overwrite the score, choose a legacy provider, or trim a
+natural-length performance.
+
+Configuration requires an explicit seed, personal-creator acknowledgement,
+allocation ceiling (at most $1), and the exact worker execution policy. The
+policy must fit that reservation and a 1200-second child execution window. The
+actual engine stage reservation and fresh execution-lease callback are required;
+the durable client rechecks authority at its existing binding/submission edges.
+This module does not start a GPU or replace the independent VM shutdown guard.
+The configured allocation is still not a hard provider-invoice cap.
+
+Only the first durable invocation may submit. Pending work uses checkpointed
+120-second Trigger waits and GET-only recovery of the same deterministic job.
+Held/ambiguous/exhausted work becomes non-retryable reconciliation-required
+state, not an alternate-provider purchase. Known completed or rejected
+supervised allocations remain in the stage cost; an unknown outcome must still
+be reconciled and is not evidence of zero spend. Completed stage receipts reuse
+the normal runner and rehydrator without a new dispatch.
+
+Output is the typed `yue2MusicCandidate`, with the exact arrangement, private
+candidate/audio identities, native frame count, technical review state and
+allocation basis. It deliberately supplies neither `musicKey` nor `musicUrl`;
+both Lo-Fi and narrated assembly reject that missing release-ready input at
+graph validation. Technical rejection remains a blocked candidate available for
+review, never musical approval. The existing owner review reader loads the same
+private evidence, but promotion to approved music and exact pipeline continuation
+remain unfinished. No legacy channel or pipeline was changed.
+
+### Evidence
+
+- The real planner/runner test replays the retained Seaside composer brief and
+  obtains the exact previously rendered request, including its channel context,
+  score and natural-loop duration policy. Worker/storage transport is mocked in
+  this test; successful recovery, bounded pending exhaustion, stale authority,
+  changed inputs, missing reservations, invalid provider/acknowledgement,
+  candidate mismatch, charge retention, failed-stage no-repurchase and both
+  assembly refusal cases are exercised.
+- The actual module then ran against private R2 using
+  `scripts/verify-yue2-music-module.ts`. That verifier forbids worker HTTP access
+  and makes every new-dispatch authorization throw. It completed with
+  **0 worker requests, 0 authorization attempts, 0 new GPU jobs**, candidate SHA
+  `0d4be29217b0af627d9ebd1d474ce531d34e2298ab36dab6c1743ef217a980f6`, listening
+  SHA `74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93`,
+  6,837,056 native frames and the retained $0.004208 allocation estimate.
+- The static ABI audit initially compared the new implementation against the
+  default music manifest. It now resolves an explicitly declared block version
+  before checking inputs. A deliberately undeclared input still fails. The
+  dedicated `--direct-contract-audit` mode avoids running unrelated quality
+  tests; the legacy music contract did not gain unused inputs to hide the error.
+- Final validation passed: the new shared-module test, version dispatch/execution/
+  policy, registry topology, provider-specific music outputs, arrangement
+  planner, shared music ownership/routes, durable and supervised durable YuE2
+  tests, calibrated direct ABI audit, TypeScript, scoped ESLint and the full
+  Next.js production build. Graphify was refreshed. No thumbnail generation or
+  paid model/GPU test was performed in this batch.
+
+Live submission through this new module/Trigger checkpoint path, paid-failure
+cost reconciliation into a real run, owner-approved promotion/continuation,
+on-demand VM orchestration, all-family audio qualification and production
+deployment remain open. The storage-only proof does not stand in for them.

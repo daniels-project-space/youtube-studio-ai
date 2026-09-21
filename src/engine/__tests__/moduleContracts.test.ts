@@ -68,14 +68,16 @@ function literalStrings(property: ts.ObjectLiteralElementLike | undefined): stri
     .map((element) => element.text);
 }
 
-function directContractAudit(): void {
+function directContractAudit(additionalSources: Record<string, string> = {}): void {
   const blockDir = join(process.cwd(), "src/trigger/blocks");
   const extras: string[] = [];
   const ambientReads: string[] = [];
-  for (const file of readdirSync(blockDir).filter((name) => name.endsWith(".ts"))) {
+  const sources = Object.fromEntries(readdirSync(blockDir).filter(name => name.endsWith(".ts"))
+    .map(file => [file, readFileSync(join(blockDir, file), "utf8")]));
+  for (const [file, text] of Object.entries({ ...sources, ...additionalSources })) {
     const source = ts.createSourceFile(
       file,
-      readFileSync(join(blockDir, file), "utf8"),
+      text,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
@@ -90,7 +92,24 @@ function directContractAudit(): void {
       );
       if (!idProperty || !ts.isStringLiteral(idProperty.initializer)) return;
       const id = idProperty.initializer.text;
-      const manifest = getManifest(id);
+      const versionProperty = object.properties.find(property => propertyName(property) === "version");
+      let version: string | undefined;
+      if (versionProperty && ts.isPropertyAssignment(versionProperty)) {
+        const expression = versionProperty.initializer;
+        if (ts.isStringLiteral(expression)) version = expression.text;
+        else if (ts.isIdentifier(expression)) {
+          for (const statement of source.statements) {
+            if (!ts.isVariableStatement(statement)) continue;
+            for (const declaration of statement.declarationList.declarations) {
+              if (ts.isIdentifier(declaration.name) && declaration.name.text === expression.text &&
+                declaration.initializer && ts.isStringLiteral(declaration.initializer)) version = declaration.initializer.text;
+            }
+          }
+        }
+        assert.ok(version, `cannot resolve explicit ${id} version in ${file}`);
+      }
+      const manifest = getManifest(id, version);
+      if (version) assert.ok(manifest, `explicit ${id}@${version} is not registered`);
       if (!manifest) return;
       const producesProperty = object.properties.find(
         (property) => ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === "produces",
@@ -161,6 +180,14 @@ function directContractAudit(): void {
   }
   assert.deepEqual([...new Set(extras)].sort(), [], "module returned undeclared artifacts");
   assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared literal store reads");
+}
+
+function calibratedDirectContractAudit(): void {
+  directContractAudit();
+  assert.throws(() => directContractAudit({ "version-negative-fixture.ts": `
+    const block = { id: "music", version: "3.0.0-yue2-candidate", produces: [],
+      run: ctx => { const illegal = ctx.store["undeclared_fixture_input"]; } };
+  ` }), /undeclared literal store reads/);
 }
 
 function contractInputDeclarationsAreUnambiguous(): void {
@@ -903,7 +930,7 @@ function main(): void {
     [],
     "production registry must not contain implicit legacy manifests",
   );
-  directContractAudit();
+  calibratedDirectContractAudit();
   contractInputDeclarationsAreUnambiguous();
   compileRepresentativeFamilies();
   defaultBudgetsCoverCompilerReservations();
@@ -922,4 +949,8 @@ function main(): void {
   console.log("module ABI, production compiler, and Golden promotion guard tests passed");
 }
 
-main();
+if (process.argv.includes("--direct-contract-audit")) {
+  registerAllBlocks();
+  calibratedDirectContractAudit();
+  console.log("Direct module artifact/store contract audit passed");
+} else main();
