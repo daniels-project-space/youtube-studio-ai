@@ -1192,3 +1192,39 @@ reads across repeated calls and fail closed on missing configuration; fake vault
 transport refuses provider requests. Existing bootstrap, lease and durable
 delivery tests also pass. No thumbnail tests, paid generation or deployment ran.
 Live vault inventory, cold-start latency and production savings remain unverified.
+
+## Combined music continuation preparation
+
+The YuE2 continuation integration initially added a second Convex preparation
+RPC to every existing music-recovery tick. New workers now opt into
+`includeYuE2: true` on the existing music checkpoint preparation mutation.
+Within that transaction each module still owns its own bounded queue scans,
+approval/invocation validation and recovery writes. The result includes both
+receipt lists; the YuE2 dispatcher consumes the already prepared list rather
+than repeating preparation. An empty list also avoids the second call.
+
+Older workers omit the flag and retain the old result and scan surface. The
+standalone YuE2 endpoint remains compatible. New workers refuse a missing or
+oversized combined receipt list before any Trigger dispatch rather than silently
+falling back to another call or dropping a queue. Deploy Convex before workers.
+
+The measured fixture call count is one preparation RPC per idle music tick,
+down from two in the preceding branch implementation. At the verified existing
+one-minute cadence this avoids 43,200 preparation invocations per 30 days once
+the new path is deployed. The same bounded record reads remain necessary; this
+does not halve database reads, change scan limits, remove approval checks, add
+a cron, reduce audio quality or prove current production billing savings.
+
+Focused network-isolated tests execute actual Convex handlers with in-memory
+state and the actual scheduled dispatcher with explicit Trigger transport
+fixtures. They cover empty and populated YuE2 queues, legacy response isolation,
+expired-delivery recovery, revoked approval, owner authorization, malformed
+combined responses, exact worker binding, and lost-acknowledgement idempotency
+with both standalone and prepared dispatch. No live queue, owner decision,
+GPU, publishing or thumbnail generation was touched.
+
+Final verification for this batch: 24 focused tests across eight files passed
+with external networking disabled, plus TypeScript, scoped ESLint and the
+production build. The earlier 860-file sweep predates this optimization and is
+not represented as a full sweep of this revision. Production rollout and live
+invocation/billing verification remain outstanding.

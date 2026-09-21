@@ -155,7 +155,7 @@ export const verifyReleaseSource = query({ args: { ...scope, source: v.optional(
   return source;
 } });
 
-export const prepareDispatch = mutation({ args: { ownerId: v.string() }, handler: async (ctx, args) => {
+export async function prepareYuE2Dispatch(ctx: MutationCtx, args: { ownerId: string }) {
   await requireStudioServiceIdentity(ctx, args.ownerId, "YuE2 continuation dispatch");
   const now = Date.now();
   const expired = await ctx.db.query("yue2Continuations").withIndex("by_owner_state_deadline", q =>
@@ -181,7 +181,9 @@ export const prepareDispatch = mutation({ args: { ownerId: v.string() }, handler
     }
   }
   return pending;
-} });
+}
+
+export const prepareDispatch = mutation({ args: { ownerId: v.string() }, handler: prepareYuE2Dispatch });
 
 export const recordDispatch = mutation({ args: { ...scope, resume: yue2ResumeValidator, attempt: v.number(), triggerRunId: v.optional(v.string()) }, handler: async (ctx, args) => {
   await requireStudioServiceIdentity(ctx, args.ownerId, "YuE2 continuation acknowledgement");

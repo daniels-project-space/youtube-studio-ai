@@ -1,6 +1,6 @@
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
-import { dispatchPendingYuE2Continuations } from "./yue2ContinuationDispatcher";
+import { dispatchPendingYuE2Continuations, type YuE2ContinuationReceipt } from "./yue2ContinuationDispatcher";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -35,9 +35,10 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = input?.convex ?? new ConvexHttpClient(url!);
-  const { recovery, pending } = await convex.mutation(musicAuditionCheckpointsApi.prepareResumeDispatch, {
-    ownerId, now: Date.now(), limit: MUSIC_AUDITION_CONTINUATION_LIMIT,
-  } as never) as unknown as { recovery: { requeued: number; blocked: number }; pending: PendingMusicAuditionResume[] };
+  const { recovery, pending, yue2Pending } = await convex.mutation(musicAuditionCheckpointsApi.prepareResumeDispatch, {
+    ownerId, now: Date.now(), limit: MUSIC_AUDITION_CONTINUATION_LIMIT, includeYuE2: true,
+  } as never) as unknown as { recovery: { requeued: number; blocked: number }; pending: PendingMusicAuditionResume[]; yue2Pending: YuE2ContinuationReceipt[] };
+  if (!Array.isArray(yue2Pending) || yue2Pending.length > 25) throw new Error("Music recovery lacks bounded YuE2 preparation evidence");
   if (recovery.requeued || recovery.blocked) log(`music-audition queued delivery recovery: ${recovery.requeued} reissued, ${recovery.blocked} manual-blocked`);
   let triggered = 0;
   for (const receipt of pending.slice(0, MUSIC_AUDITION_CONTINUATION_LIMIT)) {
@@ -85,7 +86,7 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
       log(`music-audition continuation enqueue failed for ${receipt.runId}: ${message}`);
     }
   }
-  const yue2 = await dispatchPendingYuE2Continuations({ ownerId, convex, log, dispatchContext: input?.dispatchContext });
+  const yue2 = await dispatchPendingYuE2Continuations({ ownerId, convex, log, dispatchContext: input?.dispatchContext, preparedReceipts: yue2Pending });
   return { pending: pending.length + yue2.pending, triggered: triggered + yue2.triggered };
 }
 

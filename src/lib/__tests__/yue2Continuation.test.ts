@@ -5,6 +5,7 @@ import { getFunctionName } from "convex/server";
 import ts from "typescript";
 import * as continuations from "../../../convex/yue2Continuations";
 import * as auditions from "../../../convex/yue2Auditions";
+import { prepareResumeDispatch } from "../../../convex/musicAuditionCheckpoints";
 import { claimExecutionLease } from "../../../convex/runs";
 import { api } from "../../../convex/_generated/api";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
@@ -41,16 +42,19 @@ function fixture() {
       { _id: "stage-arrangement", runId, block: "music_arrangement_plan", status: "ok", outputs: { acceptedMusicArrangement: structuredClone(arrangement) } }],
     yue2Continuations: [], yue2Auditions: [] };
   let authorized = true;
+  const queriedTables: string[] = [];
   const db = {
     normalizeId: (_table: string, id: string) => id,
     get: async (id: string) => Object.values(tables).flat().find(row => row._id === id) ?? null,
     insert: async (table: string, value: Row) => { const id = `${table}-${tables[table].length}`; tables[table].push({ _id: id, ...structuredClone(value) }); return id; },
     patch: async (id: string, patch: Row) => { const row = await db.get(id); assert.ok(row); Object.assign(row, structuredClone(patch)); },
     query: (table: string) => {
+      queriedTables.push(table);
       let rows = [...(tables[table] ?? [])];
       const range = {
         eq: (key: string, value: unknown) => { rows = rows.filter(row => row[key] === value); return range; },
         lte: (key: string, value: number) => { rows = rows.filter(row => row[key] === undefined || Number(row[key]) <= value); return range; },
+        gt: (key: string, value: number | undefined) => { rows = rows.filter(row => row[key] !== undefined && (value === undefined || Number(row[key]) > value)); return range; },
       };
       const query = { withIndex: (_name: string, build: (r: typeof range) => unknown) => { build(range); return query; },
         order: (direction: string) => { if (direction === "desc") rows.reverse(); return query; },
@@ -78,7 +82,7 @@ function fixture() {
   });
   const pending = () => call<Row[]>(continuations.prepareDispatch);
   const claim = (resume?: unknown, leaseOwner = "worker-resumed") => call(claimExecutionLease, { leaseOwner, now: Date.now(), ...(resume ? { yue2AuditionResume: resume } : {}) });
-  return { run, tables, call, park, review, pending, claim, forbid: () => { authorized = false; } };
+  return { run, tables, queriedTables, call, park, review, pending, claim, forbid: () => { authorized = false; } };
 }
 
 test("real handlers pause, atomically approve, dispatch, claim, and recover without mutating completed source stages", async () => {
@@ -155,9 +159,11 @@ test("ownership, execution fences, frozen invocation, and retained source corrup
 });
 
 test("actual dispatcher preserves worker binding and idempotency through a lost acknowledgement", async () => {
+  for (const prepared of [false, true]) {
   const f = fixture(); await f.park(); await f.review();
   const deliveries: { payload: Row; options: Row }[] = [];
   let loseAck = true;
+  let preparations = 0;
   const compiled = ts.transpileModule(readFileSync("src/trigger/yue2ContinuationDispatcher.ts", "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -170,8 +176,10 @@ test("actual dispatcher preserves worker binding and idempotency through a lost 
     throw new Error(`Unexpected dependency ${name}`);
   }, loaded, loaded.exports);
   const input = { ownerId, log: () => {}, dispatchContext: { projectId: "proj_original", environmentId: "env_original" },
+    ...(prepared ? { preparedReceipts: await f.pending() } : {}),
     convex: { mutation: async (ref: Parameters<typeof getFunctionName>[0], args: Row) => {
       const name = getFunctionName(ref).split(":")[1];
+      if (name === "prepareDispatch") preparations++;
       if (name === "recordDispatch" && loseAck) { loseAck = false; throw new Error("lost acknowledgement"); }
       return f.call(continuations[name as keyof typeof continuations], args);
     } } };
@@ -180,6 +188,8 @@ test("actual dispatcher preserves worker binding and idempotency through a lost 
   assert.deepEqual(deliveries[0], deliveries[1]); assert.equal(deliveries[0].options.concurrencyKey, channelId);
   assert.equal(deliveries[0].payload.invocationSha256, f.run.pipelineInvocationSha256);
   assert.equal(f.tables.yue2Continuations[0].state, "queued");
+  assert.equal(preparations, prepared ? 0 : 2, "prepared delivery must not repeat preparation on either acknowledgement attempt");
+  }
 });
 
 test("worker wiring parks after persisted music and keeps recovery and self-heal bound to that source", () => {
@@ -189,7 +199,25 @@ test("worker wiring parks after persisted music and keeps recovery and self-heal
   assert.match(worker, /if \(isYuE2Boundary\) \{\s*await logSink\.flush\(\);\s*const checkpoint = await convex\.mutation\(yue2ContinuationsApi\.createAwaiting/u);
   assert.match(worker, /requiresYuE2AuditionCheckpoint && plan\.rerunBlocks\.some/u);
   const dispatcher = readFileSync("src/trigger/musicAuditionContinuationDispatcher.ts", "utf8");
-  assert.match(dispatcher, /await dispatchPendingYuE2Continuations\(\{ ownerId, convex, log, dispatchContext: input\?\.dispatchContext \}\)/u);
+  assert.match(dispatcher, /await dispatchPendingYuE2Continuations\(\{ ownerId, convex, log, dispatchContext: input\?\.dispatchContext, preparedReceipts: yue2Pending \}\)/u);
+});
+
+test("combined music preparation preserves legacy selection and recovers the exact approved YuE2 receipt", async () => {
+  const f = fixture(); await f.park(); await f.review();
+  f.queriedTables.length = 0;
+  assert.deepEqual(await f.call(prepareResumeDispatch, { now: Date.now() }), { recovery: { requeued: 0, blocked: 0 }, pending: [] });
+  assert.ok(!f.queriedTables.includes("yue2Continuations"), "old workers do not acquire new queue behavior");
+  const expected = await f.pending();
+  const combined = await f.call(prepareResumeDispatch, { now: Date.now(), includeYuE2: true });
+  assert.deepEqual(combined, { recovery: { requeued: 0, blocked: 0 }, pending: [], yue2Pending: expected });
+  await f.call(continuations.recordDispatch, { resume: expected[0].yue2AuditionResume, attempt: 1, triggerRunId: "lost" });
+  f.tables.yue2Continuations[0].queueDeadlineAt = Date.now() - 1;
+  const recovered = await f.call(prepareResumeDispatch, { now: Date.now(), includeYuE2: true });
+  assert.equal((recovered.yue2Pending as Row[])[0].attempt, 2);
+  assert.deepEqual((recovered.yue2Pending as Row[])[0].yue2AuditionResume, expected[0].yue2AuditionResume);
+  await f.review("rejected");
+  assert.deepEqual((await f.call(prepareResumeDispatch, { now: Date.now(), includeYuE2: true })).yue2Pending, []);
+  f.forbid(); await assert.rejects(f.call(prepareResumeDispatch, { now: Date.now(), includeYuE2: true }));
 });
 
 async function assembledFixture(block = "assemble") {

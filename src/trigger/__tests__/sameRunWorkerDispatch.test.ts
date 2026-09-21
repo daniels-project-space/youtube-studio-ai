@@ -20,6 +20,8 @@ let empty = false;
 let failPreparation = false;
 let failEnqueue = false;
 let failAcknowledgement = false;
+let invalidYuE2Preparation: "missing" | "oversized" | undefined;
+let preparedYuE2: Row | undefined;
 const queries: string[] = [];
 const triggers: { task: string; payload: Row; options: Row }[] = [];
 const keys: { seed: string; options?: Row }[] = [];
@@ -41,15 +43,22 @@ class Convex {
     if (name === "runs:listPendingPublishContinuations") return [];
     throw new Error(`unexpected query ${name}`);
   }
-  async mutation(ref: Parameters<typeof getFunctionName>[0]): Promise<unknown> {
+  async mutation(ref: Parameters<typeof getFunctionName>[0], args: Row = {}): Promise<unknown> {
     const name = getFunctionName(ref);
     mutations.push(name);
-    if (name === "yue2Continuations:prepareDispatch") return [];
     if (name.endsWith(":prepareResumeDispatch")) {
       if (failPreparation) throw new Error("fixture preparation unavailable");
       const selected = (mode === "music" && name.startsWith("musicAuditionCheckpoints:")) ||
         (mode === "factual" && name.startsWith("factualReviewCheckpoints:"));
-      return { recovery: { requeued: 0, blocked: 0 }, pending: empty || !selected ? [] : [{ ...receipt, ...fields() }] };
+      const music = name.startsWith("musicAuditionCheckpoints:");
+      if (music) assert.equal(args.includeYuE2, true);
+      return { recovery: { requeued: 0, blocked: 0 }, pending: empty || !selected ? [] : [{ ...receipt, ...fields() }],
+        ...(music && invalidYuE2Preparation !== "missing" ? { yue2Pending: invalidYuE2Preparation === "oversized" ? Array(26).fill(receipt) : preparedYuE2 ? [preparedYuE2] : [] } : {}) };
+    }
+    if (name === "yue2Continuations:recordDispatch" && preparedYuE2) {
+      assert.deepEqual(args.resume, preparedYuE2.yue2AuditionResume);
+      assert.equal(args.attempt, 1); assert.equal(args.triggerRunId, "trigger-a");
+      return null;
     }
     if (name.endsWith(":reapExpiredQueuedResumes") || name === "runs:reapExpiredQueuedPublishContinuations") return { requeued: 0, blocked: 0 };
     if (name === "contentPlan:claimNextPlanRun") return { state: "cadence", runId: receipt.runId, reused: true, ...fields() };
@@ -129,9 +138,8 @@ async function main() {
     mode = kind;
     empty = true;
     await invoke(kind);
-    assert.equal(mutations.length, kind === "music" ? 2 : 1, "one bounded preparation call per independent checkpoint store");
+    assert.equal(mutations.length, 1, "idle recovery prepares both music checkpoint stores in one Convex call");
     assert.match(mutations[0], /:prepareResumeDispatch$/);
-    if (kind === "music") assert.equal(mutations[1], "yue2Continuations:prepareDispatch");
     assert.deepEqual(queries, []);
     assert.deepEqual(triggers, []);
     assert.deepEqual(keys, []);
@@ -143,19 +151,38 @@ async function main() {
     failAcknowledgement = true;
     await invoke(kind);
     assert.equal(triggers.length, 1);
-    assert.equal(mutations.length, kind === "music" ? 3 : 2);
+    assert.equal(mutations.length, 2);
     assert.match(mutations[1], /:markResumeQueued$/);
-    if (kind === "music") assert.equal(mutations[2], "yue2Continuations:prepareDispatch");
     assert.deepEqual(queries, []);
     failAcknowledgement = false;
     failEnqueue = true;
     await invoke(kind);
     assert.equal(triggers.length, 1);
-    assert.equal(mutations.length, kind === "music" ? 3 : 2);
+    assert.equal(mutations.length, 2);
     assert.match(mutations[1], /:recordResumeEnqueueFailure$/);
-    if (kind === "music") assert.equal(mutations[2], "yue2Continuations:prepareDispatch");
     failEnqueue = false;
   }
+  mode = "music";
+  for (const malformed of ["missing", "oversized"] as const) {
+    invalidYuE2Preparation = malformed;
+    triggers.length = 0; mutations.length = 0; keys.length = 0;
+    await assert.rejects(tasks.music.run({}, { ctx: scope }), /bounded YuE2 preparation evidence/);
+    assert.equal(mutations.length, 1); assert.deepEqual(triggers, []); assert.deepEqual(keys, []);
+  }
+  invalidYuE2Preparation = undefined;
+  empty = true;
+  preparedYuE2 = { channelId: receipt.channelId, runId: receipt.runId, invocationSha256: receipt.invocationSha256,
+    attempt: 1, workerDeployment: binding, yue2AuditionResume: {
+      checkpointId: "yue2-checkpoint", checkpointFingerprint: receipt.checkpointFingerprint,
+      approvalFingerprint: receipt.approvalFingerprint, invocationSha256: receipt.invocationSha256,
+    } };
+  await invoke("music", scope);
+  assert.equal(triggers.length, 1);
+  assert.deepEqual(triggers[0].payload.yue2AuditionResume, preparedYuE2.yue2AuditionResume);
+  assert.equal(triggers[0].options.version, binding.version);
+  assert.match(keys[0].seed, /^yue2-audition-resume\/v1:/);
+  assert.deepEqual(mutations, ["musicAuditionCheckpoints:prepareResumeDispatch", "yue2Continuations:recordDispatch"]);
+  preparedYuE2 = undefined; empty = false;
   for (const kind of Object.keys(tasks)) {
     mode = kind;
     for (const casefile of kind === "scheduler" ? [false, true] : [false]) {

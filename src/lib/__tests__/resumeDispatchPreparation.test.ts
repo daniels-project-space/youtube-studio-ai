@@ -6,7 +6,7 @@ import { prepareResumeDispatch as factual } from "../../../convex/factualReviewC
 const ownerId = "owner-preparation";
 type Definition = { _handler: (ctx: unknown, args: unknown) => Promise<unknown> };
 
-function fixture(role = "service", identityOwner = ownerId) {
+function fixture(role = "service", identityOwner = ownerId, includeYuE2 = false) {
   const reads: { index: string; limit: number }[] = [];
   const ctx = {
     auth: { getUserIdentity: async () => ({
@@ -15,7 +15,7 @@ function fixture(role = "service", identityOwner = ownerId) {
     }) },
     db: {
       query: (table: string) => {
-        assert.equal(table, "runs");
+        assert.ok(table === "runs" || includeYuE2 && table === "yue2Continuations");
         let index = "";
         const range = { eq: () => range, gt: () => range, lte: () => range };
         const query = {
@@ -65,4 +65,15 @@ test("invalid recovery time fails before either scan", async () => {
       assert.deepEqual(f.reads, []);
     }
   }
+});
+
+test("opt-in music preparation keeps both queue scans bounded inside one idle transaction", async () => {
+  const f = fixture("service", ownerId, true);
+  assert.deepEqual(await f.run(music, { includeYuE2: true }), {
+    recovery: { requeued: 0, blocked: 0 }, pending: [], yue2Pending: [],
+  });
+  assert.equal(f.reads.length, 5);
+  assert.deepEqual(f.reads.slice(3), [
+    { index: "by_owner_state_deadline", limit: 25 }, { index: "by_owner_state_deadline", limit: 25 },
+  ]);
 });

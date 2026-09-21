@@ -4,7 +4,7 @@ import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { assertPipelineWorkerDeployment, pipelineWorkerDeploymentDispatchOptions, type PipelineWorkerDeployment } from "@/lib/pipelineWorkerDeployment";
 
 const continuationApi = (api as unknown as { yue2Continuations: { prepareDispatch: never; recordDispatch: never } }).yue2Continuations;
-type Receipt = { channelId: string; runId: string; invocationSha256: string; attempt: number;
+export type YuE2ContinuationReceipt = { channelId: string; runId: string; invocationSha256: string; attempt: number;
   workerDeployment?: PipelineWorkerDeployment;
   yue2AuditionResume: { checkpointId: string; checkpointFingerprint: string; approvalFingerprint: string; invocationSha256: string } };
 
@@ -12,8 +12,9 @@ type Receipt = { channelId: string; runId: string; invocationSha256: string; att
 export async function dispatchPendingYuE2Continuations(input: {
   ownerId: string; convex: StudioConvexHttpClient; log: (message: string) => void;
   dispatchContext?: Pick<PipelineWorkerDeployment, "projectId" | "environmentId">;
+  preparedReceipts?: readonly YuE2ContinuationReceipt[];
 }) {
-  const receipts = await input.convex.mutation(continuationApi.prepareDispatch, { ownerId: input.ownerId } as never) as unknown as Receipt[];
+  const receipts = input.preparedReceipts ?? await input.convex.mutation(continuationApi.prepareDispatch, { ownerId: input.ownerId } as never) as unknown as YuE2ContinuationReceipt[];
   let triggered = 0;
   for (const receipt of receipts) {
     const { attempt, workerDeployment, ...payload } = receipt;

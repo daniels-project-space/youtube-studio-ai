@@ -10,6 +10,7 @@ import {
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { verifiedWorkerDeploymentFields, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
+import { prepareYuE2Dispatch } from "./yue2Continuations";
 
 const MAX_MUSIC_AUDITION_RESUME_ENQUEUE_ATTEMPTS = 2;
 const MUSIC_AUDITION_RESUME_QUEUE_LEASE_MS = RUN_QUEUE_LEASE_MS;
@@ -505,11 +506,11 @@ async function recoverExpiredQueuedResumes(ctx: MutationCtx, args: { ownerId: st
 // Keep recovery and its pending read in one transaction; no nested function calls.
 // Legacy endpoints remain available for already-deployed workers and diagnostics.
 export const prepareResumeDispatch = mutation({
-  args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
+  args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()), includeYuE2: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const recovery = await recoverExpiredQueuedResumes(ctx, args);
     const pending = await listPendingResumesForDispatch(ctx, args);
-    return { recovery, pending };
+    return { recovery, pending, ...(args.includeYuE2 ? { yue2Pending: await prepareYuE2Dispatch(ctx, args) } : {}) };
   },
 });
 
