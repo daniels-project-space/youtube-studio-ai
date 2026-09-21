@@ -62,6 +62,52 @@ licensing is not authorized by that confirmation.
 - Accepted changes pass focused and release checks, are committed/pushed, and
   are verified on the exact Vercel alias and canonical Convex/Trigger services.
 
+## Frozen local checkpoint, 21 September
+
+Current-state verification at Studio source
+`4f58b788a04c53039c0288c4bd6ca247a1b89eca`:
+
+- Remote main and the exact production `/api/health` alias still report
+  `722facc4f5aaad004dcd9f96de3be7a29951a520`. The development branch has 229
+  changed files versus that main revision. Pushing it has not released it.
+- All 849 selected readiness files pass with external networking disabled and
+  30 thumbnail-named files excluded. Source remained unchanged throughout the
+  run. This is a frozen partial gate, not the complete production gate.
+- The canonical Next.js 16.3.4 Turbopack production build passes in a separate
+  detached checkout with an empty credential environment and only public
+  configuration. Its local health endpoint returns the exact tested SHA.
+  A preliminary network-isolated Webpack build failed on Google font downloads
+  and an existing global-only CSS-module selector; it is not claimed passing.
+  The canonical build was permitted public font downloads, not provider tests.
+- The existing hermetic assembly smoke test produces a real 1920x1080 H.264/AAC
+  master lasting 31.021995 seconds, 17,576,594 bytes, with four rendered segments,
+  no receipt warnings and no R2/provider access. Sixteen sampled frames across
+  the duration show the ordered synthetic clips, motion and intended fade-out.
+  This proves local assembly, not a real channel's visual/audio quality.
+- Isolated music runtime remains at `813dcb91da839820b0c0b6bbbf89f65bcd29a67d`.
+  Its current manifest still records RTX 3090, musical quality, exact duration
+  and instrumental-only behavior as unqualified, with production approval false.
+  No real YuE output qualification is established by the synthetic fixtures.
+
+Retained local evidence: `/tmp/studio-frozen-readiness-4f58b788.log`,
+`/tmp/studio-canonical-build-4f58b788.log`,
+`/tmp/studio-assembly-4f58b788.log`,
+`/tmp/assembly-smoke-AuqhE1/bk_smoke_2_loudnorm.mp4`, and
+`/tmp/studio-assembly-4f58b788-frames.png`.
+Master SHA-256:
+`de7b07e460ee9c5e3fd4f5f7ad57e1b78a03aaaf7543ea9c21d2f06b1399d15c`.
+
+The next release requires review of the dependency-ordered rollout, including
+Convex before new worker callers and prepared-job drain/reconciliation controls.
+Deployment authorization and a total authorized GPU evaluation spend cap have
+been requested. The previously rejected OpenRelay credential was not retried.
+The music continuation remains an implementation gap: the existing production
+audition checkpoint is MiniMax-specific (32 kHz PCM16), whereas retained YuE
+evidence is 48 kHz float. Do not relabel, resample or autoapprove it to pass that
+contract. Qualify actual YuE output, then implement its explicit approval,
+mastering and shared-module continuation while preserving legacy execution.
+The MVP and full additive backlog remain incomplete.
+
 ## Initial evidence, 19 September
 
 - Main and production health both report
@@ -146,7 +192,7 @@ receipt contract. Live metadata must use the approved configured provider.
 
 ## Work order
 
-### Current development batch, not activated
+### Historical development batch, not activated
 
 The shared music direction patch preserves explicit source/composer/Studio
 direction in both runtime and weekly preparation; independently executed
