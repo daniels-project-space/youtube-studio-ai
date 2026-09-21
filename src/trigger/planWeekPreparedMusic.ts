@@ -31,7 +31,8 @@ import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparatio
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { getObjectBytes, putObject } from "@/lib/storage";
+import { getObjectBytes } from "@/lib/storage";
+import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
@@ -245,17 +246,6 @@ async function readSidecar(sidecarKey: string, audioKey: string, manifest: PlanW
   return prepared;
 }
 
-async function persistCreateOnly(key: string, body: Uint8Array, contentType: string, metadata: Record<string, string>): Promise<boolean> {
-  try {
-    await putObject(key, body, { contentType, metadata: { ...metadata, sha256: sha256BytesHex(body) }, ifNoneMatch: "*" });
-    return true;
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-    return false;
-  }
-}
-
 export const planWeekPreparedMusicTask = task({
   id: "plan-week-prepared-music",
   maxDuration: 3_600,
@@ -315,11 +305,7 @@ export const planWeekPreparedMusicTask = task({
       if (!finalProbe.hasAudio || !Number.isFinite(finalProbe.durationSec) || finalProbe.durationSec < 1.5) throw new Error("weekly prepared music output has no measurable audio");
       const finalBytes = await readBytes(loopedPath);
       const audioSha256 = sha256BytesHex(finalBytes);
-      const audioCreated = await persistCreateOnly(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-music": "v1" });
-      if (!audioCreated) {
-        const winner = await getObjectBytes(audioKey, undefined, { maxBytes: finalBytes.byteLength, timeoutMs: 300_000 });
-        if (sha256BytesHex(winner) !== audioSha256) throw new Error("weekly prepared music audio collision has different bytes");
-      }
+      await persistPreparedResult(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-music": "v1" });
       const prepared: PlanWeekPreparedMusic = {
         version: "plan-week-prepared-music/v1",
         manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -329,12 +315,7 @@ export const planWeekPreparedMusicTask = task({
       };
       assertPlanWeekPreparedMusicBinding({ prepared, manifest });
       const body = new TextEncoder().encode(canonicalJson(prepared));
-      const created = await persistCreateOnly(sidecarKey, body, "application/json", { "plan-week-prepared-music": "v1" });
-      if (!created) {
-        const winner = await readSidecar(sidecarKey, audioKey, manifest);
-        if (!winner) throw new Error("weekly prepared music sidecar was lost after create-only collision");
-        return { ok: true, reused: true, sidecarKey, audioKey, costUsd: 0, audioSha256: winner.audioSha256, provider: winner.provider };
-      }
+      await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-music": "v1" });
       return { ok: true, reused: false, sidecarKey, audioKey, costUsd: estimatedCost, audioSha256, provider };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);

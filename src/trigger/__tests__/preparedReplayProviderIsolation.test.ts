@@ -57,6 +57,9 @@ const savedEnv = new Map(["OPENROUTER_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_A
 const vaultReads: string[] = [], events: string[] = [];
 let missingKey = "", mediaMode: "good" | "changed" | "short" | "timeout" = "good";
 let paidCalls = 0, writes = 0, mediaReads = 0, dispatches = 0;
+let resultMode = "";
+let resultWrites = 0;
+const freshResults = new Map<string, Uint8Array>();
 const claims = new Map<string, Uint8Array>();
 const timeout = new Error("bounded media deadline");
 async function main() {
@@ -75,6 +78,14 @@ async function main() {
     if (id === "@/lib/storage") return {
       getObjectBytes: async (key: string, _bucket: unknown, options: unknown) => {
         events.push(`read:${key}`);
+        if (resultMode && key === planWeekPreparedScriptKey(manifest) && resultWrites > 0) {
+          const limits = options as { maxBytes: number; timeoutMs: number };
+          assert.ok(limits.timeoutMs > 0 && limits.timeoutMs <= 30_000);
+          const saved = freshResults.get(key);
+          if (!saved) throw Object.assign(new Error("missing"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
+          assert.equal(limits.maxBytes, saved.byteLength);
+          return saved;
+        }
         if (claims.has(key)) {
           assert.deepEqual(options, { maxBytes: claims.get(key)!.byteLength, timeoutMs: 30_000 });
           return claims.get(key)!;
@@ -99,12 +110,27 @@ async function main() {
           if (claims.has(key)) throw Object.assign(new Error("already claimed"), { $metadata: { httpStatusCode: 412 } });
           claims.set(key, bytes); return key;
         }
-        writes++; throw new Error("replay must not write");
+        writes++;
+        if (resultMode) {
+          assert.equal(options.ifNoneMatch, "*");
+          resultWrites++;
+          if (resultMode === "once" && resultWrites === 1) throw Object.assign(new Error("unavailable"), { $metadata: { httpStatusCode: 503 } });
+          freshResults.set(key, resultMode === "conflict" ? Buffer.alloc(bytes.byteLength) : bytes);
+          if (resultMode !== "once") throw Object.assign(new Error("lost acknowledgement"), { $metadata: { httpStatusCode: 503 } });
+          return key;
+        }
+        throw new Error("replay must not write");
       },
     };
     const actual = originalLoad.call(this, id, ...args);
     const stop = async () => { paidCalls++; events.push("generation"); throw new Error("stubbed generation boundary"); };
-    if (id === "@/lib/scriptGen") return { ...actual as object, synthScript: stop };
+    if (id === "@/lib/scriptGen") return { ...actual as object, synthScript: async () => {
+      if (!resultMode) return stop();
+      paidCalls++;
+      const { recordModelUsage } = createRequire(import.meta.url)("../../lib/modelUsage") as typeof import("../../lib/modelUsage");
+      recordModelUsage({ provider: "openrouter", model: "fixture", kind: "text", reportedCostUsd: 0.25 });
+      return script;
+    } };
     if (id === "@/lib/novitaRenderFarm") return { ...actual as object, renderImages: stop };
     if (id === "@/lib/music") return { ...actual as object, generateMureka: stop, generateSuno: stop };
     if (id === "@/lib/tts") return { ...actual as object, synthNarration: stop };
@@ -163,6 +189,23 @@ async function main() {
     missingKey = "";
     for (const task of tasks) assert.equal((await task.run(payload)).reused, true,
       "a completed sidecar replays even when the dispatch claim exists");
+    for (const mode of ["once", "lost", "conflict"]) {
+      // Independent fixture attempts; production never clears claims.
+      claims.clear(); freshResults.clear(); resultWrites = 0; resultMode = mode;
+      missingKey = planWeekPreparedScriptKey(manifest);
+      const beforePaid: number = paidCalls, beforeDispatch: number = dispatches;
+      if (mode === "conflict") {
+        await assert.rejects(() => tasks[0].run(payload), /RECONCILIATION_REQUIRED/);
+        assert.equal(dispatches, beforeDispatch);
+      } else {
+        const result = await tasks[0].run(payload);
+        assert.equal(result.reused, false); assert.equal(result.costUsd, 0.25);
+        assert.equal(dispatches, beforeDispatch + 1);
+      }
+      assert.equal(paidCalls, beforePaid + 1, "storage recovery cannot re-enter generation");
+      assert.equal(resultWrites, mode === "once" ? 2 : 1);
+      assert.equal(claims.size, 1);
+    }
     console.log("PREPARED REPLAY ISOLATION PASS: four real producers and real bootstrap, no generation credentials on reuse, bounded retained bytes, nine bad-media holds, fresh-work credential ordering");
   } finally {
     loader._load = originalLoad; globalThis.fetch = originalFetch;

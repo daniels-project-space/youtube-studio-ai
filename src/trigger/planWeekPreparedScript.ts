@@ -22,7 +22,8 @@ import {
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { getObjectBytes, putObject } from "@/lib/storage";
+import { getObjectBytes } from "@/lib/storage";
+import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
@@ -160,21 +161,6 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
   };
 }
 
-async function persistCreateOnly(key: string, body: Uint8Array): Promise<boolean> {
-  try {
-    await putObject(key, body, {
-      contentType: "application/json",
-      metadata: { "plan-week-prepared-script": "v1", sha256: sha256BytesHex(body) },
-      ifNoneMatch: "*",
-    });
-    return true;
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-    return false;
-  }
-}
-
 async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): Promise<string> {
   const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_NARRATION_MAX_COST_USD ?? "3");
   if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
@@ -258,13 +244,7 @@ export const planWeekPreparedScriptTask = task({
     };
     assertPlanWeekPreparedScriptBinding({ prepared, manifest });
     const body = new TextEncoder().encode(canonicalJson(prepared));
-    const created = await persistCreateOnly(sidecarKey, body);
-    if (!created) {
-      const winner = await readSidecar(sidecarKey, manifest);
-      if (!winner) throw new Error("weekly prepared script sidecar was lost after create-only collision");
-      const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
-      return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: winner.scriptSha256 };
-    }
+    await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-script": "v1" });
     const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
     return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };
   },

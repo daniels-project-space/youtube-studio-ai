@@ -1039,3 +1039,44 @@ Final local gate: all 846 selected readiness files passed with external
 networking disabled and 30 thumbnail-named files excluded. TypeScript, scoped
 lint, whitespace checks and the post-edit Graphify refresh passed. This remains
 a partial offline gate, not production readiness or approval to provision GPUs.
+
+## Batch 25: Recover Result Storage Without Repeating Generation
+
+All four prepared producers now use a shared immutable-result writer for their
+final metadata and generated media, including copied footage first frames.
+Successful conditional writes perform no extra GET. A failed write reads at most
+the exact expected output length and accepts only identical length and SHA-256.
+A confirmed missing object after a known transient write failure permits up to
+three application-level write attempts of the same bytes, with 100/200 ms
+backoff. Underlying SDK retries retain their existing policy. Ambiguous reads,
+missing buckets, authorization errors, unknown failures and mismatching retained
+bytes do not authorize replacement or generation.
+
+The whole helper wait is bounded to 30 seconds for JSON or 300 seconds for media.
+A timed-out SDK write may commit later, but this helper does not start another
+write after that timeout. Dispatch claims explicitly cannot use this helper:
+identical existing claim bytes must never grant generation ownership.
+Normal completed-sidecar reuse still costs zero incremental generation; a fresh
+attempt that recovers its upload keeps its observed or estimated generation
+cost and is not mislabeled as a free replay.
+
+Offline fault tests cover healthy zero-read writes, lost acknowledgements,
+transient recovery, exact identity conflicts, strict absence, bounded attempts,
+claim-key refusal and late commits at both deadlines. The actual script task
+body proves one stubbed generation call, retained USD 0.25 fixture usage, and
+downstream dispatch only after successful storage reconciliation.
+
+This improves completion inside a live owning attempt. It cannot recover bytes
+lost with a crashed process, resume partial provider work, reconcile actual
+provider bills, or remove historical ambiguity. Claims stay held and the prior
+drain/reconciliation deployment requirements remain. No models, prompts, output
+quality settings, legacy pipeline definitions or thumbnail generation changed.
+There are no added Convex/Vercel calls; production savings are not yet measured.
+
+Validation: the network-isolated broad run passed 846 of 847 selected files
+(30 thumbnail-named files excluded). Its sole failure was a source-order
+assertion looking for the removed narration upload-helper name. After updating
+that assertion, all seven affected producer/storage/claim test files passed.
+TypeScript, scoped lint and whitespace checks passed. The entire broad run was
+not repeated after the assertion-only correction. No paid generation or
+production deployment was performed.

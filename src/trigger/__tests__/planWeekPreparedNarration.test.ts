@@ -86,7 +86,7 @@ assert.equal(imagePacket.shots[0]!.candidateCount, 2);
 
 const source = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPreparedNarration.ts"), "utf8");
 const rateGateAt = source.indexOf("assertNarrationDeliveryRate({");
-const persistAt = source.indexOf("const audioCreated = await persistCreateOnly(audioKey");
+const persistAt = source.indexOf("await persistPreparedResult(audioKey");
 assert.ok(rateGateAt >= 0 && persistAt > rateGateAt, "prepared narration must clear the measured pace gate before retained audio is written");
 assert.match(source, /composeQwenNarrationInstruction\([\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
   "weekly Qwen direction must include frozen Style DNA when no explicit module instruction exists");

@@ -29,7 +29,8 @@ import {
 } from "@/lib/planWeekPreparation";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { getObjectBytes, putObject } from "@/lib/storage";
+import { getObjectBytes } from "@/lib/storage";
+import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
@@ -347,17 +348,6 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-async function persistCreateOnly(key: string, body: Uint8Array, contentType: string, metadata: Record<string, string>): Promise<boolean> {
-  try {
-    await putObject(key, body, { contentType, metadata: { ...metadata, sha256: sha256BytesHex(body) }, ifNoneMatch: "*" });
-    return true;
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-    return false;
-  }
-}
-
 export const planWeekPreparedNarrationTask = task({
   id: "plan-week-prepared-narration",
   maxDuration: 3_600,
@@ -509,11 +499,7 @@ export const planWeekPreparedNarrationTask = task({
       if (!Number.isFinite(costUsd) || costUsd > payload.maxCostUsd) {
         throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
       }
-      const audioCreated = await persistCreateOnly(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-narration": "v1" });
-      if (!audioCreated) {
-        const winner = await getObjectBytes(audioKey, undefined, { maxBytes: finalBytes.byteLength, timeoutMs: 300_000 });
-        if (sha256BytesHex(winner) !== audioSha256) throw new Error("weekly prepared narration audio collision has different bytes");
-      }
+      await persistPreparedResult(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-narration": "v1" });
       const prepared: PlanWeekPreparedNarration = {
         version: "plan-week-prepared-narration/v1",
         manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -537,14 +523,7 @@ export const planWeekPreparedNarrationTask = task({
       };
       assertPlanWeekPreparedNarrationBinding({ prepared, manifest });
       const body = new TextEncoder().encode(canonicalJson(prepared));
-      const created = await persistCreateOnly(sidecarKey, body, "application/json", { "plan-week-prepared-narration": "v1" });
-      if (!created) {
-        const winner = await readSidecar(sidecarKey, audioKey, manifest);
-        if (!winner) throw new Error("weekly prepared narration sidecar was lost after create-only collision");
-        const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
-        const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, winner);
-        return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd: 0, audioSha256: winner.audioSha256 };
-      }
+      await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-narration": "v1" });
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prepared);
       return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd, audioSha256 };

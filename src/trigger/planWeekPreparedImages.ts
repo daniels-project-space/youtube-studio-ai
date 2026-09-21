@@ -30,7 +30,8 @@ import {
 } from "@/lib/minimaxH3";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { getObjectBytes, putObject } from "@/lib/storage";
+import { getObjectBytes } from "@/lib/storage";
+import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -301,28 +302,8 @@ export async function verifyStoredSidecar(key: string, manifest: PlanWeekPrepara
   return prepared;
 }
 
-async function persistCreateOnly(key: string, body: Uint8Array): Promise<boolean> {
-  try {
-    await putObject(key, body, { contentType: "application/json", metadata: { "plan-week-prepared-images": "v1", sha256: sha256BytesHex(body) }, ifNoneMatch: "*" });
-    return true;
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-    return false;
-  }
-}
-
 async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<void> {
-  try {
-    await putObject(key, bytes, { contentType: "image/png", metadata: { sha256: sha256BytesHex(bytes) }, ifNoneMatch: "*" });
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-    const existing = await getObjectBytes(key, undefined, { maxBytes: bytes.byteLength, timeoutMs: 300_000 });
-    if (existing.byteLength !== bytes.byteLength || sha256BytesHex(existing) !== sha256BytesHex(bytes)) {
-      throw new Error(`weekly prepared image create-only collision at ${key}`);
-    }
-  }
+  await persistPreparedResult(key, bytes, "image/png", {});
 }
 
 export async function dispatchPreparedFootage(
@@ -464,13 +445,7 @@ export const planWeekPreparedImagesTask = task({
     };
     assertPlanWeekPreparedImagesBinding({ prepared, manifest });
     const body = new TextEncoder().encode(canonicalJson(prepared));
-    const created = await persistCreateOnly(sidecarKey, body);
-    if (!created) {
-      const winner = await verifyStoredSidecar(sidecarKey, manifest);
-      if (!winner) throw new Error("weekly prepared images sidecar was lost after create-only collision");
-      const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, winner);
-      return { ok: true, reused: true, sidecarKey, outputs: winner.items.length, h3TriggerRunId, costUsd: 0, manifestSha256: winner.manifestSha256 };
-    }
+    await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
     const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, prepared);
     return { ok: true, reused: false, sidecarKey, outputs: items.length, h3TriggerRunId, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
   },
