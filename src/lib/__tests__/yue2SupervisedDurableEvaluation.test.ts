@@ -129,7 +129,16 @@ function fixture() {
 let current = fixture();
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
+const recoveryWaits: Array<{ seconds: number; idempotencyKey: string }> = [];
+let completeDuringWait = true;
 loader._load = function (id, ...args) {
+  if (id === "@trigger.dev/sdk/v3") return { task: (definition: unknown) => definition, wait: {
+    for: async (options: { seconds: number; idempotencyKey: string }) => {
+      recoveryWaits.push(options);
+      if (completeDuringWait) current.remote = "completed";
+    },
+  } };
+  if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
   if (id.endsWith("/yue2NativeAudio")) {
     const actual = originalLoad.call(this, id, ...args) as typeof import("@/lib/yue2NativeAudio");
     return { ...actual, probeYuE2NativeWav: (...input: Parameters<typeof actual.probeYuE2NativeWav>) => {
@@ -198,7 +207,7 @@ globalThis.fetch = async (input, init = {}) => {
 
 // The storage seam is installed before loading the actual production durable adapter.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { executeDurableYuE2Evaluation: run, readDurableYuE2Candidate: review } = require("@/lib/yue2DurableEvaluation") as typeof import("@/lib/yue2DurableEvaluation");
+const { executeDurableYuE2Evaluation: run, readDurableYuE2Candidate: review, loadDurableYuE2Recovery: loadRecovery } = require("@/lib/yue2DurableEvaluation") as typeof import("@/lib/yue2DurableEvaluation");
 const reviewScope = { ownerId: "supervised-owner", channelId: "supervised-channel", runId: "supervised-run" };
 type Input = YuE2DurableEvaluationInput;
 const args = (patch: Partial<Input> = {}): Input => ({ request, endpoint, bearerToken: token,
@@ -241,6 +250,69 @@ async function main() {
   async function test(name: string, fn: () => Promise<void> | void) {
     current = fixture(); await fn(); passed++; console.log(`PASS ${name}`);
   }
+  await test("checkpointed task recovers the exact submitted job without new generation", async () => {
+    current.postState = "pending"; await run(args());
+    const oldUrl = process.env.YUE2_EVALUATION_URL, oldToken = process.env.YUE2_EVALUATION_TOKEN;
+    process.env.YUE2_EVALUATION_URL = endpoint; process.env.YUE2_EVALUATION_TOKEN = token;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const task = require("../../trigger/yue2EvaluationRecovery").yue2EvaluationRecovery;
+      assert.equal(task.retry.maxAttempts, 1);
+      const scope = { ...reviewScope, jobId: request.job.job_id };
+      const input = await loadRecovery(scope, { endpoint, bearerToken: token });
+      assert.equal(input.recoverOnly, true);
+      await assert.rejects(input.authorizeSubmission, /recovery_cannot_submit/);
+      const before = current.calls.length, auth = current.authorizations;
+      const result = await task.run(scope);
+      assert.equal(result.status, "completed"); assert.equal(result.productionApproved, false);
+      assert.equal(current.posts, 1); assert.equal(current.authorizations, auth);
+      assert.ok(current.calls.slice(before).every(call => call.startsWith("GET ")));
+      assert.deepEqual(recoveryWaits, [{ seconds: 120, idempotencyKey: `${scope.jobId}:recovery-wait:0` }]);
+      assert.ok(current.objects.has(candidateKey)); assertReference(saved(candidateKey).executionAccounting);
+      current.offline = true;
+      assert.equal((await task.run(scope)).status, "completed");
+      assert.equal(recoveryWaits.length, 1, "completed reuse never waits or contacts the worker");
+    } finally {
+      for (const [key, value] of [["YUE2_EVALUATION_URL", oldUrl], ["YUE2_EVALUATION_TOKEN", oldToken]]) {
+        if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
+      }
+      recoveryWaits.length = 0;
+    }
+  });
+  await test("recovery rejects scope/endpoint substitution and never submits an absent job", async () => {
+    current.postState = "pending"; await run(args());
+    const scope = { ...reviewScope, jobId: request.job.job_id };
+    for (const changed of [{ ...scope, channelId: "other" }, { ...scope, jobId: `yue2-eval-${"0".repeat(64)}` },
+      { ...scope, runId: "../foreign" }, { ...scope, submit: true }]) {
+      await assert.rejects(() => loadRecovery(changed, { endpoint, bearerToken: token }));
+    }
+    await assert.rejects(() => loadRecovery(scope, { endpoint: "https://foreign.invalid", bearerToken: token }));
+    current.remote = "missing";
+    const before = current.calls.length;
+    await rejected(run(await loadRecovery(scope, { endpoint, bearerToken: token })));
+    assert.equal(current.posts, 1);
+    assert.ok(current.calls.slice(before).every(call => call.startsWith("GET ")));
+  });
+  await test("checkpointed recovery stops after its bounded window without claiming completion", async () => {
+    current.postState = "pending"; await run(args());
+    const oldUrl = process.env.YUE2_EVALUATION_URL, oldToken = process.env.YUE2_EVALUATION_TOKEN;
+    process.env.YUE2_EVALUATION_URL = endpoint; process.env.YUE2_EVALUATION_TOKEN = token;
+    completeDuringWait = false;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const task = require("../../trigger/yue2EvaluationRecovery").yue2EvaluationRecovery;
+      const result = await task.run({ ...reviewScope, jobId: request.job.job_id });
+      assert.equal(result.status, "pending"); assert.equal(result.reason, "recovery_window_exhausted");
+      assert.equal(recoveryWaits.length, Math.ceil((policy.max_execution_seconds + policy.termination_grace_seconds) / 120) + 1);
+      assert.equal(new Set(recoveryWaits.map(value => value.idempotencyKey)).size, recoveryWaits.length);
+      assert.equal(current.posts, 1); assert.equal(current.objects.has(candidateKey), false);
+    } finally {
+      for (const [key, value] of [["YUE2_EVALUATION_URL", oldUrl], ["YUE2_EVALUATION_TOKEN", oldToken]]) {
+        if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
+      }
+      recoveryWaits.length = 0; completeDuringWait = true;
+    }
+  });
   await test("fixture receipts pass the real accounting verifier for every lifecycle", () => {
     for (const state of ["pending", "completed", "failed", "timed_out"] as const) {
       const result = verifyYuE2ExecutionAccounting({ request, expectedPolicy: policy, ...evidence(state) });

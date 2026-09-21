@@ -175,7 +175,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index] === "--style" ? "--style-file" : argv[index];
-    if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--help"].includes(key)) {
+    if (["--submit", "--personal-creator", "--recover-only", "--durable-r2", "--queue-recovery", "--help"].includes(key)) {
       if (flags.has(key)) throw new Error("Duplicate evaluation argument");
       flags.add(key);
     } else if (["--arrangement", "--run-id", "--owner-id", "--program", "--style-file", "--seed", "--out", "--execution-policy"].includes(key)) {
@@ -185,6 +185,7 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
   }
   if (flags.has("--help")) {
     console.log("Usage: tsx src/scripts/evaluate-yue2-music.ts (--arrangement ARRANGEMENT.json | --run-id RUN_ID --owner-id OWNER_ID | --program PROGRAM.json --style-file STYLE.txt) --seed INTEGER --personal-creator [--out DIRECTORY | --durable-r2 [--execution-policy POLICY.json]] [--submit [--recover-only]]\n--style is an alias for --style-file. Arrangement mode forbids an independent program or style. --run-id reads one accepted, owner-scoped saved arrangement from Convex using configured Studio service credentials; it forbids --arrangement and does not authorize GPU submission. --durable-r2 requires an arrangement and stores run-bound evaluation artifacts in R2, not --out. --execution-policy requires --durable-r2 and validates a bounded local policy before credentials or network access; its exact terms are bound to durable evaluation. Default for file inputs: local validation only, no GPU or network. --submit uses YUE2_EVALUATION_URL and YUE2_EVALUATION_TOKEN. Every result remains unqualified; manual audition pending. Supervised accounting is an operator-configured allocation estimate, not provider billing or a hard VM bill cap; provider billing remains unknown. Without a policy, cost is not measured.");
+    console.log("--queue-recovery optionally queues GET-only Trigger recovery after a pending supervised --durable-r2 --submit result; requires --execution-policy and TRIGGER_SECRET_KEY. It does not provision a GPU, authorize another generation, approve music or publish.");
     return;
   }
   const runMode = values["--run-id"] !== undefined;
@@ -196,6 +197,11 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
     if (values["--arrangement"] !== undefined) throw new Error("--run-id forbids an independent --arrangement");
   }
   const durableMode = flags.has("--durable-r2");
+  const queueRecovery = flags.has("--queue-recovery");
+  if (queueRecovery && (!durableMode || !flags.has("--submit") || !values["--execution-policy"] ||
+    !environment.TRIGGER_SECRET_KEY?.trim())) {
+    throw new Error("--queue-recovery requires --durable-r2, --submit, --execution-policy and TRIGGER_SECRET_KEY");
+  }
   if (values["--execution-policy"] !== undefined && !durableMode) {
     throw new Error("--execution-policy requires --durable-r2");
   }
@@ -251,7 +257,15 @@ export async function runYuE2EvaluationCli(argv: string[], environment: Readonly
       await bootstrapSecrets(() => undefined, { services: ["cloudflare"], required });
     }
     const result = await executeDurableYuE2Evaluation(input);
+    // Record the pending result before delivery: a queue outage must not hide
+    // the paid job or invite a fresh submission.
     console.log(JSON.stringify({ ...result, storage: "r2", qualified: false, manualAudition: "pending", costStatus: "not_measured" }));
+    if (queueRecovery && result.status === "pending" && request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION) {
+      const { queueYuE2Recovery } = await import("@/lib/yue2RecoveryDispatch");
+      const { ownerId, channelId, runId } = request.acceptedArrangement;
+      const queued = await queueYuE2Recovery({ ownerId, channelId, runId, jobId: result.jobId }, environment.TRIGGER_SECRET_KEY!);
+      console.log(JSON.stringify({ status: "recovery_queued", jobId: result.jobId, recoveryRunId: queued.id }));
+    }
     return;
   }
   const result = await executeYuE2Evaluation({ request, endpoint, bearerToken,

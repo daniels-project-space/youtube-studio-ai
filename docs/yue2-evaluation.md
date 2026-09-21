@@ -617,3 +617,39 @@ Both remain production-unapproved. Five focused test files pass, including all
 26 supervised durable integration contracts, the authenticated review route and
 audition persistence handlers; TypeScript and scoped lint pass.
 This uses synthetic audio only, with no thumbnail/GPU generation or deployment.
+
+### Opt-in checkpointed result recovery (21 September)
+
+Add `--queue-recovery` to an explicitly authorized supervised
+`--durable-r2 --submit --execution-policy POLICY.json` invocation to queue
+`yue2-evaluation-recovery` only when the existing job is pending. The CLI requires
+`TRIGGER_SECRET_KEY`; the task must already be deployed with the same
+`YUE2_EVALUATION_URL`, `YUE2_EVALUATION_TOKEN`, and scoped R2 credentials.
+This change does not deploy the task or authorize a live evaluation.
+
+Delivery contains only owner, channel, run and job IDs. A job-derived 24-hour
+idempotency key deduplicates queue delivery. The pending result is printed before
+delivery so a queue outage does not conceal the existing job. Retry delivery
+with the same inputs and `--recover-only --queue-recovery`; do not start a new
+generation to recover a lost acknowledgement.
+
+The task restores the exact retained v2 supervised binding and verifies its
+scope, request, configured endpoint and execution policy. Recovery is GET-only:
+it cannot authorize a generation, including when the remote job is missing.
+It uses 120-second Trigger checkpoint waits, not active sleeps, with at most
+`ceil((max_execution_seconds + termination_grace_seconds) / 120) + 2` checks
+(63 under the current maximum policy). It has one task attempt, concurrency two,
+and no cron, Convex polling, GPU lifecycle control or automatic provider retry.
+An exhausted window remains pending with `recovery_window_exhausted`; it is not
+evidence of completion or permission to resubmit. Native audio and accounting
+checks remain mandatory, and all results remain production-unapproved.
+
+Eight focused test files pass in a network-isolated serial gate (20 top-level
+tests, including 29 supervised durable integration contracts). Coverage includes
+actual task pending-to-completed recovery, scope rejection, missing remote jobs,
+bounded exhaustion, offline replay and CLI delivery failure/retry. The initial
+concurrent gate exposed a shared temporary-directory assertion collision; serial
+execution isolates those suites. TypeScript and scoped lint pass. Provider and
+queue boundaries are simulated: this is not live Trigger checkpoint, GPU,
+musical-quality or production billing evidence. No thumbnail tests or generation
+were run.

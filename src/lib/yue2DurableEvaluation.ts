@@ -118,6 +118,36 @@ function assertBytes(actual: Uint8Array, expected: Uint8Array): void {
     throw new YuE2EvaluationError("durable_identity_mismatch");
   }
 }
+
+export const YuE2RecoveryScopeSchema = z.object({
+  ownerId: safeId, channelId: safeId, runId: safeId,
+  jobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
+}).strict();
+export type YuE2RecoveryScope = z.infer<typeof YuE2RecoveryScopeSchema>;
+
+/** Restore only the retained supervised request. This cannot authorize a POST. */
+export async function loadDurableYuE2Recovery(
+  scopeValue: unknown, worker: { endpoint: string; bearerToken: string },
+): Promise<YuE2DurableEvaluationInput & { expectedExecutionPolicy: YuE2ExecutionPolicy }> {
+  const scope = YuE2RecoveryScopeSchema.parse(scopeValue);
+  const endpoint = validateYuE2Endpoint(worker.endpoint);
+  const binding = z.object({
+    version: z.literal("studio-yue2-durable-evaluation/v2"),
+    ownerId: z.literal(scope.ownerId), channelId: z.literal(scope.channelId), runId: z.literal(scope.runId),
+    endpoint: z.literal(endpoint), request: z.unknown(), expectedExecutionPolicy: z.unknown(),
+  }).strict().parse(parseJson(await read(`owner/${scope.ownerId}/runs/${scope.runId}/music/yue2-evaluation/binding.json`)));
+  const request = validateYuE2EvaluationRequest(binding.request);
+  if (request.version !== YUE2_ARRANGEMENT_EVALUATION_VERSION || request.job.job_id !== scope.jobId ||
+    request.acceptedArrangement.ownerId !== scope.ownerId || request.acceptedArrangement.channelId !== scope.channelId ||
+    request.acceptedArrangement.runId !== scope.runId) throw new YuE2EvaluationError("recovery_scope_mismatch");
+  const input = {
+    request, endpoint, bearerToken: worker.bearerToken, recoverOnly: true,
+    expectedExecutionPolicy: validateYuE2ExecutionPolicy(binding.expectedExecutionPolicy),
+    authorizeSubmission: async () => { throw new YuE2EvaluationError("recovery_cannot_submit"); },
+  };
+  validateDurableYuE2Evaluation(input);
+  return input;
+}
 /** Bounds this waiter only; an SDK write may still commit after timeout. */
 async function boundedPut(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
