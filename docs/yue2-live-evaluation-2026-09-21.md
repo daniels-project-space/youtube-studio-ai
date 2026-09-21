@@ -90,6 +90,21 @@ covered through the durable review path with actual FFmpeg signal analysis.
 This fixes an impossible native timing gate, not the model's duration planning.
 The real 228-second candidate remains unsuitable for its 30-second request.
 
+### Early Duration Refusal
+
+New accepted-arrangement jobs use schema v2 with `requested_duration_sec` bound
+to the arrangement and job ID. The runtime retains full score/token diagnostics
+but refuses semantic sequences other than exactly 25 frames per requested second
+before NAR synthesis and VAE decode. For the observed failed-duration track, that
+would avoid its measured 37.95-second NAR and 6.85-second VAE stages, not the prior
+planning or semantic generation. This is a counterfactual saving, not a billed
+benchmark. Sampling settings, full planning and precision are unchanged.
+
+The v1 diagnostic job and all retained evidence remain readable. The schema-v2
+runtime must be deployed before new arrangement submissions; the previous image
+rejects the new field. This contract is CPU/wire-tested, not yet GPU-deployed.
+Actual duration-conditioned composition and private-worker deployment remain open.
+
 1. Review actual audio, vocal leakage, endings and channel-specific fit.
 2. Resolve duration planning before claiming arrangement compliance.
 3. Connect the private worker and immutable evidence to the existing accepted

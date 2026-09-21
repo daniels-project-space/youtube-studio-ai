@@ -494,6 +494,9 @@ async function main(): Promise<void> {
       assert.deepEqual(arrangementRequest.acceptedArrangement, arrangement);
       assert.equal(arrangementRequest.job.style, projectAcceptedMusicArrangementToYuEStyle(arrangement));
       assert.equal(arrangementRequest.job.lyrics, "");
+      assert.equal(arrangementRequest.job.schema_version, 2);
+      assert.ok(arrangementRequest.job.schema_version === 2);
+      assert.equal(arrangementRequest.job.requested_duration_sec, arrangement.arrangement.requestedDurationSec);
       assert.deepEqual(validateYuE2EvaluationRequest(arrangementRequest), arrangementRequest);
       assert.deepEqual(createYuE2AcceptedArrangementRequest({ arrangement, seed: 42, personalCreatorAcknowledged: true }), arrangementRequest);
       assert.notEqual(createYuE2AcceptedArrangementRequest({ arrangement, seed: 43, personalCreatorAcknowledged: true }).job.job_id, arrangementRequest.job.job_id);
@@ -503,6 +506,27 @@ async function main(): Promise<void> {
       assert.throws(() => validateYuE2EvaluationRequest({ ...arrangementRequest, style: "Replace accepted direction" }));
       assert.equal(request.version, "studio-yue2-evaluation/v1");
       assert.equal(Object.hasOwn(request, "acceptedArrangement"), false);
+    });
+    await test("duration is bound independently of prose and retained v1 jobs remain readable", () => {
+      assert.ok(arrangementRequest.job.schema_version === 2);
+      const { requested_duration_sec: duration, ...legacyFields } = arrangementRequest.job;
+      const legacy = { ...arrangementRequest, job: { ...legacyFields, schema_version: 1 as const } };
+      const rehash = (value: typeof arrangementRequest) => {
+        const { job_id, ...body } = value.job;
+        assert.match(job_id, /^yue2-eval-/);
+        value.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({ version: value.version,
+          programFingerprint: value.programFingerprint, manifestSha256: value.manifestSha256, request: body }))}`;
+      };
+      rehash(legacy);
+      assert.deepEqual(validateYuE2EvaluationRequest(legacy), legacy);
+      const changed = { ...arrangementRequest, job: { ...arrangementRequest.job, requested_duration_sec: duration + 1 } };
+      rehash(changed);
+      assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/);
+      for (const invalid of [true, 9, 301, 30.5, "30", null]) {
+        assert.throws(() => validateYuE2EvaluationRequest({ ...arrangementRequest,
+          job: { ...arrangementRequest.job, requested_duration_sec: invalid } }));
+      }
+      assert.notEqual(legacy.job.job_id, arrangementRequest.job.job_id);
     });
     await test("tampered arrangement, fingerprint and independently rehashed style fail before any HTTP or output directory", async () => {
       const changedArtifact = clone(arrangementRequest);

@@ -86,11 +86,16 @@ const License = z.object({
   company_commercial_authorized: z.literal(false),
 }).strict();
 const Text = z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 32000);
-export const YuE2JobSchema = z.object({
+const LegacyYuE2JobSchema = z.object({
   schema_version: z.literal(1), job_id: JobId,
   style: Text.refine((value) => value.trim().length > 0), lyrics: z.literal(""),
   seed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), license: License,
 }).strict();
+export const YuE2JobSchema = z.discriminatedUnion("schema_version", [LegacyYuE2JobSchema,
+  LegacyYuE2JobSchema.extend({ schema_version: z.literal(2),
+    requested_duration_sec: z.number().int().min(10).max(300),
+  }).strict(),
+]);
 export type YuE2Job = z.infer<typeof YuE2JobSchema>;
 
 export interface YuE2EvaluationRequest {
@@ -136,7 +141,8 @@ export function createYuE2AcceptedArrangementRequest(input: {
   }).strict().parse(input);
   const acceptedArrangement = parsed.arrangement;
   const body = {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
+    requested_duration_sec: acceptedArrangement.arrangement.requestedDurationSec,
     style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
     lyrics: "" as const,
     seed: parsed.seed,
@@ -162,6 +168,7 @@ export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluati
   }).strict()]).parse(value);
   if (request.version === YUE2_ARRANGEMENT_EVALUATION_VERSION && (
     request.programFingerprint !== request.acceptedArrangement.fingerprint ||
+    (request.job.schema_version === 2 && request.job.requested_duration_sec !== request.acceptedArrangement.arrangement.requestedDurationSec) ||
     request.job.style !== projectAcceptedMusicArrangementToYuEStyle(request.acceptedArrangement)
   )) {
     throw new Error("YuE2 evaluation must preserve the accepted arrangement fingerprint and exact projected style");
