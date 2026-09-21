@@ -653,3 +653,49 @@ execution isolates those suites. TypeScript and scoped lint pass. Provider and
 queue boundaries are simulated: this is not live Trigger checkpoint, GPU,
 musical-quality or production billing evidence. No thumbnail tests or generation
 were run.
+
+### Real image, model cache and OpenRelay placement preflight (21 September)
+
+The separate runtime source `373e13933d0127847d266740153ac22769b4a2a9` now builds
+`youtube-studio/yue2:373e139`, actual local image ID
+`sha256:dba5667c11bfcfc791111b13342c765de9e642d62cdfba51d72582a859bd2ff7`.
+Official source hashes, package pins, the actual pipeline import, and CUDA 12.8
+libraries pass. Five real cache files (7,794,517,915 bytes) passed pinned SHA-256
+verification again with network disabled and a read-only model mount. This is
+software/cache evidence, not GPU inference or music-quality qualification.
+The runtime has 102 passing CPU tests and its own clean, pushed repository.
+
+Read-only placement inspection is now an executable Studio operator command:
+
+```sh
+ai-vault openrelay OPENRELAY_API_KEY=OPENRELAY_API_KEY -- \
+  node_modules/.bin/tsx src/scripts/preflight-yue2-openrelay.ts \
+  626c2959-4f58-4779-b867-2a74129e93e5 18
+```
+
+It validates the account, exact RTX 3090/24 GB identity, bounded hourly rate,
+single-GPU placement, and RAM/disk/CPU on the **same** live offer. Default
+placement could choose 25,454 MiB guest RAM, too tight for the runtime's 24 GiB
+available-memory gate after the OS. The plan explicitly requests 28,672 MiB,
+one GPU, a separate 60 GB disk, private endpoint and no GPU fallback. Actual
+available memory must still pass runtime preflight; requested RAM is not proof.
+
+The provider's paginated VM inventory is inspected for the Studio-specific
+`yt-yue2-3090-evaluation` name. Repeated cursors, more than five pages, malformed
+evidence, duplicate matches, wrong account, and insufficient joint resources
+refuse a plan. No create/restart/stop or inference endpoint is called. Keys and
+raw provider error bodies are never printed.
+
+The live 10:55 UTC check found one compatible offer at 18 cents/hour, and no
+existing Studio YuE2 VM. Its retained report is
+`/var/lib/youtube-studio-render/builds/yue2-373e139/openrelay-preflight.json`.
+Capacity is ephemeral and must be refreshed immediately before any placement.
+The report explicitly leaves storage price, spend authorization, placement and
+GPU qualification unverified. It cannot authorize a purchase, represent a hard
+VM bill cap, or substitute for the existing supervised execution policy.
+
+Regression checks reject the real narrow-RAM offer, resources split across
+different offers, stale/insufficient free resources, a different GPU, ambiguous
+or excessive rates, wrong-account reads, and incomplete pagination. The actual
+live read-only CLI also passed after its initial array-only VM parser was fixed
+to use OpenRelay's `VmPage` contract. No legacy channel route was changed.
