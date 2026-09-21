@@ -145,6 +145,30 @@ async function main(): Promise<void> {
       );
     }
 
+    // ---- native-rate FLOAT mode preserves detail below the 16-bit floor ----
+    const floatIn = join(dir, "native.wav");
+    const floatOut = join(dir, "native-loop.wav");
+    await execFileP(FFMPEG, ["-v", "error", "-y", "-f", "lavfi", "-i",
+      "aevalsrc=0.000001*sin(2*PI*440*t)|0.000001*sin(2*PI*330*t):s=48000:d=12.4386666667",
+      "-c:a", "pcm_f32le", floatIn]);
+    await selfLoopAudio(floatIn, floatOut, { outputFormat: "native_float_wav" });
+    const decode = async (path: string) => (await execFileP(FFMPEG,
+      ["-v", "error", "-i", path, "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"],
+      { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 })).stdout;
+    const source = await decode(floatIn), folded = await decode(floatOut);
+    const frameBytes = 8;
+    assert.equal(folded.length, source.length - 2 * 48000 * frameBytes, "lossless fold has exact D-F frame count");
+    assert.equal(source.length, 597056 * frameBytes, "native rate and stereo geometry are unchanged");
+    // After the crossfade, the untouched main starts at source F and output F+0.5.
+    // Sub-16-bit content must remain bit-identical, not quantized to silence.
+    const offset = 3 * 48000 * frameBytes;
+    assert.ok(source.subarray(offset, offset + 8000).some(value => value !== 0));
+    assert.deepEqual(folded.subarray(offset + 24000 * frameBytes, offset + 24000 * frameBytes + 8000),
+      source.subarray(offset, offset + 8000));
+    for (const crossfadeSec of [NaN, Infinity, -Infinity]) {
+      await assert.rejects(selfLoopAudio(floatIn, floatOut, { crossfadeSec }), /finite/);
+    }
+
     // ---- an unprovable short track must fail closed ----
     const shortIn = join(dir, "short.mp3");
     await synth(shortIn, 5); // 5s < fade*4 = 8s

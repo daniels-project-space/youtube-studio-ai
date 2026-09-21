@@ -105,17 +105,22 @@ const FFPROBE_BIN = () => process.env.FFPROBE_BIN ?? "ffprobe";
 const MP3_ENCODE_ARGS = ["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100"];
 
 /**
- * Exact duration of a PCM WAV, straight from its header (data-chunk bytes /
- * byte rate). Unlike the compressed case below, there is nothing to estimate.
+ * Exact PCM sample clock. Unlike compressed duration/progress timestamps,
+ * duration_ts in a 1/sample-rate timebase includes the final partial packet.
  */
-async function pcmWavDurationSec(path: string): Promise<number> {
+async function pcmWavInfo(path: string): Promise<{ durationSec: number; sampleRateHz: number }> {
   const { stdout } = await execFileP(FFPROBE_BIN(), [
     "-v", "error",
-    "-show_entries", "format=duration",
-    "-of", "csv=p=0",
+    "-select_streams", "a:0", "-show_entries", "stream=duration_ts,time_base,sample_rate",
+    "-of", "json",
     path,
   ]);
-  return Number(String(stdout).trim());
+  const stream = JSON.parse(String(stdout)).streams?.[0];
+  const sampleRateHz = Number(stream?.sample_rate);
+  const frames = Number(stream?.duration_ts);
+  if (!Number.isInteger(sampleRateHz) || sampleRateHz <= 0 || !Number.isSafeInteger(frames) || frames <= 0 ||
+      stream?.time_base !== `1/${sampleRateHz}`) throw new MusicError("PCM WAV has no exact sample clock");
+  return { durationSec: frames / sampleRateHz, sampleRateHz };
 }
 
 /**
@@ -179,6 +184,10 @@ async function decodeAccurateDurationSec(path: string): Promise<number> {
  * mp3 generation, not three, and segment edges land on exact sample boundaries
  * instead of mp3 frame boundaries.
  *
+ * Default output retains legacy MP3 behavior. Explicit native_float_wav uses
+ * FLOAT intermediates/output at the source rate, with sample-clock validation.
+ * Structural continuity does not establish a musically convincing transition.
+ *
  * Throws MusicError on ffmpeg/ffprobe failure, a corrupt result, or a source
  * too short to prove as a loop. A caller that later uses `-stream_loop` must
  * never receive the original bed as a "best effort" fallback: that would turn
@@ -187,13 +196,23 @@ async function decodeAccurateDurationSec(path: string): Promise<number> {
 export async function selfLoopAudio(
   inPath: string,
   outPath: string,
-  opts?: { crossfadeSec?: number; log?: (msg: string) => void },
+  opts?: { crossfadeSec?: number; outputFormat?: "mp3" | "native_float_wav"; log?: (msg: string) => void },
 ): Promise<string> {
+  if (opts?.outputFormat !== undefined && !["mp3", "native_float_wav"].includes(opts.outputFormat)) {
+    throw new MusicError("selfLoopAudio: unsupported output format");
+  }
+  const lossless = opts?.outputFormat === "native_float_wav";
+  const pcmCodec = lossless ? "pcm_f32le" : "pcm_s16le";
+  const encodeArgs = lossless ? ["-c:a", "pcm_f32le", "-f", "wav"] : MP3_ENCODE_ARGS;
+  if (opts?.crossfadeSec !== undefined && !Number.isFinite(opts.crossfadeSec)) {
+    throw new MusicError("selfLoopAudio: crossfade must be finite");
+  }
   const fade = Math.min(4, Math.max(0.5, opts?.crossfadeSec ?? 2));
   const tmpFull = `${outPath}.selfloop-src.tmp.wav`;
   const tmpMain = `${outPath}.selfloop-main.tmp.wav`;
   const tmpTail = `${outPath}.selfloop-tail.tmp.wav`;
   let durationSec = 0;
+  let sampleRateHz = 0;
   try {
     // PASS 0 — decode the source ONCE, losslessly. One cheap pass buys three
     // things: an EXACT duration (WAV header, not a bitrate guess), a
@@ -206,10 +225,10 @@ export async function selfLoopAudio(
     try {
       await execFileP(
         FFMPEG_BIN(),
-        ["-y", "-i", inPath, "-c:a", "pcm_s16le", tmpFull],
+        ["-y", "-i", inPath, "-c:a", pcmCodec, tmpFull],
         { maxBuffer: 16 * 1024 * 1024 },
       );
-      durationSec = await pcmWavDurationSec(tmpFull);
+      ({ durationSec, sampleRateHz } = await pcmWavInfo(tmpFull));
     } catch (e) {
       throw new MusicError(`selfLoopAudio: could not decode ${inPath} (${e instanceof Error ? e.message : e})`);
     }
@@ -231,13 +250,13 @@ export async function selfLoopAudio(
       // PASS 1 — head/main segment A[0 .. D-T] to its own file.
       await execFileP(
         FFMPEG_BIN(),
-        ["-y", "-i", tmpFull, "-t", mainEnd, "-c:a", "pcm_s16le", tmpMain],
+        ["-y", "-i", tmpFull, "-t", mainEnd, "-c:a", pcmCodec, tmpMain],
         { maxBuffer: 16 * 1024 * 1024 },
       );
       // PASS 2 — tail segment A[D-T .. D] to its own file.
       await execFileP(
         FFMPEG_BIN(),
-        ["-y", "-ss", mainEnd, "-i", tmpFull, "-c:a", "pcm_s16le", tmpTail],
+        ["-y", "-ss", mainEnd, "-i", tmpFull, "-c:a", pcmCodec, tmpTail],
         { maxBuffer: 16 * 1024 * 1024 },
       );
       // PASS 3 — crossfade TWO SEPARATE inputs (no shared-decoder deadlock).
@@ -249,7 +268,7 @@ export async function selfLoopAudio(
           "-i", tmpMain,
           "-filter_complex", `[0:a][1:a]acrossfade=d=${fade}:c1=tri:c2=tri[out]`,
           "-map", "[out]",
-          ...MP3_ENCODE_ARGS,
+          ...encodeArgs,
           outPath,
         ],
         { maxBuffer: 16 * 1024 * 1024 },
@@ -283,17 +302,23 @@ export async function selfLoopAudio(
   let outSec = 0;
   try {
     outSec = await decodeAccurateDurationSec(outPath);
+    // FFmpeg progress can omit a partial final packet; PCM's sample clock is exact.
+    if (lossless) {
+      const output = await pcmWavInfo(outPath);
+      if (output.sampleRateHz !== sampleRateHz) throw new MusicError("native loop sample rate changed");
+      outSec = output.durationSec;
+    }
   } catch (e) {
     throw new MusicError(`selfLoopAudio: output verification decode failed (${e instanceof Error ? e.message : e})`);
   }
-  const tolerance = Math.max(1, expectedSec * 0.03);
+  const tolerance = lossless ? 1 / sampleRateHz + 1e-9 : Math.max(1, expectedSec * 0.03);
   if (!Number.isFinite(outSec) || outSec <= 0 || Math.abs(outSec - expectedSec) > tolerance) {
     throw new MusicError(
       `selfLoopAudio: output duration ${outSec.toFixed(2)}s is not the expected ${expectedSec.toFixed(2)}s (±${tolerance.toFixed(2)}s) — refusing to return a bad loop`,
     );
   }
   opts?.log?.(
-    `selfLoopAudio: folded tail→head (${fade}s crossfade) — ${durationSec.toFixed(1)}s → ${outSec.toFixed(1)}s, ${(outBytes / 1024).toFixed(0)}KB, verified non-empty; mix now loops seamlessly`,
+    `selfLoopAudio: folded tail→head (${fade}s crossfade) — ${durationSec.toFixed(1)}s → ${outSec.toFixed(1)}s, ${(outBytes / 1024).toFixed(0)}KB, verified non-empty${lossless ? "; native-rate FLOAT WAV; perceptual seam review pending" : "; mix now loops seamlessly"}`,
   );
   return outPath;
 }

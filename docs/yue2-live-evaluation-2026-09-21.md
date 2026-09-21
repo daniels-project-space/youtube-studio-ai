@@ -674,3 +674,41 @@ The independent private-R2 review reader also verified the current bytes and
 exported the listening copy locally. These prove storage/recovery without another
 GPU purchase, not production owner-review integration: this evaluation uses an
 explicit isolated-operator owner/run namespace rather than a live channel run.
+
+## Native-Precision Assembly Boundary
+
+The owner approved natural-length loop sources while retaining exact requested
+final video duration. `selfLoopAudio` now has explicit `native_float_wav` output:
+FLOAT intermediates and output preserve the source sample rate without an MP3
+generation. Default production callers retain legacy behavior. The new mode is
+currently exercised by `scripts/verify-yue2-assembly.ts`, not activated in a
+production pipeline.
+
+The retained 6,837,056-frame listening source folds into a 6,741,056-frame loop
+(140.4386667 seconds), preserving 48 kHz stereo FLOAT. The original source stays
+unchanged. A real first attempt exposed an incorrect measurement assumption:
+FFmpeg's final null-output progress omitted 64 samples in the partial last
+packet. Verification now decodes for integrity, then uses PCM `duration_ts` and
+its checked sample-rate timebase for exact length. A sub-16-bit-amplitude test
+also proves untouched samples remain bit-identical, rather than quantized away.
+
+The existing `composeMusicLoopDeblur` assembled this real music with a synthetic
+320x176 timing clip. The default-preset 60-second master has exactly 1,800 video
+frames and 60-second video/audio/container durations. A 300-second diagnostic
+run using the ultrafast preset has exactly 9,000 frames and matching durations.
+Both retain 48 kHz stereo audio. This is timing proof, not channel visual proof.
+Small generated receipts are retained in `test-fixtures/music-composer/assembly/`;
+full media remain outside Git.
+
+The independent `scripts/verify-yue2-assembly-audio.ts` compares decoded AAC
+against the FLOAT loop at repeated sample-clock positions. The 300-second master
+passed at 10 and 150.4386667 seconds (correlations above 0.99999, RMS ratios near
+0.9995). Supplying the unfurled source deliberately failed with correlation
+0.0229. Neither signal alignment nor structural looping approves musical quality,
+perceptual transition quality, channel personality or owner-review integration.
+
+Legacy loop tests, native FLOAT preservation, continuity admission, packet
+assembly, mastering, submission admission, composer-aware assembly, shared
+ownership and legacy route handoffs passed, along with TypeScript and scoped
+ESLint. No new text/GPU purchase, thumbnail test or production deployment was
+performed for this work.
