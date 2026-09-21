@@ -162,6 +162,9 @@ async function main() {
   assert.ok(weeklySealed.includes(sealedDirection));
   assert.ok(weeklySealed.includes(flat));
   assert.ok(weeklySealed.includes(studioCore.promptAddenda[0]));
+  const differentProviderPlan = createOriginalMusicProgramPlan({ route, topic, audioDirection: sealedDirection, providerPreference: "suno" });
+  await assert.rejects(weekly(flat, { channelProgramRoute: route, musicProgramPlan: differentProviderPlan }), /provider does not match the frozen route/);
+  assert.equal(dispatched.length, 0, "weekly generation cannot buy a provider that the sealed route will refuse");
   await assert.rejects(weekly(flat, { channelProgramRoute: route, musicProgramPlan: { ...plan, topic: "tampered" } }));
   assert.equal(dispatched.length, 0, "invalid supplied sealed plan fails before dispatch");
   // Weekly preparation can precede the original planner; this existing

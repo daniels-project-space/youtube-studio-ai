@@ -15,6 +15,7 @@ const program = createChannelMusicProgram({
 });
 const master = Buffer.alloc(1000, 7);
 const prepared = { ownerId: ctx.ownerId, channelId: ctx.channelId, topic: "Quiet evening", musicProgram: program,
+  provider: "mureka",
   audioByteLength: master.length, audioSha256: sha256BytesHex(master), musicDurationSec: 10, musicKey: "prepared-master.mp3" };
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
@@ -76,12 +77,20 @@ async function main() {
   }
   assert.equal(storageCalls, 0, "invalid inputs cannot persist a misleading program or read audio");
   assert.equal(networkCalls, 0, "invalid selection cannot silently buy from a default provider");
+  for (const provider of ["suno", "minimax_music3", "yue2", undefined]) {
+    await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: { ...prepared, provider } } }), /provider does not match/);
+  }
+  await assert.rejects(music.run({ ...ctx, params: { provider: "suno" }, store: { ...ctx.store, preparedMusic: prepared } }), /provider does not match/);
+  assert.equal(storageCalls, 0, "mismatched provider evidence cannot write or download anything");
   await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: prepared } }), /admitted-first-storage-write/);
   assert.equal(storageCalls, 1, "a matching frozen program reaches the existing storage path");
   assert.equal(networkCalls, 0);
   transferMode = true;
   await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, musicQualityReceiptKey: "quality.json", preparedMusic: {
-    ...prepared, provider: "minimax_music3", minimax: { nativeWavKey: "native.wav", runtimeReceiptKey: "runtime.json", qualityReceiptKey: "quality.json" },
+    ...prepared, provider: "minimax_music3",
+    musicProgram: createChannelMusicProgram({ channelId: String(ctx.channelId), channelIdentityFingerprint: "a".repeat(64),
+      family: "narrated_stock", contentLaneKey: "narrated_stock", topic: "Quiet evening", providerPreference: "minimax_music3" }),
+    minimax: { nativeWavKey: "native.wav", runtimeReceiptKey: "runtime.json", qualityReceiptKey: "quality.json" },
   } } }), /not valid JSON/);
   assert.deepEqual(reads, [
     { key: prepared.musicKey, options: { maxBytes: 1000, timeoutMs: 300000 } },

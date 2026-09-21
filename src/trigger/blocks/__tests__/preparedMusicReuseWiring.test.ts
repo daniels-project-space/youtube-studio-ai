@@ -15,7 +15,7 @@ assert.ok(
   "a verified prepared music master must be consumed before provider generation is considered",
 );
 for (const required of [
-  "preparedMusic.musicProgram.fingerprint !== channelMusicProgram.fingerprint",
+  "preparedMusic.provider !== preparedProgram.generation.providerPreference",
   "getObjectBytes(preparedMusic.musicKey, undefined,",
   "sha256BytesHex(masterBytes)",
   "preparedMusic.musicDurationSec",

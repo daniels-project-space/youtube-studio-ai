@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import Module, { createRequire } from "node:module";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   planWeekPreparationKey, planWeekPreparedScriptKey, planWeekPreparedNarrationKey,
   planWeekPreparedNarrationAudioKey, planWeekPreparedMusicKey, planWeekPreparedMusicAudioKey,
@@ -45,8 +45,7 @@ const sidecars = new Map<string, Buffer>([
     sentenceTimings: [{ text: script.narrationText, start: 0, end: 12 }], chapterPlan: [{ kind: "footage", durSec: 12 }] })],
   [planWeekPreparedMusicKey(manifest), encode({ ...common, version: "plan-week-prepared-music/v1", musicKey,
     audioSha256: mediaHash, audioByteLength: media.length, musicDurationSec: 120, provider: "mureka",
-    musicProgram: createChannelMusicProgram({ channelId: manifest.channelId, channelIdentityFingerprint: "a".repeat(64),
-      family: "history", contentLaneKey: "documentary", topic: manifest.plan.topic, providerPreference: "mureka" }) })],
+    musicProgram: planWeekPreparedMusicProgram(manifest, "mureka") })],
   [planWeekPreparedImagesKey(manifest), encode({ ...common, version: "plan-week-prepared-images/v1", stillRenderManifest,
     stillRenderManifestSha256: sha256Hex(canonicalJson(stillRenderManifest)),
     items: [{ shotId: "shot-1", candidateIndex: 0, stillKey: imageKey, sha256: mediaHash, byteLength: media.length }] })],
@@ -151,6 +150,24 @@ async function main() {
     }
     assert.deepEqual(vaultReads, ["cloudflare"], "real bootstrap must not hydrate generation providers during replay");
     assert.equal(mediaReads, 3); assert.equal(dispatches, 1, "saved script retains its normal idempotent narration handoff");
+    const musicSidecarKey = planWeekPreparedMusicKey(manifest);
+    const originalMusicSidecar = sidecars.get(musicSidecarKey)!;
+    const beforeMusicReads = mediaReads;
+    for (const field of ["genre", "section", "identity", "provider"] as const) {
+      const substituted = JSON.parse(originalMusicSidecar.toString());
+      if (field === "genre") substituted.musicProgram.identity.genre = "Unrelated stadium metal";
+      if (field === "section") substituted.musicProgram.generation.sections[1].instruction = "Explosive unrelated climax";
+      if (field === "identity") substituted.musicProgram.channelIdentityFingerprint = "c".repeat(64);
+      if (field === "provider") substituted.musicProgram.generation.providerPreference = "suno";
+      const body = { ...substituted.musicProgram };
+      delete body.fingerprint;
+      substituted.musicProgram.fingerprint = sha256Hex(canonicalJson(body));
+      sidecars.set(musicSidecarKey, encode(substituted));
+      await assert.rejects(() => tasks[2].run(payload), /music program binding mismatch/);
+      assert.equal(mediaReads, beforeMusicReads, "reject substituted sound before downloading paid media");
+      assert.equal(paidCalls, 0); assert.equal(writes, 0); assert.equal(claims.size, 0);
+    }
+    sidecars.set(musicSidecarKey, originalMusicSidecar);
     for (const mode of ["changed", "short", "timeout"] as const) {
       mediaMode = mode;
       for (const task of tasks.slice(1)) await assert.rejects(() => task.run(payload));

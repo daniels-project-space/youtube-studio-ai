@@ -42,7 +42,8 @@ import {
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
 import { buildPreparedFootageSidecar } from "@/trigger/minimaxH3WeeklyBatch";
-import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   claimPlanItem,
   completeDeferredFramePlanItem,
@@ -458,9 +459,12 @@ assert.throws(
   /transcript does not match/,
   "a sidecar cannot swap the text that its measured audio receipt claims to narrate",
 );
+// Earlier scope-only cases deliberately use an incomplete route marker.
+const musicManifest = structuredClone(manifest);
+delete musicManifest.execution.seedStore.channelProgramRoute;
 const preparedMusic = {
   version: PLAN_WEEK_PREPARED_MUSIC_VERSION,
-  manifestSha256: pointer.manifestSha256,
+  manifestSha256: planWeekPreparationManifestSha256(musicManifest),
   ownerId,
   channelId,
   batchId,
@@ -472,14 +476,7 @@ const preparedMusic = {
   audioByteLength: 8_192,
   musicDurationSec: 120,
   provider: "minimax_music3" as const,
-  musicProgram: createChannelMusicProgram({
-    channelId,
-    channelIdentityFingerprint: "f".repeat(64),
-    family: "history",
-    contentLaneKey: "documentary",
-    topic: manifest.plan.topic,
-    providerPreference: "minimax_music3",
-  }),
+  musicProgram: planWeekPreparedMusicProgram(musicManifest, "minimax_music3"),
   minimax: {
     nativeWavKey: planWeekPreparedMusicNativeWavKey({ ownerId, channelSlug, batchId, itemId }),
     runtimeReceiptKey: planWeekPreparedMusicRuntimeReceiptKey({ ownerId, channelSlug, batchId, itemId }),
@@ -488,14 +485,58 @@ const preparedMusic = {
   createdAt: Date.now() - 200,
 };
 assert.equal(
-  assertPlanWeekPreparedMusicBinding({ prepared: preparedMusic, manifest }).musicProgram.fingerprint,
+  assertPlanWeekPreparedMusicBinding({ prepared: preparedMusic, manifest: musicManifest }).musicProgram.fingerprint,
   preparedMusic.musicProgram.fingerprint,
   "a prepared MiniMax master binds the frozen episode, sealed music program, and all required audit artifacts",
 );
+for (const mutate of [
+  (program: typeof preparedMusic.musicProgram) => { program.identity.genre = "unrelated stadium metal"; },
+  (program: typeof preparedMusic.musicProgram) => { program.channelIdentityFingerprint = "a".repeat(64); },
+  (program: typeof preparedMusic.musicProgram) => { program.generation.sections[1].instruction = "Replace the calm cue with an explosive climax."; },
+  (program: typeof preparedMusic.musicProgram) => { program.mix.targetLufs = -12; },
+]) {
+  const changed = structuredClone(preparedMusic.musicProgram);
+  mutate(changed);
+  const body: Partial<typeof changed> = { ...changed };
+  delete body.fingerprint;
+  const musicProgram = ChannelMusicProgramSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+  assert.throws(() => assertPlanWeekPreparedMusicBinding({
+    prepared: { ...preparedMusic, musicProgram }, manifest: musicManifest,
+  }), /music.*(program|binding).*mismatch/, "a valid self-hash must not authorize a different frozen music direction");
+}
+for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
+  const frozen = structuredClone(musicManifest);
+  frozen.execution.seedStore = {
+    family, channelName: `Channel ${family}`,
+    styleDNA: { audio: { genre: "quiet chamber strings", instrumentation: ["cello", "viola"],
+      textures: ["soft bow"], bpmRange: [60, 80], loopable: true, moodArc: "quiet resolve", loudnessLufs: -18 } },
+    musicBrief: { musicPrompt: "Keep this episode's low sustained pulse." },
+  };
+  frozen.execution.moduleConfig.music = { generationDurationSec: 120 };
+  for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
+    const musicProgram = planWeekPreparedMusicProgram(frozen, provider);
+    const receipt = { ...preparedMusic, manifestSha256: planWeekPreparationManifestSha256(frozen),
+      provider, musicProgram, minimax: provider === "minimax_music3" ? preparedMusic.minimax : undefined };
+    assert.equal(assertPlanWeekPreparedMusicBinding({ prepared: receipt, manifest: frozen }).musicProgram.fingerprint,
+      musicProgram.fingerprint, "all existing provider/family recipes remain reusable");
+    const wrongProvider = { ...frozen, execution: { ...frozen.execution,
+      moduleConfig: { ...frozen.execution.moduleConfig, music: { provider: provider === "suno" ? "mureka" : "suno" } } } };
+    assert.throws(() => planWeekPreparedMusicProgram(wrongProvider, provider), /provider does not match the frozen route/);
+    for (const changed of [
+      { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, channelName: "Different channel personality" } } },
+      { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, musicBrief: { musicPrompt: "Replace the episode with an aggressive solo." } } } },
+      { ...frozen, execution: { ...frozen.execution, moduleConfig: { ...frozen.execution.moduleConfig, music: { generationDurationSec: 240 } } } },
+    ]) {
+      assert.throws(() => assertPlanWeekPreparedMusicBinding({
+        prepared: { ...receipt, manifestSha256: planWeekPreparationManifestSha256(changed) }, manifest: changed,
+      }), /music program binding mismatch/, "rewriting the outer manifest hash cannot reuse stale channel direction");
+    }
+  }
+}
 assert.throws(
   () => assertPlanWeekPreparedMusicBinding({
     prepared: { ...preparedMusic, musicKey: "owner/foreign/music.mp3" },
-    manifest,
+    manifest: musicManifest,
   }),
   /binding mismatch/,
   "a prepared weekly master may not redirect scheduled execution to another channel object",
@@ -503,7 +544,7 @@ assert.throws(
 assert.throws(
   () => assertPlanWeekPreparedMusicBinding({
     prepared: { ...preparedMusic, minimax: undefined },
-    manifest,
+    manifest: musicManifest,
   }),
   /MiniMax music receipt is invalid/,
   "a MiniMax weekly master cannot bypass its native-WAV, runtime, and human-audition evidence",

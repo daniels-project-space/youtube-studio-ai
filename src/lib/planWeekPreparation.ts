@@ -1,4 +1,5 @@
 import { canonicalJson } from "@/lib/canonicalJson";
+import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   assertPlanWeekThumbnailSource,
   type PlanWeekThumbnailSource,
@@ -919,6 +920,10 @@ export function assertPlanWeekPreparedMusicBinding(args: {
     ))
   ) {
     throw new Error("plan-week prepared music binding mismatch");
+  }
+  const expectedProgram = planWeekPreparedMusicProgram(args.manifest, normalized.provider);
+  if (normalized.musicProgram.fingerprint !== expectedProgram.fingerprint) {
+    throw new Error("plan-week prepared music program binding mismatch");
   }
   return normalized;
 }

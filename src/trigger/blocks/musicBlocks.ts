@@ -91,6 +91,11 @@ export const music: Block = {
       if (preparedProgram.channelId !== String(ctx.channelId) || preparedProgram.topic !== topic) {
         throw new Error("music: prepared weekly sound program does not match the current channel and topic");
       }
+      if (preparedMusic.provider !== preparedProgram.generation.providerPreference ||
+        (requestedProvider !== undefined && requestedProvider !== preparedMusic.provider) ||
+        (musicProgram && musicProgram.audio.providerPreference !== preparedMusic.provider)) {
+        throw new Error("music: prepared weekly provider does not match its program or the selected route");
+      }
       if (!Number.isSafeInteger(preparedMusic.audioByteLength) || preparedMusic.audioByteLength < 1_000 ||
         preparedMusic.audioByteLength > 250_000_000 || typeof preparedMusic.audioSha256 !== "string" || !/^[a-f0-9]{64}$/.test(preparedMusic.audioSha256) ||
         !Number.isFinite(preparedMusic.musicDurationSec) || preparedMusic.musicDurationSec < 1.5 || preparedMusic.musicDurationSec > 86_400) {
@@ -246,15 +251,12 @@ export const music: Block = {
     // Week-ahead preparation is a distinct, receipt-backed reuse route. Do
     // not feed it through reuseMusicKey: that shortcut only proves a language
     // sibling named an object. This verifies the master and the exact sealed
-    // program before any provider credential is consulted or generation can
-    // begin. A stale program, altered byte, or absent MiniMax audit record is
+    // program admitted against the frozen manifest by assertPlanWeekPreparedMusicBinding.
+    // A stale program, altered byte, or absent MiniMax audit record is
     // terminal rather than permission to replace the planned track.
     if (preparedMusic !== undefined) {
       if (!preparedMusic || typeof preparedMusic !== "object") {
         throw new Error("music: prepared weekly music is invalid");
-      }
-      if (preparedMusic.musicProgram.fingerprint !== channelMusicProgram.fingerprint) {
-        throw new Error("music: prepared weekly music does not match the frozen channel sound program");
       }
       const masterBytes = await getObjectBytes(preparedMusic.musicKey, undefined, {
         maxBytes: preparedMusic.audioByteLength, timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,

@@ -1080,3 +1080,45 @@ that assertion, all seven affected producer/storage/claim test files passed.
 TypeScript, scoped lint and whitespace checks passed. The entire broad run was
 not repeated after the assertion-only correction. No paid generation or
 production deployment was performed.
+
+## Batch 26: Bind Prepared Music To The Frozen Channel Recipe
+
+The weekly music receipt previously checked its own content fingerprint and
+episode fields, but did not prove that its program came from the frozen inputs.
+The runtime's extra fingerprint comparison compared the selected prepared
+program with itself. A regression reproduced acceptance of a self-consistent,
+rehashed program with an unrelated genre.
+
+The unchanged weekly program derivation is now a pure shared helper. Both the
+producer and receipt admission use it, binding the complete expected program to
+the frozen channel identity, style DNA, composer direction, approved Studio
+recipe, route, generation duration and mix controls. This happens on replay
+before media transfer and in scheduled-run admission before the receipt can
+seed execution. The shared music block separately refuses a prepared provider
+that disagrees with its program or an explicitly selected/current sealed route,
+before writing the program or downloading audio. The self-comparison is removed.
+The shared derivation also rejects an explicit provider that disagrees with the
+frozen module configuration or sealed route before fresh weekly generation.
+
+Offline evidence covers twelve positive family/provider combinations, 36
+changed-manifest cases with freshly rewritten outer hashes, and four validly
+rehashed corrupt programs. The actual weekly task rejects substituted genre,
+section, identity and provider programs with no audio reads, result/claim writes
+or generation. Actual music-block tests cover provider disagreement before I/O
+and preserve valid master reuse and MiniMax receipt-before-native-audio ordering.
+
+This adds deterministic recipe validation, not provider, Convex or Vercel calls.
+It can prevent downstream spend on mismatched music; no billing saving or
+musical-quality improvement is inferred from fixtures. Existing receipts that
+cannot reproduce their frozen recipe are held, never regenerated automatically.
+The provider-generation recipe and legacy pipeline definitions are unchanged.
+YuE2 still requires GPU/output qualification and its separate production handoff;
+this repair does not promote evaluation audio or change thumbnail generation.
+
+Validation: the broad network-isolated run passed all 847 selected readiness
+files, with 30 thumbnail-named files excluded. The final provider-admission
+follow-up also passed a fresh eight-file focused run, TypeScript and scoped lint;
+the broad run began before that follow-up, so this is not a frozen release gate.
+The extracted helper bundles without Node-only dependencies, and the code graph
+was refreshed after final source changes. No production build, deployment, paid
+generation, real GPU qualification or production billing measurement is claimed.
