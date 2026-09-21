@@ -26,6 +26,11 @@ async function main(): Promise<void> {
     const measurement = await measureAudio(mastered);
     assert.notEqual(measurement.integratedLufs, null);
     assert.ok(Math.abs((measurement.integratedLufs ?? 0) - -18) <= 0.65);
+    const { stderr } = await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
+      "-nostats", "-i", mastered, "-map", "a:0", "-filter:a", "ebur128=peak=true", "-f", "null", "-",
+    ]);
+    const peak = Number([...stderr.matchAll(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/gu)].at(-1)?.[1]);
+    assert.ok(Number.isFinite(peak) && peak <= -1 + 0.05, `encoded true peak must pass, measured ${peak}`);
     console.log("TRANSPARENT MUSIC MASTER PASS: measured fixed gain without compressor/limiter normalization");
   } finally {
     await rm(directory, { recursive: true, force: true });

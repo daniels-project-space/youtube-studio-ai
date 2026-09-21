@@ -2254,18 +2254,21 @@ export async function masterAudioTransparentGain(
   outPath: string,
   opts: { lufs: number; truePeakMaxDbtp?: number },
 ): Promise<string> {
+  if (!Number.isFinite(opts.lufs) || !Number.isFinite(opts.truePeakMaxDbtp ?? -1)) {
+    throw new Error("transparent music master requires finite loudness and true-peak targets");
+  }
   const targetLufs = Math.max(-24, Math.min(-9, opts.lufs));
   const truePeakMaxDbtp = Math.max(-6, Math.min(-0.1, opts.truePeakMaxDbtp ?? -1));
-  const { stderr } = await run(FFMPEG, [
-    "-nostats", "-i", inPath,
-    "-map", "a:0",
-    "-filter:a", "ebur128=peak=true",
-    "-f", "null", "-",
-  ], 600_000);
-  const loudnessMatches = [...stderr.matchAll(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/gu)];
-  const peakMatches = [...stderr.matchAll(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/gu)];
-  const inputLufs = Number(loudnessMatches.at(-1)?.[1]);
-  const inputPeakDbfs = Number(peakMatches.at(-1)?.[1]);
+  async function measureMaster(path: string) {
+    const { stderr } = await run(FFMPEG, [
+      "-nostats", "-i", path, "-map", "a:0",
+      "-filter:a", "ebur128=peak=true", "-f", "null", "-",
+    ], 600_000);
+    const loudness = [...stderr.matchAll(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/gu)];
+    const peak = [...stderr.matchAll(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/gu)];
+    return { lufs: Number(loudness.at(-1)?.[1]), truePeakDbtp: Number(peak.at(-1)?.[1]) };
+  }
+  const { lufs: inputLufs, truePeakDbtp: inputPeakDbfs } = await measureMaster(inPath);
   if (!Number.isFinite(inputLufs) || !Number.isFinite(inputPeakDbfs)) {
     throw new Error("transparent music master could not measure source loudness and true peak");
   }
@@ -2282,11 +2285,20 @@ export async function masterAudioTransparentGain(
     "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100",
     outPath,
   ]);
-  const verification = await measureAudio(outPath);
-  if (verification.integratedLufs === null || Math.abs(verification.integratedLufs - targetLufs) > 0.65) {
+  // Check both properties of the encoded artifact in the existing final pass:
+  // MP3 reconstruction can introduce peaks absent from the source waveform.
+  const verification = await measureMaster(outPath);
+  if (!Number.isFinite(verification.lufs) || Math.abs(verification.lufs - targetLufs) > 0.65) {
     throw new Error(
       `transparent music master verification missed ${targetLufs} LUFS ` +
-      `(measured ${verification.integratedLufs ?? "unavailable"})`,
+      `(measured ${Number.isFinite(verification.lufs) ? verification.lufs : "unavailable"})`,
+    );
+  }
+  if (!Number.isFinite(verification.truePeakDbtp) || verification.truePeakDbtp > truePeakMaxDbtp + 0.05) {
+    throw new Error(
+      `transparent music master encoded true peak exceeds ${truePeakMaxDbtp} dBTP or is unavailable ` +
+      `(measured ${Number.isFinite(verification.truePeakDbtp) ? verification.truePeakDbtp : "unavailable"}); ` +
+      "refusing to release or silently limit the encoded master",
     );
   }
   return outPath;
