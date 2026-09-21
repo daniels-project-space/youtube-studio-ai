@@ -143,3 +143,39 @@ Receipts are under `/var/lib/youtube-studio-render/operator/credential-validatio
 This proves credential/lifecycle/SSH operation, not YuE2 inference, image
 deployment, musical quality or production readiness. The key was supplied in
 chat for temporary testing and must be rotated by the owner after validation.
+
+## Live YuE2 GPU deployment: 21 September 2026
+
+The verified 3090 VM now retains its own build context, Docker image, model cache
+and ledger under `/var/lib/youtube-studio-render/`. The deployed runtime source
+is `e5e59b74cd15c3dd3c483c8e6df89f1e44592214`; the Studio builder pins this revision.
+The remote Docker image ID is
+`sha256:beef55e2f9ad478c54d613eb6a063118c46b41cd0e5f4ee8ee80937d5a5f9e87`.
+
+For this host, transfer the builder's allowlisted context (about 100 KB) and build
+on the VM. Bulk SSH image/model transfer was slow; direct pinned dependency and
+public-checkpoint downloads completed successfully. Do not upload private build
+images to Studio's media bucket: its public development domain is enabled. No
+private image was uploaded there. Provider credentials remain on the controller.
+
+Run cache staging as UID/GID 1000, matching the Studio GPU volume owner, with
+`HOME=/tmp`, read-only container root, all capabilities dropped, and no-new-privileges.
+Staging alone gets network access and a writable cache mount. The same image
+verified all five pinned checkpoint files (7,794,517,915 bytes). Inference gets a
+read-only cache and `--network none`; its ledger is a separate writable mount.
+
+`yue2_gpu_preflight.py` runs inside the real image with GPU access and the same
+thread-only seccomp/parent-death protection as the inference child. It verified
+installed source/package pins, offline checkpoint hashes, RTX 3090 identity,
+available RAM and actual FP32/BF16 CUDA matrix products. The CPU-host negative
+check refuses to substitute CPU execution. This is not music-quality approval.
+The retained receipt is `/var/lib/youtube-studio-render/operator/yue2-gpu-preflight.json`.
+
+`yue2_supervised_probe.py --job /absolute/job.json --policy /absolute/policy.json`
+executes one strict personal-creator job through the existing runtime supervisor.
+It does not invent a channel profile, change model settings, provision compute,
+or approve music. Every attempt remains in the mounted ledger. The first live
+attempt exposed a missing passwd entry for UID 1000 during Torch cache setup;
+the pinned image now registers `studio`, without widening capabilities or
+changing inference precision. Preserve that failed receipt when evaluating the
+explicit retry. The external VM shutdown guard remains separately required.
