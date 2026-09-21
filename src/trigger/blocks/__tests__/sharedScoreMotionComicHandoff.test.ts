@@ -98,7 +98,10 @@ async function main() {
       return { stdout: "", stderr: JSON.stringify({ input_i: "-19", input_tp: "-4", input_lra: "2", input_thresh: "-29", target_offset: "0" }) };
     }
     if (command === "ffprobe") return { stdout: JSON.stringify({
-      streams: [{ codec_type: values.at(-1)!.endsWith(".audio") ? "audio" : "video", duration: "1.7", start_time: "0", sample_rate: "48000" }],
+      streams: [
+        ...values.at(-1)!.endsWith(".audio") ? [] : [{ codec_type: "video", duration: "1.7", duration_ts: 17, time_base: "1/10", start_time: "0" }],
+        { codec_type: "audio", duration: "1.7", duration_ts: 81600, time_base: "1/48000", start_time: "0", sample_rate: "48000" },
+      ],
       format: { format_name: values.at(-1)!.endsWith(".audio") ? "wav" : "mov,mp4,m4a,3gp,3g2,mj2", duration: "1.7" },
     }), stderr: "" };
     if (values.some((value) => value.includes("amix="))) {
@@ -203,6 +206,7 @@ async function main() {
         queueMicrotask(async () => {
           try {
             const output = await processCommand(command, values);
+            child.stdout.write(output.stdout);
             child.stderr.write(output.stderr);
             if (values.at(-1) === "pipe:1") child.stdout.write(Buffer.alloc(480 * 4));
             child.emit("close", 0);
@@ -378,6 +382,11 @@ async function main() {
     assert.equal(musicCalls, 1, "legacy retains its existing nested score behavior, using an explicit fake purchase");
     assert.equal(libraryCalls[0].externalScore, undefined);
     assert.deepEqual(normalizationTargets, [-14]);
+    const normalization = commands.find(command => command.some(value => value.includes("linear=true:")));
+    assert.ok(normalization, "legacy finishing must actually apply its measured loudness pass");
+    assert.equal(normalization[normalization.indexOf("-ar") + 1], "48000");
+    assert.equal(normalization[normalization.indexOf("-t") + 1], "1.7");
+    assert.equal(normalization[normalization.indexOf("-c:v") + 1], "copy");
     console.log("SHARED SCORE MOTION COMIC PASS: real cold Mureka producer/registry/compiler/runner/block/cast, once/repeat, raw reuse refusal, same-key replacement refusal, cache identity; legacy persona contract failure retained and direct legacy behavior verified; paid I/O explicitly fake");
   } finally {
     reset?.(); loader._load = originalLoad; globalThis.fetch = originalFetch;

@@ -44,6 +44,7 @@ class Convex {
   async mutation(ref: Parameters<typeof getFunctionName>[0]): Promise<unknown> {
     const name = getFunctionName(ref);
     mutations.push(name);
+    if (name === "yue2Continuations:prepareDispatch") return [];
     if (name.endsWith(":prepareResumeDispatch")) {
       if (failPreparation) throw new Error("fixture preparation unavailable");
       const selected = (mode === "music" && name.startsWith("musicAuditionCheckpoints:")) ||
@@ -128,8 +129,9 @@ async function main() {
     mode = kind;
     empty = true;
     await invoke(kind);
-    assert.equal(mutations.length, 1, "idle recovery uses one Convex function call");
+    assert.equal(mutations.length, kind === "music" ? 2 : 1, "one bounded preparation call per independent checkpoint store");
     assert.match(mutations[0], /:prepareResumeDispatch$/);
+    if (kind === "music") assert.equal(mutations[1], "yue2Continuations:prepareDispatch");
     assert.deepEqual(queries, []);
     assert.deepEqual(triggers, []);
     assert.deepEqual(keys, []);
@@ -141,15 +143,17 @@ async function main() {
     failAcknowledgement = true;
     await invoke(kind);
     assert.equal(triggers.length, 1);
-    assert.equal(mutations.length, 2);
+    assert.equal(mutations.length, kind === "music" ? 3 : 2);
     assert.match(mutations[1], /:markResumeQueued$/);
+    if (kind === "music") assert.equal(mutations[2], "yue2Continuations:prepareDispatch");
     assert.deepEqual(queries, []);
     failAcknowledgement = false;
     failEnqueue = true;
     await invoke(kind);
     assert.equal(triggers.length, 1);
-    assert.equal(mutations.length, 2);
+    assert.equal(mutations.length, kind === "music" ? 3 : 2);
     assert.match(mutations[1], /:recordResumeEnqueueFailure$/);
+    if (kind === "music") assert.equal(mutations[2], "yue2Continuations:prepareDispatch");
     failEnqueue = false;
   }
   for (const kind of Object.keys(tasks)) {

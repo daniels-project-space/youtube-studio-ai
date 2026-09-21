@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import vm from "node:vm";
 import ts from "typescript";
+import { getFunctionName } from "convex/server";
 import type { Block, BlockPatch, RunStageSink } from "@/engine/types";
 import { register, getManifest, _clear } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
@@ -89,6 +90,13 @@ function actualBlock(path: string): Block {
   const mod = { exports: {} as { qaVisual: Block } };
   const guardedRequire = (name: string) => {
     const actual = requireLocal(name);
+    if (name === "@/lib/studioConvexHttpClient") return { ...actual, StudioConvexHttpClient: class {
+      async query(reference: Parameters<typeof getFunctionName>[0], args: unknown) {
+        assert.equal(getFunctionName(reference), "yue2Continuations:verifyReleaseSource");
+        assert.deepEqual(args, { ownerId: scope.ownerId, channelId: scope.channelId, runId: scope.runId });
+        return null; // This fixture is a legacy narrated run, not an approved YuE2 source.
+      }
+    } };
     if (name === "@/lib/storage") return { ...actual, getObjectBytes: async (key: string) => { if (key === store.narrationKey) { sourceDownloads++; callOrder.push("source-download"); const next = sourceReadOutcomes ? sourceReadOutcomes.shift() : downloadSource; if (next instanceof Error) throw next; assert.ok(next, "source download must be explicitly guarded"); return next; } assert.equal(key, "guarded-thumbnail"); return Buffer.from("thumbnail-process-fixture"); }, putObject: async () => { writes++; throw new Error("unapproved storage write"); } };
     if (name === "@/lib/ffmpeg") return { ...actual, probe: async () => ({ hasVideo: true, hasAudio: true, durationSec: probeDuration, width: 1920, height: 1080 }), measureAudio: async () => { onFinalAudioMeter?.(); return { integratedLufs: -18, windowMeanDb: -22 }; }, measureNarrationMixCorrelation: async () => ({ correlation: 0.99 }) };
     if (name === "@/lib/visualReview") return { ...actual, reviewRender: async (_path: string, _duration: number, _intent: unknown, options: { sourceSha256: string }) => { reviewerCalls++; callOrder.push("review"); onReview?.(); return { ran: true, verdict: "pass", defects: [], evidence: { source: { sha256: options.sourceSha256 }, frames: [], coverage: { maxGapSec: 1, maxAllowedGapSec: 2, focusedWindows: [] } }, focusWindows: [], broadQualityScore: { score: 9, broadBatchCount: 1 }, summary: "Guarded transport fixture, not a visual review." }; } };
@@ -375,6 +383,8 @@ async function availabilityControls(block: Block, goodAudit: Buffer) {
 
 async function main() {
   const originalFetch = globalThis.fetch;
+  const originalConvexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  process.env.NEXT_PUBLIC_CONVEX_URL = "https://source-preflight-fixture.convex.cloud";
   globalThis.fetch = async () => { throw new Error("all network forbidden"); };
   try {
     const file = process.env.NARRATION_PREFLIGHT_SOURCE ?? join(repo, "src/trigger/blocks/narratedBlocks.ts");
@@ -394,6 +404,10 @@ async function main() {
     }
     assert.equal(writes, 0);
     console.log(JSON.stringify({ retained: root, sourceSha256: hash(readFileSync(file)), before: Boolean(process.env.NARRATION_PREFLIGHT_EXPECT_BEFORE), liveProviders: 0, fullQualityCompletion: false, results }, null, 2));
-  } finally { globalThis.fetch = originalFetch; }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalConvexUrl === undefined) delete process.env.NEXT_PUBLIC_CONVEX_URL;
+    else process.env.NEXT_PUBLIC_CONVEX_URL = originalConvexUrl;
+  }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

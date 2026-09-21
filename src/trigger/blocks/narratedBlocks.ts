@@ -4371,8 +4371,6 @@ export const qaVisual: Block = {
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
   run: async (ctx) => {
-    const yue2AssemblySource = ctx.params["qaProfile"] === "draft" ? null
-      : await verifyCurrentYuE2ReleaseSource(convex(), ctx, ctx.store["yue2AssemblySource"]);
     // A legacy fictional route remains readable for audit, but must not mint
     // a new QA/certificate path without the sealed visual treatment that
     // binds its independently publishable thumbnail.
@@ -4389,6 +4387,8 @@ export const qaVisual: Block = {
       consumer: "qa_visual",
       operation: "certify thumbnail QA",
     });
+    const yue2AssemblySource = ctx.params["qaProfile"] === "draft" ? null
+      : await verifyCurrentYuE2ReleaseSource(convex(), ctx, ctx.store["yue2AssemblySource"]);
     // Fail before any paid final-master review when the independently
     // publishable thumbnail cannot prove its fictional treatment. Reuse the
     // exact fetched bytes below, rather than downloading/rechecking a second

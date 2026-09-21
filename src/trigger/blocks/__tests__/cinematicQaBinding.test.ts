@@ -6,7 +6,7 @@ const source = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBloc
 const cinematicQaEvidenceContractSource = readFileSync(join(process.cwd(), "src/lib/cinematicQaEvidenceContract.ts"), "utf8");
 const sourceProofMediaSource = readFileSync(join(process.cwd(), "src/lib/sourceProofMedia.ts"), "utf8");
 const qaStart = source.indexOf("export const qaVisual: Block");
-const timelineStart = source.indexOf("export const timelineAssemble: Block");
+const timelineStart = source.indexOf("export function createTimelineAssemblyBlock(");
 const qaSource = source.slice(qaStart);
 const timelineSource = source.slice(timelineStart, qaStart);
 const binding = qaSource.indexOf("assertCinematicSequenceRenderBinding({");
@@ -17,6 +17,8 @@ const sourceHashAfterReview = qaSource.indexOf("const finalMasterSha256AfterVisu
 
 assert(qaStart >= 0, "qa_visual must remain the final production review block");
 assert(timelineStart >= 0, "timeline_assemble must remain the final-master assembly block");
+assert.match(source, /export const timelineAssemble: Block = createTimelineAssemblyBlock\(\);/,
+  "legacy timeline assembly must use the same tested factory without opt-in overrides");
 assert(binding >= 0, "qa_visual must re-assert exact cinematic scene/edit/render binding");
 assert(reviewer >= 0 && binding < reviewer, "cinematic clip receipts must be validated before final-master visual review");
 assert(
