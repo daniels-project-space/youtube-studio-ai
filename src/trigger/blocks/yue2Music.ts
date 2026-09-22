@@ -10,6 +10,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
 import { validateYuE2ExecutionPolicy } from "@/lib/yue2ExecutionAccounting";
 import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
+import { musicProgramForCurrentRoute } from "./blockContext";
 
 export const YUE2_MUSIC_CANDIDATE_VERSION = "3.0.0-yue2-candidate";
 const config = z.object({
@@ -35,6 +36,10 @@ const block: Block & { version: string } = {
   consumes: ["topic", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate"], paid: true,
   run: async ctx => {
     const params = config.parse(ctx.params);
+    const program = musicProgramForCurrentRoute(ctx, String(ctx.store["topic"]));
+    if (program && program.audio.providerPreference !== "yue2") {
+      throw new Error("YuE2 music requires a sealed YuE2 program; a legacy provider choice cannot be overwritten");
+    }
     const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
     if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
       arrangement.runId !== ctx.runId || arrangement.topic !== ctx.store["topic"] ||
@@ -101,6 +106,7 @@ export function createYuE2MusicManifest() {
   const manifest = manifestFromBlock(block, {
     version: block.version,
     capabilities: ["audio.music_candidate"], requiredCapabilities: ["music.arrangement.accepted"],
+    optionalConsumes: ["channelProgramRoute", "musicProgramPlan"],
     providerProfiles: [{ id: "yue2-native-v1", provider: "openrelay", quality: "production", allowFallback: false }],
     maxCostUsd: 1, maxCostUsdFor: params => config.parse(params).maxCostUsd, maxLatencySec: 1800,
     certification: "contract", qualityRequired: true,

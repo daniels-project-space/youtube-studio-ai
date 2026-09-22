@@ -138,7 +138,7 @@ async function main() {
   const { manifestFromBlock } = load("@/engine/moduleManifest") as typeof import("@/engine/moduleManifest");
   const { validatePipeline } = load("@/engine/validate") as typeof import("@/engine/validate");
   const { validateArtifact } = load("@/engine/artifactSchemas") as typeof import("@/engine/artifactSchemas");
-  const { prepareApprovedYuE2AssemblySource } = load("@/lib/approvedYuE2AssemblySource") as typeof import("@/lib/approvedYuE2AssemblySource");
+  const { prepareApprovedYuE2AssemblySource, verifyApprovedYuE2Source } = load("@/lib/approvedYuE2AssemblySource") as typeof import("@/lib/approvedYuE2AssemblySource");
   _resetBlocks(); registerAllBlocks();
   registerManifest(manifestFromBlock({ id: "approved_source_fixture", consumes: [],
     produces: ["yue2MusicCandidate", "acceptedMusicArrangement"], run: async () => ({ yue2MusicCandidate: candidate, acceptedMusicArrangement: arrangement }) },
@@ -167,6 +167,14 @@ async function main() {
       footageClips: [picture], entityClips: [], narrationLocalPath: narration, narrationDurationSec: 10,
       musicBrief: { directives: { bodyMusicVol: 0.04, targetLufs: -16 } },
     } };
+  reset();
+  const sourceAdmission = await verifyApprovedYuE2Source(ctx);
+  assert.equal(sourceAdmission.approval.fingerprint, approved.fingerprint);
+  assert.equal(privateReads, 0, "visual admission must not download or fold audio");
+  assert.equal(durableReads, 1);
+  approval = null;
+  await assert.rejects(sourceAdmission.assertCurrent());
+  assert.equal(privateReads, 0);
   for (const id of ["assemble", "timeline_assemble"]) {
     reset();
     nativeEncode = Boolean(proofDirectory) && id === "timeline_assemble";

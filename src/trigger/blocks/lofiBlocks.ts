@@ -1124,7 +1124,8 @@ export const topicSelect: Block = {
  * deterministic from the already-selected topic and frozen channel route; it
  * never calls a provider or grants render/publication authority.
  */
-export const musicProgramPlan: Block = {
+export function createMusicProgramPlanBlock(sourceProvider?: "yue2"): Block {
+  return {
   id: "music_program_plan",
   consumes: ["topic"],
   produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
@@ -1135,11 +1136,15 @@ export const musicProgramPlan: Block = {
       throw new Error("music_program_plan: requires a sealed music-loop channel program route");
     }
     const requestedProvider = ctx.params["provider"];
+    if (sourceProvider && requestedProvider !== undefined && requestedProvider !== sourceProvider) {
+      throw new Error("music_program_plan: explicit provider conflicts with YuE2 source ownership");
+    }
     if (
       requestedProvider !== undefined &&
       requestedProvider !== "minimax_music3" &&
       requestedProvider !== "suno" &&
-      requestedProvider !== "mureka"
+      requestedProvider !== "mureka" &&
+      !(sourceProvider === "yue2" && requestedProvider === "yue2")
     ) {
       throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
     }
@@ -1167,13 +1172,15 @@ export const musicProgramPlan: Block = {
       topic,
       setting,
       visualStyle: visualStyle(ctx),
-      motionIntent: "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
+      motionIntent: sourceProvider === "yue2"
+        ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
+        : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
       audioDirection,
       // Select a provider once, before either paid branch is allowed to run.
       // Automatic programs use MiniMax only when its independently qualified
       // worker is ready; an explicit route selection always remains immutable.
-      providerPreference: selectOriginalMusicProvider({
-        requestedProvider,
+      providerPreference: sourceProvider ?? selectOriginalMusicProvider({
+        requestedProvider: requestedProvider === "yue2" ? undefined : requestedProvider,
         minimaxQualified: hasQualifiedMiniMaxMusic3(),
       }),
     });
@@ -1183,7 +1190,10 @@ export const musicProgramPlan: Block = {
       musicProgramPlanFingerprint: plan.fingerprint,
     };
   },
-};
+  };
+}
+
+export const musicProgramPlan = createMusicProgramPlanBlock();
 
 export function createScenePlannerBlock(planner: typeof planScenes = planScenes): Block {
   return {
@@ -1259,6 +1269,7 @@ export const scenePlanner = createScenePlannerBlock();
 export function createKeyframesBlock(
   identityForContext?: (ctx: StageContext) => ScenePlanInput["styleDNA"] | Promise<ScenePlanInput["styleDNA"]>,
   bindMotionIdentity = false,
+  beforeImageDispatch?: (ctx: StageContext) => Promise<void>,
 ): Block {
   return {
   id: "keyframes",
@@ -1319,6 +1330,7 @@ export function createKeyframesBlock(
       maxIters: maximumImageAttempts,
       log: (m) => ctx.log(m),
       produce: async (priorIssues) => {
+        await beforeImageDispatch?.(ctx);
         const fix = priorIssues.length
           ? ` Correct these problems from the previous attempt: ${priorIssues.join("; ")}.`
           : "";
@@ -1458,7 +1470,10 @@ export const keyframes = createKeyframesBlock();
 
 /* --------------------------- 3. loop_clips ------------------------------ */
 
-export const loopClips: Block = {
+export function createLoopClipsBlock(
+  admitMusicSource?: (ctx: StageContext) => Promise<{ assertCurrent: () => Promise<void> }>,
+): Block {
+  return {
   id: "loop_clips",
   consumes: ["f1Key"],
   produces: [
@@ -1496,7 +1511,8 @@ export const loopClips: Block = {
     // audio-conditioning input, so music remains a separate mastered asset.
     const musicKey = typeof ctx.store["musicKey"] === "string" ? ctx.store["musicKey"].trim() : "";
     const routeBoundMusicProgram = musicProgramForCurrentRoute(ctx, str(ctx, "topic"));
-    if (routeBoundMusicProgram && !musicKey) {
+    const admittedMusic = admitMusicSource ? await admitMusicSource(ctx) : undefined;
+    if (routeBoundMusicProgram && !musicKey && !admittedMusic) {
       throw new Error("loop_clips: the registered music-loop route requires mastered music before visual generation");
     }
     const style = styleGrammar(ctx);
@@ -1537,7 +1553,7 @@ export const loopClips: Block = {
     if (!Number.isFinite(perNativeClipBudgetUsd) || perNativeClipBudgetUsd <= 0) {
       throw new Error("loop_clips: MiniMax H3 native clip budget is invalid");
     }
-    ctx.log(`loop_clips: MiniMax H3 Novita on-demand ${segmentCount}×${segmentSeconds}s (${totalNativeClips} native takes; loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    ctx.log(`loop_clips: MiniMax H3 Novita on-demand ${segmentCount}×${segmentSeconds}s (${totalNativeClips} native takes; loop=${loopMode}${admittedMusic ? "; reviewed private music source" : musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
     const tmp = await makeRunTempDir(ctx.runId);
     const firstFrameSha256 = sha256BytesHex(await getObjectBytes(f1Key));
     const clips: Awaited<ReturnType<typeof renderMiniMaxH3>>[] = [];
@@ -1553,6 +1569,7 @@ export const loopClips: Block = {
         const nativePaths: string[] = [];
         for (let nativeIndex = 0; nativeIndex < nativeClipsPerSegment; nativeIndex++) {
           const nativeOrdinal = nativeIndex + 1;
+          await admittedMusic?.assertCurrent();
           const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
             provider: "novita",
             execution: "on-demand",
@@ -1654,7 +1671,10 @@ export const loopClips: Block = {
       [COST_PATCH_KEY]: observedClipCostUsd,
     };
   },
-};
+  };
+}
+
+export const loopClips = createLoopClipsBlock();
 
 /* ----------------------------- 4. upscale ------------------------------- */
 

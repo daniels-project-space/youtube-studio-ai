@@ -76,6 +76,9 @@ export const music: Block = {
     // route could attach a sibling's track without proving it belongs to this
     // episode program.
     const musicProgram = musicProgramForCurrentRoute(ctx, topic);
+    if (musicProgram?.audio.providerPreference === "yue2") {
+      throw new Error("music: sealed YuE2 program requires the YuE2 candidate module; legacy generation and reuse cannot substitute for it");
+    }
     const selection = ctx.params.provider === undefined ? undefined : ChannelMusicProviderSchema.safeParse(ctx.params.provider);
     if (selection && !selection.success) {
       throw new Error("music: unsupported explicit provider; refusing substitution with a default provider");

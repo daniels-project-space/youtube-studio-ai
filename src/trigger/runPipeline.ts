@@ -2021,6 +2021,7 @@ export const runPipelineTask = task({
       const resolved = validatePipeline(entries, channelPipelineValidationSeedKeys(
         contentLane,
         seedStore["channelProgramRoute"],
+        entries,
       ));
       // Private probes keep their existing no-upload policy; ordinary runs
       // retain the full production contract and exact frozen compilation guard.

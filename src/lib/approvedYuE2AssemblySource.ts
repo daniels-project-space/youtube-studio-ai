@@ -20,14 +20,13 @@ const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 const approvalApi = (api as unknown as { yue2Auditions: { getSourceApproval: never } }).yue2Auditions;
 
 /** Read-only source adoption. Never dispatches inference or copies private audio to a public bucket. */
-export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, crossfadeSec: number, playback: "repeat" | "once" = "repeat") {
+export async function verifyApprovedYuE2Source(ctx: StageContext, playback: "repeat" | "once" = "repeat") {
   const candidate = YuE2MusicCandidateSchema.parse(ctx.store["yue2MusicCandidate"]);
   const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
   if (candidate.ownerId !== ctx.ownerId || candidate.channelId !== ctx.channelId || candidate.runId !== ctx.runId ||
     arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId || arrangement.runId !== ctx.runId ||
     candidate.arrangementFingerprint !== arrangement.fingerprint || candidate.technicalStatus !== "needs_audition" ||
-    arrangement.arrangement.playback !== playback || !arrangement.reviewContext ||
-    (playback === "repeat" ? !Number.isFinite(crossfadeSec) || crossfadeSec < 0.5 || crossfadeSec > 4 : crossfadeSec !== 0)) {
+    arrangement.arrangement.playback !== playback || !arrangement.reviewContext) {
     throw new Error("YuE2 assembly requires the exact unblocked arrangement, playback mode and candidate");
   }
   const assertLease = ctx.assertRemoteChildExecutionLease
@@ -65,6 +64,14 @@ export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, cross
     material.listeningAudioKey !== candidate.listeningAudioKey || canonicalJson(material.request.acceptedArrangement) !== canonicalJson(arrangement)) {
     throw new Error("YuE2 retained source no longer matches the approved candidate");
   }
+  return { candidate, arrangement, approval, assertCurrent };
+}
+
+export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, crossfadeSec: number, playback: "repeat" | "once" = "repeat") {
+  if (playback === "repeat" ? !Number.isFinite(crossfadeSec) || crossfadeSec < 0.5 || crossfadeSec > 4 : crossfadeSec !== 0) {
+    throw new Error("YuE2 assembly requires the exact unblocked arrangement, playback mode and candidate");
+  }
+  const { candidate, arrangement, approval, assertCurrent } = await verifyApprovedYuE2Source(ctx, playback);
   const bytes = await getObjectBytes(candidate.listeningAudioKey, getStudioPrivateBucket(), {
     timeoutMs: 120_000, maxBytes: Math.min(256 * 1024 * 1024, candidate.nativeFrames * 8 + 65536),
   });

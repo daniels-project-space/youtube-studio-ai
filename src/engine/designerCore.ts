@@ -1355,6 +1355,7 @@ export function designPipelineCore(
       programRoute && opts.programBrief
         ? channelProgramRouteRunSeed({ route: programRoute, programBrief: opts.programBrief })
         : undefined,
+      pipeline,
     ));
     if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {

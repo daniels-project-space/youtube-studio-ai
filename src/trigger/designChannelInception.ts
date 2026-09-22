@@ -1377,6 +1377,7 @@ function certifyChannelPipeline(args: {
       admittedShowProfile.programRoute
         ? channelProgramRouteRunSeed({ route: admittedShowProfile.programRoute, programBrief: args.programBrief })
         : undefined,
+      args.pipeline,
     )),
   );
   const claims = {

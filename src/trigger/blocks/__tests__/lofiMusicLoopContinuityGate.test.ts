@@ -1,19 +1,22 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 
 import { MusicError, withMusicGenerationCost } from "@/lib/music";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 
 const source = readFileSync(join(process.cwd(), "src", "trigger", "blocks", "lofiBlocks.ts"), "utf8");
-const loopStart = source.indexOf("loopClips: Block = {");
-const upscaleStart = source.indexOf("upscale: Block = {", loopStart);
+const parsed = ts.createSourceFile("lofiBlocks.ts", source, ts.ScriptTarget.Latest, true);
+const loopFactory = parsed.statements.find((node): node is ts.FunctionDeclaration =>
+  ts.isFunctionDeclaration(node) && node.name?.text === "createLoopClipsBlock");
 const musicSource = readFileSync(join(process.cwd(), "src", "trigger", "blocks", "musicBlocks.ts"), "utf8");
 const musicStart = musicSource.indexOf("export const music: Block = {");
 
-assert.ok(loopStart >= 0 && upscaleStart > loopStart, "visual loop block must remain independently inspectable");
+assert.ok(loopFactory?.body, "visual loop block must remain independently inspectable");
+assert.match(source, /export const loopClips = createLoopClipsBlock\(\);/, "legacy loop must use the inspected factory without overrides");
 assert.ok(musicStart >= 0, "shared music block must remain independently inspectable");
-const loopBlock = source.slice(loopStart, upscaleStart);
+const loopBlock = loopFactory.body.getText(parsed);
 const musicBlock = musicSource.slice(musicStart);
 
 assert.match(loopBlock, /minimaxH3Readiness\("novita"\)/, "H3 readiness must be checked before motion spend");

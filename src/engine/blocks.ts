@@ -9,6 +9,7 @@ import { createArrangementComposerManifest, musicArrangementPlan } from "@/trigg
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { createGroundedScenePlannerManifest } from "@/trigger/blocks/groundedScenePlanner";
 import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@/trigger/blocks/boundLoopVisuals";
+import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2KeyframesManifest } from "@/trigger/blocks/yue2LoopVisuals";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
@@ -64,7 +65,11 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createGroundedScenePlannerManifest(getManifest("scene_planner")!));
   const boundScenePlanner = createBoundScenePlannerManifest(getManifest("scene_planner")!);
   registerManifestVersion(boundScenePlanner);
-  registerManifestVersion(createBoundKeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
+  const boundKeyframes = createBoundKeyframesManifest(getManifest("keyframes")!, boundScenePlanner);
+  registerManifestVersion(boundKeyframes);
+  registerManifestVersion(createYuE2ProgramManifest(getManifest("music_program_plan")!));
+  registerManifestVersion(createYuE2KeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
+  registerManifestVersion(createYuE2LoopVisualManifest(getManifest("loop_clips")!));
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
   registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));

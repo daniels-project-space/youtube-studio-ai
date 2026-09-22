@@ -21,7 +21,7 @@ const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/iu);
 const boundedText = (maximum: number) => z.string().trim().min(1).max(maximum);
 
 const PlanBodySchema = z.object({
-  version: z.literal(ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION),
+  version: z.enum([ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION, "original-music-program-plan/v2-yue2"]),
   family: z.literal("music_loop"),
   contentLaneKey: z.literal("music_loop"),
   routeKey: z.literal(ORIGINAL_MUSIC_PROGRAM_ROUTE_KEY),
@@ -36,7 +36,7 @@ const PlanBodySchema = z.object({
   }).strict(),
   audio: z.object({
     direction: boundedText(900),
-    providerPreference: z.enum(["minimax_music3", "suno", "mureka"]),
+    providerPreference: z.enum(["minimax_music3", "suno", "mureka", "yue2"]),
     instrumentalOnly: z.literal(true),
     noVocals: z.literal(true),
     loopable: z.literal(true),
@@ -46,6 +46,9 @@ const PlanBodySchema = z.object({
 export const OriginalMusicProgramPlanSchema = PlanBodySchema.extend({
   fingerprint: FingerprintSchema,
 }).strict().superRefine((plan, refinement) => {
+  if ((plan.version === "original-music-program-plan/v2-yue2") !== (plan.audio.providerPreference === "yue2")) {
+    refinement.addIssue({ code: z.ZodIssueCode.custom, message: "music program version does not bind its provider" });
+  }
   const expected = originalMusicProgramPlanFingerprint(plan);
   if (plan.fingerprint !== expected) {
     refinement.addIssue({
@@ -70,7 +73,7 @@ export interface CreateOriginalMusicProgramPlanInput {
    * explicit rather than a fallback: its worker independently fails closed
    * until its current quality qualification is present.
    */
-  readonly providerPreference?: "minimax_music3" | "suno" | "mureka";
+  readonly providerPreference?: "minimax_music3" | "suno" | "mureka" | "yue2";
 }
 
 export type OriginalMusicProvider = "minimax_music3" | "suno" | "mureka";
@@ -146,7 +149,7 @@ export function createOriginalMusicProgramPlan(
     900,
   );
   const body = {
-    version: ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION,
+    version: input.providerPreference === "yue2" ? "original-music-program-plan/v2-yue2" as const : ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION,
     family: "music_loop" as const,
     contentLaneKey: "music_loop" as const,
     routeKey: ORIGINAL_MUSIC_PROGRAM_ROUTE_KEY,
@@ -157,7 +160,7 @@ export function createOriginalMusicProgramPlan(
     visual: { setting, visualStyle, motionIntent },
     audio: {
       direction: audioDirection,
-      providerPreference: selectOriginalMusicProvider({
+      providerPreference: input.providerPreference === "yue2" ? "yue2" as const : selectOriginalMusicProvider({
         requestedProvider: input.providerPreference,
         minimaxQualified: false,
       }),

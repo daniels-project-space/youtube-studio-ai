@@ -74,9 +74,10 @@ export function createBoundScenePlannerManifest(legacy: ModuleManifest): ModuleM
     certification: { status: "contract", evidence: "Run-bound scene and effective identity handoff; not real-output qualification." } };
 }
 
-export function createBoundKeyframesManifest(legacy: ModuleManifest, planner: ModuleManifest): ModuleManifest {
+export function createBoundKeyframesManifest(legacy: ModuleManifest, planner: ModuleManifest,
+  beforeImageDispatch?: (ctx: StageContext) => Promise<void>): ModuleManifest {
   if (legacy.id !== "keyframes" || planner.id !== "scene_planner") throw new Error("bound visuals require scene_planner and keyframes");
-  const block = createKeyframesBlock(admittedVisualIdentity, true);
+  const block = createKeyframesBlock(admittedVisualIdentity, true, beforeImageDispatch);
   const consumes = { ...legacy.consumes, ...planner.consumes, loopVisualPlan: artifactContract("loopVisualPlan") };
   const optionalConsumes = Object.fromEntries(Object.entries({ ...legacy.optionalConsumes, ...planner.optionalConsumes })
     .filter(([key]) => !(key in consumes)));

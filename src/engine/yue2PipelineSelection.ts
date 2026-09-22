@@ -43,6 +43,22 @@ export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2
     throw new Error("Play-once music requires the narrated timeline consumer, not loop assembly");
   }
   const versions = new Map([[composerIndex, composerVersion], [musicIndex, musicVersion], [assemblyIndex, assemblyVersion]]);
+  if (source.some(entry => ["scene_planner", "keyframes", "loop_clips"].includes(entry.block))) {
+    if (selected.musicIntent.playback !== "repeat" || selected.musicIntent.role !== "primary_music") {
+      throw new Error("YuE2 loop visuals require repeat primary-music intent");
+    }
+    const programIndex = indexOfOne(["music_program_plan"]), sceneIndex = indexOfOne(["scene_planner"]);
+    const keyframeIndex = indexOfOne(["keyframes"]), clipsIndex = indexOfOne(["loop_clips"]);
+    if (!(programIndex < sceneIndex && sceneIndex < musicIndex && musicIndex < keyframeIndex && keyframeIndex < clipsIndex && clipsIndex < assemblyIndex)) {
+      throw new Error("YuE2 loop ownership requires program, scene, source audition, keyframe, clips, assembly ordering");
+    }
+    const provider = source[programIndex].params?.provider;
+    if (provider !== undefined && provider !== "yue2") throw new Error("YuE2 selection conflicts with the program's explicit provider");
+    versions.set(programIndex, "2.0.0-yue2-intent");
+    versions.set(sceneIndex, "3.0.0-bound-visual-plan");
+    versions.set(keyframeIndex, "3.0.0-yue2-reviewed");
+    versions.set(clipsIndex, "2.0.0-yue2-reviewed");
+  }
   for (const [index, version] of versions) {
     const entry = source[index];
     if (entry.version !== undefined && entry.version !== version) {
@@ -66,7 +82,8 @@ export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2
       return { ...entry, version: assemblyVersion, params: { ...entry.params,
         ...(selected.musicIntent.playback === "once" ? { sourceCrossfadeSec: 0 } : {}) } };
     }
-    return { ...entry, ...(entry.params ? { params: { ...entry.params } } : {}) };
+    return { ...entry, ...(versions.has(index) ? { version: versions.get(index)! } : {}),
+      ...(entry.params ? { params: { ...entry.params } } : {}) };
   });
   if (!plans.length) pipeline.splice(composerIndex + 1, 0, { block: "music_arrangement_plan" });
   for (const entry of pipeline) {
