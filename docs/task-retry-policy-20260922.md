@@ -24,3 +24,15 @@ are recorded in `yue2-integrated-verification-20260922.md`. Neither the correcte
 770-file selection nor the unchanged complete release suite was run for this
 patch. These changes are not proof of deployed behavior or measured billing
 savings.
+
+## Subsequent Integration Verification
+
+Clean, frozen source `387eea676f3ada417802677ed04cf26ff5a74e06` passed all
+770 files selected by the corrected optional exclusion, with 157 files excluded.
+The process exited successfully with external networking disabled. Revision
+and worktree cleanliness were unchanged across the run. This supersedes the
+focused-only limitation above, but is still not the complete release gate.
+
+Log: `/tmp/studio-readiness-387eea67-strict-exclusion.log`.
+SHA-256: `b2f37b0d0d503d7cd386c0c004a1cc37dab453148b75a55d0c96d66cb6f60474`.
+No production deployment or new GPU execution was performed.

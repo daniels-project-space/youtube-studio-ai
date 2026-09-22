@@ -79,3 +79,24 @@ The locally built runtime image at revision
 `c5d5a6b61107ad08bc22a20f7813d0e57137e73f` was not deployed to the GPU. Read access
 is recovered, but GPU write authorization and fresh runtime qualification remain
 unproven. No new generated output or musical approval is claimed.
+
+## Additional Named-Key Search
+
+A subsequent metadata-only Vault Hub catalogue check found OpenRelay API-key
+records under `youtube`, `openrelay`, and `lito-music`; `book-forge` has an
+organization-ID record, not another named API key. The generic metadata request
+for the restricted `higgsfield` service was denied. It was not retried or worked
+around; the scan continued through the remaining permitted service metadata.
+No secret values were printed. This is a key-name search, not proof that no
+differently named credential exists anywhere.
+
+The `lito-music/OPENRELAY_API_KEY` candidate was injected directly from the vault
+into a trusted process. Its `/v1/whoami` request returned HTTP 401, so no further
+provider requests were made with it. The response status alone does not identify
+whether the key was revoked, expired, or otherwise invalid. It was neither
+promoted to Studio's canonical record nor removed from its owning project.
+
+No credentials were replaced, no denied restart was repeated, and no additional
+GPU window was reserved. The known canonical read-success/write-denial boundary
+remains unresolved; the named music-key record did not provide a working
+alternative.
