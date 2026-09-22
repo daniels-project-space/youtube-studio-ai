@@ -18,6 +18,8 @@ import {
 import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
 
 export const runtime = "nodejs";
+const headers = { "Cache-Control": "private, no-store" };
+const RunIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
 
 const musicAuditionApi = (api as unknown as {
   readonly musicAuditionCheckpoints: { readonly getReviewForRun: never; readonly approve: never; readonly reject: never };
@@ -26,7 +28,7 @@ const musicAuditionApi = (api as unknown as {
 const QualitySubmissionSchema = z.object({
   action: z.literal("approve"),
   checkpointId: z.string().trim().min(1).max(500),
-  runId: z.string().trim().min(1).max(500),
+  runId: RunIdSchema,
   sectionReviews: z.array(z.object({
     sectionId: z.string().trim().min(1).max(80), score: z.number().finite(), evidence: z.string().trim().min(1).max(600),
   }).strict()).min(4).max(8),
@@ -49,11 +51,6 @@ function client(): StudioConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("Convex URL is not configured");
   return new StudioConvexHttpClient(url);
-}
-
-function runId(value: string | null): string {
-  if (!value || !value.trim() || value.length > 500) throw new Error("runId is required");
-  return value;
 }
 
 function musicReviewResult(value: unknown): ReviewResult {
@@ -84,11 +81,13 @@ async function writeImmutableQualityReceipt(key: string, value: unknown): Promis
 export async function GET(request: Request) {
   try {
     const actor = await requireStudioActor(request);
+    const parsed = RunIdSchema.safeParse(new URL(request.url).searchParams.get("runId"));
+    if (!parsed.success) return NextResponse.json({ ok: false, error: "Invalid runId" }, { status: 400, headers });
     const result = await client().query(musicAuditionApi.getReviewForRun, {
       ownerId: actor.ownerId,
-      runId: runId(new URL(request.url).searchParams.get("runId")) as Id<"runs">,
+      runId: parsed.data as Id<"runs">,
     } as never) as unknown as ReviewResult | null;
-    if (!result) return NextResponse.json({ ok: true, checkpoint: null }, { headers: { "Cache-Control": "no-store" } });
+    if (!result) return NextResponse.json({ ok: true, checkpoint: null }, { headers });
     assertOwnedKey(actor.ownerId, result.review.nativeWavKey, "music audition native WAV");
     assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
     const [programBytes, nativeWavBytes] = await Promise.all([
@@ -118,18 +117,18 @@ export async function GET(request: Request) {
         nativeQuality,
         sections: program.generation.sections.map((section) => ({ id: section.id, label: section.label, instruction: section.instruction })),
       },
-    }, { headers: { "Cache-Control": "no-store" } });
+    }, { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Music audition review failed";
-    const status = error instanceof StudioAuthError ? error.status : /runId|required|ownership|checkpoint|audition/i.test(message) ? 422 : 500;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    const status = error instanceof StudioAuthError ? error.status : 503;
+    return NextResponse.json({ ok: false, error: status === 503 ? "Review evidence unavailable or invalid" : "Authentication required" }, { status, headers });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const actor = await requireStudioActor(request);
-    const body = await request.json() as Record<string, unknown>;
+    if (actor.authKind !== "session") throw new StudioAuthError("Owner session required", 403);
+    const body = z.record(z.string(), z.unknown()).parse(await request.json());
     if (body.action === "approve") {
       const submission = QualitySubmissionSchema.parse(body);
       const convex = client();
@@ -203,18 +202,18 @@ export async function POST(request: Request) {
         ownerId: actor.ownerId, checkpointId: submission.checkpointId as Id<"musicAuditionCheckpoints">,
         reviewerId: actor.ownerId, qualityReceiptKey, qualityReceiptFingerprint: qualityReceipt.fingerprint, now: approvedAt,
       } as never);
-      return NextResponse.json({ ok: true, result: mutationResult, approvalFingerprint: approval.approvalFingerprint }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ ok: true, result: mutationResult, approvalFingerprint: approval.approvalFingerprint }, { headers });
     }
     if (body.action !== "reject" || typeof body.checkpointId !== "string" || !body.checkpointId.trim() || Object.keys(body).some((key) => key !== "action" && key !== "checkpointId")) {
-      throw new Error("music audition accepts only reject and checkpointId");
+      return NextResponse.json({ ok: false, error: "Invalid audition request" }, { status: 400, headers });
     }
     const result = await client().mutation(musicAuditionApi.reject, {
       ownerId: actor.ownerId, checkpointId: body.checkpointId, reviewerId: actor.ownerId, now: Date.now(),
     } as never);
-    return NextResponse.json({ ok: true, result }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ok: true, result }, { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Music audition rejection failed";
-    const status = error instanceof StudioAuthError ? error.status : /accepts|checkpoint|audition|rejection/i.test(message) ? 422 : 500;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    const status = error instanceof StudioAuthError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
+    return NextResponse.json({ ok: false, error: status === 400 ? "Invalid audition request" : status === 503
+      ? "Audition could not be saved; reload before retrying" : "Owner session required" }, { status, headers });
   }
 }
