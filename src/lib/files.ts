@@ -5,10 +5,10 @@
  * files. These helpers give each run an isolated temp dir and stream remote
  * assets to disk without buffering whole videos in app memory.
  */
-import { access, mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, writeFile, readFile, rename, rm } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -74,6 +74,19 @@ export interface DownloadToOptions {
  */
 export const DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
+async function publishFile(destPath: string, write: (stagedPath: string) => Promise<void>): Promise<string> {
+  // Stage beside the destination so rename publishes only complete bytes on the same filesystem.
+  const stagingDir = await mkdtemp(join(dirname(destPath), ".ysa-artifact-"));
+  try {
+    const stagedPath = join(stagingDir, "artifact");
+    await write(stagedPath);
+    await rename(stagedPath, destPath);
+    return destPath;
+  } finally {
+    await cleanupDir(stagingDir);
+  }
+}
+
 export async function downloadTo(
   url: string,
   destPath: string,
@@ -84,15 +97,16 @@ export async function downloadTo(
     typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
       ? { signal: AbortSignal.timeout(Math.floor(timeoutMs)) }
       : undefined;
-  const res = await fetch(url, request);
-  if (!res.ok || !res.body) {
-    throw new Error(`download failed (${res.status}) for ${url}`);
-  }
-  await pipeline(
-    Readable.fromWeb(res.body as unknown as import("stream/web").ReadableStream),
-    createWriteStream(destPath),
-  );
-  return destPath;
+  return publishFile(destPath, async (stagedPath) => {
+    const res = await fetch(url, request);
+    if (!res.ok || !res.body) {
+      throw new Error(`download failed (${res.status}) for ${url}`);
+    }
+    await pipeline(
+      Readable.fromWeb(res.body as unknown as import("stream/web").ReadableStream),
+      createWriteStream(stagedPath),
+    );
+  });
 }
 
 /** Write bytes to a local file. */
@@ -100,8 +114,7 @@ export async function writeBytes(
   destPath: string,
   bytes: Uint8Array,
 ): Promise<string> {
-  await writeFile(destPath, bytes);
-  return destPath;
+  return publishFile(destPath, (stagedPath) => writeFile(stagedPath, bytes));
 }
 
 /** Read a local file as bytes. */

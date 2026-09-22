@@ -76,7 +76,13 @@ export class SourceResolver {
       }
     });
     this.inflight.set(src, p);
-    return p;
+    try {
+      return await p;
+    } catch (error) {
+      // Coalesce this failure, but allow a later explicit resolve to fetch again.
+      if (this.inflight.get(src) === p) this.inflight.delete(src);
+      throw error;
+    }
   }
 
   /** Resolve many srcs preserving order. */
