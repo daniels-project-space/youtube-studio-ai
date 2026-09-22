@@ -121,7 +121,7 @@ import { parseJsonLoose } from "@/lib/gemini";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
-import { produceAndCritique } from "@/engine/critiqueLoop";
+import { produceAndCritique, validateCritiqueResponse } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
 import { renderStoryStateForPrompt } from "@/lib/seriesStoryState";
@@ -1357,19 +1357,34 @@ export const keyframes: Block = {
             maxTokens: VISION_GATE_MAX_TOKENS,
             providers: ["openrouter"], tier: "final",
           });
-          const v = parseJsonLoose<{ score?: number; issues?: string[] }>(raw);
-          const score = Math.max(0, Math.min(1, Number(v.score) || 0));
-          const issues = (v.issues ?? []).filter((s): s is string => typeof s === "string" && s.length > 0).slice(0, 5);
-          return { score, pass: score >= 0.8, issues };
+          const v = parseJsonLoose<{ score?: unknown; issues?: unknown } | null>(raw);
+          const admission = validateCritiqueResponse({
+            score: v?.score,
+            pass: typeof v?.score === "number" && v.score >= 0.8,
+            issues: v?.issues,
+          });
+          if (!admission.pass || !admission.critique) {
+            throw new Error(`malformed art-direction verdict: ${admission.issues.join("; ")}`);
+          }
+          return admission.critique;
         } catch (e) {
           if (productionVisualQa) {
-            throw new Error(`keyframes: independent art-direction review failed: ${e instanceof Error ? e.message : e}`);
+            // A reviewer retry must not restart this block's paid image loop.
+            throw new ExecutionError(`keyframes: independent art-direction review failed: ${e instanceof Error ? e.message : e}`, {
+              retryable: false, code: "KEYFRAME_REVIEW_FAILED",
+            });
           }
           ctx.log(`keyframes: critic failed (${e instanceof Error ? e.message : e}) — accepting draft attempt`);
           return { score: 0.8, pass: true, issues: [] };
         }
       },
     });
+    if (productionVisualQa && !loop.accepted) {
+      throw new ExecutionError(
+        `keyframes: art-direction review rejected all ${stills} attempts; best score=${loop.critique.score.toFixed(2)}: ${loop.critique.issues.join("; ")}`,
+        { retryable: false, code: "KEYFRAME_QUALITY_REJECTED" },
+      );
+    }
     const f1Url = loop.value.url;
     const f1Local = loop.value.local;
     ctx.log(`keyframes: best still after ${stills} attempt(s) (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted})`);
