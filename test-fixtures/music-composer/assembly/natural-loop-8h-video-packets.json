@@ -1,0 +1,19 @@
+{
+  "version": "music-loop-video-repetition/v1",
+  "masterSha256": "c413635329f976ab5b3d652e5708766883f4caa00aab231e39f6f2dc622e7d8d",
+  "masterBytes": 12983194060,
+  "durationSec": 28800,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "unitSeconds": 30,
+  "packetCount": 864000,
+  "bodyUnitCount": 959,
+  "comparedBodyPackets": 862200,
+  "uniqueVideoSeconds": 60,
+  "orderedVideoPacketSha256": "15a72e133a18df216e599befb648fc114b2ca013180e5222fede40a561a5d692",
+  "bodyPacketTemplateSha256": "22c9534adf42d59da7cc1412a84aae19b1ea6e6fbb05f3d96e60cecec4a567cc",
+  "independentIdrBoundariesVerified": true,
+  "elapsedMs": 137142,
+  "scope": "all video packets and clocks; not decoded visual quality, audio continuity, source approval or release authority"
+}

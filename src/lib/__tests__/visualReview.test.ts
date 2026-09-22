@@ -622,6 +622,19 @@ async function main(): Promise<void> {
   try {
     const sparseCoverage = join(work, "sparse-coverage.mp4");
     makeSparseCoverageFixture(sparseCoverage);
+    await assert.rejects(reviewRender(sparseCoverage, 90, {
+      title: "Impossible coverage-budget fixture",
+      expectTitleCard: false,
+    }, {
+      runId: "visual-review-impossible-coverage",
+      required: true,
+      reviewer,
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+    }), /coverage cannot fit/);
+    // Potential focus capacity admits review, but unused capacity cannot
+    // substitute for actual temporal evidence at the final coverage gate.
     const coverageEscalated = await reviewRender(sparseCoverage, 90, {
       title: "Required coverage-gate fixture",
       expectTitleCard: false,
@@ -631,7 +644,7 @@ async function main(): Promise<void> {
       reviewer,
       persistEvidence: false,
       maxFrames: 8,
-      maxFocusFrames: 0,
+      maxFocusFrames: 6,
     });
     assert.equal(coverageEscalated.verdict, "needs_human", "required review must not pass when its frame budget cannot cover the master");
     assert(

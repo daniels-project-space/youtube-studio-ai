@@ -776,6 +776,22 @@ export function maxAllowedVisualReviewGapSec(durationSec: number): number {
   return Number(clamp(duration / 24, 6, 90).toFixed(2));
 }
 
+/** A necessary coverage bound, never a claim that the selected frames suffice. */
+export function assertVisualReviewCoveragePossible(durationSec: number, maximumFrames: number): void {
+  if (!Number.isFinite(durationSec) || durationSec <= 0 || !Number.isSafeInteger(maximumFrames) || maximumFrames < 0) {
+    throw new VisualReviewFailure("visualReview coverage requires a positive duration and bounded frame budget", []);
+  }
+  // N interior samples create at most N+1 intervals. Include the existing
+  // verdict tolerance so this preflight is no stricter than final admission.
+  const minimumFrames = Math.max(0, Math.ceil(durationSec / (maxAllowedVisualReviewGapSec(durationSec) + 0.01)) - 1);
+  if (maximumFrames < minimumFrames) {
+    throw new VisualReviewFailure(
+      `visualReview coverage cannot fit: ${durationSec}s needs at least ${minimumFrames} distinct frames; ` +
+        `the configured broad/focus budget permits at most ${maximumFrames}. No visual review was purchased.`, [],
+    );
+  }
+}
+
 function coverageFrameCount(durationSec: number, maxFrames: number): number {
   if (durationSec <= 0) return 0;
   return Math.min(maxFrames, Math.max(1, Math.ceil(durationSec / maxAllowedVisualReviewGapSec(durationSec))));
@@ -1728,6 +1744,11 @@ export async function reviewRender(
           `planned ${requiredFocusFrames.length}`,
       );
     }
+  }
+  if (required) {
+    assertVisualReviewCoveragePossible(durationSec,
+      Math.max(8, Math.floor(finite(opts.maxFrames, 48))) +
+      Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))) + requiredFocusFrames.length);
   }
   if (!opts.reviewer && !hasNonGoogleVisionKey()) {
     if (required) {
