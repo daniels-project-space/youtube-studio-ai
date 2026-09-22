@@ -10,7 +10,7 @@ import {
 import { getObjectBytes } from "@/lib/storage";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 
-async function stalledDurableOutputReattachesWithoutAnotherRender(): Promise<void> {
+async function stalledDurableOutputReattachesWithoutAnotherRender(fetchStartDelayMs = 0): Promise<void> {
   const originalFetch = globalThis.fetch;
   const directory = await mkdtemp(join(tmpdir(), "novita-durable-delivery-"));
   let keepAlive: ReturnType<typeof setInterval> | undefined;
@@ -21,6 +21,10 @@ async function stalledDurableOutputReattachesWithoutAnotherRender(): Promise<voi
       fetchCalls += 1;
       observedSignal = init?.signal ?? undefined;
       assert.ok(observedSignal, "durable Novita output delivery carries an opt-in deadline");
+      if (fetchStartDelayMs) await new Promise(resolve => setTimeout(resolve, fetchStartDelayMs));
+      // Real fetch rejects an already-aborted signal, including when staging I/O
+      // used up the deadline before fetch started on a busy runner.
+      observedSignal.throwIfAborted();
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
           keepAlive = setInterval(() => undefined, 1_000);
@@ -156,6 +160,7 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
 
 async function main(): Promise<void> {
   await stalledDurableOutputReattachesWithoutAnotherRender();
+  await stalledDurableOutputReattachesWithoutAnotherRender(50);
   await stalledR2ObjectBodyIsBounded();
   await directNovitaCallersUseOnlyTheOptInDeadline();
   console.log("NOVITA DURABLE DELIVERY PASS: bounded transfers reattach complete R2 artifacts without new worker spend");
