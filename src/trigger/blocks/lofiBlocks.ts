@@ -126,6 +126,7 @@ import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
 import { renderStoryStateForPrompt } from "@/lib/seriesStoryState";
 import { ExecutionError } from "@/engine/executionErrors";
+import { persistRenderedFile } from "@/lib/renderedFilePersistence";
 import {
   continueReservedSerializedProgramEpisode,
   parseSerializedProgramEpisodeMemoryKey,
@@ -172,7 +173,6 @@ import {
   makeRunTempDir,
   downloadTo,
   DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-  readBytes,
   writeBytes,
 } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, publicUrl } from "@/lib/storage";
@@ -1564,6 +1564,15 @@ export function createLoopClipsBlock(
     const clips: Awaited<ReturnType<typeof renderMiniMaxH3>>[] = [];
     const segmentPaths: string[] = [];
     let observedClipCostUsd = 0;
+    const failAfterRender = (error: unknown): never => {
+      const source = error instanceof Error ? error : new Error(String(error));
+      const charged = Object.isExtensible(source) ? source : Object.assign(new Error(source.message), source, { name: source.name, cause: source });
+      const prior = Number((charged as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd ?? 0);
+      throw Object.assign(charged, {
+        additionalObservedCostUsd: (Number.isFinite(prior) && prior > 0 ? prior : 0) + observedClipCostUsd,
+        retryable: false,
+      });
+    };
     try {
       for (let index = 0; index < scaling.sourceSegmentCount; index++) {
         const ordinal = index + 1;
@@ -1603,22 +1612,16 @@ export function createLoopClipsBlock(
         }));
       }
     } catch (error) {
-      const source = error instanceof Error ? error : new Error(String(error));
-      const charged = Object.isExtensible(source) ? source : Object.assign(new Error(source.message), { cause: source });
-      const prior = Number((charged as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd ?? 0);
-      throw Object.assign(charged, {
-        additionalObservedCostUsd: (Number.isFinite(prior) && prior > 0 ? prior : 0) + observedClipCostUsd,
-        retryable: false,
-      });
+      return failAfterRender(error);
     }
 
-    if (segmentPaths.length !== scaling.sourceSegmentCount) {
-      throw new Error("loop_clips: incomplete source segment set after rendering");
-    }
     let loopRaw: string;
     let internalSeamDiff: number;
     let wrapSeamDiff: number;
     try {
+      if (segmentPaths.length !== scaling.sourceSegmentCount) {
+        throw new Error("loop_clips: incomplete source segment set after rendering");
+      }
       loopRaw = await composeLoopSourceUnit({
         segmentPaths: [segmentPaths[0], segmentPaths[1]],
         outPath: join(tmp, "loopraw.mp4"),
@@ -1642,39 +1645,37 @@ export function createLoopClipsBlock(
         );
       }
     } catch (error) {
-      const source = error instanceof Error ? error : new Error(String(error));
-      const charged = Object.isExtensible(source) ? source : Object.assign(new Error(source.message), { cause: source });
-      const prior = Number((charged as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd ?? 0);
-      throw Object.assign(charged, {
-        additionalObservedCostUsd: (Number.isFinite(prior) && prior > 0 ? prior : 0) + observedClipCostUsd,
-        retryable: false,
-      });
+      return failAfterRender(error);
     }
 
-    const loopRawKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopraw.mp4`;
-    await putObject(loopRawKey, await readBytes(loopRaw), { contentType: "video/mp4" });
-    await recordAsset(ctx, "clip", loopRawKey, {
-      jobIds: clips.map((clip) => clip.receipt.jobId),
-      models: clips.map((clip) => clip.receipt.runtime.runtimeId),
-      provider: "minimax-h3-novita-on-demand",
-      profile: MINIMAX_H3_PROFILE.id,
-      nativeClipsPerSegment,
-      sourceSegmentCount: scaling.sourceSegmentCount,
-      sourceSegmentSeconds: scaling.sourceSegmentSeconds,
-      sourceUnitSeconds: scaling.sourceUnitSeconds,
-      internalSeamDiff,
-      wrapSeamDiff,
-    });
+    try {
+      const loopRawKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopraw.mp4`;
+      await persistRenderedFile(loopRawKey, loopRaw, { contentType: "video/mp4" }, { beforeAttempt: admittedMusic?.assertCurrent });
+      await recordAsset(ctx, "clip", loopRawKey, {
+        jobIds: clips.map((clip) => clip.receipt.jobId),
+        models: clips.map((clip) => clip.receipt.runtime.runtimeId),
+        provider: "minimax-h3-novita-on-demand",
+        profile: MINIMAX_H3_PROFILE.id,
+        nativeClipsPerSegment,
+        sourceSegmentCount: scaling.sourceSegmentCount,
+        sourceSegmentSeconds: scaling.sourceSegmentSeconds,
+        sourceUnitSeconds: scaling.sourceUnitSeconds,
+        internalSeamDiff,
+        wrapSeamDiff,
+      });
 
-    return {
-      loopRawKey,
-      loopRawUrl: loopRaw, // local path; upscale reads it directly
-      loopSourceDurationSec: scaling.sourceUnitSeconds,
-      loopSourceSegmentCount: scaling.sourceSegmentCount,
-      loopSourceInternalSeamDiff: internalSeamDiff,
-      loopSourceWrapSeamDiff: wrapSeamDiff,
-      [COST_PATCH_KEY]: observedClipCostUsd,
-    };
+      return {
+        loopRawKey,
+        loopRawUrl: loopRaw, // local path; upscale reads it directly
+        loopSourceDurationSec: scaling.sourceUnitSeconds,
+        loopSourceSegmentCount: scaling.sourceSegmentCount,
+        loopSourceInternalSeamDiff: internalSeamDiff,
+        loopSourceWrapSeamDiff: wrapSeamDiff,
+        [COST_PATCH_KEY]: observedClipCostUsd,
+      };
+    } catch (error) {
+      return failAfterRender(error);
+    }
   },
   };
 }
@@ -1739,7 +1740,7 @@ export const upscale: Block = {
     ctx.log(`upscale: local finish complete — ${resolution}`);
 
     const loopUnitKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopunit_${resolution}.mp4`;
-    await putObjectFromFile(loopUnitKey, finalLoopPath, {
+    await persistRenderedFile(loopUnitKey, finalLoopPath, {
       contentType: "video/mp4",
     });
     await recordAsset(ctx, "loop_unit", loopUnitKey, {
