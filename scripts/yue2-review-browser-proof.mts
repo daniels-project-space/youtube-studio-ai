@@ -63,7 +63,7 @@ const built = await esbuild.build({ absWorkingDir: root, bundle: true, write: fa
   ` } });
 const js = built.outputFiles.find((file) => file.path.endsWith(".js"))!.contents;
 const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.contents;
-let mode: "ready" | "absent" | "blocked" | "natural-loop" | "headroom" | "missing-context" | "unfrozen" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
+let mode: "ready" | "absent" | "blocked" | "natural-loop" | "long-natural-loop" | "headroom" | "missing-context" | "unfrozen" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
 let saveMode: "valid" | "rejected" | "invalid" | "incomplete" = "valid";
 const methods: string[] = [];
@@ -116,10 +116,10 @@ const server = createServer((req, res) => {
     if (mode === "headroom") current.quality.headroomPreparation = {
       method: "linear_attenuation_only", gainDb: -4.1, sourceSha256: "b".repeat(64), audioSha256: "c".repeat(64),
     };
-    if (mode === "natural-loop") {
+    if (mode === "natural-loop" || mode === "long-natural-loop") {
       current.arrangement.playback = "repeat";
-      current.quality.requestedDurationSec = current.arrangement.requestedDurationSec = 60;
-      current.quality.expectedNativeFrames = 60 * 48000 - 64;
+      current.quality.requestedDurationSec = current.arrangement.requestedDurationSec = mode === "natural-loop" ? 60 : 3;
+      current.quality.expectedNativeFrames = current.arrangement.requestedDurationSec * 48000 - 64;
       current.quality.nativeDurationMatches = false;
       current.quality.sourceDurationPolicy = "natural_loop";
       current.quality.naturalLoopDurationAccepted = true;
@@ -159,7 +159,7 @@ try {
     await page.getByRole("heading", { name: topic }).waitFor();
     await page.getByText("Native codec timing matches.", { exact: false }).waitFor();
     await page.waitForFunction(() => (document.querySelector("audio")?.readyState ?? 0) >= 2);
-    await page.getByRole("button", { name: "Seek to Interval 3", exact: true }).click();
+    await page.getByRole("button", { name: "Seek to planned time for Interval 3", exact: true }).click();
     await page.waitForFunction(() => Math.abs((document.querySelector("audio")?.currentTime ?? 0) - 6) < 0.1);
     const played = await page.locator("audio").evaluate(async (audio: HTMLAudioElement) => {
       audio.muted = true; await audio.play(); await new Promise((resolve) => setTimeout(resolve, 350));
@@ -260,15 +260,29 @@ try {
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
     ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"],
-    ["natural-loop", "Natural-length loop source."], ["headroom", "-4.10 dB gain"]] as const) {
+    ["natural-loop", "Natural-length loop source."], ["long-natural-loop", "Natural-length loop source."], ["headroom", "-4.10 dB gain"]] as const) {
     mode = state; await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByText(expected, { exact: false }).waitFor();
     if (state === "unnamed") assert.equal(await page.getByText("Channel context not retained", { exact: true }).count(), 0);
-    if (state === "blocked") assert.equal(await page.getByRole("button", { name: "Seek to Interval 2", exact: true }).isDisabled(), true);
-    if (state === "natural-loop") {
-      await page.setViewportSize({ width: 390, height: 1000 });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-      await page.screenshot({ path: join(outputDir, "natural-loop-mobile.png"), fullPage: true });
+    if (state === "blocked") assert.equal(await page.getByRole("button", { name: "Seek to planned time for Interval 2", exact: true }).isDisabled(), true);
+    if (state === "natural-loop" || state === "long-natural-loop") {
+      await page.waitForFunction(() => (document.querySelector("audio")?.readyState ?? 0) >= 2);
+      for (const button of await page.getByRole("button", { name: /^Seek to planned time/ }).all()) {
+        assert.equal(await button.isDisabled(), true, "requested section times are not performed section boundaries");
+      }
+      const beforeSeek = requests;
+      for (const percent of [0, 25, 50, 75, 95]) {
+        await page.getByRole("button", { name: `Seek to ${percent}% of measured source`, exact: true }).click();
+        await page.waitForFunction(expected => Math.abs((document.querySelector("audio")?.currentTime ?? -1) - expected) < 0.1,
+          frames / 48000 * percent / 100);
+      }
+      assert.equal(requests, beforeSeek, "source navigation never rereads verification or dispatches generation");
+      for (const [width, font] of [[1440, 16], [390, 16], [320, 24]]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await page.screenshot({ path: join(outputDir, `${state}-${width}.png`), fullPage: true });
+      }
     }
     if (state === "headroom") {
       assert.equal(await page.getByLabel("Headroom-prepared YuE candidate", { exact: true }).count(), 1);
@@ -286,6 +300,9 @@ try {
   mode = "ready"; brokenAudio = true;
   await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "Audio link expired" }).waitFor();
+  for (const button of await page.getByRole("button", { name: /% of measured source$/ }).all()) {
+    assert.equal(await button.isDisabled(), true);
+  }
   brokenAudio = false;
   await page.getByRole("button", { name: "Reload review" }).click();
   await page.waitForFunction(() => (document.querySelector("audio")?.readyState ?? 0) >= 2);

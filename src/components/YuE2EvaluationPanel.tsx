@@ -58,6 +58,8 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
   const review = state.review;
   const { quality, arrangement, brief } = review;
   const signal = quality.signal;
+  const plannedTimingMatches = quality.durationMatches || quality.nativeDurationMatches;
+  const sourcePositions = [0, 0.25, 0.5, 0.75, 0.95];
   const audition = review.audition?.candidateSha256 === review.candidateSha256 ? review.audition : null;
   const sourceApproved = quality.status !== "blocked" && brief.contextRetained && review.sourceApprovalAvailable &&
     /^[a-f0-9]{64}$/u.test(review.sourceApprovalBasisFingerprint ?? "") &&
@@ -83,6 +85,17 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <span>{review.nativeOutput.sampleRateHz / 1000} kHz / {review.nativeOutput.channels} channels / FLOAT WAV{quality.headroomPreparation ? ` / ${quality.headroomPreparation.gainDb.toFixed(2)} dB gain` : ""}</span>
       <button type="button" onClick={reload}>Reload review</button>
     </div>
+    <nav className={styles.sourceNavigation} aria-label="Measured source positions">
+      {sourcePositions.map(fraction => {
+        const seconds = fraction * quality.actualDurationSec;
+        return <button key={fraction} type="button" title={`Seek to ${Math.round(fraction * 100)}% of measured source`}
+          aria-label={`Seek to ${Math.round(fraction * 100)}% of measured source`}
+          disabled={!audioReady || audioFailed}
+          onClick={() => { if (audio.current?.readyState) audio.current.currentTime = seconds; }}>
+          <IconChevron /><span>{time(seconds)} / {Math.round(fraction * 100)}%</span>
+        </button>;
+      })}
+    </nav>
     <dl className={styles.facts}>
       <div><dt>Requested source</dt><dd>{time(quality.requestedDurationSec)}</dd></div>
       <div><dt>Measured source</dt><dd>{quality.actualDurationSec.toFixed(3)} s</dd></div>
@@ -106,13 +119,15 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <h3>Accepted arrangement</h3>
       <p>{arrangement.direction}</p>
       <p className={styles.muted}>{label(arrangement.role)} / {label(arrangement.form)} / {label(arrangement.ending)} / {arrangement.playback}</p>
+      <p className={styles.muted}>Planned section times; performed section boundaries are unverified.</p>
       <ol className={styles.sections}>
         {arrangement.sections.map((section) => {
           const start = section.startFraction * arrangement.requestedDurationSec;
           const end = section.endFraction * arrangement.requestedDurationSec;
           return <li key={section.id}>
-            <button type="button" title={`Seek to ${section.label}`} aria-label={`Seek to ${section.label}`}
-              disabled={!audioReady || audioFailed || start >= quality.actualDurationSec}
+            <button type="button" title={plannedTimingMatches ? `Seek to planned time for ${section.label}` : "Source length differs from the plan; performed section timing is unknown"}
+              aria-label={`Seek to planned time for ${section.label}`}
+              disabled={!plannedTimingMatches || !audioReady || audioFailed || start >= quality.actualDurationSec}
               onClick={() => { if (audio.current?.readyState) audio.current.currentTime = start; }}>
               <IconChevron /> <span>{time(start)}</span>
             </button>
