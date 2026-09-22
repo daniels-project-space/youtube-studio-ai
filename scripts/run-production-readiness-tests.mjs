@@ -112,7 +112,7 @@ async function executeAllTests() {
 // suite died there and the remaining 576 never ran. A green-looking partial
 // sweep is worse than a red one, because it is quoted as evidence.
 if (selection.partial) {
-  console.log(`PARTIAL READINESS: excluding ${selection.excluded.length} thumbnail-named tests; this is not the complete production gate.`);
+  console.log(`PARTIAL READINESS: excluding ${selection.excluded.length} tests with thumbnail names or direct source references; this is not the complete production gate.`);
   for (const path of selection.excluded) console.log(`EXCLUDED ${relative(root, path)}`);
 }
 console.log(`Running ${tests.length} direct readiness tests with ${DIRECT_TEST_CONCURRENCY} workers.`);

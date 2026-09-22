@@ -1,5 +1,26 @@
 # Integrated YuE2 verification
 
+## Test-Scope Correction
+
+The historical 896-file runs below excluded filenames only. A later inspection
+found direct thumbnail coverage inside mixed files, including
+`src/engine/__tests__/recoveryPolicy.test.ts`. Therefore those runs do **not**
+prove that zero thumbnail regression cases executed. The known mixed recovery
+case uses a synthetic fixture and asserts zero paid thumbnail calls; it is not
+thumbnail generation. The recorded pass counts and hashes remain accurate, but
+earlier blanket statements that no thumbnail tests ran were too broad.
+
+The opt-in `--exclude-thumbnail` selector now rejects both matching paths and
+test files containing direct thumbnail references. On the source inventory
+after adding the focused retry-policy test, it selects 770 of 927 files and
+excludes 157. A source-read failure aborts selection before execution. This is
+deliberately conservative and may exclude otherwise useful mixed coverage;
+it is not a transitive call-graph proof about dynamically invoked helpers.
+The default production suite remains unchanged and includes every discovered
+test. No reduced selection can substitute for its release gate.
+
+## Historical Checkpoints
+
 Verified at 2026-09-22 08:36 UTC against clean source commit
 `66847c2ad3ff114ee1d900c553c6fbd2aa94aebc`. No application code changed during
 this verification. This closes the full-suite gap documented in the preceding
