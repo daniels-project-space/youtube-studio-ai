@@ -122,6 +122,7 @@ export interface ChannelCritiqueContext {
   channelName?: string;
   persona?: string;
   styleGrammar?: string;
+  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Operator/Showrunner-authored stance for THIS channel's critic. */
   criticDoctrine?: string;
   /** Durable content-lane key; drives lane-tuned thresholds + emphases. */
@@ -148,6 +149,10 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
     compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
     compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
     compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
+    ...(["scriptStyle", "hookStyle", "pacing", "delivery"] as const).map(field => {
+      const value = compact(channel.narrative?.[field], 240);
+      return value ? `Narrative ${field}: ${value}` : "";
+    }),
     compact(channel.contentLaneKey, 60) ? `Content lane: ${compact(channel.contentLaneKey, 60)}` : "",
     (channel.qualityDimensions ?? []).length
       ? `Operator quality priorities: ${(channel.qualityDimensions ?? []).slice(0, 8).join(", ")}`

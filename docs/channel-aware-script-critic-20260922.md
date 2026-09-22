@@ -23,8 +23,10 @@ The new revision:
 - Requires a frozen channel name and authored personality, style or critic
   guidance before buying a verdict. It does not substitute generic review when
   that context is missing.
-- Declares and forwards the existing bounded channel critique context, including
-  style grammar, critic doctrine and lane emphasis.
+- Declares and forwards bounded spoken guidance from `styleDNA.narrative`
+  (`scriptStyle`, `hookStyle`, `pacing`, `delivery`), critic doctrine and lane
+  emphasis. Visual `styleGrammar` and acoustic `voiceProfile` are not script
+  requirements.
 - Judges pacing, clarity, purpose and distinctiveness against that context.
   A thesis, dramatic escalation or re-hook is required only when the accepted
   channel/route guidance calls for it, not because all videos must share one form.
@@ -61,3 +63,20 @@ Scoped ESLint and the production build, including TypeScript, passed. Logs:
 Real model verdict calibration and retained per-channel before/after outputs are
 still required. No live model/GPU calls, thumbnail work, channel mutation,
 publishing or production deployment occurred. The full MVP/backlog remains open.
+
+## Narrative ownership correction
+
+Tracing the writer exposed a defect in the initial opt-in revision: it reused
+visual style grammar instead of the writer's spoken narrative DNA. The initial
+fixture also incorrectly put verbal guidance in the visual field. Both are now
+corrected. Existing legacy critique callers retain their original behavior.
+
+The corrected fixture keeps visual and spoken guidance separate, verifies all
+four narrative fields, excludes acoustic casting, and prohibits reading visual
+grammar. Narrative-only guidance is accepted; visual-only guidance and malformed
+narrative DNA fail before a paid review. The legacy prompt remains byte-for-byte
+unchanged. Five focused test files passed with external networking disabled;
+these synthetic transports prove prompt wiring and gates, not model quality.
+Scoped ESLint, the production build with TypeScript, and all structural audits
+also passed without regressions or baseline changes. Undeclared store reads
+remain zero. No thumbnail tests or live generation were run for this correction.

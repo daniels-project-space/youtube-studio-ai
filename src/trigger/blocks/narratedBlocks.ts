@@ -658,7 +658,7 @@ function readDeclaredHealClasses(raw: unknown, blockId: string): HealClass[] {
  * this file reads it from here, so there is exactly one place to change what a
  * per-channel critic is told.
  */
-export function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
+function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
   const laneKey = (ctx.store["contentLane"] as { key?: unknown } | null | undefined)?.key;
   return {
     ...(opt(ctx, "channelName") ? { channelName: opt(ctx, "channelName") } : {}),
@@ -1218,7 +1218,7 @@ export function createQaScriptBlock(readChannelContext?: (ctx: StageContext) => 
       const persona = opt(ctx, "persona") ?? "";
       const channel = readChannelContext?.(ctx);
       if (channelAware && (!channel?.channelName?.trim() ||
-        ![channel.persona, channel.styleGrammar, channel.criticDoctrine].some(value => value?.trim()))) {
+        ![channel.persona, channel.criticDoctrine, ...Object.values(channel.narrative ?? {})].some(value => value?.trim()))) {
         throw new Error("qa_script FAILED: channel-aware review requires frozen channel name and authored personality or style guidance");
       }
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
