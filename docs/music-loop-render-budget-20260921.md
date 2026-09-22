@@ -34,6 +34,10 @@ worker or large 4K source may still exceed the budget. The eight-hour rerun and
 full pipeline deadline fit remain unverified; no timeout increase is evidence
 of long-form completion.
 
+Follow-up: the [eight-hour 1080p local proof](music-loop-8h-proof-20260922.md)
+subsequently completed in 48m58.67s and passed its timing and sampled audio/frame
+checks. Full production task fit, real channel quality and 4K remain unverified.
+
 ## Verification
 
 - Mocked-process regression exercises shrinking pass budgets, expiration before

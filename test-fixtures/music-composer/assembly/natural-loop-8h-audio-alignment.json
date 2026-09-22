@@ -1,0 +1,65 @@
+{
+  "version": "yue2-assembly-audio-alignment/v3",
+  "reference": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-budget-28800-1080/loop.wav",
+  "master": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-budget-28800-1080/timing-master.mp4",
+  "durationSec": 28800,
+  "results": [
+    {
+      "kind": "body",
+      "repeat": 0,
+      "sample": 480000,
+      "seconds": 10,
+      "correlation": 0.9999917365260425,
+      "rmsRatio": 0.9994014293028674
+    },
+    {
+      "kind": "body",
+      "repeat": 102,
+      "sample": 688067712,
+      "seconds": 14334.744,
+      "correlation": 0.9999903100017968,
+      "rmsRatio": 0.9993050214963597
+    },
+    {
+      "kind": "body",
+      "repeat": 204,
+      "sample": 1375655424,
+      "seconds": 28659.488,
+      "correlation": 0.9999942822589646,
+      "rmsRatio": 0.9995958790795838
+    },
+    {
+      "kind": "wrap",
+      "repeat": 102,
+      "sample": 687563712,
+      "seconds": 14324.244,
+      "correlation": 0.9999859353488704,
+      "rmsRatio": 0.9988334585591799
+    },
+    {
+      "kind": "wrap",
+      "repeat": 204,
+      "sample": 1375151424,
+      "seconds": 28648.988,
+      "correlation": 0.9999864740258428,
+      "rmsRatio": 0.9995188050821516
+    },
+    {
+      "kind": "fade_in",
+      "repeat": 0,
+      "sample": 0,
+      "seconds": 0,
+      "correlation": 0.999943854308994,
+      "rmsRatio": 0.9978093925526119
+    },
+    {
+      "kind": "fade_out",
+      "repeat": 205,
+      "sample": 1382352000,
+      "seconds": 28799,
+      "correlation": 0.99996628595048,
+      "rmsRatio": 0.9983051082448375
+    }
+  ],
+  "scope": "sample-clock alignment, decoded signal and boundary envelopes only; not a perceptual music or seam approval"
+}
