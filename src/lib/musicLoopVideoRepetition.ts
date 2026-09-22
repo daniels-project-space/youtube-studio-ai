@@ -35,6 +35,7 @@ export class MusicLoopPacketVerifier {
   private readonly template: string[] = [];
   private readonly digest = createHash("sha256");
   readonly idrPackets: Packet[] = [];
+  readonly bodyPackets: Packet[] = [];
   constructor(readonly durationSec: number, readonly ticksPerFrame: number) {
     if (!Number.isSafeInteger(durationSec) || durationSec < 90 || durationSec > 28800 || durationSec % 30 !== 0 ||
       !Number.isSafeInteger(ticksPerFrame) || ticksPerFrame <= 0) {
@@ -62,7 +63,7 @@ export class MusicLoopPacketVerifier {
     }
     if (offset === 0 && unit < 2) this.idrPackets.push(packet);
     const signature = `${frame}:${packet.duration}:${packet.flags}:${packet.size}:${packet.data_hash}`;
-    if (unit === 1) this.template.push(signature);
+    if (unit === 1) { this.template.push(signature); this.bodyPackets.push(packet); }
     if (unit >= 2 && signature !== this.template[offset]) {
       throw new Error(`loop payload or presentation mismatch at packet ${index} (unit ${unit})`);
     }
@@ -84,6 +85,38 @@ async function fileHash(path: string, signal: AbortSignal) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path, { signal })) hash.update(chunk);
   return hash.digest("hex");
+}
+
+/** Repeated units must not inherit changed parameter sets or persistent SEI. */
+export function assertStableLoopBodyNal(nal: Buffer, boundaryParameters = false): void {
+  const type = nal[0] & 31;
+  if ([1, 5, 9, 12].includes(type)) return;
+  if (boundaryParameters && (type === 7 || type === 8)) return;
+  if (type !== 6) throw new Error(`loop body contains unsupported stateful NAL type ${type}`);
+  const rbsp = Buffer.allocUnsafe(nal.length - 1);
+  let length = 0;
+  for (let i = 1; i < nal.length; i++) {
+    if (i >= 3 && nal[i] === 3 && nal[i - 1] === 0 && nal[i - 2] === 0) continue;
+    rbsp[length++] = nal[i];
+  }
+  let offset = 0;
+  while (offset < length) {
+    if (offset === length - 1 && rbsp[offset] === 0x80) return;
+    let payloadType = 0, size = 0;
+    while (rbsp[offset] === 255) { payloadType += 255; offset++; }
+    if (offset >= length) break;
+    payloadType += rbsp[offset++];
+    while (rbsp[offset] === 255) { size += 255; offset++; }
+    if (offset >= length) break;
+    size += rbsp[offset++];
+    // x264's encoder identification is unregistered user data, not a decoder
+    // parameter update. Other SEI semantics require separate qualification.
+    if (payloadType !== 5 || size < 16 || offset + size >= length) {
+      throw new Error("loop body contains unsupported persistent or malformed SEI");
+    }
+    offset += size;
+  }
+  throw new Error("loop body contains malformed SEI framing");
 }
 
 /** Qualification oracle, not release authority or a substitute for visual/audio review. */
@@ -142,6 +175,32 @@ export async function verifyMusicLoopVideoRepetition(path: string, durationSec: 
     // AVCC NAL framing and require IDR slices at the intro and body boundaries.
     const handle = await open(path, "r");
     try {
+      let sawSlice = false;
+      const boundaryParameters = new Set<number>();
+      for (const packet of verifier.bodyPackets) {
+        signal.throwIfAborted();
+        const bytes = Buffer.alloc(packet.size);
+        const read = await handle.read(bytes, 0, bytes.length, packet.pos);
+        if (read.bytesRead !== bytes.length || `SHA256:${createHash("sha256").update(bytes).digest("hex")}` !== packet.data_hash) {
+          throw new Error("loop body changed during decoder-state inspection");
+        }
+        let offset = 0;
+        while (offset < bytes.length) {
+          if (offset + 4 >= bytes.length) throw new Error("invalid loop body AVCC framing");
+          const size = bytes.readUInt32BE(offset); offset += 4;
+          if (!size || offset + size > bytes.length) throw new Error("invalid loop body NAL length");
+          const nal = bytes.subarray(offset, offset + size), type = nal[0] & 31;
+          const boundaryParameter = packet === verifier.bodyPackets[0] && !sawSlice && (type === 7 || type === 8);
+          if (boundaryParameter) {
+            if (boundaryParameters.has(type)) throw new Error("loop body has ambiguous boundary parameter sets");
+            boundaryParameters.add(type);
+          }
+          assertStableLoopBodyNal(nal, boundaryParameter);
+          if (type === 1 || type === 5) sawSlice = true;
+          offset += size;
+        }
+      }
+      if (boundaryParameters.size !== 2) throw new Error("loop body lacks repeated SPS/PPS initialization before its IDR");
       for (const packet of verifier.idrPackets) {
         signal.throwIfAborted();
         const bytes = Buffer.alloc(packet.size);
@@ -170,6 +229,7 @@ export async function verifyMusicLoopVideoRepetition(path: string, durationSec: 
     return { version: "music-loop-video-repetition/v1" as const, masterSha256: before, masterBytes: file.size,
       durationSec, width: stream.width, height: stream.height, fps: 30, unitSeconds: 30, ...packets,
       independentIdrBoundariesVerified: true, elapsedMs: Math.round(performance.now() - started),
+      stableDecoderParametersVerified: true,
       scope: "all video packets and clocks; not decoded visual quality, audio continuity, source approval or release authority" };
   } finally { clearTimeout(timer); }
 }

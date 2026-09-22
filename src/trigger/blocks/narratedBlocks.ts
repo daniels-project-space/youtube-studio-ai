@@ -4343,6 +4343,14 @@ export function compactQaVisualReviewEvidenceForStage(evidence: VisualReviewEvid
     coverage: {
       maxGapSec: evidence.coverage.maxGapSec,
       maxAllowedGapSec: evidence.coverage.maxAllowedGapSec,
+      ...(evidence.coverage.musicLoop ? { musicLoop: {
+        version: evidence.coverage.musicLoop.version,
+        sampledDurationSec: evidence.coverage.musicLoop.sampledDurationSec,
+        maxGapSec: evidence.coverage.musicLoop.maxGapSec,
+        maxAllowedGapSec: evidence.coverage.musicLoop.maxAllowedGapSec,
+        packetCount: evidence.coverage.musicLoop.repetition.packetCount,
+        masterSha256: evidence.coverage.musicLoop.repetition.masterSha256,
+      } } : {}),
       focusedWindowCount: evidence.coverage.focusedWindows.length,
       ...(evidence.coverage.requiredFocusFrameCount === undefined
         ? {}
@@ -5369,6 +5377,8 @@ export const qaVisual: Block = {
       keyPrefix: ctx.keyPrefix,
       sourceSha256: finalMasterSha256BeforeVisualReview,
       required: productionQa,
+      verifyRepeatedMusicVideo: productionQa && Boolean(yue2AssemblySource) &&
+        contentLane.key === "music_loop" && p.durationSec >= 90 && p.durationSec <= 28800 && p.durationSec % 30 === 0,
       // Reuse the final review's broad chronological batches for the shared
       // video score. Draft/probe runs retain advisory review behavior when a
       // reviewer omits the optional field; production fails closed on it.
@@ -6310,6 +6320,11 @@ export const qaVisual: Block = {
               evidence: [
                 `reviewedFrames=${visualReview.evidence.frames.length}`,
                 `maxGapSec=${visualReview.evidence.coverage.maxGapSec}`,
+                ...(visualReview.evidence.coverage.musicLoop ? [
+                  `repeatedMusicSampledSeconds=${visualReview.evidence.coverage.musicLoop.sampledDurationSec}`,
+                  `repeatedMusicSampledGapSec=${visualReview.evidence.coverage.musicLoop.maxGapSec}`,
+                  `verifiedVideoPackets=${visualReview.evidence.coverage.musicLoop.repetition.packetCount}`,
+                ] : []),
                 `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
                 visualReview.summary,
                 ...cinematicQualityEvidence,

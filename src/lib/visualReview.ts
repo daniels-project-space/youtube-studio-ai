@@ -28,6 +28,11 @@ import {
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { verifyMusicLoopVideoRepetition } from "./musicLoopVideoRepetition";
+import {
+  assertMusicLoopReviewCoverage, musicLoopReviewGap, MUSIC_LOOP_REVIEW_JOIN_TIMES,
+  MUSIC_LOOP_REVIEW_SECONDS, MusicLoopReviewCoverageSchema, type MusicLoopReviewCoverage,
+} from "./musicLoopReviewCoverage";
 
 // v5 adds typed reference-criterion coverage and a full SHA-256 review
 // fingerprint. A receipt made under an earlier schema cannot attest the
@@ -211,6 +216,8 @@ export interface VisualReviewIntent {
    * pass automatically.
    */
   referenceCriteria?: readonly VisualReviewReferenceCriterion[];
+  /** Set only after the reviewer verifies the exact master's repetition. */
+  verifiedMusicLoopDurationSec?: number;
 }
 
 export interface ChannelVisualReviewProfileInput {
@@ -550,6 +557,7 @@ export interface VisualReviewEvidence {
     requiredFocusFrameCount?: number;
     /** Missing required focus frames make the review fail closed. */
     missingFocusFrameCount?: number;
+    musicLoop?: MusicLoopReviewCoverage;
   };
   manifestKey?: string;
 }
@@ -665,6 +673,8 @@ export interface ReviewRenderOptions {
    */
   sourceSha256?: string;
   required?: boolean;
+  /** Verify all packets locally; never accepts a caller-supplied repetition receipt. */
+  verifyRepeatedMusicVideo?: boolean;
   /** Ask every broad final-review batch for a receipt-bound 0–10 quality score. */
   collectBroadQualityScore?: boolean;
   /**
@@ -1102,6 +1112,11 @@ function reviewerPrompt(
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
+    (intent.verifiedMusicLoopDurationSec !== undefined
+      ? `REPEATED MUSIC VISUAL: this exact ${intent.verifiedMusicLoopDurationSec}s master has a 30s intro followed by identical 30s video units. ` +
+        `Every video packet and clock was verified locally. These frames cover the first 90s, including the intro and a complete repeated-body transition. ` +
+        `Judge the visible material and loop continuity against the channel standard; repetition proof is not visual or audio quality approval.\n\n`
+      : "") +
     // Per-channel grounding first: a critic that does not know the channel's own
     // standard falls back to a uniform rubric, which is exactly what this gate
     // must not do. The doctrine informs SEVERITY, never the defect vocabulary —
@@ -1648,6 +1663,7 @@ export function visualReviewReceiptFingerprint(input: VisualReviewReceiptFingerp
             .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec || left.reason.localeCompare(right.reason)),
           requiredFocusFrameCount: input.evidence.coverage.requiredFocusFrameCount ?? null,
           missingFocusFrameCount: input.evidence.coverage.missingFocusFrameCount ?? null,
+          ...(input.evidence.coverage.musicLoop ? { musicLoop: input.evidence.coverage.musicLoop } : {}),
         },
       },
       defects,
@@ -1720,8 +1736,28 @@ export async function reviewRender(
   if (opts.sourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(sourceSha256 ?? "")) {
     throw new Error("visualReview sourceSha256 must be a 64-character hexadecimal SHA-256");
   }
-  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true;
-  const sealedCompleteFocusWindows = requireCompleteFocusCoverage
+  let repetition: MusicLoopReviewCoverage["repetition"] | undefined;
+  const loopReview = opts.verifyRepeatedMusicVideo === true;
+  const sampledDurationSec = loopReview ? MUSIC_LOOP_REVIEW_SECONDS : durationSec;
+  if (intent.verifiedMusicLoopDurationSec !== undefined) throw new Error("visualReview loop evidence cannot be supplied in intent");
+  if (loopReview) {
+    if (!sourceSha256 || intent.transcriptCues?.length || intent.expectChapters || intent.expectOutroCard ||
+      opts.requireCompleteFocusCoverage || opts.completeFocusFrames?.length || opts.completeFocusWindows?.length ||
+      [...(intent.overlays ?? []), ...(intent.creativeLocks ?? []), ...(intent.focusWindows ?? [])].some(window =>
+        !Number.isFinite(window.startSec) || !Number.isFinite(window.endSec) || window.startSec < 0 ||
+        window.endSec > sampledDurationSec || window.endSec < window.startSec)) {
+      throw new Error("visualReview repeated-music mode requires an exact master and a non-narrated, non-changing visual plan");
+    }
+    const { elapsedMs, ...proof } = await verifyMusicLoopVideoRepetition(videoPath, durationSec);
+    // Runtime is diagnostic, not evidence identity: identical bytes and
+    // sampling must not overwrite a manifest with a different timing value.
+    log(`visualReview: full music-loop packet proof completed in ${elapsedMs}ms`);
+    repetition = MusicLoopReviewCoverageSchema.shape.repetition.parse(proof);
+    if (repetition.masterSha256 !== sourceSha256) throw new Error("visualReview repetition proof belongs to a different master");
+    intent = { ...intent, verifiedMusicLoopDurationSec: durationSec };
+  }
+  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true || loopReview;
+  const sealedCompleteFocusWindows = opts.requireCompleteFocusCoverage === true
     ? opts.completeFocusWindows ?? intent.focusWindows ?? []
     : [];
   const requiredFocusFrames = requireCompleteFocusCoverage
@@ -1730,6 +1766,7 @@ export async function reviewRender(
         for (const frame of [
           ...planCompleteFocusEvidence(durationSec, sealedCompleteFocusWindows),
           ...normalizeCompleteFocusFrames(durationSec, opts.completeFocusFrames ?? []),
+          ...(loopReview ? normalizeCompleteFocusFrames(durationSec, MUSIC_LOOP_REVIEW_JOIN_TIMES.map(tSec => ({ tSec }))) : []),
         ]) {
           byTimestamp.set(frame.tSec.toFixed(1), frame);
         }
@@ -1746,7 +1783,7 @@ export async function reviewRender(
     }
   }
   if (required) {
-    assertVisualReviewCoveragePossible(durationSec,
+    assertVisualReviewCoveragePossible(sampledDurationSec,
       Math.max(8, Math.floor(finite(opts.maxFrames, 48))) +
       Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))) + requiredFocusFrames.length);
   }
@@ -1793,9 +1830,9 @@ export async function reviewRender(
     };
   }
 
-  const sceneTimes = await detectSceneChanges(videoPath);
+  const sceneTimes = await detectSceneChanges(videoPath, 30_000, loopReview ? sampledDurationSec : undefined);
   const planned = planVisualReviewEvidence({
-    durationSec,
+    durationSec: sampledDurationSec,
     sceneTimes,
     transcriptCues: intent.transcriptCues,
     overlays: intent.overlays,
@@ -1862,14 +1899,14 @@ export async function reviewRender(
   const initialDefects = dedupeDefects([...geometry, ...firstPass.defects]);
   const focusWindows = mergeWindows([
     ...(intent.focusWindows ?? []),
-    ...focusForDefects(initialDefects, durationSec),
-  ], durationSec);
+    ...focusForDefects(initialDefects, sampledDurationSec),
+  ], sampledDurationSec);
   // Sealed complete coverage is deliberately planned before the broad review.
   // Model findings can request a re-watch, but only through the separately
   // bounded regular focus allowance; an untrusted endSec must never expand the
   // paid 2fps cinematic plan after its pre-render reservation.
   const regularFocusCandidates = focusOnlyEvidence(
-    durationSec,
+    sampledDurationSec,
     focusWindows,
     Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))),
     false,
@@ -1931,6 +1968,13 @@ export async function reviewRender(
       maxGapSec: maxGap(allFrames.map((frame) => frame.tSec), durationSec),
       maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
       focusedWindows: focusWindows,
+      ...(repetition ? { musicLoop: {
+        version: "music-loop-review-coverage/v1" as const,
+        sampledDurationSec: MUSIC_LOOP_REVIEW_SECONDS,
+        maxGapSec: musicLoopReviewGap(allFrames.map(frame => frame.tSec)),
+        maxAllowedGapSec: 6 as const,
+        repetition,
+      } } : {}),
       ...(requireCompleteFocusCoverage
         ? {
             requiredFocusFrameCount: requiredFocusFrames.length,
@@ -1961,7 +2005,14 @@ export async function reviewRender(
   const incompleteBroadQualityScore = requireBroadQualityScore && broadQualityScore === undefined;
   const incompleteReferenceCriteriaReceipts =
     firstPass.incompleteReferenceCriteriaReceiptCount + focusPass.incompleteReferenceCriteriaReceiptCount;
-  const coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
+  let coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
+  if (evidence.coverage.musicLoop) {
+    try {
+      assertMusicLoopReviewCoverage({ coverage: evidence.coverage.musicLoop,
+        source: { durationSec, sha256: sourceSha256! }, frameTimes: allFrames.map(frame => frame.tSec) });
+      coverageIncomplete = false;
+    } catch { coverageIncomplete = true; }
+  }
   const globalCriteriaWithoutEvidenceCoverage = coverageIncomplete
     ? requestedReferenceCriteria.filter((criterion) => criterion.scope === "global").map((criterion) => criterion.id)
     : [];
@@ -2024,7 +2075,9 @@ export async function reviewRender(
             ? `reference criteria not observable: ${unobservableReferenceCriteria.map((criterion) => criterion.id).join(", ")}`
             : "",
     coverageIncomplete
-      ? `evidence gap ${evidence.coverage.maxGapSec.toFixed(2)}s exceeds ${evidence.coverage.maxAllowedGapSec.toFixed(2)}s coverage cap`
+      ? evidence.coverage.musicLoop
+        ? "repeated-music evidence lacks qualified material coverage or loop-boundary witnesses"
+        : `evidence gap ${evidence.coverage.maxGapSec.toFixed(2)}s exceeds ${evidence.coverage.maxAllowedGapSec.toFixed(2)}s coverage cap`
       : "",
     focusCoverageIncomplete
       ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
@@ -2039,6 +2092,11 @@ export async function reviewRender(
     (intent.qualityCriteria ?? []).length ? `quality-bar×${(intent.qualityCriteria ?? []).length}` : "",
     requestedReferenceCriteria.length ? `reference-criteria×${requestedReferenceCriteria.length}` : "",
   ].filter(Boolean).join("+");
+  if (evidence.coverage.musicLoop) {
+    log(`visualReview: repeated-music coverage uses ${evidence.coverage.musicLoop.sampledDurationSec}s of intro/body/join material, ` +
+      `${evidence.coverage.musicLoop.maxGapSec.toFixed(2)}/6.00s sampled gap and ${evidence.coverage.musicLoop.repetition.packetCount} verified packets; ` +
+      "the full-programme frame gap below remains literal, not a continuous visual-review claim");
+  }
   log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), ${incompleteReferenceCriteriaReceipts} incomplete reference-criterion receipt(s)${collectBroadQualityScore ? `, broad score ${broadQualityScore ? `${broadQualityScore.score.toFixed(1)}/10 across ${broadQualityScore.broadBatchCount} batch(es)` : "unavailable"}` : ""}, coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {
     ran: true,

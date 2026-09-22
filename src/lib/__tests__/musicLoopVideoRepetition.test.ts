@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { composeMusicLoopDeblur } from "../ffmpeg";
-import { MusicLoopPacketVerifier, parseLoopPacket, verifyMusicLoopVideoRepetition } from "../musicLoopVideoRepetition";
+import { assertStableLoopBodyNal, MusicLoopPacketVerifier, parseLoopPacket, verifyMusicLoopVideoRepetition } from "../musicLoopVideoRepetition";
 
 function packet(index: number) {
   return { pts: index * 512, dts: index * 512 - 1024, duration: 512, pos: index * 100, size: 100,
@@ -15,6 +15,11 @@ function packet(index: number) {
 }
 
 test("packet oracle checks every later payload and both clocks without weakening unique-frame review", () => {
+  for (const type of [1, 5, 9, 12]) assert.doesNotThrow(() => assertStableLoopBodyNal(Buffer.from([type, 0x80])));
+  for (const type of [7, 8, 13, 15]) assert.throws(() => assertStableLoopBodyNal(Buffer.from([type, 0x80])), /stateful NAL/);
+  assert.doesNotThrow(() => assertStableLoopBodyNal(Buffer.from([6, 5, 16, ...Array(16).fill(1), 0x80])));
+  assert.throws(() => assertStableLoopBodyNal(Buffer.from([6, 1, 16, ...Array(16).fill(1), 0x80])), /persistent/);
+  assert.throws(() => assertStableLoopBodyNal(Buffer.from([6, 5, 16, 0x80])), /malformed/);
   const run = (mutate?: (p: ReturnType<typeof packet>, index: number) => void, count = 2700) => {
     const verifier = new MusicLoopPacketVerifier(90, 512);
     for (let i = 0; i < count; i++) { const p = packet(i); mutate?.(p, i); verifier.accept(p); }

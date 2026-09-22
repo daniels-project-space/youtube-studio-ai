@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { z } from "zod";
 import { YuE2AssemblySourceSchema } from "@/engine/yue2AssemblySource";
+import { assertMusicLoopReviewCoverage } from "@/lib/musicLoopReviewCoverage";
 
 import {
   assertReferenceQualityMechanicsLedger,
@@ -1149,6 +1150,19 @@ export function assertReleaseCertificateVisualReviewBindings(args: {
   }).passthrough().safeParse(args.evidenceManifest);
   if (!manifest.success) {
     throw new Error("final-master release certificate references an invalid visual-review evidence manifest");
+  }
+  const coverage = manifest.data.coverage;
+  if (coverage && typeof coverage === "object" && "musicLoop" in coverage) {
+    if (!receipt.evidence.manifestFingerprint) {
+      throw new Error("music-loop release evidence requires a complete manifest fingerprint");
+    }
+    assertMusicLoopReviewCoverage({ coverage: coverage.musicLoop,
+      source: certificate.finalMaster,
+      frameTimes: manifest.data.frames.map(frame => {
+        if (frame.tSec === undefined) throw new Error("music-loop review requires every retained frame timestamp");
+        return frame.tSec;
+      }),
+    });
   }
   const manifestFrameArtifacts = manifest.data.frames.map((frame) => {
     if (!frame.r2Key || !frame.contentSha256 || frame.byteLength === undefined) {

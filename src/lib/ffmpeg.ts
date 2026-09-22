@@ -628,11 +628,15 @@ export async function parallaxLoopUnit(
  * lightweight helper shared by assembly and post-render visual review so the
  * reviewer sees edit boundaries instead of only evenly-spaced stills.
  */
-export async function detectSceneChanges(path: string, timeoutMs = 30_000): Promise<number[]> {
+export async function detectSceneChanges(path: string, timeoutMs = 30_000, durationSec?: number): Promise<number[]> {
+  if (durationSec !== undefined && (!Number.isFinite(durationSec) || durationSec <= 0)) {
+    throw new FfmpegError("scene detection requires a positive bounded duration");
+  }
   try {
     const { stderr } = await run(
       FFMPEG,
-      ["-i", path, "-vf", "scale=160:-2,select='gt(scene,0.35)',showinfo", "-f", "null", "-"],
+      ["-i", path, ...(durationSec === undefined ? [] : ["-t", String(durationSec)]),
+        "-vf", "scale=160:-2,select='gt(scene,0.35)',showinfo", "-f", "null", "-"],
       timeoutMs,
     );
     const times: number[] = [];
