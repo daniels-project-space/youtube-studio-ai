@@ -124,6 +124,8 @@ async function get<T>(
   params: Record<string, string>,
   access: YouTubeDataAccess = {},
 ): Promise<T> {
+  // One budget includes any connector refresh and the complete response body.
+  const signal = AbortSignal.timeout(30_000);
   const apiKey = process.env.YOUTUBE_DATA_API_KEY;
   let url: string;
   const headers: Record<string, string> = {};
@@ -132,7 +134,7 @@ async function get<T>(
     url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
   } else if (access.refreshToken) {
     const { getAccessToken } = await import("@/lib/youtube");
-    headers.Authorization = `Bearer ${await getAccessToken(access.refreshToken)}`;
+    headers.Authorization = `Bearer ${await getAccessToken(access.refreshToken, { signal })}`;
     url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
   } else if (access.requireConnector) {
     throw new YouTubeDataError("channel-bound YouTube Data access is required");
@@ -140,14 +142,14 @@ async function get<T>(
     url = `${BASE}/${path}?${new URLSearchParams({ ...params, key: apiKey }).toString()}`;
   } else if (process.env.YOUTUBE_REFRESH_TOKEN) {
     const { getAccessToken } = await import("@/lib/youtube");
-    headers.Authorization = `Bearer ${await getAccessToken(process.env.YOUTUBE_REFRESH_TOKEN)}`;
+    headers.Authorization = `Bearer ${await getAccessToken(process.env.YOUTUBE_REFRESH_TOKEN, { signal })}`;
     url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
   } else {
     throw new YouTubeDataError("no YouTube Data access (set YOUTUBE_DATA_API_KEY or OAuth)");
   }
   const method = `${path}.list` as YouTubeDataMethod;
   if (method in youtubeDataMetrics) recordRequest(method);
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal });
   const json = (await res.json()) as T & { error?: { message?: string } };
   if (!res.ok) {
     throw new YouTubeDataError(

@@ -43,6 +43,7 @@ export interface YouTubeAccessTokenGrant {
 
 export async function refreshAccessTokenGrant(
   refreshToken: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<YouTubeAccessTokenGrant> {
   if (!refreshToken) {
     throw new YouTubeError(
@@ -51,6 +52,7 @@ export async function refreshAccessTokenGrant(
   }
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    signal: options.signal,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: reqEnv("YOUTUBE_CLIENT_ID"),
@@ -78,8 +80,8 @@ export async function refreshAccessTokenGrant(
   };
 }
 
-export async function getAccessToken(refreshToken: string): Promise<string> {
-  return (await refreshAccessTokenGrant(refreshToken)).accessToken;
+export async function getAccessToken(refreshToken: string, options: { signal?: AbortSignal } = {}): Promise<string> {
+  return (await refreshAccessTokenGrant(refreshToken, options)).accessToken;
 }
 
 /** OAuth scopes needed to upload + manage branding/captions/localizations. */

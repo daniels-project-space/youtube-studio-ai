@@ -52,10 +52,12 @@ export async function fetchRedditTrends(
   const request = (async (): Promise<TrendSignal[]> => {
     let completed = 0;
     try {
+      const signal = AbortSignal.timeout(8_000);
       const results = await Promise.all(selectedSubs.map(async (sub): Promise<TrendSignal[]> => {
         try {
           const res = await fetch(`https://www.reddit.com/r/${sub}/top.json?t=week&limit=12`, {
             headers: { "User-Agent": "youtube-studio-ai/1.0 (topic research)" },
+            signal,
           });
           if (!res.ok) return [];
           const j = (await res.json()) as {
