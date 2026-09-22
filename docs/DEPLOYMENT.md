@@ -91,6 +91,45 @@ The canonical deployment holds live data. Do not run a casual local/VPS
 `convex dev` against it; GitHub Actions is the only approved runtime deployment
 source. For experiments, create an isolated personal Convex dev deployment.
 
+## Read-only rollout verification
+
+After a release, check the exact intended Git revision across the public web
+alias, current Trigger worker, canonical Convex function inventory, and recovery
+schedules with one command:
+
+```sh
+ai-vault convex CONVEX_ACCESS_TOKEN=CONVEX_ACCESS_TOKEN -- \
+  ai-vault trigger TRIGGER_SECRET_KEY_YOUTUBE_STUDIO=TRIGGER_SECRET_KEY_PROD -- \
+  npm run verify:deployment -- --revision "$(git rev-parse HEAD)" --mode shared
+```
+
+Use `--mode individual` only when verifying an intentionally individual recovery
+deployment. The verifier never changes schedules, deploys code, starts tasks, or
+publishes media. It uses fixed project endpoints, rejects development Trigger
+credentials, bounds observations, and omits raw provider/CLI failures. A failed
+layer does not prevent the remaining layers from being reported. Exit code 1
+means that at least one requested deployment check failed or was unavailable.
+
+Convex checks prove required function names, kinds and public visibility, not
+implementation revision or successful authenticated execution. The report keeps
+`convexRevisionVerified` and `productionReadinessVerified` false even when all
+deployment checks pass. Musical review, live continuation, final media QA and
+publishing authorization remain separate requirements. This command is an
+operator observation, not a substitute for CI or an automated release gate.
+
+The first live observation at 2026-09-22 10:51 UTC correctly failed against
+`ac0122dc`: web and Trigger remained at `722facc4`, all eight required YuE2
+functions were absent, and six individual recovery schedules were active rather
+than the shared schedule. No production state changed. The new verifier covers
+stale/dirty workers, cached health,
+wrong backend/environment, missing/incompatible functions and safe transport
+failure reporting. An initial 24-case paired run accidentally included the old
+schedule suite's thumbnail-task noninterference fixture. It made no provider
+calls or generation, but failed the owner's exclusion policy. Subsequent
+verification selects only the new suite through the strict exclusion selector.
+All 18 selected cases pass. The local offline wrapper now enforces that selector
+before starting any explicitly named test, preventing the same invocation error.
+
 ## Canonical references
 
 - `NEXT_PUBLIC_CONVEX_URL_YOUTUBE_STUDIO` = `https://astute-camel-689.convex.cloud`

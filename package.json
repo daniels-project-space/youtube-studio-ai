@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "verify:deployment": "node scripts/verify-studio-deployment.mjs",
     "test": "npm run test:production-readiness",
     "test:production-readiness": "node scripts/run-production-readiness-tests.mjs && npm run test:assembly",
     "test:engine": "tsx src/engine/__tests__/engine.test.ts",
