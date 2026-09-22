@@ -366,8 +366,10 @@ function crewCtx(
   return {
     topic: topicOf(ctx),
     family: (ctx.params["family"] as string | undefined) ?? "narrated_stock",
-    niche: (ctx.store["niche"] as string | undefined) ?? g.niche,
-    channelName: (ctx.store["channelName"] as string | undefined) ?? g.channelName,
+    // Once a profile is frozen, even an omitted field is authoritative. Loose
+    // legacy seeds must not give different crew roles a mixed channel identity.
+    niche: g.profile ? g.niche : (ctx.store["niche"] as string | undefined) ?? g.niche,
+    channelName: g.profile ? g.channelName : (ctx.store["channelName"] as string | undefined) ?? g.channelName,
     targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
     dnaDigest: dnaDigest(g.dna),
     dnaAudio: dnaAudioDigest(g.dna),
