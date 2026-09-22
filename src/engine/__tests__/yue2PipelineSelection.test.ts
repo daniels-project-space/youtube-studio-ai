@@ -22,6 +22,10 @@ try {
     const baseline = designPipeline(opts), before = structuredClone(baseline.pipeline);
     const chosen = { ...selection, musicIntent: { ...selection.musicIntent, playback, role } };
     const result = designPipeline({ ...opts, yue2Music: chosen });
+    const preview = designPipelineCore({ ...opts, yue2Music: chosen }, { validateRuntimeRegistry: false });
+    assert.deepEqual(preview.pipeline, result.pipeline, "YuE2 read-only projection matches executable graph");
+    assert.equal(preview.compilation, undefined);
+    assert.equal(preview.productionReady, false);
     assert.equal(result.productionReady, false, "source selection is not automatic production qualification");
     assert.ok(result.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const modules = result.compilation!.modules;
@@ -65,7 +69,6 @@ try {
   }
   const missingPlayback = { ...selection, musicIntent: { role: "primary_music", requestedDurationSec: 30 } } as YuE2PipelineSelection;
   assert.throws(() => selectYuE2Pipeline(baseline, missingPlayback));
-  assert.throws(() => designPipelineCore({ family: "music_loop", yue2Music: selection }, { validateRuntimeRegistry: false }), /runtime validation/);
   assert.throws(() => designPipeline({ family: "music_loop", yue2Music: selection, paramOverrides: { music: { trackCount: 2 } } }), /legacy music overrides/);
   const selected = selectYuE2Pipeline(baseline, selection);
   for (const optional of [false, true]) {

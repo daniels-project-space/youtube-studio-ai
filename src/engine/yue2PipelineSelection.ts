@@ -3,6 +3,7 @@ import { MusicArrangementIntentSchema, type MusicArrangementIntent } from "./acc
 import { getManifest } from "./registry";
 import { canonicalJson } from "@/lib/canonicalJson";
 import type { PipelineEntry } from "./types";
+import { YuE2SourceConfigSchema } from "./yue2SourceConfig";
 
 export interface YuE2PipelineSelection {
   musicIntent: MusicArrangementIntent & Required<Pick<MusicArrangementIntent, "playback" | "role" | "requestedDurationSec">>;
@@ -10,23 +11,21 @@ export interface YuE2PipelineSelection {
   sourceParams: Record<string, unknown>;
 }
 
-const selectionSchema = z.object({
+export const YuE2PipelineSelectionSchema = z.object({
   musicIntent: MusicArrangementIntentSchema.and(z.object({
     playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
     requestedDurationSec: z.number().int().min(10).max(300),
   })),
-  sourceParams: z.record(z.unknown()),
+  sourceParams: YuE2SourceConfigSchema,
 }).strict();
 
-/** Resolve one explicit source choice into compatible owners before freezing or spending. */
-export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
-  const selected = selectionSchema.parse(input);
+/** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
+export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
+  const selected = YuE2PipelineSelectionSchema.parse(input);
   const musicVersion = "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
-  const music = getManifest("music", musicVersion);
-  if (!music) throw new Error("YuE2 selection requires registered runtime manifests");
-  const sourceParams = music.configSchema.parse(selected.sourceParams) as Record<string, unknown>;
+  const sourceParams = selected.sourceParams;
   const indexOfOne = (ids: readonly string[]) => {
     const indexes = source.flatMap((entry, index) => ids.includes(entry.block) ? [index] : []);
     if (indexes.length !== 1) throw new Error(`YuE2 selection requires exactly one ${ids.join(" or ")} owner`);
@@ -64,7 +63,6 @@ export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2
     if (entry.version !== undefined && entry.version !== version) {
       throw new Error(`YuE2 selection cannot replace explicitly pinned ${entry.block}@${entry.version}`);
     }
-    if (!getManifest(entry.block, version)) throw new Error(`YuE2 executable unavailable: ${entry.block}@${version}`);
   }
   const plans = source.flatMap((entry, index) => entry.block === "music_arrangement_plan" ? [index] : []);
   if (plans.length > 1 || (plans.length === 1 && !(composerIndex < plans[0] && plans[0] < musicIndex))) {
@@ -86,9 +84,17 @@ export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2
       ...(entry.params ? { params: { ...entry.params } } : {}) };
   });
   if (!plans.length) pipeline.splice(composerIndex + 1, 0, { block: "music_arrangement_plan" });
+  return pipeline;
+}
+
+/** Resolve the projection against real executable contracts before freezing or spending. */
+export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
+  const pipeline = projectYuE2Pipeline(source, input);
   for (const entry of pipeline) {
     const manifest = getManifest(entry.block, entry.version);
-    if (manifest && (manifest.consumes.musicUrl || manifest.consumes.musicKey)) {
+    if (!manifest) throw new Error(`YuE2 executable unavailable: ${entry.block}@${entry.version ?? "default"}`);
+    manifest.configSchema.parse(entry.params ?? {});
+    if (manifest.consumes.musicUrl || manifest.consumes.musicKey) {
       throw new Error(`YuE2 private candidate has no compatible music handoff for ${entry.block}`);
     }
   }

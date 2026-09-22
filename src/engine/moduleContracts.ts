@@ -21,12 +21,12 @@ import {
   motionComicPanelCount,
   motionComicTtsBillableCharacterCeiling,
   motionComicVisionCallCeiling,
-} from "../lib/motionComic";
+} from "../lib/motionComicBounds";
 import {
   whiteboardImageCallCeiling,
   whiteboardNarrationCharacterCeiling,
   whiteboardPanelsForTargetSeconds,
-} from "../lib/whiteboardSync";
+} from "../lib/whiteboardSyncBounds";
 import type {
   ModuleContractOverride,
   ModuleCostContext,

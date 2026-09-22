@@ -88,7 +88,7 @@ import {
   type PipelineCompilation,
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
-import { selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
+import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -1304,11 +1304,10 @@ export function designPipelineCore(
   );
   pipeline = enforcedLength.pipeline;
   if (opts.yue2Music !== undefined) {
-    if (options.validateRuntimeRegistry === false) throw new Error("YuE2 selection requires executable runtime validation, not a structural preview");
     if (opts.paramOverrides?.music && Object.keys(opts.paramOverrides.music).length) {
       throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
     }
-    pipeline = selectYuE2Pipeline(pipeline, opts.yue2Music);
+    pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
   }
   if (enforcedLength.changed.length) {

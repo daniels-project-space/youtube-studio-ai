@@ -23,6 +23,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
 import type { ModuleConfigurationScope } from "@/engine/moduleRegistry";
+import { YuE2PipelineSelectionSchema } from "@/engine/yue2PipelineSelection";
 
 export const CHANNEL_PIPELINE_PREVIEW_VERSION = "channel-pipeline-preview/v1" as const;
 
@@ -59,6 +60,7 @@ const ChannelPipelinePreviewInputSchema = z.object({
   sourceReferences: z.unknown().optional(),
   claimEvidence: z.unknown().optional(),
   capabilitySelections: z.unknown().optional(),
+  yue2Music: YuE2PipelineSelectionSchema.optional(),
 }).strict();
 
 const ChannelPipelinePreviewSnapshotSchema = z.object({
@@ -98,8 +100,7 @@ const PREVIEW_INPUT_FIELDS = [
   "sourceReferences",
   "claimEvidence",
   "capabilitySelections",
-  // Preserve unsupported executable selections so the strict preview schema
-  // rejects them; dropping one would attest a different, legacy pipeline.
+  // Preserve the selected source in the request-key-bound preview fingerprint.
   "yue2Music",
 ] as const;
 
@@ -213,6 +214,7 @@ export function compileChannelPipelinePreview(value: unknown): ChannelPipelinePr
     capabilitySelections,
     syntheticScenario,
     quizProfile: programRoute.quizProfile,
+    yue2Music: input.yue2Music,
   }, { validateRuntimeRegistry: false });
 
   return channelPipelinePreviewFromCompiledDesign({

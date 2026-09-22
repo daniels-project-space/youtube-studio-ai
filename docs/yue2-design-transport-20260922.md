@@ -1,5 +1,9 @@
 # Preserve explicit music choices across design transport
 
+The original rejection-only preview described below is superseded by
+`yue2-readonly-preview-20260922.md`: valid selections now receive an exact
+provider-free projection; malformed selections still fail before dispatch.
+
 The supervised designer selector exposed a downstream transport defect:
 `DesignChannelArgs` inherited `yue2Music`, but the task's actual `designOptions`
 projection omitted it. Separately, the public build endpoint projected unknown

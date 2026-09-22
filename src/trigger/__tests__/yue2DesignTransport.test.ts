@@ -5,6 +5,8 @@ import ts from "typescript";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { designPipeline, type DesignOptions } from "@/engine/designer";
 import { channelPipelinePreviewInputFromDesign, compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 // Execute the worker's actual options projection, then the real designer and
 // compiler. Loading the task itself would bring unrelated provider startup in.
@@ -58,12 +60,17 @@ try {
 
     // The public build endpoint uses this projection before Trigger dispatch.
     // It must never validate a legacy snapshot after discarding a YuE2 choice.
-    for (const value of [yue2Music, null, {}, false]) {
+    const preview = compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign(payload));
+    assert.equal(preview.pipelineFingerprint, sha256Hex(canonicalJson(selected.pipeline)));
+    const changedPreview = compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign({ ...payload,
+      yue2Music: { ...yue2Music, sourceParams: { ...sourceParams, seed: 43 } } }));
+    assert.notEqual(changedPreview.pipelineFingerprint, preview.pipelineFingerprint);
+    for (const value of [null, {}, false]) {
       const previewInput = channelPipelinePreviewInputFromDesign({ ...payload, yue2Music: value });
       assert.equal(previewInput.yue2Music, value);
       assert.throws(() => compileChannelPipelinePreview(previewInput), /yue2Music/);
     }
     assert.doesNotThrow(() => compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign({ programBrief })));
   }
-  console.log("YUE2 DESIGN TRANSPORT PASS: actual worker projection and compiler across four families; strict creator rejection, legacy preview parity, no provider calls");
+  console.log("YUE2 DESIGN TRANSPORT PASS: actual worker projection and compiler across four families; exact preview parity, malformed selection rejection, no provider calls");
 } finally { globalThis.fetch = fetchBefore; }

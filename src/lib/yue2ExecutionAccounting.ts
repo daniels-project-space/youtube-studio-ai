@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { YuE2ExecutionPolicySchema as Policy, maximumYuE2Allocation as maximum,
+  validateYuE2ExecutionPolicy, type YuE2ExecutionPolicy } from "./yue2ExecutionPolicy";
+export { validateYuE2ExecutionPolicy, type YuE2ExecutionPolicy } from "./yue2ExecutionPolicy";
 import {
   assertYuE2Manifest, validateYuE2EvaluationRequest, YUE2_QUALIFICATION,
 } from "@/lib/yue2Evaluation";
@@ -13,19 +16,6 @@ const SafeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const PositiveInteger = SafeInteger.refine((value) => value > 0);
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const JobId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/);
-const Label = z.string().min(1).refine((value) => value === value.trim() &&
-  Buffer.byteLength(value, "utf8") <= 512 && !/[\x00-\x1f]/u.test(value) &&
-  Buffer.from(value, "utf8").toString("utf8") === value);
-const Policy = z.object({
-  schema_version: z.literal(1), provider: z.literal("openrelay"),
-  allocation_basis: z.literal(BASIS), rate_source: z.literal("operator_configured"),
-  rate_reference: Label, runtime_id: Label.refine((value) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)),
-  hourly_rate_usd_micros: PositiveInteger,
-  max_execution_seconds: z.number().int().min(1).max(7200),
-  termination_grace_seconds: z.number().int().min(1).max(30),
-  reserved_allocation_usd_micros: PositiveInteger,
-}).strict();
-export type YuE2ExecutionPolicy = z.infer<typeof Policy>;
 
 const Sealed = z.object({ sha256: Hash, payload_json: z.string().refine((value) =>
   Buffer.byteLength(value, "utf8") <= 1024 * 1024) }).strict();
@@ -33,8 +23,6 @@ type SealedReceipt = z.infer<typeof Sealed>;
 const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const integerCanonical = (value: unknown) => `${canonicalJson(value)}\n`;
 const allocate = (rate: number, elapsedNs: bigint) => (BigInt(rate) * elapsedNs + DENOMINATOR - BigInt(1)) / DENOMINATOR;
-const maximum = (policy: YuE2ExecutionPolicy) => allocate(policy.hourly_rate_usd_micros,
-  (BigInt(policy.max_execution_seconds) + BigInt(policy.termination_grace_seconds)) * BigInt(1_000_000_000));
 function requireMatch(condition: boolean): asserts condition {
   if (!condition) throw new Error("YuE2 execution accounting verification failed");
 }
@@ -42,12 +30,6 @@ function unseal(value: unknown): { receipt: SealedReceipt; payload: unknown } {
   const receipt = Sealed.parse(value);
   requireMatch(receipt.payload_json.endsWith("\n") && hash(receipt.payload_json) === receipt.sha256);
   return { receipt, payload: JSON.parse(receipt.payload_json) as unknown };
-}
-
-export function validateYuE2ExecutionPolicy(input: unknown): YuE2ExecutionPolicy {
-  const policy = Policy.parse(input);
-  requireMatch(BigInt(policy.reserved_allocation_usd_micros) >= maximum(policy));
-  return policy;
 }
 
 const PolicyReceipt = z.object({

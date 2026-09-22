@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
@@ -8,22 +8,10 @@ import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
-import { validateYuE2ExecutionPolicy } from "@/lib/yue2ExecutionAccounting";
 import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
 import { musicProgramForCurrentRoute } from "./blockContext";
 
 export const YUE2_MUSIC_CANDIDATE_VERSION = "3.0.0-yue2-candidate";
-const config = z.object({
-  seed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  personalCreatorAcknowledged: z.literal(true),
-  maxCostUsd: z.number().finite().positive().max(1),
-  executionPolicy: z.unknown().transform(value => validateYuE2ExecutionPolicy(value)),
-}).strict().superRefine((value, ctx) => {
-  if (value.executionPolicy.reserved_allocation_usd_micros > Math.floor(value.maxCostUsd * 1_000_000) ||
-    value.executionPolicy.max_execution_seconds > 1200) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "YuE2 policy exceeds the explicit stage allocation or 1200-second execution window" });
-  }
-});
 
 function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 ${reason}; recover the same job, never regenerate`,

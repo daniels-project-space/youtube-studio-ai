@@ -4,7 +4,7 @@ import {
   MINIMAX_H3_MODEL,
   MINIMAX_H3_MODEL_REVISION,
   MINIMAX_H3_PROFILE,
-} from "@/lib/minimaxH3";
+} from "@/lib/minimaxH3Admission";
 import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
