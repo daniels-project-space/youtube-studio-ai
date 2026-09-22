@@ -30,6 +30,42 @@ export class OpenRelayApiError extends Error {
   }
 }
 
+const diagnosticCodes = new Set([
+  "FORBIDDEN", "UNAUTHORIZED", "REVOKED_API_KEY", "NOT_FOUND", "not_found",
+  "VM_NODE_BUSY", "POD_NODE_BUSY", "POD_NODE_OFFLINE", "POD_NODE_NO_INFINIBAND",
+  "POD_STOPPING", "NODE_AT_CAPACITY", "INSUFFICIENT_GPU_CAPACITY",
+  "INSUFFICIENT_CPU_CAPACITY", "INSUFFICIENT_HOST_CAPACITY", "INSUFFICIENT_IP_CAPACITY",
+]);
+
+async function readErrorDiagnostic(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  try {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 4096) return "";
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+    const { code, requestId } = value as Record<string, unknown>;
+    // Free-form provider messages, unknown codes and arbitrary IDs can echo keys.
+    return [
+      typeof code === "string" && diagnosticCodes.has(code) ? code : "",
+      typeof requestId === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(requestId)
+        ? `request ${requestId}` : "",
+    ].filter(Boolean).join("; ");
+  } catch { return ""; }
+  finally { void reader.cancel().catch(() => undefined); }
+}
+
 function requireApiKey(value: string | undefined): string {
   const key = value?.trim() ?? "";
   if (key.length < 32) throw new Error("OPENRELAY_API_KEY is missing or too short");
@@ -77,18 +113,20 @@ export class OpenRelayVmClient {
         ...init,
         headers: { authorization: `Bearer ${this.apiKey}`, ...init?.headers },
         cache: "no-store",
+        redirect: "error",
         signal: AbortSignal.timeout(20_000),
       });
-    } catch (error) {
-      throw new OpenRelayApiError(operation, 0, error instanceof Error ? error.name : "network error");
+    } catch {
+      throw new OpenRelayApiError(operation, 0, "transport unavailable");
     }
     if (!response.ok) {
-      // Provider error bodies can contain internal placement data. Preserve a
-      // short diagnostic without copying arbitrary content into task logs.
-      const detail = (await response.text().catch(() => "")).replace(/[\u0000-\u001f]/g, " ").slice(0, 220);
+      const detail = await readErrorDiagnostic(response);
       throw new OpenRelayApiError(operation, response.status, detail);
     }
-    return vmFromUnknown(await response.json());
+    let value: unknown;
+    try { value = await response.json(); }
+    catch { throw new OpenRelayApiError(operation, response.status, "invalid JSON response"); }
+    return vmFromUnknown(value);
   }
 
   getVm(vmId: string): Promise<OpenRelayVm> {
