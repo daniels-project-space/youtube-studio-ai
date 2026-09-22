@@ -45,10 +45,43 @@ not current price evidence, a GPU reservation, or spending authorization.
 
 The canonical production health endpoint still reports
 `722facc4f5aaad004dcd9f96de3be7a29951a520`; this branch is not deployed there.
-The canonical vault OpenRelay key fingerprint is unchanged from the previously
+At this 08:36 UTC checkpoint, the canonical vault OpenRelay key fingerprint was unchanged from the previously
 revoked key. No fresh provider authentication attempt or GPU start was made.
 No secrets are included in this record.
 
 This turn generated no music, thumbnails, or final videos and made no publishing
 request. Musical quality, owner listening approval, new-runtime GPU execution,
 complete release coverage, and the broader module-first backlog remain open.
+
+## Subsequent Frozen-Identity Checkpoint
+
+Clean source `3a2793394bd47b2afd1d30d474de4d285cbd84ca` passed a fresh
+network-isolated readiness run: **896/896 selected files, 30 thumbnail-named
+files excluded**. The process exited successfully. Source revision and clean
+worktree were checked before and after the run; no application files changed.
+This includes the shared OpenRelay error-safety fix and the new frozen-identity
+YuE2 program version, not just their focused regression tests.
+
+The same HTTP harness also passed against the production build produced during
+the preceding implementation turn. All five family/playback paths retained
+exact preview/runtime fingerprints, source-seed sensitivity, legacy distinction,
+invalid-selection rejection, and the YuE2 production hold. Malformed JSON and
+oversized requests were rejected. Its temporary server exited successfully.
+The supplied health revision remains release metadata, not a binary digest;
+the fingerprint comparisons independently test the selected graph behavior.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `/tmp/studio-readiness-3a279339.log` | `637b9a3319668c0ef8f12872125729fd29892c8005673aaa99f824eb724a4fdb` |
+| `/tmp/studio-http-3a279339.log` | `bbc8cf27beffc58172da5709c23d373c696c32c4d7f9d4e52bb651b21455f001` |
+
+The unchanged harness hash is recorded above. The live production health check
+at `2026-09-22T09:18:46.375Z` returned HTTP 200, no-store, and revision
+`722facc4f5aaad004dcd9f96de3be7a29951a520`, so the branch is still not deployed.
+
+The earlier revoked-key observation is superseded by
+`openrelay-vault-recovery-20260922.md`: canonical read access was recovered,
+but the subsequent restart request was denied with 403 and the VM was verified
+stopped. This checkpoint did not retry that write or spend on GPU generation.
+No thumbnail tests/generation, owner musical approval, complete release gate,
+or production rollout is claimed. The full MVP and additive backlog stay open.
