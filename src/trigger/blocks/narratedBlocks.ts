@@ -3144,7 +3144,7 @@ export function createTimelineAssemblyBlock(
   prepareMusic?: (ctx: StageContext) => Promise<string>,
   mixSampleRateHz?: 44100 | 48000,
   assertOutputAuthority?: () => Promise<void>,
-  options: { retainRepairCheckpoint?: boolean } = {},
+  options: { retainRepairCheckpoint?: boolean; musicPlayback?: "repeat" | "once"; musicSourceDurationSec?: number } = {},
 ): Block {
   return {
   id: "timeline_assemble",
@@ -3508,6 +3508,10 @@ export function createTimelineAssemblyBlock(
     const fadeOutSec = Number(ctx.params["fadeOutSec"] ?? 2);
     const audioFadeOutSec = Number(ctx.params["audioFadeOutSec"] ?? fadeOutSec);
     const videoSec = introSec + narrationSec + tailSec;
+    if (options.musicPlayback === "once" && (!Number.isFinite(options.musicSourceDurationSec) ||
+      options.musicSourceDurationSec! <= 0 || options.musicSourceDurationSec! > videoSec + 1 / 48000)) {
+      throw new Error("Play-once music does not fit the final timeline; assembly cannot trim its approved ending");
+    }
 
     // EARLY LENGTH GATE: videoSec is the EXACT runtime this block is about to
     // render. If it already lands outside the channel's [minSeconds, maxSeconds]
@@ -3877,6 +3881,7 @@ export function createTimelineAssemblyBlock(
       introCardPath: introCardPath || undefined,
       loopBodyPath: concat,
       musicPath,
+      musicPlayback: options.musicPlayback,
       audioSampleRateHz: mixSampleRateHz,
       narrationPath: narration,
       outPath: out,

@@ -74,6 +74,7 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("timeline_assemble")!));
+  registerManifestVersion(createYuE2AssemblyManifest(getManifest("timeline_assemble")!, "once"));
   // Compliance gates (Phase 4): originality_gate + compliance_check.
   for (const b of complianceBlocks) register(b);
   // Growth blocks (Phase 8, opt-in): crosspost.

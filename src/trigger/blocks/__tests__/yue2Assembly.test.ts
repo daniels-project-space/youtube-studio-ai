@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { getFunctionName } from "convex/server";
 import { createYuE2SourceApproval } from "@/engine/yue2SourceApproval";
+import { createAcceptedMusicArrangement, createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
 import { YUE2_AUDITION_CHECKS } from "@/engine/yue2Audition";
-import { canonicalJson } from "@/lib/canonicalJson";
 import type { StageContext } from "@/engine/types";
 
 const retained = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-after/gpu-material.json", "utf8"));
@@ -320,10 +320,52 @@ async function main() {
   for (const patch of [{ nativeFrames: frames + 1 }, { channelId: "foreign" }, { technicalStatus: "blocked" }]) {
     await assert.rejects(prepareApprovedYuE2AssemblySource({ ...ctx, store: { ...ctx.store, yue2MusicCandidate: { ...candidate, ...patch } } }, 2));
   }
-  const once = structuredClone(arrangement); once.arrangement.playback = "once";
-  const { fingerprint: _fingerprint, ...body } = once; void _fingerprint; once.fingerprint = hash(canonicalJson(body));
+  const once = createAcceptedMusicArrangement({ ownerId: candidate.ownerId, channelId: candidate.channelId, runId: candidate.runId,
+    topic: arrangement.topic, sourceBrief: { musicIntent: { playback: "once", role: "narration_bed", requestedDurationSec: 12 },
+      reviewContext: createMusicReviewContext({ topic: arrangement.topic, family: "narrated", channelName: "Synthetic background fixture",
+        promptContext: "Synthetic test only: play the complete twelve-second background score once; do not repeat or trim its natural ending." }) },
+    arrangement: { ...arrangement.arrangement, playback: "once", role: "narration_bed", requestedDurationSec: 12 } });
   reset(); await assert.rejects(prepareApprovedYuE2AssemblySource({ ...ctx, store: { ...ctx.store, acceptedMusicArrangement: once } }, 2));
   assert.equal(queries, 0);
+  const onceCandidate = { ...candidate, arrangementFingerprint: once.fingerprint };
+  const onceApproval = createYuE2SourceApproval({ basis: { ...basis, arrangementFingerprint: once.fingerprint },
+    submission, reviewedAt: 12345, revision: 1 });
+  const onceContext = { ...ctx, store: { ...ctx.store, acceptedMusicArrangement: once, yue2MusicCandidate: onceCandidate,
+    narrationDurationSec: 14 }, params: { tailSec: 0, burnCaptions: false, transitions: "hardcut" } };
+  const setOnce = () => {
+    reset(); approval = onceApproval;
+    currentMaterial = { ...material, request: { ...material.request, acceptedArrangement: once } };
+  };
+  setOnce();
+  const onceSource = await prepareApprovedYuE2AssemblySource(onceContext, 0, "once");
+  try {
+    assert.deepEqual(await readFile(onceSource.path), wav, "once source is byte-identical, with no loop fold or re-encode");
+    const contract = getManifest("timeline_assemble", "3.1.0-yue2-reviewed-once")!.produces.yue2AssemblySource;
+    assert.doesNotThrow(() => validateArtifact(contract, onceSource.evidence));
+    for (const patch of [{ preparedFrames: frames - 1 }, { crossfadeSec: 2 },
+      { preparedAudioSha256: "0".repeat(64) }, { version: "yue2-assembly-source/v1" }]) {
+      assert.throws(() => validateArtifact(contract, { ...onceSource.evidence, ...patch }));
+    }
+  } finally { await onceSource.cleanup(); }
+  setOnce();
+  const onceManifest = getManifest("timeline_assemble", "3.1.0-yue2-reviewed-once")!;
+  assert.ok(!allManifests().includes(onceManifest), "once remains explicit opt-in");
+  assert.doesNotThrow(() => validatePipeline([{ block: "approved_source_fixture" },
+    { block: "timeline_assemble", version: onceManifest.version }], ["footageClips", "narrationLocalPath", "narrationDurationSec"]));
+  const onceResult = await onceManifest.execute(onceContext);
+  assert.equal(renders.length, 1); assert.equal(renders[0].musicPlayback, "once");
+  assert.equal(renders[0].bodyMusicVol, 0.04);
+  assert.equal((onceResult.yue2AssemblySource as Record<string, unknown>).preparedAudioSha256, hash(wav));
+  await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/);
+  setOnce();
+  await assert.rejects(onceManifest.execute({ ...onceContext, store: { ...onceContext.store, narrationDurationSec: 10 } }), /cannot trim/);
+  assert.equal(renders.length, 0); assert.equal(uploads, 0);
+  setOnce();
+  await assert.rejects(onceManifest.execute({ ...onceContext, params: { sourceCrossfadeSec: 2 } }));
+  assert.equal(queries, 0);
+  setOnce(); revoked = true;
+  await assert.rejects(onceManifest.execute(onceContext), /revoked/); assert.equal(privateReads, 0);
+  reset();
   for (const params of [{ useAssemblyEdl: true }, { sourceCrossfadeSec: 4.5 }]) {
     await assert.rejects(getManifest("timeline_assemble", "3.0.0-yue2-reviewed-loop")!.execute({ ...ctx, params }));
   }

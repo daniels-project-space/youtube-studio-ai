@@ -1747,6 +1747,8 @@ export async function composeWithIntro(args: {
   introCardPath?: string;
   loopBodyPath: string;
   musicPath: string;
+  /** Once preserves the source ending and pads silence; omitted keeps legacy repetition. */
+  musicPlayback?: "repeat" | "once";
   narrationPath?: string;
   outPath: string;
   introSec: number;
@@ -1812,6 +1814,15 @@ export async function composeWithIntro(args: {
   const audioSampleRate = args.audioSampleRateHz ?? 44100;
   if (audioSampleRate !== 44100 && audioSampleRate !== 48000) throw new FfmpegError("Unsupported composition audio rate");
   const total = intro + args.bodySec + tail;
+  if (args.musicPlayback !== undefined && args.musicPlayback !== "repeat" && args.musicPlayback !== "once") {
+    throw new FfmpegError("Unsupported music playback mode");
+  }
+  if (args.musicPlayback === "once") {
+    const source = await probe(args.musicPath);
+    if (!source.hasAudio || !Number.isFinite(source.durationSec) || source.durationSec <= 0 || source.durationSec > total + 1 / audioSampleRate) {
+      throw new FfmpegError("Play-once music does not fit the final timeline; refusing to trim its ending");
+    }
+  }
   const fadeSt = Math.max(0, total - fade);
   const afadeSt = Math.max(0, total - afade);
   const introMs = Math.round(intro * 1000);
@@ -1839,7 +1850,7 @@ export async function composeWithIntro(args: {
   }
   inputs.push("-stream_loop", "-1", "-i", args.loopBodyPath);
   const bodyIdx = idx++;
-  inputs.push("-stream_loop", "-1", "-i", args.musicPath);
+  inputs.push(...(args.musicPlayback === "once" ? [] : ["-stream_loop", "-1"]), "-i", args.musicPath);
   const musicIdx = idx++;
   let narrIdx = -1;
   if (args.narrationPath) {
@@ -1921,7 +1932,7 @@ export async function composeWithIntro(args: {
     `if(lt(t,${dStart}),${introVol},` +
     `if(lt(t,${dEnd}),${introVol}+(${bodyVol}-${introVol})*(t-${dStart})/${duckRamp.toFixed(3)},${bodyVol}))`;
   aparts.push(
-    `[${musicIdx}:a]aresample=${audioSampleRate},atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
+    `[${musicIdx}:a]aresample=${audioSampleRate},${args.musicPlayback === "once" ? `apad=whole_dur=${total.toFixed(3)},` : ""}atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
   );
   if (includeBodyAudio) {
     // LTX's audio VAE creates in-world sound for the take. It begins with the

@@ -20,15 +20,15 @@ const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 const approvalApi = (api as unknown as { yue2Auditions: { getSourceApproval: never } }).yue2Auditions;
 
 /** Read-only source adoption. Never dispatches inference or copies private audio to a public bucket. */
-export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, crossfadeSec: number) {
+export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, crossfadeSec: number, playback: "repeat" | "once" = "repeat") {
   const candidate = YuE2MusicCandidateSchema.parse(ctx.store["yue2MusicCandidate"]);
   const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
   if (candidate.ownerId !== ctx.ownerId || candidate.channelId !== ctx.channelId || candidate.runId !== ctx.runId ||
     arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId || arrangement.runId !== ctx.runId ||
     candidate.arrangementFingerprint !== arrangement.fingerprint || candidate.technicalStatus !== "needs_audition" ||
-    arrangement.arrangement.playback !== "repeat" || !arrangement.reviewContext ||
-    !Number.isFinite(crossfadeSec) || crossfadeSec < 0.5 || crossfadeSec > 4) {
-    throw new Error("YuE2 assembly requires the exact unblocked, repeatable arrangement and candidate");
+    arrangement.arrangement.playback !== playback || !arrangement.reviewContext ||
+    (playback === "repeat" ? !Number.isFinite(crossfadeSec) || crossfadeSec < 0.5 || crossfadeSec > 4 : crossfadeSec !== 0)) {
+    throw new Error("YuE2 assembly requires the exact unblocked arrangement, playback mode and candidate");
   }
   const assertLease = ctx.assertRemoteChildExecutionLease
     ? () => ctx.assertRemoteChildExecutionLease!({ reason: "paid_wave" }) : ctx.assertInlinePaidExecutionLease;
@@ -72,21 +72,21 @@ export async function prepareApprovedYuE2AssemblySource(ctx: StageContext, cross
   const directory = await makeRunTempDir(ctx.runId);
   const cleanup = () => rm(directory, { recursive: true, force: true });
   try {
-  const inputPath = join(directory, "source.wav"), path = join(directory, "loop.wav");
+  const inputPath = join(directory, "source.wav"), path = playback === "once" ? inputPath : join(directory, "loop.wav");
   await writeFile(inputPath, bytes, { mode: 0o600 });
   await probeYuE2NativeWav(inputPath, { frames: candidate.nativeFrames }, bytes.byteLength);
-  await selfLoopAudio(inputPath, path, { outputFormat: "native_float_wav", crossfadeSec, log: ctx.log });
+  if (playback === "repeat") await selfLoopAudio(inputPath, path, { outputFormat: "native_float_wav", crossfadeSec, log: ctx.log });
   const loopBytes = await readFile(path);
   const preparedFrames = candidate.nativeFrames - Math.round(crossfadeSec * 48000);
   await probeYuE2NativeWav(path, { frames: preparedFrames }, loopBytes.byteLength);
   // Recheck after storage/CPU work: a changed owner decision cannot slip into encoding.
   await assertCurrent();
   return { path, cleanup, assertCurrent, evidence: {
-    version: "yue2-assembly-source/v1", approvalFingerprint: approval.fingerprint,
+    version: playback === "repeat" ? "yue2-assembly-source/v1" : "yue2-assembly-source/v2", approvalFingerprint: approval.fingerprint,
     candidateSha256: candidate.candidateSha256, arrangementFingerprint: arrangement.fingerprint,
     listeningAudioSha256: candidate.listeningAudioSha256, nativeFrames: candidate.nativeFrames,
     preparedAudioSha256: digest(loopBytes), preparedAudioBytes: loopBytes.byteLength, preparedFrames,
-    crossfadeSec, sampleRateHz: 48000, channels: 2, playback: "repeat", publishingApproved: false,
+    crossfadeSec, sampleRateHz: 48000, channels: 2, playback, publishingApproved: false,
   } };
   } catch (error) { await cleanup(); throw error; }
 }

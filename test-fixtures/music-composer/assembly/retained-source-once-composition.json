@@ -1,0 +1,13 @@
+{
+  "scope": "retained YuE2 audio through real play-once compositor; diagnostic picture, not visual or listening approval",
+  "networkDisabled": true,
+  "pictureWidth": 320,
+  "pictureHeight": 180,
+  "sourceSha256": "74183b3537381622fa9c83a031a9a51a7f9314763e3634c20eb2cdda8a307b93",
+  "sourceDurationSec": 142.438667,
+  "masterDurationSec": 145,
+  "audioTailPeak": 0,
+  "tailFrames": 24000,
+  "elapsedMs": 17315,
+  "sourceUnchanged": true
+}
