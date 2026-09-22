@@ -5631,6 +5631,10 @@ export const qaVisual: Block = {
     const rv = await validateRender({
       videoPath: video,
       durationSec: p.durationSec,
+      ...(visualReview.evidence.coverage.musicLoop ? { musicLoopReview: {
+        coverage: visualReview.evidence.coverage.musicLoop,
+        frameTimes: visualReview.evidence.frames.map(frame => frame.tSec),
+      } } : {}),
       introSec: Number(ctx.store["introSec"] ?? 0),
       tailSec: Number(ctx.params["tailSec"] ?? 3),
       introApplied: ctx.store["introApplied"] === true,
@@ -7368,6 +7372,7 @@ export const qaVisual: Block = {
         renderValidation: {
           verdict: rv.verdict,
           ran: rv.ran,
+          ...(rv.blackFrameEvidence ? { blackFrameEvidence: rv.blackFrameEvidence } : {}),
           temporalDynamism: rv.temporalDynamism,
           visualPacing: rv.visualPacing,
           finalMasterSha256: cinematicFinalMasterSha256,

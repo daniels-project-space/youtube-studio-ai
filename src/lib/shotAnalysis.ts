@@ -107,12 +107,12 @@ export interface ShotAnalysisProcessResult {
  * decode them. This keeps the detector receipt tied to the same master final
  * QA is inspecting, without buffering a long video in memory.
  */
-export async function sha256ShotAnalysisSource(videoPath: string): Promise<string> {
+export async function sha256ShotAnalysisSource(videoPath: string, options: { signal?: AbortSignal } = {}): Promise<string> {
   if (!videoPath.trim()) throw unavailable("videoPath is required");
   const hash = createHash("sha256");
   let byteLength = 0;
   try {
-    for await (const chunk of createReadStream(videoPath)) {
+    for await (const chunk of createReadStream(videoPath, { signal: options.signal })) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       hash.update(bytes);
       byteLength += bytes.byteLength;
