@@ -2,6 +2,13 @@
 
 ## Owner decision
 
+Latest test authorization (22 September): thumbnail tests are now permitted,
+including generation-path regressions, but Nano Banana Pro must not be used.
+This supersedes the earlier instruction to exclude thumbnail tests. Full
+regression runs may exercise mocked provider contracts with external networking
+disabled; this does not authorize a live Pro request, musical approval, or
+publishing. Resolve the remaining infrastructure/release work autonomously.
+
 On 19 September 2026 the owner made the working MVP the top priority for the
 whole product. Fix shared/core module blockers before broad UI redesign or
 isolated format refinements. This changes delivery order, not the quality bar

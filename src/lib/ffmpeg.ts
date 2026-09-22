@@ -12,7 +12,6 @@
 import { spawn } from "node:child_process";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { probeYuE2NativeWav } from "./yue2NativeAudio";
 import {
   planThumbnailText,
   type ThumbnailHeadlineLine,
@@ -2360,6 +2359,7 @@ export async function normalizeMusicLoopSource(
     !Number.isSafeInteger(frames) || frames <= 0) {
     throw new FfmpegError("loop mastering requires a separate output, native frame count and -23 to -12 LUFS target");
   }
+  const { probeYuE2NativeWav } = await import("./yue2NativeAudio");
   await probeYuE2NativeWav(inPath, { frames }, (await stat(inPath)).size);
   const measure = async (path: string) => {
     const { stderr } = await run(FFMPEG, [
