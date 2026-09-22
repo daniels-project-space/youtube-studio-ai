@@ -37,7 +37,7 @@ try {
     assert.deepEqual(result.pipeline.find(entry => entry.block === "composer_brief")?.params?.musicIntent, chosen.musicIntent);
     assert.equal(result.pipeline.filter(entry => entry.block === "music_arrangement_plan").length, 1);
     if (family === "music_loop") {
-      for (const [id, version] of [["music_program_plan", "2.0.0-yue2-intent"], ["scene_planner", "3.0.0-bound-visual-plan"],
+      for (const [id, version] of [["music_program_plan", "2.1.0-yue2-frozen-identity"], ["scene_planner", "3.0.0-bound-visual-plan"],
         ["keyframes", "3.1.0-yue2-reviewed-motion"], ["loop_clips", "2.1.0-yue2-reviewed-motion"]]) {
         assert.equal(modules.find(module => module.id === id)?.version, version);
       }
@@ -72,7 +72,7 @@ try {
   assert.throws(() => designPipeline({ family: "music_loop", yue2Music: selection, paramOverrides: { music: { trackCount: 2 } } }), /legacy music overrides/);
   const selected = selectYuE2Pipeline(baseline, selection);
   for (const optional of [false, true]) {
-    const disconnected = validatePipeline(selected, ["styleDNA"]);
+    const disconnected = validatePipeline(selected, ["styleDNA", "channelProfile"]);
     const index = disconnected.manifests.findIndex(manifest => manifest.id === "music_arrangement_plan");
     const mediator = disconnected.manifests[index];
     const { musicBrief, ...consumes } = mediator.consumes;
@@ -80,7 +80,7 @@ try {
       optionalConsumes: { ...mediator.optionalConsumes, ...(optional ? { musicBrief } : {}) } };
     assert.throws(() => compilePipeline(disconnected), /without declaring it/, "absent or optional crew handoff cannot qualify mediation");
   }
-  const optionalConsumer = validatePipeline(selected, ["styleDNA"]);
+  const optionalConsumer = validatePipeline(selected, ["styleDNA", "channelProfile"]);
   const consumerIndex = optionalConsumer.manifests.findIndex(manifest => manifest.id === "music");
   const consumer = optionalConsumer.manifests[consumerIndex];
   const { acceptedMusicArrangement, ...consumes } = consumer.consumes;
@@ -88,10 +88,10 @@ try {
     optionalConsumes: { ...consumer.optionalConsumes, acceptedMusicArrangement } };
   assert.throws(() => compilePipeline(optionalConsumer), /without declaring it/, "music must require the accepted handoff");
   const withoutMediator = selected.filter(entry => entry.block !== "music_arrangement_plan");
-  assert.throws(() => compilePipeline(validatePipeline(withoutMediator, ["styleDNA"])), /music\.arrangement\.accepted/);
+  assert.throws(() => compilePipeline(validatePipeline(withoutMediator, ["styleDNA", "channelProfile"])), /music\.arrangement\.accepted/);
   const reordered = [...withoutMediator, { block: "music_arrangement_plan" }];
-  assert.throws(() => compilePipeline(validatePipeline(reordered, ["styleDNA"])), /music\.arrangement\.accepted/);
+  assert.throws(() => compilePipeline(validatePipeline(reordered, ["styleDNA", "channelProfile"])), /music\.arrangement\.accepted/);
   const wrong = selected.map(entry => entry.block === "assemble" ? { block: "assemble", params: entry.params } : entry);
-  assert.throws(() => compilePipeline(validatePipeline(wrong, ["styleDNA"])), /musicUrl/, "ordinary assembly cannot consume a private candidate");
+  assert.throws(() => compilePipeline(validatePipeline(wrong, ["styleDNA", "channelProfile"])), /musicUrl/, "ordinary assembly cannot consume a private candidate");
   console.log("YUE2 PIPELINE SELECTION PASS: five real family/playback designs and compilations, exact versions and budgets, legacy parity, rejecting ownership/config cases; no provider calls");
 } finally { globalThis.fetch = originalFetch; }

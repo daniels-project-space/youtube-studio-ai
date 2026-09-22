@@ -1124,7 +1124,10 @@ export const topicSelect: Block = {
  * deterministic from the already-selected topic and frozen channel route; it
  * never calls a provider or grants render/publication authority.
  */
-export function createMusicProgramPlanBlock(sourceProvider?: "yue2"): Block {
+export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
+  dna: import("@/engine/creative/types").StyleDNA | null;
+  niche?: string;
+}): Block {
   return {
   id: "music_program_plan",
   consumes: ["topic"],
@@ -1148,7 +1151,9 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2"): Block {
     ) {
       throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
     }
-    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const identity = readIdentity?.(ctx);
+    const dna = identity ? identity.dna
+      : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const visual = getVisualBrief(ctx.store);
     const audio = getMusicBrief(ctx.store);
     const setting = [
@@ -1157,7 +1162,7 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2"): Block {
       visual?.footageQueries?.[0],
       ctx.params["setting"] as string | undefined,
       dna?.setting,
-      ctx.store["niche"] as string | undefined,
+      identity ? identity.niche : ctx.store["niche"] as string | undefined,
     ].map((value) => value?.toString().trim()).find(Boolean);
     const audioDirection = [
       `Original instrumental program for “${topic}”.`,

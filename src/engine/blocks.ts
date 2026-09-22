@@ -70,6 +70,7 @@ export function registerAllBlocks(): void {
   const boundKeyframes = createBoundKeyframesManifest(getManifest("keyframes")!, boundScenePlanner);
   registerManifestVersion(boundKeyframes);
   registerManifestVersion(createYuE2ProgramManifest(getManifest("music_program_plan")!));
+  registerManifestVersion(createYuE2ProgramManifest(getManifest("music_program_plan")!, true));
   registerManifestVersion(createYuE2KeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
   registerManifestVersion(createYuE2LoopVisualManifest(getManifest("loop_clips")!));
   registerManifestVersion(createReviewedMotionKeyframesManifest(getManifest("keyframes")!, boundScenePlanner));

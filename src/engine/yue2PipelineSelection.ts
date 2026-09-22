@@ -53,7 +53,7 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
     }
     const provider = source[programIndex].params?.provider;
     if (provider !== undefined && provider !== "yue2") throw new Error("YuE2 selection conflicts with the program's explicit provider");
-    versions.set(programIndex, "2.0.0-yue2-intent");
+    versions.set(programIndex, "2.1.0-yue2-frozen-identity");
     versions.set(sceneIndex, "3.0.0-bound-visual-plan");
     versions.set(keyframeIndex, "3.1.0-yue2-reviewed-motion");
     versions.set(clipsIndex, "2.1.0-yue2-reviewed-motion");

@@ -5,6 +5,8 @@ import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine
 import { OriginalMusicProgramPlanSchema, originalMusicProgramPlanFingerprint } from "@/engine/originalMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { stageReuseHash } from "@/engine/stageReuse";
+import { buildChannelProfile } from "@/engine/channelProfile";
+import type { StyleDNA } from "@/engine/creative/types";
 import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
@@ -43,6 +45,8 @@ async function main() {
     const { registerAllBlocks } = require("@/engine/blocks");
     const { getManifest, allManifests } = require("@/engine/registry");
     const { designPipeline } = require("@/engine/designer");
+    const { runPipeline } = require("@/engine/runner") as typeof import("@/engine/runner");
+    const { validatePipeline } = require("@/engine/validate") as typeof import("@/engine/validate");
     registerAllBlocks();
     const brief = createChannelProgramBrief({ family: "music_loop", nicheKey: "lofi", locale: "en",
       concept: "Quiet original instrumental sessions with calm seamless loop visuals." });
@@ -61,6 +65,50 @@ async function main() {
     assert.match(sealed.visual.motionIntent, /Camera completely static/);
     assert.match(sealed.audio.direction, /piano/);
     assert.notEqual(legacy.musicProgramPlan.audio.providerPreference, "yue2");
+    const frozenProgram = getManifest("music_program_plan", "2.1.0-yue2-frozen-identity");
+    assert.ok(frozenProgram.consumes.channelProfile);
+    const staleStore = { ...ctx.store, styleDNA: { setting: "STALE CITY", audio: { genre: "STALE ELECTRO",
+      instrumentation: ["STALE SYNTH"] }, motionVocabulary: ["STALE CAMERA SWEEP"] }, niche: "STALE NICHE" };
+    for (const [instrument, setting, movement] of [
+      ["felt piano", "coastal lighthouse room", "Distant water ripples"],
+      ["bowed glass", "quiet woodland cabin", "Leaves moving gently"],
+    ]) {
+      const profile = buildChannelProfile({ row: { _id: ctx.channelId!, name: setting, slug: "frozen-fixture",
+        status: "paused", template: "music_loop", budget: 1, identity: { niche: setting } },
+        archetype: "music_loop", pipeline: [{ block: "music_program_plan", version: frozenProgram.version }],
+        styleDNA: { setting, audio: { genre: "ambient", instrumentation: [instrument] },
+          motionVocabulary: [movement] } as StyleDNA });
+      const store = { ...staleStore, channelProfile: profile };
+      const before = structuredClone(store);
+      const previous = await program.execute({ ...ctx, store });
+      assert.match(JSON.stringify(previous), /STALE/, "fixture reproduces the prior loose-identity behavior");
+      const patch = await frozenProgram.execute({ ...ctx, store });
+      const executed = await runPipeline(validatePipeline(profile.pipeline, Object.keys(store)), {
+        ownerId: ctx.ownerId, channelId: ctx.channelId!, runId: ctx.runId, keyPrefix: ctx.keyPrefix,
+        budgetUsd: 0, seedStore: store, defaultRetries: 0,
+        sink: { upsert: async () => {} },
+      });
+      assert.equal(executed.ok, true, executed.error);
+      assert.deepEqual(executed.store.musicProgramPlan, patch.musicProgramPlan,
+        "actual runner must honor the declared frozen-profile input and identical sealed output");
+      const current = OriginalMusicProgramPlanSchema.parse(patch.musicProgramPlan);
+      assert.ok(current.audio.direction.includes(instrument));
+      assert.ok(current.visual.setting.includes(setting));
+      assert.ok(current.visual.motionIntent.includes(movement));
+      assert.doesNotMatch(JSON.stringify(current), /STALE/);
+      assert.deepEqual(store, before, "frozen identity projection must not mutate input seeds");
+      const withoutDna = { ...profile, styleDNA: undefined, identity: {} };
+      const absent = await frozenProgram.execute({ ...ctx, store: { ...staleStore, channelProfile: withoutDna } });
+      assert.doesNotMatch(JSON.stringify(absent), /STALE|felt piano|bowed glass/,
+        "absent canonical fields must not revive stale loose identity");
+      await assert.rejects(() => frozenProgram.execute({ ...ctx, store: { ...staleStore,
+        channelProfile: { ...profile, id: "another-channel" } } }), /current channel/);
+    }
+    for (const channelProfile of [undefined, null, { id: ctx.channelId }]) {
+      await assert.rejects(() => frozenProgram.execute({ ...ctx, store: { ...staleStore, channelProfile } }));
+    }
+    const oldWithProfile = await program.execute({ ...ctx, store: { ...ctx.store, channelProfile: { id: "malformed" } } });
+    assert.deepEqual(oldWithProfile, planned, "previously frozen v2 programs retain exact behavior");
     const wrongVersion = { ...sealed, version: "original-music-program-plan/v1" as const };
     assert.throws(() => OriginalMusicProgramPlanSchema.parse({ ...wrongVersion, fingerprint: originalMusicProgramPlanFingerprint(wrongVersion) }), /version does not bind/);
     await assert.rejects(() => program.execute({ ...ctx, params: { provider: "suno" } }), /conflicts/);

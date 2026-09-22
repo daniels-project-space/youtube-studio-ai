@@ -47,6 +47,15 @@ try {
   }
   const children = contentLaneForFamily("children_learning")!;
   assert.deepEqual(channelPipelineValidationSeedKeys(children), ["contentLane", ...childrenShowBibleSeedKeys(children)]);
+  const music = contentLaneForFamily("music_loop")!;
+  assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
+    { block: "music_program_plan", version: "2.1.0-yue2-frozen-identity" },
+  ]), ["contentLane", "channelProfile"]);
+  for (const version of [undefined, "2.0.0-yue2-intent"]) {
+    assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
+      { block: "music_program_plan", ...(version ? { version } : {}) },
+    ]), ["contentLane"], "historical programs do not gain a new required seed");
+  }
   assert.equal(calls, 0);
   console.log("Shared route seed projection passes: three prior failures, ordinary compilation parity, missing/malformed/foreign seeds and preserved children packets");
 } finally {

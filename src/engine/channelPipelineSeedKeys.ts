@@ -14,6 +14,9 @@ export function channelPipelineValidationSeedKeys(
   pipeline: readonly PipelineEntry[] = [],
 ): string[] {
   const keys = ["contentLane", ...childrenShowBibleSeedKeys(contentLane)];
+  if (pipeline.some(entry => entry.block === "music_program_plan" && entry.version === "2.1.0-yue2-frozen-identity")) {
+    keys.push("channelProfile");
+  }
   if (pipeline.some(entry => entry.block === "scene_planner" &&
     ["2.0.0-grounded-deterministic", "3.0.0-bound-visual-plan"].includes(entry.version ?? ""))) {
     keys.push("styleDNA");

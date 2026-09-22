@@ -1,4 +1,5 @@
 import { artifactContract } from "@/engine/artifactSchemas";
+import { ChannelProfileSchema, parseFrozenChannelProfile } from "@/engine/channelProfile";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
@@ -8,6 +9,7 @@ import { createLoopClipsBlock, createMusicProgramPlanBlock } from "./lofiBlocks"
 import { createBoundKeyframesManifest } from "./boundLoopVisuals";
 
 export const YUE2_PROGRAM_VERSION = "2.0.0-yue2-intent";
+export const YUE2_FROZEN_PROGRAM_VERSION = "2.1.0-yue2-frozen-identity";
 export const YUE2_KEYFRAMES_VERSION = "3.0.0-yue2-reviewed";
 export const YUE2_LOOP_CLIPS_VERSION = "2.0.0-yue2-reviewed";
 
@@ -23,10 +25,18 @@ export async function admitYuE2LoopSource(ctx: StageContext) {
   return source;
 }
 
-export function createYuE2ProgramManifest(legacy: ModuleManifest): ModuleManifest {
+export function createYuE2ProgramManifest(legacy: ModuleManifest, frozenIdentity = false): ModuleManifest {
   if (legacy.id !== "music_program_plan") throw new Error("YuE2 program requires music_program_plan");
-  const block = createMusicProgramPlanBlock("yue2");
-  return { ...legacy, version: YUE2_PROGRAM_VERSION, block, execute: block.run,
+  const block = createMusicProgramPlanBlock("yue2", frozenIdentity ? ctx => {
+    const profile = parseFrozenChannelProfile(ctx.store["channelProfile"]);
+    if (!profile || profile.id !== ctx.channelId) throw new Error("YuE2 program requires the current channel's frozen profile");
+    return { dna: profile.styleDNA ?? null, niche: profile.identity?.niche };
+  } : undefined);
+  return { ...legacy, version: frozenIdentity ? YUE2_FROZEN_PROGRAM_VERSION : YUE2_PROGRAM_VERSION,
+    consumes: { ...legacy.consumes, ...(frozenIdentity ? {
+      channelProfile: { ...artifactContract("channelProfile"), schema: ChannelProfileSchema },
+    } : {}) },
+    block, execute: block.run,
     certification: { status: "contract", evidence: "Explicit YuE2 program intent; no legacy provider selection or automatic qualification." } };
 }
 
