@@ -53,10 +53,13 @@ export function planYuE2OpenRelayAdmission(input: {
 /** Only GETs; provider keys and raw provider error bodies never enter results. */
 export async function inspectYuE2OpenRelayAdmission(options: {
   apiKey: string; expectedOrganizationId: string; maximumHourlyCents: number; fetchImpl?: typeof fetch;
+  /** Inspect this retained Studio VM instead of planning a new allocation. */
+  existingVmId?: string;
 }) {
   if (options.apiKey.trim().length < 32) throw new Error("OpenRelay key unavailable");
   const organizationId = z.string().uuid().parse(options.expectedOrganizationId);
   integer.min(1).parse(options.maximumHourlyCents);
+  const existingVmId = z.string().uuid().optional().parse(options.existingVmId);
   const fetchImpl = options.fetchImpl ?? fetch;
   async function read(path: string): Promise<unknown> {
     let response: Response;
@@ -75,6 +78,37 @@ export async function inspectYuE2OpenRelayAdmission(options: {
   // Scope labels are advisory: cluster-scoped keys can currently read VM APIs.
   // Let the authenticated endpoints enforce access instead of guessing from
   // labels. Successful reads never establish write authority or spend consent.
+  if (existingVmId !== undefined) {
+    // A retained disk is tied to its VM/node. Global free capacity and the
+    // default provisioning name cannot establish whether that VM can resume.
+    const vm = z.object({
+      id: z.literal(existingVmId), organizationId: z.literal(organizationId),
+      name: z.string().min(1), status: z.enum(["stopped", "running"]),
+      gpuModelId: z.string().uuid(), gpuCount: z.literal(1),
+      gpuInfo: z.object({ name: z.literal("RTX 3090"), vramGb: z.literal(24) }),
+      guestMemMb: integer.min(YUE2_OPENRELAY_SHAPE.guestMemMb),
+      diskSizeGb: integer.min(YUE2_OPENRELAY_SHAPE.diskSizeGb),
+      public: z.literal(false), tier: z.literal(YUE2_OPENRELAY_SHAPE.tier),
+    }).parse(await read(`/v1/vms/${existingVmId}/detail`));
+    const burn = z.object({ vmId: z.literal(existingVmId), gpuCount: z.literal(1),
+      pricePerHourCents: integer.min(1).max(options.maximumHourlyCents), diskBilled: z.literal(false),
+    }).parse(await read(`/v1/vms/${existingVmId}/burn`));
+    return {
+      schema: "youtube-studio-yue2-openrelay-admission/v1" as const,
+      admissionMode: "retained_vm" as const,
+      gpuModelName: vm.gpuInfo.name, vramGb: vm.gpuInfo.vramGb,
+      shape: { name: vm.name, gpuModelId: vm.gpuModelId, gpuCount: vm.gpuCount,
+        guestMemMb: vm.guestMemMb, diskSizeGb: vm.diskSizeGb, public: vm.public,
+        tier: vm.tier, allowFallback: false as const },
+      pricePerHourCents: burn.pricePerHourCents, compatibleOfferCount: null,
+      minimumAvailableGuestRamBytes: 24 * 2 ** 30,
+      storagePriceVerified: true as const, authorizedToCreate: false as const,
+      authorizedToRestart: false as const, restartCapacityVerified: false as const,
+      placementVerified: false as const, gpuQualified: false as const,
+      organizationId, reportedScopes: identity.scopes, readAccessVerified: true as const,
+      observedAt: new Date().toISOString(), existingVm: { id: vm.id, name: vm.name, status: vm.status },
+    };
+  }
   const liveAvailability = await read("/v1/gpu-availability");
   const pricing = await read("/v1/pricing");
   const plan = planYuE2OpenRelayAdmission({ availability: liveAvailability, pricing,
@@ -95,6 +129,6 @@ export async function inspectYuE2OpenRelayAdmission(options: {
   }
   const existing = vms.filter(vm => vm.name === plan.shape.name);
   if (existing.length > 1) throw new Error("Multiple Studio YuE2 VMs require reconciliation");
-  return { ...plan, organizationId, reportedScopes: identity.scopes, readAccessVerified: true as const,
+  return { ...plan, admissionMode: "new_vm" as const, organizationId, reportedScopes: identity.scopes, readAccessVerified: true as const,
     observedAt: new Date().toISOString(), existingVm: existing[0] ?? null };
 }

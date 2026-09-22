@@ -46,8 +46,57 @@ async function main() {
       : path === "/v1/gpu-availability" ? input.availability : path === "/v1/pricing" ? pricing : { items: [] });
   };
   const report = await inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org, maximumHourlyCents: 18, fetchImpl });
+  assert.equal(report.admissionMode, "new_vm");
   assert.equal(report.existingVm, null); assert.ok(!JSON.stringify(report).includes(key));
   assert.deepEqual(calls, ["/v1/whoami", "/v1/gpu-availability", "/v1/pricing", `/v1/orgs/${org}/vms`]);
+  const vmId = "29e245a2-2e1a-431e-b5b3-654cf0ba1587";
+  const retainedVm = { id: vmId, organizationId: org, name: "yt-yue2-3090-credential-validation", status: "stopped",
+    gpuModelId: id, gpuCount: 1, gpuInfo: { name: "RTX 3090", vramGb: 24 }, guestMemMb: 28672,
+    diskSizeGb: 60, public: false, tier: "community" };
+  const burn = { vmId, gpuCount: 1, pricePerHourCents: 18, diskBilled: false };
+  const retainedCalls: string[] = [];
+  const retainedFetch = (detail: unknown = retainedVm, cost: unknown = burn): typeof fetch => async (url, init) => {
+    assert.equal(init?.method, "GET");
+    const path = new URL(String(url)).pathname; retainedCalls.push(path);
+    if (path === "/v1/whoami") return Response.json({ organizationId: org, scopes: ["vms:read", "vms:write"] });
+    if (path === `/v1/vms/${vmId}/detail`) return Response.json(detail);
+    if (path === `/v1/vms/${vmId}/burn`) return Response.json(cost);
+    throw new Error("Retained VM inspection must not depend on new-placement capacity or inventory names");
+  };
+  const retainedOptions = { apiKey: key, expectedOrganizationId: org, maximumHourlyCents: 18, existingVmId: vmId };
+  const retained = await inspectYuE2OpenRelayAdmission({ ...retainedOptions, fetchImpl: retainedFetch() });
+  assert.equal(retained.admissionMode, "retained_vm");
+  if (retained.admissionMode !== "retained_vm") throw Error("Expected retained mode");
+  assert.deepEqual(retained.existingVm, { id: vmId, name: retainedVm.name, status: "stopped" });
+  assert.equal(retained.authorizedToRestart, false, "reported write scope is not verified restart permission");
+  assert.equal(retained.restartCapacityVerified, false);
+  assert.equal(retained.authorizedToCreate, false);
+  assert.equal(retained.storagePriceVerified, true);
+  assert.equal(retained.compatibleOfferCount, null);
+  assert.deepEqual(retainedCalls, ["/v1/whoami", `/v1/vms/${vmId}/detail`, `/v1/vms/${vmId}/burn`]);
+  for (const patch of [{ id }, { organizationId: id }, { status: "terminated" }, { status: "failed" },
+    { gpuCount: 2 }, { gpuInfo: { name: "RTX 4090", vramGb: 24 } }, { gpuInfo: { name: "RTX 3090", vramGb: 12 } },
+    { guestMemMb: 24576 }, { diskSizeGb: 59 }, { public: true }, { tier: "enterprise" }]) {
+    await assert.rejects(() => inspectYuE2OpenRelayAdmission({ ...retainedOptions,
+      fetchImpl: retainedFetch({ ...retainedVm, ...patch }) }));
+  }
+  for (const patch of [{ vmId: id }, { gpuCount: 2 }, { pricePerHourCents: 19 }, { pricePerHourCents: 0 }, { diskBilled: true }]) {
+    await assert.rejects(() => inspectYuE2OpenRelayAdmission({ ...retainedOptions,
+      fetchImpl: retainedFetch(retainedVm, { ...burn, ...patch }) }));
+  }
+  let invalidIdCalls = 0;
+  await assert.rejects(() => inspectYuE2OpenRelayAdmission({ ...retainedOptions, existingVmId: "../other",
+    fetchImpl: async () => { invalidIdCalls++; throw Error("Must validate ID before HTTP"); } }));
+  assert.equal(invalidIdCalls, 0);
+  for (const deniedPath of [`/v1/vms/${vmId}/detail`, `/v1/vms/${vmId}/burn`]) {
+    const goodFetch = retainedFetch();
+    await assert.rejects(() => inspectYuE2OpenRelayAdmission({ ...retainedOptions,
+      fetchImpl: async (url, init) => new URL(String(url)).pathname === deniedPath
+        ? new Response(key, { status: 403 }) : goodFetch(url, init) }), error => {
+      assert.ok(error instanceof Error && error.message.includes("HTTP 403") && !error.message.includes(key));
+      return true;
+    });
+  }
   for (const scopes of [["clusters:read", "clusters:write"], []]) {
     const observed: string[] = [];
     const actualAccess: typeof fetch = async (url, init) => {
