@@ -23,6 +23,7 @@ import {
   HeadObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
+  AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -253,11 +254,8 @@ export async function headObjectMetadata(
 }
 
 /**
- * Upload a file to R2 by STREAMING it from disk — the bytes never sit in app
- * memory as one Buffer. `putObject(key, await readBytes(path))` buffered the
- * whole render (300MB+ meditation finals) and OOM-killed the worker mid-upload
- * (TASK_PROCESS_SIGTERM). Uses a plain read stream + ContentLength (from stat),
- * so it needs no extra dependency and stays a single streamed PUT.
+ * Stream small files and atomic claims directly; use bounded multipart uploads
+ * for large media. R2's single-PUT limit cannot accommodate long-form masters.
  */
 export async function putObjectFromFile(
   key: string,
@@ -266,17 +264,71 @@ export async function putObjectFromFile(
 ): Promise<string> {
   const { createReadStream } = await import("node:fs");
   const { stat } = await import("node:fs/promises");
-  const size = (await stat(filePath)).size;
-  const command = new PutObjectCommand({
-    Bucket: getBucket(opts.bucket),
+  const file = await stat(filePath);
+  const size = file.size;
+  const singlePutLimit = 5 * 1024 ** 3;
+  if (!file.isFile() || !Number.isSafeInteger(size) || size < 0 || size > 5 * 1024 ** 4 - singlePutLimit) {
+    throw new Error("R2 upload requires a regular file within the object-size limit");
+  }
+  if (opts.ifNoneMatch && size > singlePutLimit) {
+    throw new Error("R2 multipart create-only writes are not qualified; refusing to weaken IfNoneMatch");
+  }
+  const Bucket = getBucket(opts.bucket);
+  const client = getR2Client();
+  const body = createReadStream(filePath);
+  const params: PutObjectCommandInput = {
+    Bucket,
     Key: key,
-    Body: createReadStream(filePath),
+    Body: body,
     ContentLength: size,
     ContentType: opts.contentType,
     Metadata: opts.metadata,
     IfNoneMatch: opts.ifNoneMatch,
-  });
-  await getR2Client().send(command);
+  };
+  try {
+    if (size <= 64 * 1024 ** 2 || opts.ifNoneMatch) {
+      await client.send(new PutObjectCommand(params));
+    } else {
+      const { Upload } = await import("@aws-sdk/lib-storage");
+      // Keep the shared client's configuration, but isolate this upload's
+      // fail-fast read cancellation from unrelated concurrent requests.
+      const uploadClient = Object.create(client) as typeof client;
+      let requestFailure: Error | undefined;
+      uploadClient.send = (async (command: Parameters<typeof client.send>[0]) => {
+        if (requestFailure) throw requestFailure;
+        try { return await client.send(command); }
+        catch (error) {
+          requestFailure = error instanceof Error ? error : new Error("R2 multipart request failed");
+          body.destroy(requestFailure);
+          throw error;
+        }
+      }) as typeof client.send;
+      const upload = new Upload({
+        client: uploadClient, params, queueSize: 2,
+        partSize: Math.max(32 * 1024 ** 2, Math.ceil(size / 10_000)),
+        // Own cleanup also for completion failures, not only failed parts.
+        leavePartsOnError: true,
+      });
+      try {
+        await upload.done();
+      } catch (error) {
+        if (upload.uploadId) {
+          try {
+            await client.send(new AbortMultipartUploadCommand({ Bucket: params.Bucket, Key: key, UploadId: upload.uploadId }));
+          } catch (cleanupError) {
+            // Completion may have succeeded before its response was lost.
+            // Never delete a completed object or retry the whole upload here.
+            if ((cleanupError as { name?: string })?.name !== "NoSuchUpload") {
+              throw new AggregateError([error, cleanupError], "R2 multipart upload failed and temporary-part cleanup was not confirmed");
+            }
+          }
+        }
+        throw error;
+      }
+    }
+  } finally {
+    body.destroy();
+  }
   return key;
 }
 
