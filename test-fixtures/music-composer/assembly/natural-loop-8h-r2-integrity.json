@@ -1,0 +1,24 @@
+{
+  "schema": "isolated-r2-multipart-qualification-v1",
+  "dateUtc": "2026-09-22",
+  "implementationCommit": "ffc88e9c",
+  "scope": "actual retained eight-hour master; shared upload helper and full remote streamed byte-integrity verification; not production pipeline approval",
+  "bucket": "youtube-studio-ai-private",
+  "key": "operator/qualification/multipart-20260922/ea633df1-f9ca-4f83-aa2b-92e2c0c90212/timing-master.mp4",
+  "localMaster": "/var/lib/youtube-studio-render/operator/composed-score-assembly-20260921-budget-28800-1080/timing-master.mp4",
+  "byteLength": 12983194060,
+  "sha256": "c413635329f976ab5b3d652e5708766883f4caa00aab231e39f6f2dc622e7d8d",
+  "uploadElapsedMs": 261650,
+  "uploadAndVerificationElapsedMs": 382284,
+  "remoteFullHashMatchesLocalEvidence": true,
+  "head": {
+    "contentLength": 12983194060,
+    "contentType": "video/mp4",
+    "etag": "\"3b6e90ffb7f74cd9e6cf9b8ea43e0d2b-387\"",
+    "metadata": { "purpose": "isolated-multipart-qualification" }
+  },
+  "retainedPrivately": true,
+  "processExitCode": 0,
+  "productionPromoted": false,
+  "ownerMusicApprovalEstablished": false
+}

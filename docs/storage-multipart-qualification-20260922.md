@@ -36,8 +36,35 @@ two-worker bound, part/completion/create/missing-ETag failures, cleanup failure,
 lost completion, conditional writes and invalid input. No thumbnails ran.
 
 TypeScript, focused ESLint and the optimized Next.js production build passed.
-Graphify's code graph was refreshed. Live private R2 transfer qualification is
-in progress; unit/SDK fixtures alone do not establish provider compatibility.
+Graphify's code graph was refreshed.
+
+## Live private R2 result
+
+On 2026-09-22 UTC, the actual retained eight-hour master was uploaded through
+`putObjectFromFile`, then downloaded through `getObjectIntegrity` as a full
+streamed SHA-256 check. The process exited successfully, with exact equality:
+
+- Bytes: `12983194060`.
+- SHA-256: `c413635329f976ab5b3d652e5708766883f4caa00aab231e39f6f2dc622e7d8d`.
+- Upload acknowledgement: 261,650 ms from invocation start.
+- Upload plus full remote hash verification: 382,284 ms.
+- Independent HEAD: matching length, `video/mp4`, and expected purpose metadata.
+- Multipart ETag: `3b6e90ffb7f74cd9e6cf9b8ea43e0d2b-387`; this is not used as a
+  substitute for SHA-256.
+
+Bucket: `youtube-studio-ai-private`.
+Retained isolated test key:
+`operator/qualification/multipart-20260922/ea633df1-f9ca-4f83-aa2b-92e2c0c90212/timing-master.mp4`.
+This newly generated UUID key is not referenced by a live channel or run. The
+object is retained as qualification evidence and consumes about 13 GB of private
+storage. No existing object was deleted, no GPU started and no music generated.
+Credentials were injected into the trusted test process from the Cloudflare vault
+namespace; no credential value was written to source or the evidence receipt.
+
+Machine-readable result:
+`test-fixtures/music-composer/assembly/natural-loop-8h-r2-integrity.json`.
+This validates the shared helper against real R2 using the existing local master,
+not an end-to-end deployed Trigger run or production rollout.
 
 ## Limits
 
