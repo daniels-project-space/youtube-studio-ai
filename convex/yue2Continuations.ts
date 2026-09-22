@@ -104,8 +104,9 @@ export async function assertYuE2Continuation(ctx: Ctx, run: Doc<"runs">, resume?
   if (!approval || approval.fingerprint !== row.approvalFingerprint || !["pending", "queued", "consumed"].includes(row.state)) {
     throw new Error("YuE2 continuation lacks its current explicit owner approval");
   }
-  if (row.state === "queued" && (!Number.isSafeInteger(row.queueDeadlineAt) || row.queueDeadlineAt! <= Date.now())) {
-    throw new Error("YuE2 queued delivery expired before execution claim");
+  if ((row.state === "queued" || row.state === "pending" && row.queueDeadlineAt !== undefined) &&
+    (!Number.isSafeInteger(row.queueDeadlineAt) || row.queueDeadlineAt! <= Date.now())) {
+    throw new Error("YuE2 delivery expired before execution claim");
   }
   if (resume && (resume.checkpointId !== row._id || resume.checkpointFingerprint !== row.fingerprint ||
     resume.approvalFingerprint !== approval.fingerprint || resume.invocationSha256 !== row.basis.invocationSha256)) {
@@ -172,6 +173,9 @@ export async function prepareYuE2Dispatch(ctx: MutationCtx, args: { ownerId: str
       const run = await ctx.db.get(row.runId);
       if (!run || run.status !== "awaiting_music_audition" || row.attempts >= 2) throw new Error("YuE2 continuation is not dispatchable");
       await assertYuE2Continuation(ctx, run);
+      // Bound uncertain submissions well inside the explicit 24-hour Trigger
+      // idempotency TTL. Re-preparation never extends this recovery window.
+      if (row.queueDeadlineAt === undefined) await ctx.db.patch(row._id, { queueDeadlineAt: now + RUN_QUEUE_LEASE_MS });
       pending.push({ channelId: row.channelId, runId: row.runId, attempt: row.attempts + 1,
         invocationSha256: row.basis.invocationSha256 as string, ...verifiedWorkerDeploymentFields(run),
         yue2AuditionResume: { checkpointId: row._id, checkpointFingerprint: row.fingerprint,
@@ -185,14 +189,20 @@ export async function prepareYuE2Dispatch(ctx: MutationCtx, args: { ownerId: str
 
 export const prepareDispatch = mutation({ args: { ownerId: v.string() }, handler: prepareYuE2Dispatch });
 
-export const recordDispatch = mutation({ args: { ...scope, resume: yue2ResumeValidator, attempt: v.number(), triggerRunId: v.optional(v.string()) }, handler: async (ctx, args) => {
+export const recordDispatch = mutation({ args: { ...scope, resume: yue2ResumeValidator, attempt: v.number(), triggerRunId: v.optional(v.string()), ambiguous: v.optional(v.boolean()) }, handler: async (ctx, args) => {
   await requireStudioServiceIdentity(ctx, args.ownerId, "YuE2 continuation acknowledgement");
+  if (args.ambiguous && args.triggerRunId !== undefined) throw new Error("YuE2 acknowledgement cannot be both accepted and uncertain");
   const run = await ctx.db.get(args.runId);
   if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId) throw new Error("YuE2 continuation scope mismatch");
   const row = await assertYuE2Continuation(ctx, run, args.resume);
   if (row.state === "consumed" || row.state === "queued") return;
   if (args.attempt !== row.attempts + 1 || args.attempt > 2) throw new Error("YuE2 delivery attempt mismatch");
   const now = Date.now();
+  if (args.ambiguous) {
+    await ctx.db.patch(row._id, { updatedAt: now, queueDeadlineAt: row.queueDeadlineAt ?? now + RUN_QUEUE_LEASE_MS,
+      error: "YuE2 continuation enqueue uncertain; recover the same delivery identity" });
+    return;
+  }
   await ctx.db.patch(row._id, { state: args.triggerRunId ? "queued" : args.attempt >= 2 ? "blocked" : "pending",
     attempts: args.attempt, updatedAt: now, triggerRunId: args.triggerRunId,
     queueDeadlineAt: args.triggerRunId ? now + RUN_QUEUE_LEASE_MS : undefined,

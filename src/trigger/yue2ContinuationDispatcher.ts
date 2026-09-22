@@ -23,6 +23,7 @@ export async function dispatchPendingYuE2Continuations(input: {
     const resume = payload.yue2AuditionResume;
     const acknowledgement = { ownerId: input.ownerId, channelId: payload.channelId, runId: payload.runId, resume, attempt };
     let triggerRunId: string;
+    let submitted = false;
     try {
       if (workerDeployment) {
         if (!input.dispatchContext) throw new Error("YuE2 continuation requires verified dispatch context");
@@ -30,14 +31,22 @@ export async function dispatchPendingYuE2Continuations(input: {
       }
       const seed = ["yue2-audition-resume/v1", payload.runId, resume.checkpointId, resume.checkpointFingerprint,
         resume.approvalFingerprint, payload.invocationSha256, attempt].join(":");
+      const idempotencyKey = await idempotencyKeys.create(seed, { scope: "global" });
+      submitted = true;
       const result = await tasks.trigger("run-pipeline", payload, {
         ...pipelineWorkerDeploymentDispatchOptions(workerDeployment), concurrencyKey: payload.channelId,
-        idempotencyKey: await idempotencyKeys.create(seed, { scope: "global" }),
+        idempotencyKey, idempotencyKeyTTL: "24h",
       });
+      if (typeof result?.id !== "string" || !result.id.trim()) throw new Error("Missing Trigger delivery identity");
       triggerRunId = result.id;
-    } catch {
-      await input.convex.mutation(continuationApi.recordDispatch, acknowledgement as never);
-      input.log(`YuE2 continuation enqueue failed for ${payload.runId}`);
+    } catch (error) {
+      const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+      const rejected = typeof status === "number" && [400, 401, 403, 404, 422].includes(status);
+      const ambiguous = submitted && !rejected;
+      await input.convex.mutation(continuationApi.recordDispatch, {
+        ...acknowledgement, ...(ambiguous ? { ambiguous: true } : {}),
+      } as never);
+      input.log(`YuE2 continuation enqueue ${ambiguous ? "uncertain" : "failed"} for ${payload.runId}`);
       return;
     }
     // A failed acknowledgement retries the same idempotency key, not a new take.

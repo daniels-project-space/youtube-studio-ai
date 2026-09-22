@@ -193,11 +193,57 @@ test("actual dispatcher preserves worker binding and idempotency through a lost 
   }
 });
 
+test("accepted Trigger delivery with lost or malformed responses preserves one key and a bounded pending window", async () => {
+  for (const response of ["lost", "malformed"] as const) {
+  const f = fixture(); await f.park(); await f.review();
+  const deliveries: Row[] = [];
+  const compiled = ts.transpileModule(readFileSync("src/trigger/yue2ContinuationDispatcher.ts", "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loaded = { exports: {} as { dispatchPendingYuE2Continuations: (input: unknown) => Promise<unknown> } };
+  new Function("require", "module", "exports", compiled)((name: string) => {
+    if (name === "@trigger.dev/sdk") return { idempotencyKeys: { create: async (seed: string) => seed },
+      tasks: { trigger: async (_id: string, _payload: Row, options: Row) => {
+        deliveries.push(options);
+        if (deliveries.length < 3) {
+          if (response === "malformed") return { id: "" };
+          throw new Error("accepted remotely; response lost");
+        }
+        return { id: "same-trigger-run" };
+      } } };
+    if (name.endsWith("/_generated/api")) return { api };
+    if (name.endsWith("/pipelineWorkerDeployment")) return deployment;
+    throw new Error(`Unexpected dependency ${name}`);
+  }, loaded, loaded.exports);
+  const input = { ownerId, log: () => {}, dispatchContext: { projectId: "proj_original", environmentId: "env_original" },
+    convex: { mutation: (ref: Parameters<typeof getFunctionName>[0], args: Row) =>
+      f.call(continuations[getFunctionName(ref).split(":")[1] as keyof typeof continuations], args) } };
+  await loaded.exports.dispatchPendingYuE2Continuations(input);
+  const deadline = f.tables.yue2Continuations[0].queueDeadlineAt;
+  assert.equal(f.tables.yue2Continuations[0].attempts, 0, "uncertain enqueue must not consume a delivery identity");
+  assert.ok(Number.isFinite(deadline));
+  await loaded.exports.dispatchPendingYuE2Continuations(input);
+  assert.equal(f.tables.yue2Continuations[0].queueDeadlineAt, deadline, "retries must not extend the ambiguity window");
+  await loaded.exports.dispatchPendingYuE2Continuations(input);
+  assert.equal(deliveries.length, 3);
+  assert.deepEqual(deliveries[0], deliveries[1]); assert.deepEqual(deliveries[1], deliveries[2]);
+  assert.equal(deliveries[0].idempotencyKeyTTL, "24h");
+  assert.equal(f.tables.yue2Continuations[0].state, "queued");
+  assert.equal(f.tables.yue2Continuations[0].attempts, 1);
+
+  const expired = fixture(); await expired.park(); await expired.review(); const [receipt] = await expired.pending();
+  expired.tables.yue2Continuations[0].queueDeadlineAt = Date.now() - 1;
+  assert.equal((await expired.claim(receipt.yue2AuditionResume)).kind, "music_audition_ineligible");
+  assert.deepEqual(await expired.pending(), []);
+  assert.equal(expired.tables.yue2Continuations[0].state, "blocked");
+  }
+});
+
 test("YuE2 delivery isolates acknowledgement failures without changing attempts or skipping later channels", async () => {
   const f = fixture(); await f.park(); await f.review();
   const [basis] = await f.pending() as unknown as YuE2ContinuationReceipt[];
   const receipts = Array.from({ length: 25 }, (_, index) => ({ ...structuredClone(basis), channelId: `channel-${index}`, runId: `run-${index}` }));
-  for (const failure of ["ack", "enqueue-and-ack", "enqueue", "foreign-worker", "none"]) {
+  for (const failure of ["ack", "enqueue-and-ack", "enqueue", "enqueue-rejected", "foreign-worker", "none"]) {
     const deliveries: Row[] = [];
     const acknowledgements: Row[] = [];
     const logs: string[] = [];
@@ -214,11 +260,12 @@ test("YuE2 delivery isolates acknowledgement failures without changing attempts 
           const { attempt, workerDeployment, ...expected } = receipt;
           assert.deepEqual(payload, expected);
           assert.deepEqual(options, { ...deployment.pipelineWorkerDeploymentDispatchOptions(workerDeployment),
-            concurrencyKey: receipt.channelId, idempotencyKey: ["yue2-audition-resume/v1", receipt.runId,
+            concurrencyKey: receipt.channelId, idempotencyKeyTTL: "24h", idempotencyKey: ["yue2-audition-resume/v1", receipt.runId,
               receipt.yue2AuditionResume.checkpointId, receipt.yue2AuditionResume.checkpointFingerprint,
               receipt.yue2AuditionResume.approvalFingerprint, receipt.invocationSha256, attempt].join(":") });
           deliveries.push(payload);
-          if (payload.runId === "run-0" && failure.startsWith("enqueue")) throw new Error("secret-provider-sentinel");
+          if (payload.runId === "run-0" && failure.startsWith("enqueue")) throw Object.assign(new Error("secret-provider-sentinel"),
+            failure === "enqueue-rejected" ? { status: 403 } : {});
           return { id: `trigger-${payload.runId}` };
         } },
       };
@@ -246,6 +293,7 @@ test("YuE2 delivery isolates acknowledgement failures without changing attempts 
     for (const [index, acknowledgement] of acknowledgements.entries()) {
       assert.deepEqual(acknowledgement, { ownerId, channelId: receipts[index].channelId, runId: receipts[index].runId,
         resume: receipts[index].yue2AuditionResume, attempt: receipts[index].attempt,
+        ...(index === 0 && failure.startsWith("enqueue") && failure !== "enqueue-rejected" ? { ambiguous: true } : {}),
         ...(index === 0 && (failure.startsWith("enqueue") || failure === "foreign-worker") ? {} : { triggerRunId: `trigger-run-${index}` }) });
     }
     assert.doesNotMatch(logs.join("\n"), /secret-/);
