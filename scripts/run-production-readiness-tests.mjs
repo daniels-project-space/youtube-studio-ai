@@ -60,6 +60,10 @@ const DIRECT_TEST_CONCURRENCY = Number.isSafeInteger(requestedConcurrency)
 function executeTest(test) {
   return new Promise((resolve) => {
     const label = relative(root, test);
+    // This fixture performs two independently bounded 120s renders plus the
+    // full-decode comparison scans. Keep its aggregate budget above that sum.
+    const timeoutMs = test === join(sourceRoot, "lib", "__tests__", "repeatedMusicBlackGate.test.ts")
+      ? 360_000 : DIRECT_TEST_TIMEOUT_MS;
     const child = spawn(tsx, [test], {
       cwd: root,
       env: process.env,
@@ -75,7 +79,7 @@ function executeTest(test) {
       child.kill("SIGTERM");
       forceKill = setTimeout(() => child.kill("SIGKILL"), 10_000);
       forceKill.unref();
-    }, DIRECT_TEST_TIMEOUT_MS);
+    }, timeoutMs);
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk) => { stdout += chunk; });
@@ -84,7 +88,7 @@ function executeTest(test) {
     child.on("close", (status, signal) => {
       clearTimeout(timer);
       if (forceKill) clearTimeout(forceKill);
-      resolve({ label, status, signal, stdout, stderr, spawnError, timedOut });
+      resolve({ label, status, signal, stdout, stderr, spawnError, timedOut, timeoutMs });
     });
   });
 }
@@ -123,7 +127,7 @@ for (const result of results) {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.timedOut) {
-    console.error(`Timed out after ${DIRECT_TEST_TIMEOUT_MS / 1_000}s: ${result.label}`);
+    console.error(`Timed out after ${result.timeoutMs / 1_000}s: ${result.label}`);
     failures.push(result.label);
     continue;
   }
