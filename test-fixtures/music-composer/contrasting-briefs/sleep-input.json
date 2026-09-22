@@ -1,0 +1,42 @@
+{
+  "ownerId": "isolated-operator-evaluation",
+  "channelId": "sleep-drone-evaluation",
+  "runId": "sleep-composer-evaluation-20260922-01",
+  "provenance": "New synthetic evaluation brief authored for shared-module qualification, not an export or mutation of a real channel. Tests static, unmetered sleep identity against the actual composer and native parser. No manual score or generated-audio quality approval.",
+  "family": "sleep",
+  "musicIntent": {
+    "role": "meditation_bed",
+    "requestedDurationSec": 30,
+    "form": "continuous",
+    "ending": "natural_cadence",
+    "playback": "repeat"
+  },
+  "seed": 42,
+  "budgetUsd": 0.1,
+  "seedStore": {
+    "topic": "Still air in a dark, quiet room",
+    "channelName": "Still Room - evaluation only",
+    "channelSlug": "still-room-evaluation",
+    "niche": "Nonverbal sleep and meditation",
+    "persona": "A calm, unobtrusive companion. Never performs for attention, tells a story, or introduces a dramatic event.",
+    "styleGrammar": "One stable soft instrumental texture. No audible pulse, drums, plucked attacks, vocals, choir, lead melody, build, drop, sudden register changes or cinematic climax. A notation grid may exist only for the renderer; it must not become audible rhythm.",
+    "showBible": {
+      "positioning": "Quiet sleep support, not a showcase composition.",
+      "vibe": "Steady, warm, low contrast",
+      "iconicMotif": "Stillness",
+      "worksInSpace": ["Long sustained instrumental tones", "Stable low energy"],
+      "avoidInSpace": ["Attention-grabbing musical development", "Human or synthesized voices", "Percussion"],
+      "activeCrew": ["composer"],
+      "composerDoctrine": "The four or more review intervals are not new musical sections: hold the same timbre, register and energy. End with a gentle natural resolution, not an abrupt cut or a peak. Assembly owns repeats and final video length.",
+      "refreshedAt": 0
+    },
+    "styleDNA": {
+      "audio": {
+        "genre": "unmetered instrumental ambient drone",
+        "instrumentation": ["soft sustained bowed strings", "low warm instrumental pad"],
+        "textures": ["continuous", "no sharp attacks"],
+        "moodArc": "flat low energy; no build, drop or climax"
+      }
+    }
+  }
+}

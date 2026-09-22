@@ -29,15 +29,48 @@ const inputSchema = z.object({
   "frozen topic and channel grounding are required; live channel fallback is forbidden"),
 }).strict();
 
+const scoreVoiceReview = z.object({
+  noteCount: z.number().int().nonnegative(), pitches: z.array(z.number().int().min(0).max(127)),
+  chordSymbols: z.array(z.string()), notatedSoundSeconds: z.number().finite().nonnegative(),
+  notatedRestSeconds: z.number().finite().nonnegative(), endingRestSeconds: z.number().finite().nonnegative(),
+}).strict();
+export const NativeScoreReviewSchema = z.object({
+  version: z.literal("native-music-score-review/v1"), scope: z.literal("notation_only"),
+  audioQualityApproved: z.literal(false), scoreSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  durationSeconds: z.number().finite().positive(), bpm: z.number().int().positive(),
+  voices: z.object({ Vocal: scoreVoiceReview, Ins: scoreVoiceReview }).strict(),
+}).strict();
+export type NativeScoreReview = z.infer<typeof NativeScoreReviewSchema>;
+
+const nativeScoreReviewProgram = `import hashlib,json,sys
+from fractions import Fraction
+from music_runtime.config import validate_job
+from music_runtime.upstream_abc import parse_abc
+job=validate_job(json.load(sys.stdin))
+score=parse_abc(job["abc"])
+voices={}
+for name,voice in score.voices.items():
+    sounding=sum((note[2] for note in voice.notes), Fraction(0))
+    end=max((note[0]+note[2] for note in voice.notes), default=Fraction(0))
+    seconds=lambda value: float(value*60/score.bpm)
+    voices[name]={"noteCount":len(voice.notes), "pitches":sorted({note[1] for note in voice.notes}),
+        "chordSymbols":list(dict.fromkeys(chord[1] for chord in voice.chords)),
+        "notatedSoundSeconds":seconds(sounding), "notatedRestSeconds":seconds(voice.time-sounding),
+        "endingRestSeconds":seconds(voice.time-end)}
+print(json.dumps({"version":"native-music-score-review/v1", "scope":"notation_only", "audioQualityApproved":False,
+    "scoreSha256":hashlib.sha256(job["abc"].encode()).hexdigest(),
+    "durationSeconds":float(score.voices["Ins"].time*60/score.bpm), "bpm":score.bpm, "voices":voices}))`;
+
 export function validateLocalYuE2Score(runtime: string, job?: unknown) {
   if (!isAbsolute(runtime)) throw new Error("runtime path must be absolute");
   const result = spawnSync(join(runtime, ".venv-test/bin/python"), ["-c", job === undefined
     ? "from music_runtime.config import validate_job; print('ready')"
-    : "import json,sys; from music_runtime.config import validate_job; validate_job(json.load(sys.stdin)); print('valid')"], {
+    : nativeScoreReviewProgram], {
     input: job === undefined ? undefined : JSON.stringify(job), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
     env: { NODE_ENV: "test", PATH: process.env.PATH, PYTHONPATH: join(runtime, "src"), PYTHONDONTWRITEBYTECODE: "1" },
   });
   if (result.error || result.status !== 0) throw new Error(`native score validation failed: ${result.error?.message ?? result.stderr}`);
+  return job === undefined ? undefined : NativeScoreReviewSchema.parse(JSON.parse(result.stdout));
 }
 
 /** Isolated operator evaluation, never a production run lease or channel mutation. */
@@ -87,13 +120,15 @@ export async function evaluateMusicComposer(value: unknown, options: { output?: 
     });
     await save("arrangement.json", request.acceptedArrangement);
     await save("request.json", request);
-    validateLocalYuE2Score(options.runtime, request.job);
+    const scoreReview = validateLocalYuE2Score(options.runtime, request.job)!;
+    await save("score-review.json", scoreReview);
     const measured = usage.snapshot();
     if (measured.calls !== 1 || measured.unpricedCalls || measured.costUsd > input.budgetUsd) {
       throw new Error("composer evaluation requires exactly one fully priced call within budget");
     }
     const result = { status: "score_validated", inputFingerprint, reservationUsd, usage: measured,
-      jobId: request.job.job_id, gpuCalls: 0, productionApproved: false, musicalQualityApproved: false };
+      jobId: request.job.job_id, scoreReviewSha256: sha256Hex(canonicalJson(scoreReview)),
+      gpuCalls: 0, productionApproved: false, musicalQualityApproved: false };
     await save("result.json", result);
     return result;
   } catch (error) {

@@ -1,0 +1,87 @@
+{
+  "version": "studio-yue2-arrangement-evaluation/v1",
+  "programFingerprint": "b85ef39ffd10e712416c103597d536f1b09dc6edd3ebde14c9e294079054d48b",
+  "manifestSha256": "0fdc439206f6274696e11f7fdaa7dc05f73061cc61779dbab1ab777fe54cab97",
+  "acceptedArrangement": {
+    "version": "accepted-music-arrangement/v1",
+    "ownerId": "isolated-operator-evaluation",
+    "channelId": "sleep-drone-evaluation",
+    "runId": "sleep-composer-evaluation-20260922-01",
+    "topic": "Still air in a dark, quiet room",
+    "sourceBriefFingerprint": "c85e384d4e350d8c7297d3a3dbd36a5b97ea18b3c33fd4a613abe3641b08a300",
+    "arrangement": {
+      "role": "meditation_bed",
+      "requestedDurationSec": 30,
+      "form": "continuous",
+      "ending": "natural_cadence",
+      "playback": "repeat",
+      "direction": "Unmetered instrumental ambient drone for quiet sleep support. Soft sustained bowed strings merge seamlessly into a low warm instrumental pad with zero pulse, no plucked attacks, and completely stable low energy. Sustained motionless harmonic texture evoking still air in a quiet dark room, concluding with a gentle natural resolution.",
+      "sections": [
+        {
+          "id": "interval-1-stillness",
+          "label": "Still Air Immersion",
+          "startFraction": 0,
+          "endFraction": 0.25,
+          "energy": 0.15,
+          "instruction": "Establish the motionless ambient drone with soft sustained bowed strings and a warm low pad. No audible rhythm or sharp attacks."
+        },
+        {
+          "id": "interval-2-depth",
+          "label": "Sustained Warmth",
+          "startFraction": 0.25,
+          "endFraction": 0.5,
+          "energy": 0.15,
+          "instruction": "Hold identical low energy and texture across this review interval, maintaining a flat and calm bed without melodic progression."
+        },
+        {
+          "id": "interval-3-quietude",
+          "label": "Dark Quiet Space",
+          "startFraction": 0.5,
+          "endFraction": 0.75,
+          "energy": 0.15,
+          "instruction": "Continue the unmetered sustained pad and string warmth with zero build or dynamic change."
+        },
+        {
+          "id": "interval-4-resolution",
+          "label": "Gentle Cadence",
+          "startFraction": 0.75,
+          "endFraction": 1,
+          "energy": 0.12,
+          "instruction": "Gently settle the sustained drone into a soft, natural acoustic cadence without abrupt cuts or volume peaks."
+        }
+      ]
+    },
+    "musicIntent": {
+      "role": "meditation_bed",
+      "requestedDurationSec": 30,
+      "form": "continuous",
+      "ending": "natural_cadence",
+      "playback": "repeat"
+    },
+    "reviewContext": {
+      "version": "music-review-context/v1",
+      "topic": "Still air in a dark, quiet room",
+      "family": "sleep",
+      "channelName": "Still Room - evaluation only",
+      "promptContext": "Channel: Still Room - evaluation only (Nonverbal sleep and meditation).\nPositioning: Quiet sleep support, not a showcase composition.\nVibe: Steady, warm, low contrast\nIconic motif: Stillness\nWORKS in this space: Long sustained instrumental tones; Stable low energy\nNEVER do (fails here): Attention-grabbing musical development; Human or synthesized voices; Percussion\nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Still air in a dark, quiet room\".\n\nContent family: sleep.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"meditation_bed\",\"requestedDurationSec\":30,\"form\":\"continuous\",\"ending\":\"natural_cadence\",\"playback\":\"repeat\"}\n\nChannel persona: A calm, unobtrusive companion. Never performs for attention, tells a story, or introduces a dramatic event.\n\nChannel style grammar: One stable soft instrumental texture. No audible pulse, drums, plucked attacks, vocals, choir, lead melody, build, drop, sudden register changes or cinematic climax. A notation grid may exist only for the renderer; it must not become audible rhythm.\n\nYour doctrine: The four or more review intervals are not new musical sections: hold the same timbre, register and energy. End with a gentle natural resolution, not an abrupt cut or a peak. Assembly owns repeats and final video length.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): {\"genre\":\"unmetered instrumental ambient drone\",\"instrumentation\":[\"soft sustained bowed strings\",\"low warm instrumental pad\"],\"textures\":[\"continuous\",\"no sharp attacks\"],\"moodArc\":\"flat low energy; no build, drop or climax\"}\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+      "fingerprint": "5e27d52be0124e84f730397b705901f912cb586e3fa96b9b5805d7e1dd972561"
+    },
+    "symbolicScore": "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=32\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:C\n% interval-1-stillness\nV: Vocal\n\"C\" z32 |\nV: Ins\nC32 |\n% interval-2-depth\nV: Vocal\n\"Csus2\" z32 |\nV: Ins\nD32 |\n% interval-3-quietude\nV: Vocal\n\"Am7\" z32 |\nV: Ins\nC32 |\n% interval-4-resolution\nV: Vocal\n\"C\" z32 |\nV: Ins\nC32 |",
+    "fingerprint": "b85ef39ffd10e712416c103597d536f1b09dc6edd3ebde14c9e294079054d48b"
+  },
+  "job": {
+    "schema_version": 2,
+    "job_id": "yue2-eval-7671784d601a13ce2db6e44c43e71a991cea707248a3941add8ebd0edb10ec99",
+    "style": "Role: meditation_bed.\nRequested duration: 30 seconds.\nForm: continuous.\nEnding: natural_cadence.\nPlayback: repeat.\nTechnical restriction: instrumental only; no vocals or lyrics.\nDirection:\nUnmetered instrumental ambient drone for quiet sleep support. Soft sustained bowed strings merge seamlessly into a low warm instrumental pad with zero pulse, no plucked attacks, and completely stable low energy. Sustained motionless harmonic texture evoking still air in a quiet dark room, concluding with a gentle natural resolution.\nSections (fractions of the requested duration):\nSection interval-1-stillness: Still Air Immersion; startFraction 0; endFraction 0.25; energy 0.15.\nEstablish the motionless ambient drone with soft sustained bowed strings and a warm low pad. No audible rhythm or sharp attacks.\nSection interval-2-depth: Sustained Warmth; startFraction 0.25; endFraction 0.5; energy 0.15.\nHold identical low energy and texture across this review interval, maintaining a flat and calm bed without melodic progression.\nSection interval-3-quietude: Dark Quiet Space; startFraction 0.5; endFraction 0.75; energy 0.15.\nContinue the unmetered sustained pad and string warmth with zero build or dynamic change.\nSection interval-4-resolution: Gentle Cadence; startFraction 0.75; endFraction 1; energy 0.12.\nGently settle the sustained drone into a soft, natural acoustic cadence without abrupt cuts or volume peaks.",
+    "lyrics": "",
+    "seed": 42,
+    "license": {
+      "scope": "personal_creator",
+      "acknowledged": true,
+      "company_commercial_authorized": false
+    },
+    "requested_duration_sec": 30,
+    "source_duration_policy": "natural_loop",
+    "abc": "X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=32\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:C\n% interval-1-stillness\nV: Vocal\n\"C\" z32 |\nV: Ins\nC32 |\n% interval-2-depth\nV: Vocal\n\"Csus2\" z32 |\nV: Ins\nD32 |\n% interval-3-quietude\nV: Vocal\n\"Am7\" z32 |\nV: Ins\nC32 |\n% interval-4-resolution\nV: Vocal\n\"C\" z32 |\nV: Ins\nC32 |"
+  }
+}

@@ -309,6 +309,9 @@ async function main() {
   assert.equal(calls.at(-1)!.maxTokens, 12000);
   assert.match(calls.at(-1)!.prompt, /No vocals or lyrics/);
   assert.match(calls.at(-1)!.prompt, /symbolicScore.*complete original YuE2 native ABC/);
+  assert.match(calls.at(-1)!.prompt, /ties across barlines to avoid unrequested reattacks/);
+  assert.match(calls.at(-1)!.prompt, /write actual z rests in the instrumental line/);
+  assert.match(calls.at(-1)!.prompt, /trailing silence, end the score with explicit rests/);
   assert.ok(calls.at(-1)!.prompt.includes(seedStore.persona));
   assert.ok(calls.at(-1)!.prompt.includes(seedStore.styleGrammar));
   const scoredAccepted = AcceptedMusicArrangementSchema.parse(scoredResult.store.acceptedMusicArrangement);

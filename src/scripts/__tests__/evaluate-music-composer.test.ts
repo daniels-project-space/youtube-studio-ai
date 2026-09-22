@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
+import type { NativeScoreReview } from "../evaluate-music-composer";
 
 async function main() {
   const directory = await mkdtemp(join(tmpdir(), "music-composer-eval-"));
@@ -50,12 +53,58 @@ async function main() {
         if (name === "before") assert.throws(() => validateLocalYuE2Score(process.env.YUE2_TEST_RUNTIME!, retained.job), /blank T: header/);
         else validateLocalYuE2Score(process.env.YUE2_TEST_RUNTIME!, retained.job);
       }
+      for (const [name, seconds, notes, rests, endingRest] of [
+        ["sleep-01", 30, 4, 0, 0], ["sleep-02", 30, 1, 1.5, 1.5],
+        ["narration-01", 60, 23, 0, 0], ["narration-02", 60, 27, 23, 6],
+      ] as const) {
+        const root = new URL(`../../../test-fixtures/music-composer/contrasting-briefs/${name}/`, import.meta.url);
+        const retained = validateYuE2EvaluationRequest(JSON.parse(await readFile(new URL("request.json", root), "utf8")));
+        const review: NativeScoreReview = validateLocalYuE2Score(process.env.YUE2_TEST_RUNTIME!, retained.job)!;
+        assert.deepEqual(review, JSON.parse(await readFile(new URL("score-review.json", root), "utf8")));
+        assert.ok("acceptedArrangement" in retained);
+        assert.equal(review.scoreSha256, sha256Hex(retained.acceptedArrangement.symbolicScore!));
+        assert.equal(review.durationSeconds, seconds);
+        assert.equal(review.voices.Ins.noteCount, notes);
+        assert.equal(review.voices.Ins.notatedRestSeconds, rests);
+        assert.equal(review.voices.Ins.endingRestSeconds, endingRest);
+        assert.equal(review.voices.Vocal.noteCount, 0);
+        assert.equal(review.audioQualityApproved, false);
+        const result = JSON.parse(await readFile(new URL("result.json", root), "utf8"));
+        assert.equal(result.jobId, retained.job.job_id);
+        assert.equal(result.usage.calls, 1);
+        assert.equal(result.usage.unpricedCalls, 0);
+        assert.ok(result.usage.costUsd < 0.1);
+        assert.equal(result.gpuCalls, 0);
+        assert.equal(result.musicalQualityApproved, false);
+      }
+      for (const family of ["sleep", "narration"]) {
+        const root = new URL("../../../test-fixtures/music-composer/contrasting-briefs/", import.meta.url);
+        const before = JSON.parse(await readFile(new URL(`${family}-01/attempt.json`, root), "utf8"));
+        const after = JSON.parse(await readFile(new URL(`${family}-02/attempt.json`, root), "utf8"));
+        assert.deepEqual(before.input, after.input, "before/after keeps the exact same brief and source controls");
+        assert.notEqual(before.implementation["../engine/creative/crew.ts"], after.implementation["../engine/creative/crew.ts"]);
+        const { "../engine/creative/crew.ts": _beforeCrew, ...beforeRest } = before.implementation;
+        const { "../engine/creative/crew.ts": _afterCrew, ...afterRest } = after.implementation;
+        assert.ok(_beforeCrew && _afterCrew);
+        assert.deepEqual(beforeRest, afterRest, "only the prompt implementation changed during the live comparison");
+        assert.equal(before.model, after.model);
+        assert.equal(before.reservationUsd, after.reservationUsd);
+      }
       const options = { submit: true, output: join(directory, "valid"), runtime: process.env.YUE2_TEST_RUNTIME };
       const result = await evaluateMusicComposer(input, options);
       assert.equal(result.status, "score_validated"); assert.equal(calls, 1);
       const request = JSON.parse(await readFile(join(options.output, "request.json"), "utf8"));
       assert.equal(request.job.abc, score);
       assert.equal(request.acceptedArrangement.symbolicScore, score);
+      const review = JSON.parse(await readFile(join(options.output, "score-review.json"), "utf8"));
+      assert.equal(review.audioQualityApproved, false);
+      assert.equal(review.scope, "notation_only");
+      assert.equal(review.durationSeconds, 64);
+      assert.equal("scoreReviewSha256" in result && result.scoreReviewSha256, sha256Hex(canonicalJson(review)));
+      assert.deepEqual(review.voices.Ins, { noteCount: 16, pitches: [72], chordSymbols: [],
+        notatedSoundSeconds: 64, notatedRestSeconds: 0, endingRestSeconds: 0 });
+      assert.deepEqual(review.voices.Vocal, { noteCount: 0, pitches: [], chordSymbols: [],
+        notatedSoundSeconds: 0, notatedRestSeconds: 64, endingRestSeconds: 64 });
       await assert.rejects(evaluateMusicComposer(input, options), /EEXIST/);
       await assert.rejects(evaluateMusicComposer({ ...input, seed: 43 }, options), /EEXIST/);
       assert.equal(calls, 1, "same or changed input cannot replay a claimed evaluation");

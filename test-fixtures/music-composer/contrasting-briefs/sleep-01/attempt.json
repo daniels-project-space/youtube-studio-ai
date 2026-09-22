@@ -1,0 +1,74 @@
+{
+  "version": "music-composer-evaluation/v1",
+  "input": {
+    "ownerId": "isolated-operator-evaluation",
+    "channelId": "sleep-drone-evaluation",
+    "runId": "sleep-composer-evaluation-20260922-01",
+    "provenance": "New synthetic evaluation brief authored for shared-module qualification, not an export or mutation of a real channel. Tests static, unmetered sleep identity against the actual composer and native parser. No manual score or generated-audio quality approval.",
+    "family": "sleep",
+    "musicIntent": {
+      "role": "meditation_bed",
+      "requestedDurationSec": 30,
+      "form": "continuous",
+      "ending": "natural_cadence",
+      "playback": "repeat"
+    },
+    "seed": 42,
+    "budgetUsd": 0.1,
+    "seedStore": {
+      "topic": "Still air in a dark, quiet room",
+      "channelName": "Still Room - evaluation only",
+      "channelSlug": "still-room-evaluation",
+      "niche": "Nonverbal sleep and meditation",
+      "persona": "A calm, unobtrusive companion. Never performs for attention, tells a story, or introduces a dramatic event.",
+      "styleGrammar": "One stable soft instrumental texture. No audible pulse, drums, plucked attacks, vocals, choir, lead melody, build, drop, sudden register changes or cinematic climax. A notation grid may exist only for the renderer; it must not become audible rhythm.",
+      "showBible": {
+        "positioning": "Quiet sleep support, not a showcase composition.",
+        "vibe": "Steady, warm, low contrast",
+        "iconicMotif": "Stillness",
+        "worksInSpace": [
+          "Long sustained instrumental tones",
+          "Stable low energy"
+        ],
+        "avoidInSpace": [
+          "Attention-grabbing musical development",
+          "Human or synthesized voices",
+          "Percussion"
+        ],
+        "activeCrew": [
+          "composer"
+        ],
+        "composerDoctrine": "The four or more review intervals are not new musical sections: hold the same timbre, register and energy. End with a gentle natural resolution, not an abrupt cut or a peak. Assembly owns repeats and final video length.",
+        "refreshedAt": 0
+      },
+      "styleDNA": {
+        "audio": {
+          "genre": "unmetered instrumental ambient drone",
+          "instrumentation": [
+            "soft sustained bowed strings",
+            "low warm instrumental pad"
+          ],
+          "textures": [
+            "continuous",
+            "no sharp attacks"
+          ],
+          "moodArc": "flat low energy; no build, drop or climax"
+        }
+      }
+    }
+  },
+  "implementation": {
+    "./evaluate-music-composer.ts": "35c7bab8b1ed4da7453b31645ab3db102f500aeeccb530303d31dedfdec36fc9",
+    "../engine/creative/crew.ts": "851b889e0903e6f58c3f0ec7e7ef1b6655da91de020ca4199a76bb4140ec3a9f",
+    "../trigger/blocks/musicArrangementBlocks.ts": "2a76445db1ba9ed2656cb09133eb16a89fad6b3b854021c2a005cef16602761a",
+    "../trigger/blocks/crewBlocks.ts": "a430034d98268c5ecce9343178c7f3242f80d92f0dc4cbe97b5f1c56f57bd886",
+    "../engine/acceptedMusicArrangement.ts": "302da39f281f882aa5ed0eef385f34885f42f80db964f82dc2769591c04b7577",
+    "../agents/mastra.ts": "b1af78007bd6ebb79e525ecf8d7240e5196758b8f1458d595850ff1405e8ec29",
+    "../lib/arrangementComposerBudget.ts": "d13cc140a43286b30b2ae2b8278d3e2f71e8ef36373747783b94b6ee2a2abba8"
+  },
+  "composerVersion": "3.0.0-yue2-score",
+  "model": "google/gemini-3.7-flash",
+  "reservationUsd": 0.09492,
+  "inputFingerprint": "55d322d460224639614a94b09d36e39bb90eed8aff0103d72b1c422312532a4b",
+  "startedAt": "2026-09-22T03:12:46.821Z"
+}

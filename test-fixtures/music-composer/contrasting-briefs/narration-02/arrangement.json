@@ -1,0 +1,75 @@
+{
+  "version": "accepted-music-arrangement/v1",
+  "ownerId": "isolated-operator-evaluation",
+  "channelId": "narration-bed-evaluation",
+  "runId": "narration-composer-evaluation-20260922-01",
+  "topic": "Why an old railway station still matters to its neighborhood",
+  "sourceBriefFingerprint": "1efde404688ac81b995fdaed2146cf74310c02c45c1366517daa156d734eafe8",
+  "arrangement": {
+    "role": "narration_bed",
+    "requestedDurationSec": 60,
+    "form": "through_composed",
+    "ending": "natural_cadence",
+    "playback": "once",
+    "direction": "Sparse, understated documentary chamber bed featuring muted felt piano and gentle sustained low string accompaniment. Intimate acoustic room ambiance with wide spaces between soft melodic gestures, supporting a reflective local history narrative without competing with speech or indulging in sentimentality.",
+    "sections": [
+      {
+        "id": "quiet-entry",
+        "label": "Quiet Entry",
+        "startFraction": 0,
+        "endFraction": 0.2,
+        "energy": 0.25,
+        "instruction": "Gentle felt piano introduces isolated, thoughtful tones over a subtle, warm low string anchor."
+      },
+      {
+        "id": "harmonic-inquiry",
+        "label": "Harmonic Inquiry",
+        "startFraction": 0.2,
+        "endFraction": 0.45,
+        "energy": 0.32,
+        "instruction": "Slight shift to minor warmth; piano poses an understated observational phrase with ample room for narration."
+      },
+      {
+        "id": "understated-reflection",
+        "label": "Understated Reflection",
+        "startFraction": 0.45,
+        "endFraction": 0.7,
+        "energy": 0.3,
+        "instruction": "Steady, restrained progression offering a calm, inquisitive space between sparse piano notes."
+      },
+      {
+        "id": "settling-cadence",
+        "label": "Settling Cadence",
+        "startFraction": 0.7,
+        "endFraction": 0.9,
+        "energy": 0.22,
+        "instruction": "Harmonic motion eases into an unhurried, natural resolution back to the root chord."
+      },
+      {
+        "id": "quiet-decay",
+        "label": "Quiet Decay",
+        "startFraction": 0.9,
+        "endFraction": 1,
+        "energy": 0.15,
+        "instruction": "Piano and strings softly dissipate into natural room silence, concluding with stillness."
+      }
+    ]
+  },
+  "musicIntent": {
+    "role": "narration_bed",
+    "requestedDurationSec": 60,
+    "form": "through_composed",
+    "ending": "natural_cadence",
+    "playback": "once"
+  },
+  "reviewContext": {
+    "version": "music-review-context/v1",
+    "topic": "Why an old railway station still matters to its neighborhood",
+    "family": "narrated_stock",
+    "channelName": "Ordinary Places - evaluation only",
+    "promptContext": "Channel: Ordinary Places - evaluation only (Observational local history).\nPositioning: Patient local history grounded in ordinary places.\nVibe: Reflective, lightly inquisitive, unsentimental\nIconic motif: An everyday detail noticed carefully\nWORKS in this space: Sparse instrumental phrasing; Room for spoken words; Restrained harmonic movement\nNEVER do (fails here): Nostalgic manipulation; Trailer tension; Lead lines that compete with narration\nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Why an old railway station still matters to its neighborhood\".\n\nContent family: narrated_stock.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"narration_bed\",\"requestedDurationSec\":60,\"form\":\"through_composed\",\"ending\":\"natural_cadence\",\"playback\":\"once\"}\n\nChannel persona: A precise, curious local historian who values ordinary detail. Reflective but never nostalgic on command or sensational.\n\nChannel style grammar: Intimate documentary understatement. A spoken voice carries the story; music leaves space between sparse gestures and never supplies a competing hook. No trailer drums, choir, vocals, triumphal swell or sentimental crescendo.\n\nYour doctrine: Write a finite supporting bed: sparse entry, small harmonic question, understated answer, quiet resolved ending. No looping instruction and no repeated dramatic arc. Preserve space for speech throughout.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): {\"genre\":\"minimal instrumental documentary chamber music\",\"instrumentation\":[\"muted felt piano\",\"soft low strings\"],\"textures\":[\"dry intimate room\",\"sparse\",\"restrained\"],\"moodArc\":\"quiet curiosity followed by a modest resolution\",\"loopable\":false}\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+    "fingerprint": "876de9d0c14d961b3232c7d8541362caa959a68ec436948ce63c9c85a73c6fa3"
+  },
+  "symbolicScore": "X:1\nT:\nM:3/4\nL:1/32\nQ:1/4=60\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:G\n% quiet-entry\nV: Vocal\n\"G\" z24 | \"G\" z24 | \"Cmaj7\" z24 | \"Cmaj7\" z24 |\nV: Ins\nz8 D8 G8 | B16 z8 | z8 E8 G8 | B16 z8 |\n% harmonic-inquiry\nV: Vocal\n\"Em7\" z24 | \"Em7\" z24 | \"Am7\" z24 |\nV: Ins\nz8 G8 B8 | d16 z8 | z8 C8 E8 |\nV: Vocal\n\"Am7\" z24 | \"D7sus4\" z24 |\nV: Ins\nA16 z8 | z8 G8 A8 |\n% understated-reflection\nV: Vocal\n\"D\" z24 | \"G\" z24 | \"Bm7\" z24 |\nV: Ins\nF16 z8 | z8 D8 G8 | F16 z8 |\nV: Vocal\n\"Cmaj7\" z24 | \"Cmaj7\" z24 |\nV: Ins\nz8 E8 G8 | e16 z8 |\n% settling-cadence\nV: Vocal\n\"Am7\" z24 | \"D\" z24 | \"G\" z24 | \"G\" z24 |\nV: Ins\nz8 C8 E8 | D16 z8 | z8 B8 d8 | G24 |\n% quiet-decay\nV: Vocal\n\"G\" z24 | z24 |\nV: Ins\nz24 | z24 |",
+  "fingerprint": "24347984ccf8ebf500d09ecef765f0721ea3705b7e4169bdb935911afaaea318"
+}

@@ -97,6 +97,14 @@ validation; rejection preserves the failure and known usage. A successful result
 requires one priced call within budget and still grants no quality/production
 approval. This local operator authority is not a production execution lease.
 
+Successful evaluations also save `score-review.json`, whose digest is bound in
+the result. The native parser measures note counts (ties merged), distinct
+pitches/chord symbols, notated sound/rest durations and ending rests. These are
+notation facts, not audible silence, instrumentation, speech masking or musical
+quality. No universal quality threshold or automatic approval is inferred.
+The retained [contrasting-brief comparison](../test-fixtures/music-composer/contrasting-briefs/README.md)
+checks these signals against two distinct briefs using real composer responses.
+
 The real retained Seaside before/after comparison is in
 `test-fixtures/music-composer/README.md`: first score rejected, corrected prompt
 produced an unchanged native-valid score; two reported text charges total

@@ -1,0 +1,67 @@
+{
+  "version": "accepted-music-arrangement/v1",
+  "ownerId": "isolated-operator-evaluation",
+  "channelId": "sleep-drone-evaluation",
+  "runId": "sleep-composer-evaluation-20260922-01",
+  "topic": "Still air in a dark, quiet room",
+  "sourceBriefFingerprint": "b11ec3e3e3e154e9c004bf3a23fd4fcc9bd846532e857db7b01da66fa7ca25bf",
+  "arrangement": {
+    "role": "meditation_bed",
+    "requestedDurationSec": 30,
+    "form": "continuous",
+    "ending": "natural_cadence",
+    "playback": "repeat",
+    "direction": "Unmetered instrumental ambient drone featuring warm low instrumental pads and soft sustained bowed strings. Completely flat low-energy dynamic contour with no sharp attacks, lead melodies, rhythm, percussion, or vocals. Pure serene stillness representing quiet dark room air, ending with a soft natural resolution.",
+    "sections": [
+      {
+        "id": "still-air-onset",
+        "label": "Still Air Onset",
+        "startFraction": 0,
+        "endFraction": 0.3,
+        "energy": 0.1,
+        "instruction": "Warm sustained low pad and bowed string drone enter smoothly with no sharp attack, holding a static pitch center."
+      },
+      {
+        "id": "unmoving-space",
+        "label": "Unmoving Space",
+        "startFraction": 0.3,
+        "endFraction": 0.5,
+        "energy": 0.1,
+        "instruction": "Maintain unbroken low register drone with zero modulation, rhythmic pulse, or tonal change."
+      },
+      {
+        "id": "quiet-continuation",
+        "label": "Quiet Continuation",
+        "startFraction": 0.5,
+        "endFraction": 0.8,
+        "energy": 0.1,
+        "instruction": "Continue completely flat warmth and texture, creating an unobtrusive background bed."
+      },
+      {
+        "id": "gentle-resolution",
+        "label": "Gentle Resolution",
+        "startFraction": 0.8,
+        "endFraction": 1,
+        "energy": 0.08,
+        "instruction": "Sustained tone softly settles into a gentle natural cadence and tranquil room stillness."
+      }
+    ]
+  },
+  "musicIntent": {
+    "role": "meditation_bed",
+    "requestedDurationSec": 30,
+    "form": "continuous",
+    "ending": "natural_cadence",
+    "playback": "repeat"
+  },
+  "reviewContext": {
+    "version": "music-review-context/v1",
+    "topic": "Still air in a dark, quiet room",
+    "family": "sleep",
+    "channelName": "Still Room - evaluation only",
+    "promptContext": "Channel: Still Room - evaluation only (Nonverbal sleep and meditation).\nPositioning: Quiet sleep support, not a showcase composition.\nVibe: Steady, warm, low contrast\nIconic motif: Stillness\nWORKS in this space: Long sustained instrumental tones; Stable low energy\nNEVER do (fails here): Attention-grabbing musical development; Human or synthesized voices; Percussion\nOperator role directives: {\"config\":{\"musicMood\":\"neutral\",\"bodyMusicVol\":0.1026,\"targetLufs\":-14,\"voiceFx\":\"none\"},\"directives\":{\"bodyMusicVol\":0.1026,\"targetLufs\":-14}}\nVideo topic: \"Still air in a dark, quiet room\".\n\nContent family: sleep.\n\nExplicit music intent (required exact values, not suggestions): {\"role\":\"meditation_bed\",\"requestedDurationSec\":30,\"form\":\"continuous\",\"ending\":\"natural_cadence\",\"playback\":\"repeat\"}\n\nChannel persona: A calm, unobtrusive companion. Never performs for attention, tells a story, or introduces a dramatic event.\n\nChannel style grammar: One stable soft instrumental texture. No audible pulse, drums, plucked attacks, vocals, choir, lead melody, build, drop, sudden register changes or cinematic climax. A notation grid may exist only for the renderer; it must not become audible rhythm.\n\nYour doctrine: The four or more review intervals are not new musical sections: hold the same timbre, register and energy. End with a gentle natural resolution, not an abrupt cut or a peak. Assembly owns repeats and final video length.\n\nFrozen audio identity (only authored values; omitted fields are unspecified): {\"genre\":\"unmetered instrumental ambient drone\",\"instrumentation\":[\"soft sustained bowed strings\",\"low warm instrumental pad\"],\"textures\":[\"continuous\",\"no sharp attacks\"],\"moodArc\":\"flat low energy; no build, drop or climax\"}\nLoopability alone does not specify musical ending, playback, or progression. Do not invent channel defaults for absent fields.",
+    "fingerprint": "5e27d52be0124e84f730397b705901f912cb586e3fa96b9b5805d7e1dd972561"
+  },
+  "symbolicScore": "X:1\nT:\nM:3/4\nL:1/32\nQ:1/4=60\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:D\n% still-air-onset\nV: Vocal\n\"D\" z24 | \"D\" z24 | \"D\" z24 |\nV: Ins\nD24- | D24- | D24- |\n% unmoving-space\nV: Vocal\n\"D\" z24 | \"D\" z24 |\nV: Ins\nD24- | D24- |\n% quiet-continuation\nV: Vocal\n\"D\" z24 | \"D\" z24 | \"D\" z24 |\nV: Ins\nD24- | D24- | D24- |\n% gentle-resolution\nV: Vocal\n\"D\" z24 | \"D\" z24 |\nV: Ins\nD24- | D12 z12 |",
+  "fingerprint": "cba00b6e4d985ad8985dd6d2d5f3535af8f8b6926fc9b0dfcf883d0dc1120451"
+}

@@ -1,0 +1,44 @@
+{
+  "version": "native-music-score-review/v1",
+  "scope": "notation_only",
+  "audioQualityApproved": false,
+  "scoreSha256": "594f6e9d4140b9c66f19ace108ff5e876c55775e747435b41518876edc4cb796",
+  "durationSeconds": 60,
+  "bpm": 60,
+  "voices": {
+    "Vocal": {
+      "noteCount": 0,
+      "pitches": [],
+      "chordSymbols": [
+        "G",
+        "Cmaj7",
+        "Em7",
+        "Am7",
+        "D7sus4",
+        "D",
+        "Bm7"
+      ],
+      "notatedSoundSeconds": 0,
+      "notatedRestSeconds": 60,
+      "endingRestSeconds": 60
+    },
+    "Ins": {
+      "noteCount": 27,
+      "pitches": [
+        60,
+        62,
+        64,
+        66,
+        67,
+        69,
+        71,
+        74,
+        76
+      ],
+      "chordSymbols": [],
+      "notatedSoundSeconds": 37,
+      "notatedRestSeconds": 23,
+      "endingRestSeconds": 6
+    }
+  }
+}

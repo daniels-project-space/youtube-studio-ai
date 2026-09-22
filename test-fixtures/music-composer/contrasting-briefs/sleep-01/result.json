@@ -1,0 +1,37 @@
+{
+  "status": "score_validated",
+  "inputFingerprint": "55d322d460224639614a94b09d36e39bb90eed8aff0103d72b1c422312532a4b",
+  "reservationUsd": 0.09492,
+  "usage": {
+    "calls": 1,
+    "cacheHits": 0,
+    "inputTokens": 1697,
+    "outputTokens": 693,
+    "reasoningTokens": 2810,
+    "cachedInputTokens": 0,
+    "totalTokens": 5200,
+    "costUsd": 0.014409,
+    "unpricedCalls": 0,
+    "groups": [
+      {
+        "provider": "openrouter",
+        "model": "gemini-3.7-flash",
+        "kind": "text",
+        "calls": 1,
+        "cacheHits": 0,
+        "inputTokens": 1697,
+        "outputTokens": 693,
+        "reasoningTokens": 2810,
+        "cachedInputTokens": 0,
+        "totalTokens": 5200,
+        "costUsd": 0.014409,
+        "unpricedCalls": 0,
+        "unpricedReasons": []
+      }
+    ]
+  },
+  "jobId": "yue2-eval-7671784d601a13ce2db6e44c43e71a991cea707248a3941add8ebd0edb10ec99",
+  "gpuCalls": 0,
+  "productionApproved": false,
+  "musicalQualityApproved": false
+}

@@ -1,0 +1,77 @@
+{
+  "version": "music-composer-evaluation/v1",
+  "input": {
+    "ownerId": "isolated-operator-evaluation",
+    "channelId": "narration-bed-evaluation",
+    "runId": "narration-composer-evaluation-20260922-01",
+    "provenance": "New synthetic evaluation brief authored for shared-module qualification, not an export or mutation of a real channel. Tests a finite understated narration bed against the actual composer and native parser. No manual score or generated-audio quality approval.",
+    "family": "narrated_stock",
+    "musicIntent": {
+      "role": "narration_bed",
+      "requestedDurationSec": 60,
+      "form": "through_composed",
+      "ending": "natural_cadence",
+      "playback": "once"
+    },
+    "seed": 42,
+    "budgetUsd": 0.1,
+    "seedStore": {
+      "topic": "Why an old railway station still matters to its neighborhood",
+      "channelName": "Ordinary Places - evaluation only",
+      "channelSlug": "ordinary-places-evaluation",
+      "niche": "Observational local history",
+      "persona": "A precise, curious local historian who values ordinary detail. Reflective but never nostalgic on command or sensational.",
+      "styleGrammar": "Intimate documentary understatement. A spoken voice carries the story; music leaves space between sparse gestures and never supplies a competing hook. No trailer drums, choir, vocals, triumphal swell or sentimental crescendo.",
+      "showBible": {
+        "positioning": "Patient local history grounded in ordinary places.",
+        "vibe": "Reflective, lightly inquisitive, unsentimental",
+        "iconicMotif": "An everyday detail noticed carefully",
+        "worksInSpace": [
+          "Sparse instrumental phrasing",
+          "Room for spoken words",
+          "Restrained harmonic movement"
+        ],
+        "avoidInSpace": [
+          "Nostalgic manipulation",
+          "Trailer tension",
+          "Lead lines that compete with narration"
+        ],
+        "activeCrew": [
+          "composer"
+        ],
+        "composerDoctrine": "Write a finite supporting bed: sparse entry, small harmonic question, understated answer, quiet resolved ending. No looping instruction and no repeated dramatic arc. Preserve space for speech throughout.",
+        "refreshedAt": 0
+      },
+      "styleDNA": {
+        "audio": {
+          "genre": "minimal instrumental documentary chamber music",
+          "instrumentation": [
+            "muted felt piano",
+            "soft low strings"
+          ],
+          "textures": [
+            "dry intimate room",
+            "sparse",
+            "restrained"
+          ],
+          "moodArc": "quiet curiosity followed by a modest resolution",
+          "loopable": false
+        }
+      }
+    }
+  },
+  "implementation": {
+    "./evaluate-music-composer.ts": "35c7bab8b1ed4da7453b31645ab3db102f500aeeccb530303d31dedfdec36fc9",
+    "../engine/creative/crew.ts": "851b889e0903e6f58c3f0ec7e7ef1b6655da91de020ca4199a76bb4140ec3a9f",
+    "../trigger/blocks/musicArrangementBlocks.ts": "2a76445db1ba9ed2656cb09133eb16a89fad6b3b854021c2a005cef16602761a",
+    "../trigger/blocks/crewBlocks.ts": "a430034d98268c5ecce9343178c7f3242f80d92f0dc4cbe97b5f1c56f57bd886",
+    "../engine/acceptedMusicArrangement.ts": "302da39f281f882aa5ed0eef385f34885f42f80db964f82dc2769591c04b7577",
+    "../agents/mastra.ts": "b1af78007bd6ebb79e525ecf8d7240e5196758b8f1458d595850ff1405e8ec29",
+    "../lib/arrangementComposerBudget.ts": "d13cc140a43286b30b2ae2b8278d3e2f71e8ef36373747783b94b6ee2a2abba8"
+  },
+  "composerVersion": "3.0.0-yue2-score",
+  "model": "google/gemini-3.7-flash",
+  "reservationUsd": 0.09492,
+  "inputFingerprint": "145ca1179f75535c17a7a4988a9b75fff1243714e052a66c2a46d17397eb67f8",
+  "startedAt": "2026-09-22T03:13:08.474Z"
+}

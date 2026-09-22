@@ -394,6 +394,13 @@ export async function briefComposerWithArrangement(
         `complete final measure with a different meter, without changing the requested musical identity or duration. ` +
         `Check all duration arithmetic before answering. A notation time grid does not authorize audible pulse, drums or melodic ` +
         `development in an unmetered drone or static sleep texture; use sustained tones/rests to preserve those intentions. ` +
+        `When the brief asks for a stable drone with no development, preserve the same pitch/register and harmonic support ` +
+        `across review intervals, using ties across barlines to avoid unrequested reattacks. Section labels alone never ` +
+        `authorize a new chord or melody; reserve any requested cadence for the ending. ` +
+        `A long note occupies its full written duration: it is not empty space between sparse gestures. When the brief ` +
+        `requires space for speech or gaps between gestures, write actual z rests in the instrumental line. ` +
+        `If an instruction promises trailing silence, end the score with explicit rests after the resolved phrase, ` +
+        `counted inside the exact source duration. Do not rely on prose to contradict sounding notes in the score. ` +
         `A requested natural ending must resolve; do not truncate a phrase merely to hit a number. The performance may ` +
         `end naturally under the permitted source policy; final video looping and duration belong to assembly. ` +
         `Keep the exact score below 32000 UTF-8 bytes. Its native syntax and symbolic duration will be independently ` +
