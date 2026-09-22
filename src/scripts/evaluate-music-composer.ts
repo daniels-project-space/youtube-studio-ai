@@ -122,6 +122,9 @@ export async function evaluateMusicComposer(value: unknown, options: { output?: 
     await save("request.json", request);
     const scoreReview = validateLocalYuE2Score(options.runtime, request.job)!;
     await save("score-review.json", scoreReview);
+    if (scoreReview.voices.Vocal.noteCount !== 0) {
+      throw new Error("Studio instrumental score must have no sounding notes in the Vocal staff");
+    }
     const measured = usage.snapshot();
     if (measured.calls !== 1 || measured.unpricedCalls || measured.costUsd > input.budgetUsd) {
       throw new Error("composer evaluation requires exactly one fully priced call within budget");

@@ -97,11 +97,21 @@ validation; rejection preserves the failure and known usage. A successful result
 requires one priced call within budget and still grants no quality/production
 approval. This local operator authority is not a production execution lease.
 
-Successful evaluations also save `score-review.json`, whose digest is bound in
-the result. The native parser measures note counts (ties merged), distinct
+Native-valid evaluations save `score-review.json`; successful evaluations bind
+its digest in the result. The native parser measures note counts (ties merged), distinct
 pitches/chord symbols, notated sound/rest durations and ending rests. These are
 notation facts, not audible silence, instrumentation, speech masking or musical
 quality. No universal quality threshold or automatic approval is inferred.
+Studio's instrumental composer evaluation rejects any sounding notes in the
+Vocal staff even when the score parses and has the exact requested duration.
+It retains the native report, original request, paid usage and failure receipt;
+it emits no successful result and cannot automatically retry that attempt.
+Resting Vocal staves with chord annotations remain valid. This operator gate
+does not change the generic runtime's song contract or establish an audible
+no-vocals guarantee. It is not yet a production worker admission gate.
+The regression uses the actual pinned CPU parser and a mocked text provider:
+a 64-second score with one four-second Vocal note must be held, while the
+retained instrumental sleep/narration scores remain accepted.
 The retained [contrasting-brief comparison](../test-fixtures/music-composer/contrasting-briefs/README.md)
 checks these signals against two distinct briefs using real composer responses.
 

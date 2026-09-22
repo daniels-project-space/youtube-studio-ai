@@ -14,7 +14,7 @@ async function main() {
   const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
   const original = loader._load;
   const fetch = globalThis.fetch;
-  let calls = 0, badScore = false;
+  let calls = 0, badScore = false, vocalScore = false;
   const arrangement = {
     role: "primary_music", requestedDurationSec: 64, form: "continuous", ending: "natural_cadence", playback: "repeat",
     direction: "Synthetic native score fixture, not musical-quality evidence.",
@@ -29,7 +29,9 @@ async function main() {
     return { ...actual as object, agentJson: async (input: { beforeDispatch: () => Promise<void>; schema: { parse: (x: unknown) => unknown } }) => {
       await input.beforeDispatch(); calls++;
       recordModelUsage({ provider: "openrouter", model: "fixture", kind: "text", reportedCostUsd: 0.01 });
-      return input.schema.parse({ arrangement, symbolicScore: badScore ? score.replace("c32", "c24") : score, duckDb: -12, bedLufs: -22 });
+      return input.schema.parse({ arrangement,
+        symbolicScore: badScore ? score.replace("c32", "c24") : vocalScore ? score.replace("z32", "c32") : score,
+        duckDb: -12, bedLufs: -22 });
     } };
   };
   globalThis.fetch = async () => { throw new Error("all network forbidden in composer fixture"); };
@@ -116,6 +118,24 @@ async function main() {
       assert.equal(JSON.parse(await readFile(join(failed.output, "request.json"), "utf8")).job.abc, score.replace("c32", "c24"));
       await assert.rejects(evaluateMusicComposer(input, failed), /EEXIST/);
       assert.equal(calls, 2, "bad native scores retain the purchase and never automatically regenerate");
+      badScore = false;
+      vocalScore = true;
+      const vocal = { ...options, output: join(directory, "vocal") };
+      await assert.rejects(evaluateMusicComposer(input, vocal), /instrumental.*Vocal/i);
+      const vocalFailure = JSON.parse(await readFile(join(vocal.output, "failure.json"), "utf8"));
+      assert.equal(vocalFailure.usage.costUsd, 0.01);
+      assert.equal(vocalFailure.dispatched, true);
+      assert.equal(vocalFailure.gpuCalls, 0);
+      assert.equal(vocalFailure.automaticRetryAllowed, false);
+      const vocalReview = JSON.parse(await readFile(join(vocal.output, "score-review.json"), "utf8"));
+      assert.equal(vocalReview.durationSeconds, 64, "timing correctness does not imply instrumental notation");
+      assert.equal(vocalReview.voices.Vocal.noteCount, 1);
+      assert.equal(vocalReview.voices.Vocal.notatedSoundSeconds, 4);
+      assert.equal(vocalReview.audioQualityApproved, false);
+      assert.equal(JSON.parse(await readFile(join(vocal.output, "request.json"), "utf8")).job.abc, score.replace("z32", "c32"));
+      await assert.rejects(readFile(join(vocal.output, "result.json")), /ENOENT/);
+      await assert.rejects(evaluateMusicComposer(input, vocal), /EEXIST/);
+      assert.equal(calls, 3, "vocal notation retains its paid attempt without retry or GPU submission");
     }
     console.log("COMPOSER EVALUATION PASS: bounded admission, exact artifacts, native validation and no-replay claims; mocked text only");
   } finally {
