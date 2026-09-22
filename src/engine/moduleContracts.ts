@@ -621,7 +621,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
-      "documentaryEpisodePlan"],
+      "documentaryEpisodePlan", "editorialEvidencePacket"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {

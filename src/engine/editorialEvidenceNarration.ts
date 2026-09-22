@@ -61,6 +61,31 @@ function containsNumericAnchor(sentences: readonly { text: string }[], numericAn
   return expectedTokens.every((token) => actualTokens.has(token));
 }
 
+function matchingClaimSentences<T extends { text: string }>(
+  claim: EditorialEvidencePacket["claims"][number], sentences: readonly T[], boundary: string,
+): T[] {
+  const matching = sentences.filter(sentence => containsBoundedText(sentence.text, claim.approvedText));
+  if (!matching.length) {
+    throw new Error(
+      `editorial evidence claim ${claim.id} is not represented verbatim in one ${boundary}; ` +
+      "regenerate narration from the reviewed claim or submit a fresh packet review",
+    );
+  }
+  if (claim.numericAnchor && !containsNumericAnchor(matching, claim.numericAnchor)) {
+    throw new Error(`editorial evidence claim ${claim.id} does not say its approved numeric anchor exactly in the bound narration`);
+  }
+  return matching;
+}
+
+/** Pre-purchase text check only; measured timing still needs the independent Story Spine binding. */
+export function assertEditorialEvidencePacketScriptAlignment(args: {
+  editorialEvidencePacket: unknown; sentences: readonly string[]; now?: number;
+}): void {
+  const packet = assertEditorialEvidencePacket(args.editorialEvidencePacket, args.now);
+  const sentences = args.sentences.map(text => ({ text }));
+  for (const claim of packet.claims) matchingClaimSentences(claim, sentences, "pre-synthesis narration sentence");
+}
+
 /**
  * Assert that every reviewed claim is audibly present in the exact timed
  * script. A claim may bind to more than one sentence only when the same
@@ -77,20 +102,7 @@ export function assertEditorialEvidencePacketNarrationAlignment(args: {
   const claimBindings: EditorialEvidenceNarrationClaimBinding[] = [];
 
   for (const claim of packet.claims) {
-    const matchingSentences = storySpine.timedScript.sentences.filter((sentence) =>
-      containsBoundedText(sentence.text, claim.approvedText),
-    );
-    if (!matchingSentences.length) {
-      throw new Error(
-        `editorial evidence claim ${claim.id} is not represented verbatim in one timed Story Spine sentence; ` +
-          "regenerate narration from the reviewed claim or submit a fresh packet review",
-      );
-    }
-    if (claim.numericAnchor && !containsNumericAnchor(matchingSentences, claim.numericAnchor)) {
-      throw new Error(
-        `editorial evidence claim ${claim.id} does not say its approved numeric anchor exactly in the bound timed narration`,
-      );
-    }
+    const matchingSentences = matchingClaimSentences(claim, storySpine.timedScript.sentences, "timed Story Spine sentence");
     claimBindings.push({
       claimId: claim.id,
       sourceIds: [...claim.sourceIds].sort(),

@@ -52,6 +52,7 @@ import {
   type ChannelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
 import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
+import { assertEditorialEvidencePacketScriptAlignment } from "@/engine/editorialEvidenceNarration";
 import {
   createReferenceQualityMechanicsLedger,
   referenceQualityVisualReviewCriteriaForRoute,
@@ -1195,6 +1196,16 @@ export const qaScript: Block = {
         );
       }
       ctx.log(`qa_script: source-attributed data-story evidence passed (${sourcedNumericSentences.length} sourced numeric sentences)`);
+    }
+    if (ctx.store["editorialEvidencePacket"] !== undefined) {
+      try {
+        assertEditorialEvidencePacketScriptAlignment({
+          editorialEvidencePacket: ctx.store["editorialEvidencePacket"], sentences: splitSentences(narration),
+        });
+      } catch (error) {
+        throw new ExecutionError(`qa_script FAILED: editorial evidence does not match the narration: ${error instanceof Error ? error.message : "invalid evidence"}`,
+          { code: "EDITORIAL_EVIDENCE_NARRATION_MISMATCH", retryable: false });
+      }
     }
     if (!hasCreativeTextKey()) {
       throw new Error(
