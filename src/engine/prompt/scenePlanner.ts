@@ -2,8 +2,9 @@
  * Scene planning — turn a channel topic + style into concrete scene specs.
  *
  * A "scene" is the unit a template renders: one FLUX still prompt + one Kling
- * MOTION-ONLY prompt + a duration. The planner is deterministic and reusable by
- * any template; lofi (Template C) needs exactly ONE scene whose still becomes
+ * MOTION-ONLY prompt + a duration. The legacy planner retains random signature
+ * scene selection; the opt-in grounded revision resolves it deterministically.
+ * Lofi (Template C) needs exactly ONE scene whose still becomes
  * the two loop keyframes (A and a gentle B variation) for the A→B→A loop.
  *
  * Per-channel consistency: an optional `sceneLibrary` (pre-authored
@@ -56,7 +57,9 @@ export interface ScenePlanInput {
    * actual identity — its subject, setting, color grade, motifs, and the exact
    * elements allowed to move — instead of a generic cozy template.
    */
-  styleDNA?: StyleDNA | null;
+  styleDNA?: Pick<StyleDNA, "recurringSubject" | "setting"> & Partial<Pick<StyleDNA,
+    "signatureScenes" | "composition" | "colorGrade" | "motifs" | "visualAvoid" |
+    "motionVocabulary" | "motionDiscipline">> | null;
   /** Optional pre-authored library keyed by topic (exact match wins). */
   sceneLibrary?: Record<string, SceneLibraryEntry>;
   /** Default per-clip duration when not specified by a library entry. */

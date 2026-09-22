@@ -1184,7 +1184,8 @@ export const musicProgramPlan: Block = {
   },
 };
 
-export const scenePlanner: Block = {
+export function createScenePlannerBlock(planner: typeof planScenes = planScenes): Block {
+  return {
   id: "scene_planner",
   consumes: ["topic"],
   produces: ["scenes", "sceneMusicPrompt", "musicProgramMotionIntent"],
@@ -1223,7 +1224,7 @@ export const scenePlanner: Block = {
     // identity (subject/setting/grade/motifs/allowed-motion) instead of a generic
     // cozy template, so every loop reads as the same channel.
     const styleDNA = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
-    const plan = planScenes({
+    const plan = planner({
       topic,
       styleGrammar: style,
       visualStyle: vs,
@@ -1247,7 +1248,10 @@ export const scenePlanner: Block = {
       ...(musicProgram ? { musicProgramMotionIntent: musicProgram.visual.motionIntent } : {}),
     };
   },
-};
+  };
+}
+
+export const scenePlanner = createScenePlannerBlock();
 
 /* ---------------------------- 2. keyframes ------------------------------ */
 
