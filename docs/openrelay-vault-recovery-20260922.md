@@ -42,7 +42,7 @@ they are not usable secrets. No shared working credential was deleted.
 
 ## Remaining GPU Boundary
 
-No VM restart, new allocation, generation, or paid request was made. The retained
+At the read-only checkpoint, no VM restart, new allocation, generation, or paid request was made. The retained
 operator ledger still conservatively reserves 63 cents of the approved 100-cent
 total; those reservations are not an observed provider bill. Its previous
 execution deadline remains expired. A fresh guarded window and verified stop
@@ -55,3 +55,27 @@ or owner approval of the retained music.
 
 Local non-secret evidence: `/tmp/studio-openrelay-shared-key-readonly-20260922.log`
 and `/tmp/studio-openrelay-canonical-key-readonly-20260922.log`.
+
+## Subsequent Guarded Restart Attempt
+
+A fresh 20-minute window reserved a further 7 cents, bringing the conservative
+reservation ledger to 70 of the authorized 100 cents. The preparation guard
+passed six local cases, including duplicate-window, running-VM, invalid-budget,
+and missing-stop-verification refusals, with zero provider writes in those tests.
+An independent systemd watchdog was started before the real restart request.
+
+The actual restart request returned HTTP 403 `FORBIDDEN`, request ID
+`2a92881d-6be8-4b35-a6ff-fbd5264bd042`. The reported `vms:write` scope therefore
+does not establish permission to restart this retained VM. The denied write was
+not retried. Its exact authorization cause remains unverified.
+
+Provider state was verified stopped at `2026-09-22T08:53:04.861Z`. The watchdog
+`youtube-studio-yue2-refresh-20260922.service` subsequently reached inactive/dead
+with result success. No operator validation or SSH process remained at the
+closure check. The extra reservation is retained conservatively; it is not a
+claim that the denied request incurred seven cents of billing.
+
+The locally built runtime image at revision
+`c5d5a6b61107ad08bc22a20f7813d0e57137e73f` was not deployed to the GPU. Read access
+is recovered, but GPU write authorization and fresh runtime qualification remain
+unproven. No new generated output or musical approval is claimed.
