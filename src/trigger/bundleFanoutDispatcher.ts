@@ -68,7 +68,7 @@ export async function dispatchDueBundleFanouts(input?: {
       await tasks.trigger("run-pipeline", request.payload, {
         concurrencyKey: request.concurrencyKey,
         idempotencyKey,
-      });
+      }, { retry: { maxAttempts: 1 } });
       await convex.mutation(api.runs.markBundleFanoutDispatchEnqueued, {
         ownerId,
         runId: claim.runId,

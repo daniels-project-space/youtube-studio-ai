@@ -41,7 +41,8 @@ function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure: boole
       idempotencyKeys: { create: async (seed: string, options: Row) => {
         keys.push({ seed, options }); return `key:${seed}`;
       } },
-      tasks: { trigger: async (task: string, payload: Row, options: Row) => {
+      tasks: { trigger: async (task: string, payload: Row, options: Row, requestOptions: Row) => {
+        assert.deepEqual(requestOptions, { retry: { maxAttempts: 1 } }, "the stable durable outbox owns subsequent delivery attempts");
         triggers.push({ task, payload, options });
         if (typeof triggerFailure === "function") await triggerFailure(payload);
         else if (triggerFailure) throw new Error("fixture enqueue failure");

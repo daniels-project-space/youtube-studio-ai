@@ -77,7 +77,7 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
       delay: new Date(request.retryAt),
       concurrencyKey: request.concurrencyKey,
       idempotencyKey,
-    });
+    }, { retry: { maxAttempts: 1 } });
     triggered++;
   };
   const batch = due.slice(0, SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT);
