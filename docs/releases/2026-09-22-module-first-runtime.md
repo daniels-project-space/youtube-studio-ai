@@ -1,5 +1,34 @@
 # Module-first runtime release: 2026-09-22
 
+## Follow-up: music review privacy and decision authority
+
+Deployed application revision `e2cfb5025a2ea8ea860d8662e91fa1e1dddb8e1b`,
+Trigger `20260922.2`, verified at 16:00 UTC. Full CI passed all 931 direct test
+files and deployed both cloud runtimes:
+https://github.com/daniels-project-space/youtube-studio-ai/actions/runs/35749433713
+
+Live inspection found that `/api/music-audition-checkpoints?runId=invalid.id`
+returned raw Convex argument-validation internals with a public cache policy.
+The corrected route rejects malformed IDs before database access, uses private
+no-store responses on every path, sanitizes dependency errors, and requires an
+owner session for human audition decisions, matching the YuE2 route. It does not
+change legacy generation, retained audio or technical-quality requirements.
+
+Production checks after deployment:
+
+- Anonymous GET: 401, `Authentication required`, private no-store.
+- Authenticated malformed-ID GET: 400, `Invalid runId`, private no-store.
+- Service-token POST with empty body: 403, `Owner session required`, private
+  no-store. No approval/rejection mutation was attempted by this check.
+- Web and Trigger exact revision checks passed; canonical Convex still exposes
+  all required contracts and shared schedule inventory remains one active cron.
+
+Focused tests additionally cover dependency-error redaction, malformed JSON,
+null/array bodies, foreign-origin requests, empty reviews and owner rejection.
+No human musical decision or end-to-end music output qualification is claimed.
+Logs: `/tmp/studio-review-release-35749433713-complete.log` and
+`/tmp/studio-deployment-observation-e2cfb502.json`.
+
 ## Deployed revision
 
 - Application revision: `7d1fb61a07b7ce2104ee4b8c725d9a4232c72c25`.
