@@ -1139,7 +1139,8 @@ export const hookCraft: Block = {
   },
 };
 
-export const qaScript: Block = {
+export function createQaScriptBlock(channelAware = false): Block {
+  return {
   id: "qa_script",
   consumes: ["narrationText"],
   produces: ["scriptApproved"],
@@ -1214,6 +1215,11 @@ export const qaScript: Block = {
     }
     try {
       const persona = opt(ctx, "persona") ?? "";
+      const channel = channelAware ? channelCritiqueContext(ctx) : undefined;
+      if (channelAware && (!channel?.channelName?.trim() ||
+        ![channel.persona, channel.styleGrammar, channel.criticDoctrine].some(value => value?.trim()))) {
+        throw new Error("qa_script FAILED: channel-aware review requires frozen channel name and authored personality or style guidance");
+      }
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
@@ -1221,10 +1227,14 @@ export const qaScript: Block = {
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
-          `. Flag dull sections, off-brand language, factual hedging, or weak structure. ` +
-          `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle — not ` +
-          `just narrated facts — and flag generic, formulaic, or templated writing that ` +
-          `could read as mass-produced (YouTube demonetizes "inauthentic" content). ` +
+          (channelAware
+            ? `. Judge clarity, intentional pacing, audience fit and distinctive writing against the frozen channel guidance. ` +
+              `Do not substitute another format's retention pattern: quiet guided listening need not argue a thesis, escalate tension, or interrupt with a dramatic re-hook. ` +
+              `Still reject incoherence, empty repetition, unsupported factual or therapeutic claims, and a failure to deliver this episode's actual promise. `
+            : `. Flag dull sections, off-brand language, factual hedging, or weak structure. ` +
+              `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle — not ` +
+              `just narrated facts — and flag generic, formulaic, or templated writing that ` +
+              `could read as mass-produced (YouTube demonetizes "inauthentic" content). `) +
           (hookLoop
             ? `THE HOOK'S CONTRACT: the cold open promised "${hookLoop}" — FAIL the script if it does not ` +
               `explicitly pay that promise off (a vague gesture at it is a fail). `
@@ -1235,8 +1245,13 @@ export const qaScript: Block = {
           (serializedEpisodeContext
             ? `${renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)}\nFAIL the script if it breaks this episode's immutable continuity. `
             : "") +
-          `Also verify a deliberate MIDPOINT RE-HOOK exists in the middle third (a pointed question to the ` +
-          `viewer, a vivid concrete example, or a tonal shift) — flag its absence as an issue. ` +
+          (channelAware
+            ? channelCritiqueBrief(channel) +
+              `Require an opening hook, midpoint re-hook or argument only when the accepted channel/route guidance calls for it. ` +
+              `For deliberate calm repetition, judge comfort, purpose and progression appropriate to that experience, not novelty for its own sake. ` +
+              `Channel personality cannot waive the sealed route, reviewed evidence, disclosures or safety requirements. `
+            : `Also verify a deliberate MIDPOINT RE-HOOK exists in the middle third (a pointed question to the ` +
+              `viewer, a vivid concrete example, or a tonal shift) — flag its absence as an issue. `) +
           `Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 issues, ` +
           `each under 140 characters (a truncated reply is unusable).\n\n` +
           // Head + middle + tail sample: a head-only slice HID the midpoint and
@@ -1280,7 +1295,10 @@ export const qaScript: Block = {
       );
     }
   },
-};
+  };
+}
+
+export const qaScript = createQaScriptBlock();
 
 export const narrationTts: Block = {
   id: "narration_tts",

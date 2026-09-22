@@ -15,6 +15,7 @@ import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializ
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
 import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
+import { createChannelAwareScriptQaManifest } from "@/trigger/blocks/channelAwareScriptQa";
 import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
 import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
@@ -71,6 +72,7 @@ export function registerAllBlocks(): void {
   for (const b of intelligenceBlocks) register(b);
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
+  registerManifestVersion(createChannelAwareScriptQaManifest(getManifest("qa_script")!));
   registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("timeline_assemble")!));
