@@ -1,0 +1,31 @@
+{
+  "version": "audio-meter-qualification/v1",
+  "date": "2026-09-22",
+  "masterSha256": "c413635329f976ab5b3d652e5708766883f4caa00aab231e39f6f2dc622e7d8d",
+  "masterBytes": 12983194060,
+  "durationSec": 28800,
+  "baseline": {
+    "revision": "15fd23cb",
+    "integratedLufs": -16.3,
+    "windowMeanDb": null,
+    "elapsedMs": 162626,
+    "nodeMaxRssKiB": 183176,
+    "gnuTimeMaxRssKiB": 183304,
+    "stderrBytes": null
+  },
+  "replacement": {
+    "integratedLufs": -16.3,
+    "windowMeanDb": null,
+    "elapsedMs": 178165,
+    "nodeMaxRssKiB": 94592,
+    "gnuTimeMaxRssKiB": 172320,
+    "stderrBytes": 1766,
+    "stdoutBytes": 0,
+    "ffmpegCalls": 1,
+    "captureLimitBytes": 65536,
+    "timeoutMs": 600000
+  },
+  "networkDisabled": true,
+  "scope": "full-programme loudness and observed local process memory; not perceptual quality, source approval, full QA qualification or production release",
+  "runtimeComparisonCaveat": "Concurrent build/graph/regression work overlapped the replacement; filesystem caches were uncontrolled. No runtime or fleet-billing saving is claimed."
+}

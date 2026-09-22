@@ -17,8 +17,9 @@ async function main() {
         stdout: new PassThrough(), stderr: new PassThrough(), kill: () => {},
       });
       queueMicrotask(() => {
-        if (args.includes("ebur128=peak=true")) {
-          child.stderr.write(args.includes("source.wav") ? source : encoded);
+        if (args.includes("ebur128=peak=true:framelog=verbose")) {
+          const values = args.includes("source.wav") ? source : encoded;
+          child.stderr.write(`Summary:\nIntegrated loudness:\n${values.replace("\nPeak:", "\nTrue peak:\nPeak:")}`);
         }
         child.emit("close", 0);
       });
@@ -32,7 +33,7 @@ async function main() {
     const master = () => masterAudioTransparentGain("source.wav", "master.mp3", { lufs: -18, truePeakMaxDbtp: -1 });
     assert.equal(await master(), "master.mp3");
     assert.equal(commands.length, 3, "source meter, fixed gain encode, final meter: no extra process");
-    assert.equal(commands.filter((args) => args.includes("ebur128=peak=true")).length, 2);
+    assert.equal(commands.filter((args) => args.includes("ebur128=peak=true:framelog=verbose")).length, 2);
     assert.ok(commands[1].includes("volume=4.000dB"));
     assert.ok(!commands.flat().some((arg) => /loudnorm|alimiter|acompressor/.test(arg)));
 

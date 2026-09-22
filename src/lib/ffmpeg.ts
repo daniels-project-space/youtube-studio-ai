@@ -29,24 +29,42 @@ function run(
   bin: string,
   args: string[],
   timeoutMs = 1_800_000,
+  maxOutputBytes?: number,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let outputBytes = 0;
+    let captureError: FfmpegError | undefined;
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new FfmpegError(`${bin} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+    const capture = (target: "stdout" | "stderr", data: Buffer) => {
+      if (captureError) return;
+      if (maxOutputBytes !== undefined) {
+        outputBytes += Buffer.byteLength(data);
+        if (outputBytes > maxOutputBytes) {
+          captureError = new FfmpegError(`${bin} output exceeded ${maxOutputBytes} bytes`);
+          child.kill("SIGKILL");
+          return;
+        }
+      }
+      if (target === "stdout") stdout += data.toString();
+      else stderr += data.toString();
+    };
+    child.stdout.on("data", (data) => capture("stdout", data));
+    child.stderr.on("data", (data) => capture("stderr", data));
     child.on("error", (e) => {
       clearTimeout(timer);
       reject(new FfmpegError(`${bin} spawn failed: ${e.message}`));
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) {
+      if (captureError) {
+        reject(captureError);
+      } else if (code !== 0) {
         reject(new FfmpegError(`${bin} exited ${code}: ${stderr.slice(-800)}`));
       } else {
         resolve({ stdout, stderr });
@@ -2246,6 +2264,18 @@ export async function masterAudio(
   return outPath;
 }
 
+// Frame-level meter logs grow with programme duration. Keep the complete
+// measurement, suppress those logs, and accept only the final summary.
+const AUDIO_METER_OUTPUT_LIMIT = 64 * 1024;
+function ebur128Summary(stderr: string): { lufs: number; truePeakDbtp: number } {
+  const start = stderr.lastIndexOf("Summary:");
+  const summary = start < 0 ? "" : stderr.slice(start);
+  return {
+    lufs: Number(/Integrated loudness:\s*I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/u.exec(summary)?.[1]),
+    truePeakDbtp: Number(/True peak:\s*Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/u.exec(summary)?.[1]),
+  };
+}
+
 /**
  * Master a generated music program with one transparent, constant gain only.
  * Unlike `masterAudio`, this path never compresses, limits, equalizes, or asks
@@ -2265,12 +2295,10 @@ export async function masterAudioTransparentGain(
   const truePeakMaxDbtp = Math.max(-6, Math.min(-0.1, opts.truePeakMaxDbtp ?? -1));
   async function measureMaster(path: string) {
     const { stderr } = await run(FFMPEG, [
-      "-nostats", "-i", path, "-map", "a:0",
-      "-filter:a", "ebur128=peak=true", "-f", "null", "-",
-    ], 600_000);
-    const loudness = [...stderr.matchAll(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/gu)];
-    const peak = [...stderr.matchAll(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/gu)];
-    return { lufs: Number(loudness.at(-1)?.[1]), truePeakDbtp: Number(peak.at(-1)?.[1]) };
+      "-hide_banner", "-loglevel", "info", "-nostats", "-i", path, "-map", "a:0",
+      "-filter:a", "ebur128=peak=true:framelog=verbose", "-f", "null", "-",
+    ], 600_000, AUDIO_METER_OUTPUT_LIMIT);
+    return ebur128Summary(stderr);
   }
   const { lufs: inputLufs, truePeakDbtp: inputPeakDbfs } = await measureMaster(inPath);
   if (!Number.isFinite(inputLufs) || !Number.isFinite(inputPeakDbfs)) {
@@ -2355,7 +2383,7 @@ export async function applyVoiceFx(
 
 /**
  * DETERMINISTIC EARS — cheap audio meters for the QA gate (the ear vision QA
- * never had). All ffmpeg, no LLM, seconds to run:
+ * never had). All ffmpeg, no LLM; runtime scales with the complete audio:
  *  - integratedLufs: ebur128 integrated loudness of the FULL mix,
  *  - windowMeanDb:   volumedetect mean over an arbitrary window (used to prove
  *    the music bed is actually audible in a narration-free window, e.g. the
@@ -2371,23 +2399,20 @@ export async function measureAudio(
   let windowMeanDb: number | null = null;
   try {
     const { stderr } = await run(FFMPEG, [
-      "-nostats", "-i", videoPath, "-map", "a:0", "-filter:a", "ebur128", "-f", "null", "-",
-    ], 600_000);
-    // Summary block: "I:  -14.2 LUFS"
-    const m = stderr.match(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/g);
-    if (m && m.length) {
-      const last = m[m.length - 1].match(/(-?\d+(?:\.\d+)?)/);
-      if (last) integratedLufs = Number(last[1]);
-    }
+      "-hide_banner", "-loglevel", "info", "-nostats", "-i", videoPath, "-map", "a:0",
+      "-filter:a", "ebur128=framelog=verbose", "-f", "null", "-",
+    ], 600_000, AUDIO_METER_OUTPUT_LIMIT);
+    const measured = ebur128Summary(stderr).lufs;
+    if (Number.isFinite(measured)) integratedLufs = measured;
   } catch { /* unmeasurable → null */ }
   const ws = opts.windowStartSec ?? 0;
   const wd = opts.windowDurSec ?? 0;
   if (wd >= 1.5) {
     try {
       const { stderr } = await run(FFMPEG, [
-        "-nostats", "-ss", ws.toFixed(2), "-t", wd.toFixed(2), "-i", videoPath,
+        "-hide_banner", "-loglevel", "info", "-nostats", "-ss", ws.toFixed(2), "-t", wd.toFixed(2), "-i", videoPath,
         "-map", "a:0", "-filter:a", "volumedetect", "-f", "null", "-",
-      ], 300_000);
+      ], 300_000, AUDIO_METER_OUTPUT_LIMIT);
       const mv = stderr.match(/mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/);
       if (mv) windowMeanDb = Number(mv[1]);
     } catch { /* unmeasurable → null */ }
