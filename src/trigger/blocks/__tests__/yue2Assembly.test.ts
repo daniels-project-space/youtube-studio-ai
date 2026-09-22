@@ -10,6 +10,7 @@ import { getFunctionName } from "convex/server";
 import { createYuE2SourceApproval } from "@/engine/yue2SourceApproval";
 import { createAcceptedMusicArrangement, createMusicReviewContext } from "@/engine/acceptedMusicArrangement";
 import { YUE2_AUDITION_CHECKS } from "@/engine/yue2Audition";
+import { classifyExecutionError } from "@/engine/executionErrors";
 import type { StageContext } from "@/engine/types";
 
 const retained = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-after/gpu-material.json", "utf8"));
@@ -52,6 +53,8 @@ const streamedUploads: string[] = [], bufferedVideoUploads: string[] = [];
 const streamedRepairDownloads: string[] = [];
 let failPreOverlayUpload = false;
 let failRepairDownload = false;
+let finalUploadFailures = 0;
+let afterFailedUpload = () => {};
 let deliveredDurationOffset = 0;
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
@@ -93,6 +96,10 @@ loader._load = function (id, ...args) {
     },
     putObjectFromFile: async (key: string, path: string) => {
       streamedUploads.push(key);
+      if (key.endsWith("/final.mp4") && finalUploadFailures-- > 0) {
+        afterFailedUpload();
+        throw Object.assign(new Error("fixture transient storage failure"), { status: 503 });
+      }
       if (failPreOverlayUpload && key.endsWith("/pre_overlay.mp4")) throw new Error("fixture checkpoint storage unavailable");
       assert.ok((await readFile(path)).length); uploads++; afterUpload();
     },
@@ -130,6 +137,7 @@ function reset() { approval = approved; source = wav; currentMaterial = material
   uploads = 0; afterEncode = () => {}; afterUpload = () => {};
   streamedUploads.length = 0; bufferedVideoUploads.length = 0; failPreOverlayUpload = false;
   streamedRepairDownloads.length = 0; failRepairDownload = false;
+  finalUploadFailures = 0; afterFailedUpload = () => {};
   deliveredDurationOffset = 0;
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
@@ -295,6 +303,23 @@ async function main() {
   assert.equal(renders[0].bodySec, 3600);
   for (const id of ["assemble", "timeline_assemble"]) {
     const manifest = getManifest(id, "3.0.0-yue2-reviewed-loop")!;
+    const renderContext = { ...ctx, params: { durationSec: 3600, tailSec: 0, burnCaptions: false, transitions: "hardcut" } };
+    reset(); finalUploadFailures = 1;
+    const recovered = await manifest.execute(renderContext);
+    assert.ok(recovered.videoKey);
+    assert.equal(renders.length, 1, "transient storage failure must not repeat assembly");
+    assert.equal(streamedUploads.length, 2);
+    assert.equal(privateReads, 1, "storage retry must not fetch or fold the music again");
+    reset(); finalUploadFailures = 10;
+    await assert.rejects(manifest.execute(renderContext), error => {
+      assert.equal(classifyExecutionError(error).retryable, false, "exhausted storage must not retry the expensive stage");
+      return true;
+    });
+    assert.equal(renders.length, 1); assert.equal(streamedUploads.length, 3);
+    reset(); finalUploadFailures = 1; afterFailedUpload = () => { approval = null; };
+    await assert.rejects(manifest.execute(renderContext));
+    assert.equal(streamedUploads.length, 1, "revoked approval must prevent another upload attempt");
+    assert.equal(renders.length, 1);
     for (const phase of ["encode", "upload"] as const) {
       for (const change of [
         () => { approval = null; },

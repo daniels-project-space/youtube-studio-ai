@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { persistRenderedFile } from "@/lib/renderedFilePersistence";
 import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 import {
   planWeekPreparationPrompt,
@@ -4123,9 +4124,10 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
-  await o.assertOutputAuthority?.();
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-  await putObjectFromFile(videoKey, finalVideo, { contentType: "video/mp4" });
+  await persistRenderedFile(videoKey, finalVideo, { contentType: "video/mp4" }, {
+    beforeAttempt: o.assertOutputAuthority,
+  });
   // Persist the PRE-OVERLAY composed video (body + outro, NO captions/cards) so
   // the surgical heal can re-finish without re-rendering the whole timeline.
   // If the upload fails, BLANK the key+path: an advertised R2 key whose object

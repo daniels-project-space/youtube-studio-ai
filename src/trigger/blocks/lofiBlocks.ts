@@ -1925,9 +1925,10 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
         throw new Error(`assemble: rendered final duration ${delivered.durationSec}s does not match ${durationSec}s`);
       }
     }
-    await options?.assertOutputAuthority?.();
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
+    await persistRenderedFile(videoKey, finalPath, { contentType: "video/mp4" }, {
+      beforeAttempt: options?.assertOutputAuthority,
+    });
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,
       introSec,
