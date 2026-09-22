@@ -40,6 +40,14 @@ async function main() {
     assert.match(baseline, /verify a deliberate MIDPOINT RE-HOOK exists/);
     assert.doesNotMatch(baseline, /Gentle invitations|Never force a suspense hook/,
       "baseline reproduces the dropped channel-specific standards");
+    const selectedOnlyKeys = new Set(["channelName", "contentLane", "criticDoctrine", "styleGrammar"]);
+    await invoke(legacy, { ...context, store: new Proxy(context.store, {
+      get(target, key) {
+        assert.equal(selectedOnlyKeys.has(String(key)), false, `legacy critic must not read selected-only input ${String(key)}`);
+        return Reflect.get(target, key);
+      },
+    }) });
+    assert.equal(prompts.at(-1), baseline);
 
     for (const store of [context.store,
       { ...context.store, channelName: "Measured Argument", persona: "Curious adults seeking a reasoned argument.",
