@@ -281,6 +281,7 @@ export function finishMetadata(
     opening?: string;
     titleProfile?: TitleProfileId;
     isMusicNiche?: boolean;
+    delivery?: import("@/lib/metadataDelivery").MetadataDelivery;
   },
 ): { title: string; description: string; tags: string[] } {
   let { title, description, tags } = o;
@@ -292,6 +293,7 @@ export function finishMetadata(
       isMusicNiche: o.isMusicNiche,
       profile: o.titleProfile,
       opening: o.opening,
+      ...(o.delivery ? { delivery: o.delivery } : {}),
     });
     if (!normalizedLint.pass) {
       ctx.log(`metadata: normalized title failed the shared title gate: ${normalizedLint.issues.join("; ")}`);
@@ -383,7 +385,8 @@ function buildThumbnailDescription(args: {
   ].join(" ");
 }
 
-export const metadataOptimized: Block = {
+export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => import("@/lib/metadataDelivery").MetadataDelivery): Block {
+  return {
   id: "metadata",
   consumes: ["topic"],
   produces: [
@@ -399,6 +402,8 @@ export const metadataOptimized: Block = {
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const delivery = resolveDelivery?.(ctx);
+    if (delivery && !hasCreativeTextKey()) throw new ExecutionError("Delivery-aware metadata requires its configured title reviewer", { retryable: false });
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "metadata");
     const serializedEpisodePrompt = serializedEpisodeContext
       ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
@@ -568,6 +573,7 @@ export const metadataOptimized: Block = {
         },
         topic,
         channelName,
+        ...(delivery ? { delivery } : {}),
         niche,
         persona,
         language,
@@ -624,6 +630,7 @@ export const metadataOptimized: Block = {
           .join("\n"),
         titleProfile,
         isMusicNiche,
+        ...(delivery ? { delivery } : {}),
       }));
       const ve = await viewEstimate(tags);
       ctx.log(
@@ -664,6 +671,9 @@ export const metadataOptimized: Block = {
 
   },
 };
+}
+
+export const metadataOptimized = createMetadataBlock();
 
 /* --------------------- 3. package-to-opening plan ------------------------ */
 

@@ -11,6 +11,7 @@ import { createGroundedScenePlannerManifest } from "@/trigger/blocks/groundedSce
 import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@/trigger/blocks/boundLoopVisuals";
 import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2KeyframesManifest } from "@/trigger/blocks/yue2LoopVisuals";
 import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifest } from "@/trigger/blocks/reviewedLoopMotion";
+import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAwareMetadata";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
@@ -84,6 +85,7 @@ export function registerAllBlocks(): void {
   // Competitor-intelligence engine: competitor_research, metadata (optimised),
   // thumbnail_gen (banana engine).
   for (const b of intelligenceBlocks) register(b);
+  registerManifestVersion(createDeliveryAwareMetadataManifest(getManifest("metadata")!));
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
   registerManifestVersion(createChannelAwareScriptQaManifest(getManifest("qa_script")!));

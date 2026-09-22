@@ -513,6 +513,7 @@ export function designPipelineCore(
         if (t.chapters === false) params.chapterCards = false;
       }
       if (e.block === "metadata") {
+        if (e.version === "2.0.0-delivery-aware") params.targetDurationSec = lenSec;
         if (opts.locale) params.language = opts.locale;
         // Seed SEO tags from the chosen subcategory (v1 catalog defaults); the
         // metadata block expands them with AI at publish time.
@@ -1446,6 +1447,7 @@ export function enforceLengthContract(
       pin("maxSeconds", envelope.maxSeconds);
     }
     if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
+    if (e.block === "metadata" && e.version === "2.0.0-delivery-aware") pin("targetDurationSec", lenSec);
     if (e.block === "loop_clips" && family === "music_loop") {
       const scaling = familyTimeScalingContract("music_loop");
       if (scaling.method !== "stream_loop") {
