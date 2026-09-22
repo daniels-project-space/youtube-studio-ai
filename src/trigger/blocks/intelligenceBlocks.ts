@@ -15,6 +15,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
+import { filterDeliveryTimestamps } from "@/lib/metadataDelivery";
 import { childrenThumbnailDirection } from "@/engine/childrenVideoTreatment";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
@@ -340,7 +341,9 @@ export function finishMetadata(
   // ("3:45", "7:00") straight into the description; a live 75s comic shipped
   // chapters out to 7:00. Strip any line whose timestamp exceeds the runtime.
   const realDur = Number(ctx.store["videoDurationSec"] ?? 0);
-  if (realDur > 0) {
+  if (o.delivery) {
+    description = filterDeliveryTimestamps(description, o.delivery, message => ctx.log(message));
+  } else if (realDur > 0) {
     const NL = String.fromCharCode(10);
     description = description
       .split(NL)

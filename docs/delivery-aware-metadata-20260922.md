@@ -80,3 +80,22 @@ The storage, rendered-file persistence, and loop-output recovery tests then
 passed together, and multipart passed ten consecutive isolated runs. No storage
 runtime change was needed. This is not a fresh full-suite pass after that
 test-only correction, nor a production deployment or creative-quality approval.
+
+## Description timestamp bounds
+
+Delivery-aware finishing now recognizes timestamp-leading MM:SS and HH:MM:SS
+lines, including bracketed and simple bulleted forms. It rejects invalid
+minute/second units and chapter starts at or beyond the final delivery bound.
+Ordinary inline clock references remain prose. Planned final duration supplies
+the bound before assembly; source music duration never substitutes for it.
+The supplied chapter-text handoff goes through the same bound after appending.
+Legacy finishing without delivery context retains its prior behavior.
+
+A regression test first reproduced a 01:30:00 chapter surviving inside a
+ten-minute video, then exercised the real finishing function for hours, long
+minute labels, malformed units, exact end boundaries, CRLF, inline prose,
+chapter handoff, source-length isolation, and legacy parity. These checks do not
+prove chapter/footage semantic alignment or qualify generated music.
+Five focused test files, build/typecheck, scoped ESLint, and audits passed after
+this finishing change. No full readiness rerun, thumbnail test, paid generation,
+or deployment was performed for this narrow correction.

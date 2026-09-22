@@ -8,6 +8,24 @@ export const MetadataDeliverySchema = z.object({
 }).strict();
 export type MetadataDelivery = z.infer<typeof MetadataDeliverySchema>;
 
+/** Bound timestamp-leading chapter lines without treating inline clocks as chapters. */
+export function filterDeliveryTimestamps(description: string, delivery: MetadataDelivery,
+  onDrop: (reason: string) => void): string {
+  const timing = MetadataDeliverySchema.parse(delivery);
+  return description.split(/\r?\n/u).filter(line => {
+    const match = line.match(/^\s*(?:[-*]\s+)?(?:\[(\d{1,4}:\d{2}(?::\d{2})?)\]|(\d{1,4}:\d{2}(?::\d{2})?))(?=\s|$)/u);
+    if (!match) return true;
+    const label = match[1] ?? match[2];
+    const parts = label.split(":").map(Number);
+    const validUnits = parts.slice(1).every(part => part < 60);
+    const seconds = parts.reduce((total, part) => total * 60 + part, 0);
+    if (validUnits && seconds < timing.durationSec) return true;
+    onDrop(`metadata: dropped chapter timestamp ${label}: ${validUnits
+      ? `outside ${timing.basis} delivery (${timing.durationSec}s)` : "invalid time units"}`);
+    return false;
+  }).join("\n").replace(/\n{3,}/gu, "\n\n");
+}
+
 /** Music-format duration labels are delivery claims, not facts spoken in a script. */
 export function musicDeliveryClaims(title: string, delivery: MetadataDelivery) {
   const text = title.normalize("NFKC");
