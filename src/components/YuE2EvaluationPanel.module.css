@@ -30,4 +30,5 @@
 .audition fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 12px; min-width: 0; }
 .audition label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .audition select { max-width: 100%; min-width: 0; min-height: 44px; padding: 6px; font: inherit; }
+.audition .verdict { width: min(100%, 16rem); }
 .audition textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; padding: 8px; }

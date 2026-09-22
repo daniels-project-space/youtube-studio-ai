@@ -58,13 +58,25 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
   const review = state.review;
   const { quality, arrangement, brief } = review;
   const signal = quality.signal;
+  const audition = review.audition?.candidateSha256 === review.candidateSha256 ? review.audition : null;
+  const sourceApproved = quality.status !== "blocked" && brief.contextRetained && review.sourceApprovalAvailable &&
+    /^[a-f0-9]{64}$/u.test(review.sourceApprovalBasisFingerprint ?? "") &&
+    audition?.verdict === "approved_for_assembly" && /^[a-f0-9]{64}$/u.test(audition.sourceApprovalFingerprint ?? "");
+  const status = quality.status === "blocked" ? "Blocked for review" : sourceApproved ? "Source approved for assembly"
+    : audition?.verdict === "rejected" ? "Rejected" : audition?.verdict === "needs_work" ? "Needs work"
+    : audition?.verdict === "promising" ? "Audition promising"
+    : audition?.verdict === "approved_for_assembly" ? "Approval needs recheck" : "Needs audition";
+  const personality = brief.contextRetained && audition?.checks?.channel_personality_fit === "pass"
+    ? "Channel personality fit passed owner audition."
+    : brief.contextRetained && audition?.checks?.channel_personality_fit === "fail"
+    ? "Channel personality fit failed owner audition." : "Channel-personality fit is unverified.";
   return <section aria-label="YuE candidate review" className={styles.review}>
     <header className={styles.header}>
       <div><h2>{brief.topic}</h2><p>{brief.reviewContext
         ? brief.reviewContext.channelName ?? "Channel name not retained" : "Channel context not retained"}</p></div>
-      <strong className={styles.status}>{quality.status === "blocked" ? "Blocked for review" : "Needs audition"}</strong>
+      <strong className={styles.status} aria-label="Audition status" aria-live="polite">{status}</strong>
     </header>
-    <p className={styles.warning}>Not approved for production. Channel-personality fit is unverified.</p>
+    <p className={styles.warning}>Not approved for production. {personality}{sourceApproved ? " Publishing is not authorized." : ""}</p>
     <audio ref={audio} controls preload="metadata" src={review.nativeWavUrl} onLoadedMetadata={() => setAudioReady(true)} onError={() => setAudioFailed(true)} aria-label={quality.headroomPreparation ? "Headroom-prepared YuE candidate" : "Native YuE candidate"} />
     {audioFailed && <p role="alert">Audio link expired or unavailable.</p>}
     <div className={styles.toolbar}>
@@ -112,7 +124,10 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
     </div>
     <details className={styles.disclosure}>
       <summary>Record audition</summary>
-      <YuE2AuditionForm key={review.candidateSha256} runId={runId} review={review} />
+      <YuE2AuditionForm key={review.candidateSha256} runId={runId} review={review} onSaved={audition => {
+        setState(current => current.status === "ready" && current.review?.candidateSha256 === audition.candidateSha256
+          ? { ...current, review: { ...current.review, audition } } : current);
+      }} />
     </details>
     <details className={styles.disclosure}>
       <summary>Signal measurements</summary>

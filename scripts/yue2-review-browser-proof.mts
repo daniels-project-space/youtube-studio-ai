@@ -65,6 +65,7 @@ const js = built.outputFiles.find((file) => file.path.endsWith(".js"))!.contents
 const css = built.outputFiles.find((file) => file.path.endsWith(".css"))!.contents;
 let mode: "ready" | "absent" | "blocked" | "natural-loop" | "headroom" | "missing-context" | "unfrozen" | "unnamed" | "unauthorized" | "unavailable" | "held" = "ready";
 let brokenAudio = false, requests = 0, held: ServerResponse | undefined;
+let saveMode: "valid" | "rejected" | "invalid" | "incomplete" = "valid";
 const methods: string[] = [];
 let savedAudition: YuE2AuditionRecord | null = null;
 const server = createServer((req, res) => {
@@ -86,6 +87,16 @@ const server = createServer((req, res) => {
         assert.equal(parsed.runId, "first-run");
         assert.equal(parsed.audition.candidateSha256, review.candidateSha256);
         assert.equal(parsed.sourceApprovalBasisFingerprint, parsed.audition.verdict === "approved_for_assembly" ? review.sourceApprovalBasisFingerprint : undefined);
+        if (saveMode === "rejected") { res.statusCode = 409; res.end('{"ok":false}'); return; }
+        if (saveMode === "invalid") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, audition: { ...parsed.audition, candidateSha256: "0".repeat(64), productionApproved: false } })); return;
+        }
+        if (saveMode === "incomplete") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true, audition: { ...parsed.audition, checks: {}, reviewedAt: 123456789,
+            reviewerId: "fixture-owner", productionApproved: false, sourceApprovalFingerprint: "f".repeat(64) } })); return;
+        }
         savedAudition = { ...parsed.audition, reviewedAt: 123456789, reviewerId: "fixture-owner", productionApproved: false,
           sourceApprovalFingerprint: parsed.audition.verdict === "approved_for_assembly" ? "f".repeat(64) : null };
         res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: true, audition: savedAudition }));
@@ -162,9 +173,18 @@ try {
     await page.getByText("Record audition", { exact: true }).click();
     const form = page.getByRole("form", { name: "YuE audition record" });
     await form.getByLabel("Audition notes", { exact: true }).fill("Restrained tone, but the ending needs a longer audition.");
-    assert.equal(await form.getByRole("option", { name: "Promising, not production-approved" }).evaluate((option: HTMLOptionElement) => option.disabled), true);
+    assert.equal(await form.getByRole("option", { name: "Promising", exact: true }).evaluate((option: HTMLOptionElement) => option.disabled), true);
+    assert.ok(await form.getByLabel("Verdict", { exact: true }).evaluate((select: HTMLSelectElement) => {
+      const style = getComputedStyle(select), canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d")!; context.font = style.font;
+      const width = Math.max(...Array.from(select.options, option => context.measureText(option.text).width));
+      return width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 24 <= select.clientWidth;
+    }), "every verdict label fits, including mobile large text");
+    const beforeSave = requests;
     await form.getByRole("button", { name: "Save audition" }).click();
     await form.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
+    assert.equal(await page.locator('section[aria-label="YuE candidate review"] header strong').textContent(), "Needs work");
+    assert.equal(requests, beforeSave + 1, "confirmed save updates the panel without rereading retained audio");
     assert.ok(await page.getByText("Not approved for production.", { exact: false }).isVisible());
     assert.equal(await page.getByRole("button", { name: /approve|generate|publish/i }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -189,11 +209,24 @@ try {
   assert.equal(recorded.verdict, "promising");
   assert.equal(recorded.productionApproved, false);
   assert.equal(recorded.sourceApprovalFingerprint, null);
+  assert.equal(await page.getByLabel("Audition status", { exact: true }).textContent(), "Audition promising");
+  assert.ok(await page.getByText("Channel personality fit passed owner audition.", { exact: false }).isVisible());
   await auditionForm.getByLabel("Audition notes", { exact: true }).fill("Synthetic fixture: complete listening and all section judgments passed.");
   await auditionForm.getByLabel("Verdict", { exact: true }).selectOption("approved_for_assembly");
+  for (const failure of ["rejected", "invalid", "incomplete"] as const) {
+    saveMode = failure;
+    await auditionForm.getByRole("button", { name: "Save audition" }).click();
+    await auditionForm.getByRole("status").filter({ hasText: failure === "rejected" ? "Candidate changed" : "Invalid save response" }).waitFor();
+    assert.equal(await page.getByLabel("Audition status", { exact: true }).textContent(), "Audition promising",
+      "unconfirmed approval must not replace the saved decision");
+  }
+  saveMode = "valid";
+  const beforeApproval = requests;
   await auditionForm.getByRole("button", { name: "Save audition" }).click();
   await auditionForm.getByRole("status").filter({ hasText: "Source approved for assembly; publishing is not authorized." }).waitFor();
   assert.equal((savedAudition as YuE2AuditionRecord | null)?.sourceApprovalFingerprint, "f".repeat(64));
+  assert.equal(await page.getByLabel("Audition status", { exact: true }).textContent(), "Source approved for assembly");
+  assert.equal(requests, beforeApproval + 1, "source approval needs no additional GET to update the panel");
   for (const [name, width, font] of [["approved-desktop", 1440, 16], ["approved-mobile", 390, 16], ["approved-large-text", 320, 24]] as const) {
     await page.setViewportSize({ width, height: 1000 });
     await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font);
@@ -205,8 +238,9 @@ try {
     await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByRole("heading", { name: topic }).waitFor();
     await page.getByText("Record audition", { exact: true }).click();
-    assert.equal(await page.getByRole("option", { name: "Approve source for assembly" }).evaluate((option: HTMLOptionElement) => option.disabled), true);
+    assert.equal(await page.getByRole("option", { name: "Approve for assembly", exact: true }).evaluate((option: HTMLOptionElement) => option.disabled), true);
     assert.equal(await page.getByRole("button", { name: "Save audition" }).isDisabled(), true);
+    assert.notEqual(await page.getByLabel("Audition status", { exact: true }).textContent(), "Source approved for assembly");
   }
   mode = "ready";
   await page.goto(base); await page.getByText("YuE music evaluation", { exact: true }).click();
@@ -216,6 +250,13 @@ try {
   await page.getByRole("button", { name: "Save audition" }).click();
   await page.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
   assert.equal((savedAudition as YuE2AuditionRecord | null)?.sourceApprovalFingerprint, null);
+  assert.equal(await page.getByLabel("Audition status", { exact: true }).textContent(), "Needs work");
+  await page.getByLabel("Channel personality fit", { exact: true }).selectOption("fail");
+  await page.getByLabel("Verdict", { exact: true }).selectOption("rejected");
+  await page.getByRole("button", { name: "Save audition" }).click();
+  await page.getByRole("status").filter({ hasText: "Audition saved" }).waitFor();
+  assert.equal(await page.getByLabel("Audition status", { exact: true }).textContent(), "Rejected");
+  assert.ok(await page.getByText("Channel personality fit failed owner audition.", { exact: false }).isVisible());
   for (const [state, expected] of [["absent", "No retained YuE candidate"], ["unauthorized", "Owner sign-in required"],
     ["unavailable", "Review evidence unavailable or invalid"], ["missing-context", "Original channel context is missing"],
     ["unnamed", "Channel name not retained"], ["blocked", "Measured duration does not match"],
