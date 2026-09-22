@@ -260,6 +260,8 @@ export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
   consumerIds: readonly string[];
   artifact: string;
   capability: string;
+  /** An explicit required artifact may carry the crew brief through a declared adapter. */
+  mediatedArtifact?: string;
 }> = [
   { consumerIds: ["script_gen", "story_spine"], artifact: "structure", capability: "crew.director_treatment" },
   {
@@ -284,6 +286,7 @@ export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
     consumerIds: ["music", "narration_tts"],
     artifact: "musicBrief",
     capability: "crew.composer_cue_sheet",
+    mediatedArtifact: "acceptedMusicArrangement",
   },
   { consumerIds: ["qa_visual"], artifact: "validationSpec", capability: "crew.critic_validation_spec" },
 ];
@@ -819,6 +822,13 @@ export function compilePipeline(
           );
         }
         if (!(binding.artifact in consumer.consumes) && !(binding.artifact in consumer.optionalConsumes)) {
+          const mediated = binding.mediatedArtifact;
+          const mediatorIndex = mediated && mediated in consumer.consumes
+            ? resolved.manifests.findIndex(manifest => mediated in manifest.produces) : -1;
+          // A structural handoff must be required on both sides and stay
+          // between its original crew producer and the final consumer.
+          if (mediatorIndex > producerIndex && mediatorIndex < consumerIndex &&
+            binding.artifact in resolved.manifests[mediatorIndex].consumes) continue;
           throw new PipelinePolicyError(
             `module "${consumer.id}" uses crew artifact "${binding.artifact}" without declaring it`,
           );

@@ -87,9 +87,12 @@ import {
   type PipelineCompilation,
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
+import { selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
+  /** Supervised source selection only; does not grant listening or release approval. */
+  yue2Music?: YuE2PipelineSelection;
   nicheKey?: string;
   subcategory?: string;
   /** Immutable creator intent, required by the channel-inception executor. */
@@ -1293,6 +1296,14 @@ export function designPipelineCore(
       : undefined,
   );
   pipeline = enforcedLength.pipeline;
+  if (opts.yue2Music !== undefined) {
+    if (options.validateRuntimeRegistry === false) throw new Error("YuE2 selection requires executable runtime validation, not a structural preview");
+    if (opts.paramOverrides?.music && Object.keys(opts.paramOverrides.music).length) {
+      throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
+    }
+    pipeline = selectYuE2Pipeline(pipeline, opts.yue2Music);
+    warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
+  }
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);
   }
@@ -1351,6 +1362,7 @@ export function designPipelineCore(
   }
 
   const runtimeBlockers = [
+    ...(opts.yue2Music !== undefined ? ["YuE2 source and final-media qualification require supervised review before automatic production."] : []),
     ...runtimeReadiness.blockers,
     ...certifiedAdmission.blockers,
     ...(!hasRequiredSelfContainedRoute
@@ -1375,7 +1387,8 @@ export function designPipelineCore(
       && hasRequiredSelfContainedRoute
       && dataStoryReadiness?.autonomous !== false
       && !isSupervisedQuizShort
-      && !previewOnlyGenerationProfile,
+      && !previewOnlyGenerationProfile
+      && opts.yue2Music === undefined,
     runtimeBlockers,
     warnings,
     compilation,
