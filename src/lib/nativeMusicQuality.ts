@@ -74,10 +74,25 @@ function runFfmpeg(args: readonly string[]): Promise<string> {
       { stdio: ["ignore", "ignore", "pipe"] },
     );
     let stderr = "";
-    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.once("error", reject);
+    let outputBytes = 0;
+    let failure: Error | undefined;
+    const timer = setTimeout(() => {
+      failure ??= new Error("native music QA FFmpeg exceeded its 90-second analysis budget");
+      child.kill("SIGKILL");
+    }, 90_000);
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (failure) return;
+      outputBytes += chunk.byteLength;
+      if (outputBytes > 1_048_576) {
+        failure = new Error("native music QA FFmpeg exceeded its diagnostic byte limit");
+        child.kill("SIGKILL");
+      } else stderr += chunk.toString();
+    });
+    child.once("error", error => { failure ??= error; });
     child.once("close", (code) => {
-      if (code === 0) resolve(stderr);
+      clearTimeout(timer);
+      if (failure) reject(failure);
+      else if (code === 0) resolve(stderr);
       else reject(new Error(`native music QA FFmpeg exited ${String(code)}: ${stderr.slice(-600)}`));
     });
   });
@@ -155,21 +170,33 @@ export async function measureNativeMusicQuality(input: {
   }
   const workDir = await mkdtemp(join(tmpdir(), "native-music-qa-"));
   const inputPath = join(workDir, "native.wav");
-  await writeFile(inputPath, input.audio);
   try {
+    await writeFile(inputPath, input.audio);
     const durationSec = input.durationSec;
-    const [loudness, statistics, silence] = await Promise.all([
-      runFfmpeg(["-hide_banner", "-i", inputPath, "-map", "a:0", "-af", "ebur128=peak=true", "-f", "null", "-"]),
-      runFfmpeg(["-hide_banner", "-i", inputPath, "-map", "a:0", "-af", "astats=metadata=0:reset=0", "-f", "null", "-"]),
-      runFfmpeg(["-hide_banner", "-i", inputPath, "-map", "a:0", "-af", "silencedetect=noise=-50dB:d=0.05", "-f", "null", "-"]),
+    // Decode once; independent branches preserve each filter's sample format
+    // and avoid feeding one analyzer's conversions into another analyzer.
+    const fullAnalysis = await runFfmpeg([
+      "-hide_banner", "-nostats", "-i", inputPath, "-filter_complex",
+      "[0:a]asplit=3[loudness][statistics][silence];" +
+        "[loudness]ebur128=peak=true:framelog=verbose[l];" +
+        "[statistics]astats=metadata=0:reset=0[s];" +
+        "[silence]silencedetect=noise=-50dB:d=0.05[q]",
+      "-map", "[l]", "-map", "[s]", "-map", "[q]", "-f", "null", "-",
     ]);
+    const loudness = fullAnalysis, statistics = fullAnalysis, silence = fullAnalysis;
     const windowDurationSec = Math.min(1.5, Math.max(0.75, durationSec * 0.1));
     const openingStartSec = Math.min(0.75, Math.max(0, durationSec - (windowDurationSec * 2)));
     const postOpeningStarts = postOpeningProbeStarts(durationSec, windowDurationSec);
-    const [openingHighBandDbfs, ...postOpeningLevels] = await Promise.all([
+    const probes = await Promise.allSettled([
       highBandWindow(inputPath, openingStartSec, windowDurationSec),
       ...postOpeningStarts.map((startSec) => highBandWindow(inputPath, startSec, windowDurationSec)),
     ]);
+    // Wait for every child to close before removing its shared input directory.
+    const levels = probes.map(probe => {
+      if (probe.status === "rejected") throw probe.reason;
+      return probe.value;
+    });
+    const [openingHighBandDbfs, ...postOpeningLevels] = levels;
     const weakestPostOpeningIndex = postOpeningLevels.reduce(
       (weakest, level, index) => level < postOpeningLevels[weakest]! ? index : weakest,
       0,

@@ -10,9 +10,38 @@ import {
   measureNativeMusicQuality,
 } from "@/lib/nativeMusicQuality";
 
-function render(path: string, args: readonly string[]): void {
-  const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args, "-c:a", "pcm_s16le", path], { encoding: "utf8" });
+function render(path: string, args: readonly string[], codec = "pcm_s16le"): void {
+  const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args, "-c:a", codec, path], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`FFmpeg fixture failed: ${result.stderr}`);
+}
+
+function separatePassMeasurements(path: string, durationSec: number) {
+  const outputs = ["ebur128=peak=true", "astats=metadata=0:reset=0", "silencedetect=noise=-50dB:d=0.05"].map(filter => {
+    const result = spawnSync("ffmpeg", ["-hide_banner", "-i", path, "-map", "a:0", "-af", filter, "-f", "null", "-"],
+      { encoding: "utf8", timeout: 30_000, maxBuffer: 1_048_576 });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stderr;
+  });
+  const last = (output: string, expression: RegExp) => {
+    const value = Number([...output.matchAll(expression)].at(-1)?.[1]);
+    assert.ok(Number.isFinite(value));
+    return value;
+  };
+  const round = (value: number, digits = 4) => Math.round(value * 10 ** digits) / 10 ** digits;
+  const peak = last(outputs[0]!, /^\s*Peak:\s*(-?[0-9.]+)\s+dBFS/mgu);
+  const rms = last(outputs[1]!, /RMS level dB:\s*(-?[0-9.]+)/gu);
+  const peaks = Math.max(0, Math.round(last(outputs[1]!, /Peak count:\s*([0-9.]+)/gu)));
+  const starts = [...outputs[2]!.matchAll(/silence_start:\s*([0-9.]+)/gu)].map(match => Number(match[1]));
+  const ends = [...outputs[2]!.matchAll(/silence_end:\s*([0-9.]+)/gu)].map(match => Number(match[1]));
+  const silence = starts.reduce((total, start, index) => total + Math.max(0, (ends[index] ?? durationSec) - start), 0);
+  return {
+    integratedLufs: round(last(outputs[0]!, /^\s*I:\s*(-?[0-9.]+)\s+LUFS/mgu)),
+    truePeakDbtp: round(peak), lraLu: round(last(outputs[0]!, /^\s*LRA:\s*(-?[0-9.]+)\s+LU/mgu)),
+    crestDb: round(Math.max(0, peak - rms)), clippedSamples: peak >= -0.1 ? peaks : 0,
+    maximumConsecutiveCeilingSamples: peak >= -0.1 ? peaks : 0,
+    dcOffsetAbsolute: round(Math.abs(last(outputs[1]!, /DC offset:\s*(-?[0-9.]+)/gu)), 6),
+    silenceFraction: round(Math.max(0, Math.min(durationSec, silence)) / durationSec, 6),
+  };
 }
 
 async function main(): Promise<void> {
@@ -21,6 +50,7 @@ async function main(): Promise<void> {
     const stable = join(work, "stable.wav");
     const collapsed = join(work, "collapsed.wav");
     const delayedCollapsed = join(work, "delayed-collapsed.wav");
+    const dynamicFloat = join(work, "dynamic-float.wav");
     // Both windows contain the same low- and high-band content.
     render(stable, [
       "-f", "lavfi", "-i", "aevalsrc=0.22*sin(2*PI*440*t)+0.13*sin(2*PI*8000*t):s=32000:d=8",
@@ -43,12 +73,22 @@ async function main(): Promise<void> {
       "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
       "-ac", "2",
     ]);
+    render(dynamicFloat, ["-f", "lavfi", "-i",
+      "aevalsrc=between(t\\,1\\,7)*(0.1+1.1*sin(2*PI*440*t))|between(t\\,1\\,7)*0.2*sin(2*PI*8000*t):s=48000:d=8"], "pcm_f32le");
 
     const [stableAnalysis, collapsedAnalysis, delayedCollapsedAnalysis] = await Promise.all([
       measureNativeMusicQuality({ audio: await readFile(stable), durationSec: 8 }),
       measureNativeMusicQuality({ audio: await readFile(collapsed), durationSec: 8 }),
       measureNativeMusicQuality({ audio: await readFile(delayedCollapsed), durationSec: 12 }),
     ]);
+    const floatAnalysis = await measureNativeMusicQuality({ audio: await readFile(dynamicFloat), durationSec: 8 });
+    for (const [path, duration, analysis] of [[stable, 8, stableAnalysis], [collapsed, 8, collapsedAnalysis],
+      [delayedCollapsed, 12, delayedCollapsedAnalysis], [dynamicFloat, 8, floatAnalysis]] as const) {
+      const expected = separatePassMeasurements(path, duration);
+      const measured = Object.fromEntries(Object.keys(expected).map(key =>
+        [key, analysis.measurements[key as keyof typeof analysis.measurements]]));
+      assert.deepEqual(measured, expected, `${path}: combined decoding must preserve every full-file measurement`);
+    }
     assert(stableAnalysis.measurements.openingHighBandDropDb < 2, "stable high-band material must not resemble the Music3 degradation");
     assert.equal(stableAnalysis.measurements.mechanicalArtifactScore, 0);
     assert.equal(hasKnownMiniMaxMusic3OpeningDegradation(stableAnalysis), false);
