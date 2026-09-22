@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,7 +9,7 @@ import { directory, worktree } from './studio-render-build.mjs';
 
 const studio = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const runtime = '/home/ubuntu/youtube-studio-music-runtime';
-const runtimeRevision = 'bb57888e2e9772131c3acc8deb2e36bb10493341';
+const runtimeRevision = 'c5d5a6b61107ad08bc22a20f7813d0e57137e73f';
 const root = '/var/lib/youtube-studio-render';
 const project = 'youtube-studio-ai';
 const run = (command, args, options = {}) => execFileSync(command, args, {
@@ -104,9 +105,17 @@ function main() {
     const manifest = json(join(receipt.context, 'src/music_runtime/manifest.json'));
     const actualManifest = JSON.parse(run('docker', [...sandbox, details.Id, 'manifest']));
     assert.deepEqual(actualManifest, manifest, 'Built runtime manifest differs from the pinned source');
+    const notices = ['UPSTREAM_ABC_LICENSE.txt', 'UPSTREAM_ABC_NOTICE.txt'];
+    const installedNotices = JSON.parse(run('docker', [...sandbox, '--entrypoint', 'python', details.Id, '-c',
+      'import hashlib,json; from importlib.resources import files; ' +
+      `print(json.dumps({name:hashlib.sha256(files("music_runtime").joinpath(name).read_bytes()).hexdigest() for name in ${JSON.stringify(notices)}}))`]));
+    const expectedNotices = Object.fromEntries(notices.map(name => [name,
+      createHash('sha256').update(readFileSync(join(receipt.context, 'src/music_runtime', name))).digest('hex')]));
+    assert.deepEqual(installedNotices, expectedNotices, 'Installed parser notices differ from the pinned source');
     receipt.imageId = details.Id;
     receipt.status = 'built';
     receipt.manifestVerified = true;
+    receipt.licenseNotices = installedNotices;
     save(receiptFile, receipt);
     if (mode === 'build-and-verify-cache') {
       const evidence = JSON.parse(run('docker', [...sandbox,
