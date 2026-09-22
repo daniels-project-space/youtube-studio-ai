@@ -10,6 +10,7 @@ function nonblankText(maximum?: number) {
 }
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/u);
 const fraction = z.number().finite().min(0).max(1);
+export const MusicSymbolicScorePolicySchema = z.literal("instrumental");
 export const MusicSymbolicScoreSchema = z.string().min(1).max(32000).refine(
   (value) => value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= 32000,
   "symbolic score must be nonblank and at most 32000 UTF-8 bytes",
@@ -110,12 +111,16 @@ const AcceptedMusicArrangementBodySchema = z.object({
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
   symbolicScore: MusicSymbolicScoreSchema.optional(),
+  symbolicScorePolicy: MusicSymbolicScorePolicySchema.optional(),
 }).strict();
 
 export const AcceptedMusicArrangementSchema = AcceptedMusicArrangementBodySchema.extend({
   fingerprint,
 }).strict().superRefine((artifact, issue) => {
   refineMusicArrangementIntent(artifact, issue);
+  if (artifact.symbolicScorePolicy && !artifact.symbolicScore) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, path: ["symbolicScorePolicy"], message: "score policy requires a symbolic score" });
+  }
   if (artifact.reviewContext && artifact.reviewContext.topic !== artifact.topic) {
     issue.addIssue({ code: z.ZodIssueCode.custom, path: ["reviewContext"], message: "music review context belongs to another topic" });
   }
@@ -176,6 +181,9 @@ export function createAcceptedMusicArrangement(input: {
   const symbolicScore = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
     Object.hasOwn(input.sourceBrief, "symbolicScore")
     ? MusicSymbolicScoreSchema.parse((input.sourceBrief as Record<string, unknown>).symbolicScore) : undefined;
+  const symbolicScorePolicy = input.sourceBrief !== null && typeof input.sourceBrief === "object" &&
+    Object.hasOwn(input.sourceBrief, "symbolicScorePolicy")
+    ? MusicSymbolicScorePolicySchema.parse((input.sourceBrief as Record<string, unknown>).symbolicScorePolicy) : undefined;
   const body = AcceptedMusicArrangementBodySchema.parse({
     version: ACCEPTED_MUSIC_ARRANGEMENT_VERSION,
     ownerId: input.ownerId,
@@ -187,6 +195,7 @@ export function createAcceptedMusicArrangement(input: {
     ...(musicIntent ? { musicIntent } : {}),
     ...(reviewContext ? { reviewContext } : {}),
     ...(symbolicScore === undefined ? {} : { symbolicScore }),
+    ...(symbolicScorePolicy === undefined ? {} : { symbolicScorePolicy }),
   });
   return AcceptedMusicArrangementSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
 }

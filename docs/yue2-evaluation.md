@@ -87,8 +87,9 @@ node --import tsx src/scripts/evaluate-music-composer.ts \
 
 Explicit `--submit --out /absolute/new-attempt --runtime /absolute/runtime`
 admits one text evaluation, with `OPENROUTER_API_KEY` injected from the vault.
-The runtime's `.venv-test/bin/python` must import its current `src` parser before
-text dispatch; after generation the same `validate_job` validates the exact
+The runtime's `.venv-test/bin/python` must validate a local ten-second
+instrumental-policy probe with its current `src` parser before text dispatch;
+importability alone is insufficient. After generation the same `validate_job` validates the exact
 request score and symbolic duration locally. No GPU/model weights are loaded.
 The exclusive `attempt.json` and `dispatch.json` claims prevent replay, including
 after ambiguous failures. Existing attempt directories are never overwritten or
@@ -104,11 +105,19 @@ notation facts, not audible silence, instrumentation, speech masking or musical
 quality. No universal quality threshold or automatic approval is inferred.
 Studio's instrumental composer evaluation rejects any sounding notes in the
 Vocal staff even when the score parses and has the exact requested duration.
-It retains the native report, original request, paid usage and failure receipt;
+It retains the original request, paid usage and failure receipt (and the native
+report if parsing reached that stage);
 it emits no successful result and cannot automatically retry that attempt.
-Resting Vocal staves with chord annotations remain valid. This operator gate
-does not change the generic runtime's song contract or establish an audible
-no-vocals guarantee. It is not yet a production worker admission gate.
+Resting Vocal staves with chord annotations remain valid. Newly scored composer
+briefs also bind `symbolicScorePolicy: "instrumental"` into their accepted
+artifact fingerprint. The shared music request carries this as
+`score_policy: "instrumental"`; stripping it is refused even with a new job
+hash. The corresponding runtime validates it before HTTP queue admission and
+GPU preflight. Old accepted artifacts retain their original policy-free
+requests and job IDs; generic song diagnostics remain supported.
+These source changes require a matching runtime build before deployment. They
+do not change the live GPU image/policy or establish an audible no-vocals
+guarantee. Policy-bearing requests fail closed against older runtime builds.
 The regression uses the actual pinned CPU parser and a mocked text provider:
 a 64-second score with one four-second Vocal note must be held, while the
 retained instrumental sleep/narration scores remain accepted.

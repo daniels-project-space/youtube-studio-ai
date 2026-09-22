@@ -95,9 +95,14 @@ export const YuE2JobSchema = z.discriminatedUnion("schema_version", [LegacyYuE2J
   LegacyYuE2JobSchema.extend({ schema_version: z.literal(2),
     requested_duration_sec: z.number().int().min(10).max(300),
     source_duration_policy: z.enum(["exact", "natural_loop"]).optional(),
+    score_policy: z.literal("instrumental").optional(),
     abc: Text.refine((value) => value.trim().length > 0).optional(),
   }).strict(),
-]);
+]).superRefine((job, issue) => {
+  if (job.schema_version === 2 && job.score_policy && !job.abc) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, path: ["score_policy"], message: "score policy requires an explicit score" });
+  }
+});
 export type YuE2Job = z.infer<typeof YuE2JobSchema>;
 
 export interface YuE2EvaluationRequest {
@@ -159,6 +164,7 @@ export function createYuE2AcceptedArrangementRequest(input: {
     requested_duration_sec: acceptedArrangement.arrangement.requestedDurationSec,
     source_duration_policy: sourceDurationPolicy(acceptedArrangement),
     ...(symbolicScore !== undefined ? { abc: symbolicScore } : {}),
+    ...(acceptedArrangement.symbolicScorePolicy ? { score_policy: acceptedArrangement.symbolicScorePolicy } : {}),
     style: projectAcceptedMusicArrangementToYuEStyle(acceptedArrangement),
     lyrics: "" as const,
     seed: parsed.seed,
@@ -186,6 +192,8 @@ export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluati
     request.programFingerprint !== request.acceptedArrangement.fingerprint ||
     (request.acceptedArrangement.symbolicScore !== undefined &&
       (request.job.schema_version !== 2 || request.job.abc !== request.acceptedArrangement.symbolicScore)) ||
+    (request.acceptedArrangement.symbolicScorePolicy !== undefined &&
+      (request.job.schema_version !== 2 || request.job.score_policy !== request.acceptedArrangement.symbolicScorePolicy)) ||
     (request.job.schema_version === 2 && request.job.requested_duration_sec !== request.acceptedArrangement.arrangement.requestedDurationSec) ||
     (request.job.schema_version === 2 && request.job.source_duration_policy === "natural_loop" &&
       sourceDurationPolicy(request.acceptedArrangement) !== "natural_loop") ||

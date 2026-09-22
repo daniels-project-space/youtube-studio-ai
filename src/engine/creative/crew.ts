@@ -18,7 +18,7 @@ import {
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
 import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema, MusicSymbolicScoreSchema,
-  MusicArrangementIntentSchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
+  MusicArrangementIntentSchema, MusicSymbolicScorePolicySchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StyleDNA,
@@ -304,6 +304,7 @@ export const ComposerBriefWithArrangementSchema = z.object({
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
   symbolicScore: MusicSymbolicScoreSchema.optional(),
+  symbolicScorePolicy: MusicSymbolicScorePolicySchema.optional(),
   audio: z.object({
     duckDb: z.number().finite(),
     bedLufs: z.number().finite(),
@@ -436,7 +437,8 @@ export async function briefComposerWithArrangement(
       reviewContext,
       ...(musicIntent ? { musicIntent } : {}),
       arrangement: raw.arrangement,
-      ...("symbolicScore" in raw ? { symbolicScore: MusicSymbolicScoreSchema.parse(raw.symbolicScore) } : {}),
+      ...("symbolicScore" in raw ? { symbolicScore: MusicSymbolicScoreSchema.parse(raw.symbolicScore),
+        symbolicScorePolicy: "instrumental" as const } : {}),
       musicPrompt: raw.arrangement.direction,
       audio: {
         duckDb: raw.duckDb,

@@ -63,14 +63,21 @@ print(json.dumps({"version":"native-music-score-review/v1", "scope":"notation_on
 
 export function validateLocalYuE2Score(runtime: string, job?: unknown) {
   if (!isAbsolute(runtime)) throw new Error("runtime path must be absolute");
-  const result = spawnSync(join(runtime, ".venv-test/bin/python"), ["-c", job === undefined
-    ? "from music_runtime.config import validate_job; print('ready')"
-    : nativeScoreReviewProgram], {
-    input: job === undefined ? undefined : JSON.stringify(job), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
+  // Exercise the required policy before purchasing composition, not just Python importability.
+  const preflight = {
+    schema_version: 2, job_id: "studio-instrumental-policy-preflight", style: "CPU admission probe",
+    lyrics: "", seed: 0, requested_duration_sec: 10, score_policy: "instrumental",
+    license: { scope: "personal_creator", acknowledged: true, company_commercial_authorized: false },
+    abc: 'X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=48\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\n' +
+      'V: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\nV: Vocal\nz32|z32|\nV: Ins\nc32|c32|\n',
+  };
+  const result = spawnSync(join(runtime, ".venv-test/bin/python"), ["-c", nativeScoreReviewProgram], {
+    input: JSON.stringify(job === undefined ? preflight : job), encoding: "utf8", timeout: 10000, maxBuffer: 65536,
     env: { NODE_ENV: "test", PATH: process.env.PATH, PYTHONPATH: join(runtime, "src"), PYTHONDONTWRITEBYTECODE: "1" },
   });
   if (result.error || result.status !== 0) throw new Error(`native score validation failed: ${result.error?.message ?? result.stderr}`);
-  return job === undefined ? undefined : NativeScoreReviewSchema.parse(JSON.parse(result.stdout));
+  const review = NativeScoreReviewSchema.parse(JSON.parse(result.stdout));
+  return job === undefined ? undefined : review;
 }
 
 /** Isolated operator evaluation, never a production run lease or channel mutation. */

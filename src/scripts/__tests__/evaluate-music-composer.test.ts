@@ -98,6 +98,8 @@ async function main() {
       const request = JSON.parse(await readFile(join(options.output, "request.json"), "utf8"));
       assert.equal(request.job.abc, score);
       assert.equal(request.acceptedArrangement.symbolicScore, score);
+      assert.equal(request.acceptedArrangement.symbolicScorePolicy, "instrumental");
+      assert.equal(request.job.score_policy, "instrumental");
       const review = JSON.parse(await readFile(join(options.output, "score-review.json"), "utf8"));
       assert.equal(review.audioQualityApproved, false);
       assert.equal(review.scope, "notation_only");
@@ -127,11 +129,8 @@ async function main() {
       assert.equal(vocalFailure.dispatched, true);
       assert.equal(vocalFailure.gpuCalls, 0);
       assert.equal(vocalFailure.automaticRetryAllowed, false);
-      const vocalReview = JSON.parse(await readFile(join(vocal.output, "score-review.json"), "utf8"));
-      assert.equal(vocalReview.durationSeconds, 64, "timing correctness does not imply instrumental notation");
-      assert.equal(vocalReview.voices.Vocal.noteCount, 1);
-      assert.equal(vocalReview.voices.Vocal.notatedSoundSeconds, 4);
-      assert.equal(vocalReview.audioQualityApproved, false);
+      await assert.rejects(readFile(join(vocal.output, "score-review.json")), /ENOENT/,
+        "native policy rejection precedes the successful notation report");
       assert.equal(JSON.parse(await readFile(join(vocal.output, "request.json"), "utf8")).job.abc, score.replace("z32", "c32"));
       await assert.rejects(readFile(join(vocal.output, "result.json")), /ENOENT/);
       await assert.rejects(evaluateMusicComposer(input, vocal), /EEXIST/);

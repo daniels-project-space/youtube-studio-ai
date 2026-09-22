@@ -114,6 +114,14 @@ async function main() {
   assert.equal(candidate.listeningAudioSha256, retained.candidate.headroom.audioSha256);
   assert.deepEqual(calls[0].request, retained.request, "score, personality, role and natural-duration policy reach the worker unchanged");
   assert.equal(reads, 1);
+  reset(); mode = "throw";
+  await assert.rejects(selected.execute({ ...context, store: { ...context.store,
+    acceptedMusicArrangement: changedArrangement({ symbolicScorePolicy: "instrumental" }) } }), /RECONCILIATION_REQUIRED/);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].request.job.schema_version === 2);
+  assert.equal(calls[0].request.job.score_policy, "instrumental");
+  assert.notEqual(calls[0].request.job.job_id, retained.request.job.job_id);
+  assert.equal(reads, 0, "transport failure never substitutes a historical candidate");
   for (const mutation of [{ productionApproved: true }, { listeningAudioKey: "owner/foreign/audio.wav" },
     { candidateKey: "owner/foreign/candidate.json" }]) {
     assert.equal(selected.produces.yue2MusicCandidate.schema.safeParse({ ...candidate, ...mutation }).success, false);

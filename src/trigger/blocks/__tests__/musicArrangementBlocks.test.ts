@@ -316,9 +316,11 @@ async function main() {
   assert.ok(calls.at(-1)!.prompt.includes(seedStore.styleGrammar));
   const scoredAccepted = AcceptedMusicArrangementSchema.parse(scoredResult.store.acceptedMusicArrangement);
   assert.equal(scoredAccepted.symbolicScore, symbolicScore);
+  assert.equal(scoredAccepted.symbolicScorePolicy, "instrumental");
   const scoredRequest = createYuE2AcceptedArrangementRequest({ arrangement: scoredAccepted, seed: 42, personalCreatorAcknowledged: true });
   assert.ok(scoredRequest.job.schema_version === 2);
   assert.equal(scoredRequest.job.abc, symbolicScore);
+  assert.equal(scoredRequest.job.score_policy, "instrumental");
   assert.deepEqual(validateYuE2EvaluationRequest(scoredRequest), scoredRequest);
   if (process.env.YUE2_TEST_RUNTIME) {
     const runtime = process.env.YUE2_TEST_RUNTIME;

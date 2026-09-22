@@ -698,6 +698,37 @@ async function main(): Promise<void> {
         assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/);
       }
     });
+    await test("instrumental score policy is sealed to new arrangements without rewriting legacy requests", () => {
+      const symbolicScore = "CPU binding fixture; native parsing is tested in the runtime.";
+      const legacy = createAcceptedMusicArrangement({ ...arrangement, sourceBrief: { symbolicScore } });
+      const accepted = createAcceptedMusicArrangement({ ...arrangement,
+        sourceBrief: { symbolicScore, symbolicScorePolicy: "instrumental" } });
+      const oldRequest = createYuE2AcceptedArrangementRequest({ arrangement: legacy, seed: 42, personalCreatorAcknowledged: true });
+      const current = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
+      assert.ok(current.job.schema_version === 2 && oldRequest.job.schema_version === 2);
+      assert.equal(current.job.score_policy, "instrumental");
+      assert.equal(oldRequest.job.score_policy, undefined);
+      assert.notEqual(current.programFingerprint, oldRequest.programFingerprint);
+      assert.notEqual(current.job.job_id, oldRequest.job.job_id);
+      assert.deepEqual(validateYuE2EvaluationRequest(oldRequest), oldRequest);
+      assert.deepEqual(validateYuE2EvaluationRequest(current), current);
+      assert.equal(legacy.symbolicScorePolicy, undefined);
+      const changed = clone(current);
+      assert.ok(changed.job.schema_version === 2);
+      delete changed.job.score_policy;
+      const { job_id: _oldId, ...body } = changed.job;
+      void _oldId;
+      changed.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({ version: changed.version,
+        programFingerprint: changed.programFingerprint, manifestSha256: changed.manifestSha256, request: body }))}`;
+      assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/);
+      for (const policy of [null, false, "none", {}]) {
+        assert.throws(() => createAcceptedMusicArrangement({ ...arrangement,
+          sourceBrief: { symbolicScore, symbolicScorePolicy: policy } }));
+      }
+      assert.throws(() => createAcceptedMusicArrangement({ ...arrangement,
+        sourceBrief: { symbolicScorePolicy: "instrumental" } }), /requires a symbolic score/);
+      assert.throws(() => validateYuE2EvaluationRequest({ ...current, job: { ...current.job, abc: undefined } }), /explicit score/);
+    });
     await test("natural source timing is restricted to repeat-playback primary and meditation music", () => {
       for (const role of ["primary_music", "meditation_bed", "narration_bed", "short_form_bed"] as const) {
         for (const playback of ["once", "repeat"] as const) {
