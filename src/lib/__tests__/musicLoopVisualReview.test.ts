@@ -101,8 +101,17 @@ test("real repeated master passes bounded review transport and durable coverage 
     const inspected = JSON.parse(execFileSync(ffprobe, ["-v", "error", "-select_streams", "v:0", "-read_intervals", "120%+#3",
       "-show_packets", "-show_entries", "packet=pos,size", "-of", "json", corrupt], { encoding: "utf8", timeout: 30000 }));
     const target = inspected.packets[1], handle = await open(corrupt, "r+");
-    try { const position = Number(target.pos) + Math.floor(Number(target.size) / 2), byte = Buffer.alloc(1);
-      await handle.read(byte, 0, 1, position); byte[0] ^= 1; await handle.write(byte, 0, 1, position);
+    try {
+      const packetStart = Number(target.pos), packetSize = Number(target.size);
+      assert.ok(Number.isSafeInteger(packetStart) && packetStart >= 0, "packet offset must be a nonnegative safe integer");
+      assert.ok(Number.isSafeInteger(packetSize) && packetSize >= 2, "packet must contain a valid corruption target");
+      const packetEnd = packetStart + packetSize;
+      assert.ok(Number.isSafeInteger(packetEnd) && packetEnd <= (await handle.stat()).size,
+        "the whole target packet must be inside the fixture");
+      const position = packetStart + Math.floor(packetSize / 2), byte = Buffer.alloc(1);
+      assert.equal((await handle.read(byte, 0, 1, position)).bytesRead, 1);
+      byte[0] ^= 1;
+      assert.equal((await handle.write(byte, 0, 1, position)).bytesWritten, 1);
     } finally { await handle.close(); }
     await assert.rejects(reviewRender(corrupt, 180, intent, options), /payload or presentation mismatch/);
     assert.equal(calls, 0, "unreviewed late corruption and incompatible plans must not purchase vision calls");

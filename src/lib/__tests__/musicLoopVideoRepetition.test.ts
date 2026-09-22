@@ -65,10 +65,17 @@ test("real production loop qualifies and a changed late packet fails the same sc
     const target = inspected.packets[1];
     const handle = await open(corrupt, "r+");
     try {
-      const position = Number(target.pos) + Math.floor(Number(target.size) / 2);
+      const packetStart = Number(target.pos), packetSize = Number(target.size);
+      assert.ok(Number.isSafeInteger(packetStart) && packetStart >= 0, "packet offset must be a nonnegative safe integer");
+      assert.ok(Number.isSafeInteger(packetSize) && packetSize >= 2, "packet must contain a valid corruption target");
+      const packetEnd = packetStart + packetSize;
+      assert.ok(Number.isSafeInteger(packetEnd) && packetEnd <= (await handle.stat()).size,
+        "the whole target packet must be inside the fixture");
+      const position = packetStart + Math.floor(packetSize / 2);
       const byte = Buffer.alloc(1);
       assert.equal((await handle.read(byte, 0, 1, position)).bytesRead, 1);
-      byte[0] ^= 1; await handle.write(byte, 0, 1, position);
+      byte[0] ^= 1;
+      assert.equal((await handle.write(byte, 0, 1, position)).bytesWritten, 1);
     } finally { await handle.close(); }
     await assert.rejects(verifyMusicLoopVideoRepetition(corrupt, 90), /payload or presentation mismatch/);
     await assert.rejects(verifyMusicLoopVideoRepetition("/does-not-exist", 60), /repetition qualification/);
