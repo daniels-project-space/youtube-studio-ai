@@ -57,3 +57,7 @@ execution accounting, and actual source-module runner. Stale legacy snapshots
 are explicitly rejected against a selected YuE2 preview. Build/typecheck and
 scoped ESLint passed. The full 896-file sweep was not repeated after the schema
 correction; synthetic transport tests are not live music-quality evidence.
+
+A subsequent clean-commit run passed all 896 selected non-thumbnail files and
+verified the built server over real loopback HTTP. See
+`yue2-integrated-verification-20260922.md` for scope, hashes, and live-state limits.
