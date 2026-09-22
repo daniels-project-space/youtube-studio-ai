@@ -190,6 +190,7 @@ import {
   planScenes,
   type SceneSpec,
   type SceneLibraryEntry,
+  type ScenePlanInput,
 } from "@/engine/prompt/scenePlanner";
 import { buildChapters } from "@/lib/metacraft";
 import {
@@ -1255,7 +1256,11 @@ export const scenePlanner = createScenePlannerBlock();
 
 /* ---------------------------- 2. keyframes ------------------------------ */
 
-export const keyframes: Block = {
+export function createKeyframesBlock(
+  identityForContext?: (ctx: StageContext) => ScenePlanInput["styleDNA"] | Promise<ScenePlanInput["styleDNA"]>,
+  bindMotionIdentity = false,
+): Block {
+  return {
   id: "keyframes",
   consumes: ["scenes"],
   produces: ["f1Url", "f1Key", "motionPrompt"],
@@ -1278,7 +1283,8 @@ export const keyframes: Block = {
       styleGrammar: style,
       visualStyle: vs,
     });
-    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const dna = identityForContext ? await identityForContext(ctx)
+      : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const tmp = await makeRunTempDir(ctx.runId);
     const productionVisualQa = ctx.params["qaProfile"] !== "draft" && ctx.params["qualityProfile"] !== "draft";
     const hasGroundedIdentity = !!(dna?.recurringSubject?.trim() && dna.setting?.trim());
@@ -1414,16 +1420,23 @@ export const keyframes: Block = {
             "SUBTLY animate (e.g. drifting steam, swaying plants, flickering candle, rain on glass, " +
             "rippling water, twinkling lights, a breathing/blinking character) and where they are. " +
             "The CAMERA stays perfectly STATIC. Return STRICT JSON " +
-            '{"motion":"one concise sentence describing only the subtle looping motion of the named elements"}.',
+            '{"motion":"one concise sentence describing only the subtle looping motion of the named elements"}.' +
+            (bindMotionIdentity ? `\nLOCKED MOTION: ${(dna?.motionVocabulary ?? []).join("; ")}. ${dna?.motionDiscipline ?? "Static camera."} Only describe visible elements permitted by this identity; do not invent motion or objects outside it.` : ""),
           imagePaths: [f1Local],
           json: true,
           maxTokens: VISION_GATE_MAX_TOKENS,
           providers: ["openrouter"], tier: "final",
         });
         const m = parseJsonLoose<{ motion?: string }>(raw).motion;
+        if (bindMotionIdentity && (typeof m !== "string" || m.trim().length <= 12 || m.length > 1000)) {
+          throw new Error("malformed bound motion-direction verdict");
+        }
         if (m && m.length > 12) { motionPrompt = m; ctx.log(`keyframes: scene-director motion → "${m.slice(0, 90)}"`); }
       } catch (e) {
         if (productionVisualQa) {
+          if (bindMotionIdentity) throw new ExecutionError(`keyframes: independent motion-direction review failed: ${e instanceof Error ? e.message : e}`, {
+            retryable: false, code: "KEYFRAME_MOTION_REVIEW_FAILED",
+          });
           throw new Error(`keyframes: independent motion-direction review failed: ${e instanceof Error ? e.message : e}`);
         }
         ctx.log(`keyframes: scene-director failed (using draft template): ${e instanceof Error ? e.message : e}`);
@@ -1438,7 +1451,10 @@ export const keyframes: Block = {
       [COST_PATCH_KEY]: imageCostUsd,
     };
   },
-};
+  };
+}
+
+export const keyframes = createKeyframesBlock();
 
 /* --------------------------- 3. loop_clips ------------------------------ */
 

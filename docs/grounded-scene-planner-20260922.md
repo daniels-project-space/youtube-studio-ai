@@ -76,3 +76,7 @@ Local logs: `/tmp/studio-grounded-scene-readiness-20260922.log`,
 
 This remains a partial release gate, with no production deployment or real
 creative-output approval implied.
+
+Follow-up: the separate version pair documented in
+`bound-loop-visual-plan-20260922.md` binds setting authority and the selected
+identity into keyframe review. This original opt-in revision is unchanged.

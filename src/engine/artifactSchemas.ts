@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AcceptedMusicArrangementSchema } from "./acceptedMusicArrangement";
 import { YuE2MusicCandidateSchema } from "./yue2MusicCandidate";
+import { LoopVisualPlanSchema } from "./loopVisualPlan";
 import { YuE2AssemblySourceSchema } from "./yue2AssemblySource";
 import {
   ContinuityLedgerSchema,
@@ -347,6 +348,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     persist: "reference",
   },
   yue2MusicCandidate: { type: "YuE2MusicCandidate", schema: YuE2MusicCandidateSchema },
+  loopVisualPlan: { type: "LoopVisualPlan", schema: LoopVisualPlanSchema },
   yue2AssemblySource: { type: "YuE2AssemblySource", schema: YuE2AssemblySourceSchema },
   validationSpec: {
     type: "CriticValidationSpec",

@@ -8,6 +8,7 @@ import { createComposerAwareAssemblyManifest } from "@/trigger/blocks/composerAw
 import { createArrangementComposerManifest, musicArrangementPlan } from "@/trigger/blocks/musicArrangementBlocks";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { createGroundedScenePlannerManifest } from "@/trigger/blocks/groundedScenePlanner";
+import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@/trigger/blocks/boundLoopVisuals";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
@@ -61,6 +62,9 @@ export function registerAllBlocks(): void {
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
   registerManifestVersion(createGroundedScenePlannerManifest(getManifest("scene_planner")!));
+  const boundScenePlanner = createBoundScenePlannerManifest(getManifest("scene_planner")!);
+  registerManifestVersion(boundScenePlanner);
+  registerManifestVersion(createBoundKeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
   registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));
