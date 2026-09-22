@@ -10,6 +10,7 @@ import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { createGroundedScenePlannerManifest } from "@/trigger/blocks/groundedScenePlanner";
 import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@/trigger/blocks/boundLoopVisuals";
 import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2KeyframesManifest } from "@/trigger/blocks/yue2LoopVisuals";
+import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifest } from "@/trigger/blocks/reviewedLoopMotion";
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
@@ -70,6 +71,8 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createYuE2ProgramManifest(getManifest("music_program_plan")!));
   registerManifestVersion(createYuE2KeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
   registerManifestVersion(createYuE2LoopVisualManifest(getManifest("loop_clips")!));
+  registerManifestVersion(createReviewedMotionKeyframesManifest(getManifest("keyframes")!, boundScenePlanner));
+  registerManifestVersion(createReviewedMotionClipsManifest(getManifest("loop_clips")!, boundScenePlanner));
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
   registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));

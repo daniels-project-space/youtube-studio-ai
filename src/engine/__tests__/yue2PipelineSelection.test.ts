@@ -34,11 +34,12 @@ try {
     assert.equal(result.pipeline.filter(entry => entry.block === "music_arrangement_plan").length, 1);
     if (family === "music_loop") {
       for (const [id, version] of [["music_program_plan", "2.0.0-yue2-intent"], ["scene_planner", "3.0.0-bound-visual-plan"],
-        ["keyframes", "3.0.0-yue2-reviewed"], ["loop_clips", "2.0.0-yue2-reviewed"]]) {
+        ["keyframes", "3.1.0-yue2-reviewed-motion"], ["loop_clips", "2.1.0-yue2-reviewed-motion"]]) {
         assert.equal(modules.find(module => module.id === id)?.version, version);
       }
       assert.equal(result.compilation!.bindings.keyframes.loopVisualPlan, "scene_planner:loopVisualPlan");
       assert.equal(result.compilation!.bindings.loop_clips.yue2MusicCandidate, "music:yue2MusicCandidate");
+      assert.equal(result.compilation!.bindings.loop_clips.loopKeyframeDirection, "keyframes:loopKeyframeDirection");
     }
     assert.deepEqual(selectYuE2Pipeline(result.pipeline, chosen), result.pipeline, "reselection is idempotent");
     assert.notEqual(result.compilation!.fingerprint, baseline.compilation!.fingerprint);

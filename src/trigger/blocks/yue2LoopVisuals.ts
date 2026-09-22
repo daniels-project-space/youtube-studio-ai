@@ -11,7 +11,7 @@ export const YUE2_PROGRAM_VERSION = "2.0.0-yue2-intent";
 export const YUE2_KEYFRAMES_VERSION = "3.0.0-yue2-reviewed";
 export const YUE2_LOOP_CLIPS_VERSION = "2.0.0-yue2-reviewed";
 
-async function admitSource(ctx: StageContext) {
+export async function admitYuE2LoopSource(ctx: StageContext) {
   const program = musicProgramForCurrentRoute(ctx, String(ctx.store["topic"]));
   if (program && program.audio.providerPreference !== "yue2") {
     throw new Error("YuE2 loop visuals require the sealed YuE2 program, not a legacy provider plan");
@@ -41,7 +41,7 @@ function sourceManifest(source: ModuleManifest, block: ModuleManifest["block"]):
 
 export function createYuE2KeyframesManifest(legacy: ModuleManifest, planner: ModuleManifest): ModuleManifest {
   const bound = createBoundKeyframesManifest(legacy, planner, async ctx => {
-    try { await (await admitSource(ctx)).assertCurrent(); }
+    try { await (await admitYuE2LoopSource(ctx)).assertCurrent(); }
     catch (error) { throw new ExecutionError(`YuE2 visual source review requires reconciliation: ${error instanceof Error ? error.message : error}`,
       { retryable: false, code: "YUE2_VISUAL_SOURCE_REVIEW" }); }
   });
@@ -50,5 +50,5 @@ export function createYuE2KeyframesManifest(legacy: ModuleManifest, planner: Mod
 
 export function createYuE2LoopVisualManifest(source: ModuleManifest): ModuleManifest {
   if (source.id !== "loop_clips") throw new Error("YuE2 loop visual consumer requires loop_clips");
-  return sourceManifest(source, createLoopClipsBlock(admitSource));
+  return sourceManifest(source, createLoopClipsBlock(admitYuE2LoopSource));
 }

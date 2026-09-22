@@ -1472,6 +1472,7 @@ export const keyframes = createKeyframesBlock();
 
 export function createLoopClipsBlock(
   admitMusicSource?: (ctx: StageContext) => Promise<{ assertCurrent: () => Promise<void> }>,
+  resolveReviewedMotion?: (ctx: StageContext) => Promise<string>,
 ): Block {
   return {
   id: "loop_clips",
@@ -1525,11 +1526,15 @@ export function createLoopClipsBlock(
     // Prefer the independently reviewed scene-director motion over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
     // (esp. the boomerang's reverse half) reads naturally with no scale/pan pop.
-    const motion = (ctx.store["musicProgramMotionIntent"] as string | undefined)
+    const motion = resolveReviewedMotion ? await resolveReviewedMotion(ctx) : (ctx.store["musicProgramMotionIntent"] as string | undefined)
       || (ctx.store["motionPrompt"] as string | undefined)
       || scene.klingMotionPrompt;
     const fwd = composeKlingPrompt({
-      sceneDescription: `${motion}. Extremely subtle, slow, NON-directional ambient motion only ` +
+      sceneDescription: resolveReviewedMotion
+        ? `${motion}. Preserve only the reviewed visible elements and motion above. ` +
+          `The camera is completely locked: no zoom, pan, tilt, scale or framing change. ` +
+          `Seamlessly loopable, no scene change or additional moving elements.`
+        : `${motion}. Extremely subtle, slow, NON-directional ambient motion only ` +
         `(gentle shimmer, soft glow flicker, drifting steam, faint sway) — avoid strong directional ` +
         `movement. The camera is COMPLETELY LOCKED: absolutely no zoom, no push-in, no pan, no scale ` +
         `or framing change. Perfectly smooth, seamlessly loopable, no scene change.`,

@@ -43,3 +43,12 @@ export const LoopVisualPlanSchema = bodySchema.extend({ fingerprint }).superRefi
   const { fingerprint: actual, ...body } = value;
   if (actual !== loopVisualPlanFingerprint(body)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "loop visual plan fingerprint mismatch" });
 });
+
+export const LoopKeyframeDirectionSchema = z.object({
+  version: z.literal("loop-keyframe-direction/v1"),
+  ownerId: text, channelId: text, runId: text,
+  visualPlanFingerprint: fingerprint,
+  f1Key: text,
+  motionPrompt: z.string().max(1000).refine(value => value.trim().length > 12, "A reviewed motion sentence is required"),
+  reviewProfile: z.literal("production"),
+}).strict();

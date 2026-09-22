@@ -45,7 +45,7 @@ async function planBoundVisuals(ctx: StageContext) {
   return { ...result, loopVisualPlan: LoopVisualPlanSchema.parse(bound) };
 }
 
-async function admittedVisualIdentity(ctx: StageContext) {
+export async function verifyBoundLoopVisualPlan(ctx: StageContext) {
   const actual = LoopVisualPlanSchema.parse(ctx.store["loopVisualPlan"]);
   const ref = ctx.artifactRefs?.["loopVisualPlan"];
   if (!ref || ref.key !== "loopVisualPlan" || ref.producerModule !== "scene_planner" ||
@@ -60,7 +60,7 @@ async function admittedVisualIdentity(ctx: StageContext) {
     canonicalJson(ctx.store["scenes"]) !== canonicalJson([actual.scene])) {
     throw new Error("bound keyframes: visual plan does not bind the current run, scene and frozen planning inputs");
   }
-  return actual.identity;
+  return actual;
 }
 
 export function createBoundScenePlannerManifest(legacy: ModuleManifest): ModuleManifest {
@@ -77,7 +77,7 @@ export function createBoundScenePlannerManifest(legacy: ModuleManifest): ModuleM
 export function createBoundKeyframesManifest(legacy: ModuleManifest, planner: ModuleManifest,
   beforeImageDispatch?: (ctx: StageContext) => Promise<void>): ModuleManifest {
   if (legacy.id !== "keyframes" || planner.id !== "scene_planner") throw new Error("bound visuals require scene_planner and keyframes");
-  const block = createKeyframesBlock(admittedVisualIdentity, true, beforeImageDispatch);
+  const block = createKeyframesBlock(async ctx => (await verifyBoundLoopVisualPlan(ctx)).identity, true, beforeImageDispatch);
   const consumes = { ...legacy.consumes, ...planner.consumes, loopVisualPlan: artifactContract("loopVisualPlan") };
   const optionalConsumes = Object.fromEntries(Object.entries({ ...legacy.optionalConsumes, ...planner.optionalConsumes })
     .filter(([key]) => !(key in consumes)));

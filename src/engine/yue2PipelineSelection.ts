@@ -56,8 +56,8 @@ export function selectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2
     if (provider !== undefined && provider !== "yue2") throw new Error("YuE2 selection conflicts with the program's explicit provider");
     versions.set(programIndex, "2.0.0-yue2-intent");
     versions.set(sceneIndex, "3.0.0-bound-visual-plan");
-    versions.set(keyframeIndex, "3.0.0-yue2-reviewed");
-    versions.set(clipsIndex, "2.0.0-yue2-reviewed");
+    versions.set(keyframeIndex, "3.1.0-yue2-reviewed-motion");
+    versions.set(clipsIndex, "2.1.0-yue2-reviewed-motion");
   }
   for (const [index, version] of versions) {
     const entry = source[index];
