@@ -7,7 +7,9 @@ import {
   planWeekPreparedImagesKey, planWeekPreparationManifestSha256, type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 
-const destinations = { script: planWeekPreparedScriptKey, narration: planWeekPreparedNarrationKey,
+const destinations = { script: planWeekPreparedScriptKey,
+  scriptReview: (manifest: PlanWeekPreparationManifest) => `${planWeekPreparedScriptKey(manifest)}.review.json`,
+  narration: planWeekPreparedNarrationKey,
   music: planWeekPreparedMusicKey, images: planWeekPreparedImagesKey };
 
 /** Only a newly created, re-read claim permits work. No expiry authorizes replay. */

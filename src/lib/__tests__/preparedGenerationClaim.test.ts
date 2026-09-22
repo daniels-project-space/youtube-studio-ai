@@ -52,8 +52,8 @@ async function main() {
   const receipt = JSON.parse(Buffer.from([...objects.values()][0]).toString());
   assert.equal(receipt.requestSha256, sha256Hex(canonicalJson(request))); assert.equal(receipt.costUsd, null);
   await assert.rejects(() => claimPreparedGeneration("script", manifest, { ...request, maxCostUsd: 50 }), /RECONCILIATION_REQUIRED/);
-  for (const stage of ["narration", "music", "images"] as const) await claimPreparedGeneration(stage, manifest, request);
-  assert.equal(objects.size, 4, "each stage owns a separate claim, without input-dependent bypass keys");
+  for (const stage of ["scriptReview", "narration", "music", "images"] as const) await claimPreparedGeneration(stage, manifest, request);
+  assert.equal(objects.size, 5, "each stage owns a separate claim, without input-dependent bypass keys");
 
   for (const failure of ["put-failure", "lost-response", "read-failure", "changed"] as const) {
     objects.clear(); mode = failure;
@@ -76,7 +76,7 @@ async function main() {
   assert.equal(objects.size, 1); assert.equal(admitted, 1);
   await assert.rejects(attempt, /RECONCILIATION_REQUIRED/);
   assert.equal(admitted, 1, "late write acknowledgement cannot admit work after the waiter timed out");
-  console.log("PREPARED GENERATION CLAIM PASS: 32 contenders admit one; four stages; changed requests, lost writes, failed readback, and late commit remain held");
+  console.log("PREPARED GENERATION CLAIM PASS: 32 contenders admit one; five stages; changed requests, lost writes, failed readback, and late commit remain held");
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   mock.timers.reset(); loader._load = originalLoad; globalThis.fetch = originalFetch;

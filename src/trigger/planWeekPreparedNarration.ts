@@ -20,7 +20,6 @@ import {
   planWeekPreparedNarrationAudioKey,
   planWeekPreparedNarrationKey,
   planWeekPreparedScriptKey,
-  planWeekPreparationKey,
   planWeekPreparationManifestSha256,
   PLAN_WEEK_PREPARATION_VERSION,
   type PlanWeekPreparedNarration,
@@ -59,80 +58,10 @@ import {
 } from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
+import { prepareWeeklyScriptReview } from "./planWeekPreparedScriptReview";
 
-export interface PlanWeekPreparedNarrationArgs {
-  ownerId: string;
-  channelId: string;
-  channelSlug: string;
-  batchId: string;
-  itemId: string;
-  manifestKey: string;
-  manifestSha256: string;
-  maxCostUsd: number;
-  provider?: "fish" | "elevenlabs" | "qwen3";
-  speaker?: string;
-  language?: string;
-  speed?: number;
-  baseGapSec?: number;
-  jitterSec?: number;
-}
-
-function safePart(value: unknown, label: string): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
-    throw new Error(`weekly prepared narration ${label} is invalid`);
-  }
-  return value;
-}
-
-function digest(value: unknown, label: string): string {
-  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value.trim().toLowerCase())) {
-    throw new Error(`weekly prepared narration ${label} is invalid`);
-  }
-  return value.trim().toLowerCase();
-}
-
-function safeNumber(value: unknown, label: string, min: number, max: number): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`weekly prepared narration ${label} is invalid`);
-  }
-  return value;
-}
-
-export function assertPlanWeekPreparedNarrationArgs(value: unknown): PlanWeekPreparedNarrationArgs {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly prepared narration payload is invalid");
-  const raw = value as Record<string, unknown>;
-  const ownerId = safePart(raw.ownerId, "owner id");
-  const channelId = safePart(raw.channelId, "channel id");
-  const channelSlug = safePart(raw.channelSlug, "channel slug");
-  const batchId = safePart(raw.batchId, "batch id");
-  const itemId = safePart(raw.itemId, "item id");
-  const manifestSha256 = digest(raw.manifestSha256, "manifest digest");
-  const manifestKey = typeof raw.manifestKey === "string" ? raw.manifestKey : "";
-  if (manifestKey !== planWeekPreparationKey({ ownerId, channelSlug, batchId, itemId })) {
-    throw new Error("weekly prepared narration manifest key is not canonical");
-  }
-  const maxCostUsd = raw.maxCostUsd;
-  if (typeof maxCostUsd !== "number" || !Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
-    throw new Error("weekly prepared narration maxCostUsd must be greater than zero and no more than 100");
-  }
-  const provider = raw.provider === undefined ? undefined : raw.provider;
-  if (provider !== undefined && provider !== "fish" && provider !== "elevenlabs" && provider !== "qwen3") {
-    throw new Error("weekly prepared narration provider is invalid");
-  }
-  const speed = safeNumber(raw.speed, "speed", 0.85, 1.15);
-  const baseGapSec = safeNumber(raw.baseGapSec, "base gap", 0.2, 2.1);
-  const jitterSec = safeNumber(raw.jitterSec, "gap jitter", 0, 0.35);
-  return {
-    ownerId, channelId, channelSlug, batchId, itemId, manifestKey, manifestSha256, maxCostUsd,
-    ...(provider === undefined ? {} : { provider }),
-    ...(typeof raw.speaker === "string" && raw.speaker.trim() ? { speaker: raw.speaker.trim() } : {}),
-    ...(typeof raw.language === "string" && raw.language.trim() ? { language: raw.language.trim() } : {}),
-    ...(speed === undefined ? {} : { speed }),
-    ...(baseGapSec === undefined ? {} : { baseGapSec }),
-    ...(jitterSec === undefined ? {} : { jitterSec }),
-  };
-}
+import { assertPlanWeekPreparedNarrationArgs, type PlanWeekPreparedNarrationArgs } from "@/lib/planWeekPreparedNarrationArgs";
+export { assertPlanWeekPreparedNarrationArgs, type PlanWeekPreparedNarrationArgs } from "@/lib/planWeekPreparedNarrationArgs";
 
 function hasMusicStage(manifest: PlanWeekPreparationManifest): boolean {
   return manifest.execution.pipeline.some((entry) => {
@@ -407,6 +336,8 @@ export const planWeekPreparedNarrationTask = task({
     if (estimatedUpperCost > payload.maxCostUsd) {
       throw new Error(`weekly prepared narration conservative cost ${estimatedUpperCost} exceeds its ${payload.maxCostUsd} USD ceiling`);
     }
+    const scriptReview = await prepareWeeklyScriptReview(manifest, preparedScript, payload.maxCostUsd - estimatedUpperCost);
+    const narrationAllowance = payload.maxCostUsd - scriptReview.chargedCostUsd;
     if (provider === "fish") await bootstrapSecrets(() => undefined, { services: ["fish-audio"] });
     if (provider === "elevenlabs") await bootstrapSecrets(() => undefined, { services: ["elevenlabs"] });
 
@@ -418,7 +349,7 @@ export const planWeekPreparedNarrationTask = task({
     let billableCharacters = 0;
     try {
       await claimPreparedGeneration("narration", manifest, { payload, scriptSha256: preparedScript.scriptSha256,
-        provider, speed, cadence, speaker, language, instruction });
+        scriptReviewFingerprint: scriptReview.fingerprint, provider, speed, cadence, speaker, language, instruction });
       let observedQwenCost = 0;
       for (const [index, sentence] of sentences.entries()) {
         const path = join(workDir, `sentence-${String(index).padStart(4, "0")}.mp3`);
@@ -433,7 +364,7 @@ export const planWeekPreparedNarrationTask = task({
           qwenLanguage: provider === "qwen3" ? language : undefined,
           qwenInstruction: provider === "qwen3" ? instruction : undefined,
           qwenSeed: 4_242,
-          qwenMaxCostUsd: provider === "qwen3" ? Math.max(0.02, payload.maxCostUsd - observedQwenCost) : undefined,
+          qwenMaxCostUsd: provider === "qwen3" ? Math.max(0.02, narrationAllowance - observedQwenCost) : undefined,
           onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost += receipt.runtime.costUsd; },
           onBillableCharacters: (characters) => { billableCharacters += characters; },
         });
@@ -496,8 +427,8 @@ export const planWeekPreparedNarrationTask = task({
       const costUsd = provider === "qwen3"
         ? qwenReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0)
         : narrationTtsCost(provider, billableCharacters, 0, 0);
-      if (!Number.isFinite(costUsd) || costUsd > payload.maxCostUsd) {
-        throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
+      if (!Number.isFinite(costUsd) || costUsd > narrationAllowance) {
+        throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${narrationAllowance} USD allowance after script review`);
       }
       await persistPreparedResult(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-narration": "v1" });
       const prepared: PlanWeekPreparedNarration = {
@@ -526,7 +457,8 @@ export const planWeekPreparedNarrationTask = task({
       await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-narration": "v1" });
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prepared);
-      return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd, audioSha256 };
+      return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId,
+        costUsd: costUsd + scriptReview.costUsd, scriptReviewReceiptKey: scriptReview.receiptKey, audioSha256 };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }

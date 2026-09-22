@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
-import { assertPlanWeekPreparedNarrationArgs } from "@/trigger/planWeekPreparedNarration";
+import { assertPlanWeekPreparedNarrationArgs } from "@/lib/planWeekPreparedNarrationArgs";
 import { planWeekPreparedNarrationKey, planWeekPreparedNarrationAudioKey } from "@/lib/planWeekPreparation";
 
 export const runtime = "nodejs";

@@ -1139,7 +1139,10 @@ export const hookCraft: Block = {
   },
 };
 
-export function createQaScriptBlock(readChannelContext?: (ctx: StageContext) => ChannelCritiqueContext): Block {
+export function createQaScriptBlock(
+  readChannelContext?: (ctx: StageContext) => ChannelCritiqueContext,
+  beforeCritiqueDispatch?: (request: { prompt: string; maxTokens: number }) => Promise<void>,
+): Block {
   const channelAware = readChannelContext !== undefined;
   return {
   id: "qa_script",
@@ -1224,7 +1227,7 @@ export function createQaScriptBlock(readChannelContext?: (ctx: StageContext) => 
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
-      const res = parseScriptCritique(await creativeTextJson<unknown>({
+      const critiqueRequest = {
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
@@ -1273,6 +1276,9 @@ export function createQaScriptBlock(readChannelContext?: (ctx: StageContext) => 
         // trailing delimiter after the JSON block.
         maxTokens: 2500,
         temperature: 0.3,
+      };
+      const res = parseScriptCritique(await creativeTextJson<unknown>({ ...critiqueRequest,
+        beforeDispatch: beforeCritiqueDispatch ? () => beforeCritiqueDispatch(critiqueRequest) : undefined,
       }));
       const { issues, pass } = res;
       ctx.log(`qa_script: pass=${pass}`, { issues: issues.slice(0, 5) });

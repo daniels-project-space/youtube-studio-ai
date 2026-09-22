@@ -15,7 +15,7 @@ const manifest: PlanWeekPreparationManifest = {
   channelSlug: "archive", batchId: "batch", itemId: "episode", itemKey: "week:0", requestKey: "week", frozenAt: 1,
   plan: { topic: "The old lock", title: "The old lock", description: "A source-bound history.",
     sceneSeed: "An archive", thumbnailKey: "owner/replay-owner/old.jpg", thumbnailSource: "planner_artwork" },
-  execution: { pipeline: [{ block: "script_gen" }], moduleConfig: {}, seedStore: {} },
+  execution: { pipeline: [{ block: "script_gen" }, { block: "qa_script" }, { block: "narration_tts" }], moduleConfig: {}, seedStore: {} },
   prompts: { script: "Source", narration: "Voice", shotlist: "Shots", visual: "Archive" },
 };
 const encode = (value: unknown) => Buffer.from(canonicalJson(value));
@@ -27,6 +27,8 @@ const common = { ...manifest, topic: manifest.plan.topic, manifestSha256, create
 const script = { hook: "An old lock.", sections: [{ heading: "Archive", narration: "A missing pin.", role: "outro" }],
   narrationText: "An old lock. A missing pin.", estDurationSec: 12 };
 const scriptSha256 = sha256Hex(canonicalJson(script));
+const reviewBody = { version: "plan-week-script-review/v1", manifestSha256, scriptSha256,
+  status: "approved", error: null, model: "google/gemini-3.7-flash", costUsd: 0.003, unpricedCalls: 0, calls: 1 };
 // Arbitrary bytes test storage integrity only, not audio/image quality.
 const media = Buffer.alloc(4096, 7), mediaHash = sha256BytesHex(media);
 const narrationKey = planWeekPreparedNarrationAudioKey(manifest), musicKey = planWeekPreparedMusicAudioKey(manifest);
@@ -36,6 +38,7 @@ const stillRenderManifest = { version: "1.0.0", generation: { contractVersion: "
   precision: "bf16", width: 1920, height: 1088, steps: 9, allowFallback: false },
   items: [{ shotId: "shot-1", candidateIndex: 0, stillKey: imageKey, outputId: "fixture" }] };
 const sidecars = new Map<string, Buffer>([
+  [`${planWeekPreparedScriptKey(manifest)}.review.json`, encode({ ...reviewBody, fingerprint: sha256Hex(canonicalJson(reviewBody)) })],
   [planWeekPreparedScriptKey(manifest), encode({ ...common, version: "plan-week-prepared-script/v1", script, scriptSha256 })],
   [planWeekPreparedNarrationKey(manifest), encode({ ...common, version: "plan-week-prepared-narration/v1", scriptSha256,
     narrationKey, audioSha256: mediaHash, audioByteLength: media.length, narrationDurationSec: 12,
