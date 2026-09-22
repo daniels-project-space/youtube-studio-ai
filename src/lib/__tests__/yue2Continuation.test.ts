@@ -13,6 +13,7 @@ import type { PipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapsho
 import * as deployment from "@/lib/pipelineWorkerDeployment";
 import { YUE2_AUDITION_CHECKS } from "@/engine/yue2Audition";
 import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
+import type { YuE2ContinuationReceipt } from "../../trigger/yue2ContinuationDispatcher";
 
 type Row = Record<string, unknown>;
 const material = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-after/gpu-material.json", "utf8"));
@@ -183,12 +184,73 @@ test("actual dispatcher preserves worker binding and idempotency through a lost 
       if (name === "recordDispatch" && loseAck) { loseAck = false; throw new Error("lost acknowledgement"); }
       return f.call(continuations[name as keyof typeof continuations], args);
     } } };
-  await assert.rejects(loaded.exports.dispatchPendingYuE2Continuations(input), /lost acknowledgement/);
+  await assert.rejects(loaded.exports.dispatchPendingYuE2Continuations(input), /recovery failed for 1 of 1 receipts/);
   await loaded.exports.dispatchPendingYuE2Continuations(input);
   assert.deepEqual(deliveries[0], deliveries[1]); assert.equal(deliveries[0].options.concurrencyKey, channelId);
   assert.equal(deliveries[0].payload.invocationSha256, f.run.pipelineInvocationSha256);
   assert.equal(f.tables.yue2Continuations[0].state, "queued");
   assert.equal(preparations, prepared ? 0 : 2, "prepared delivery must not repeat preparation on either acknowledgement attempt");
+  }
+});
+
+test("YuE2 delivery isolates acknowledgement failures without changing attempts or skipping later channels", async () => {
+  const f = fixture(); await f.park(); await f.review();
+  const [basis] = await f.pending() as unknown as YuE2ContinuationReceipt[];
+  const receipts = Array.from({ length: 25 }, (_, index) => ({ ...structuredClone(basis), channelId: `channel-${index}`, runId: `run-${index}` }));
+  for (const failure of ["ack", "enqueue-and-ack", "enqueue", "foreign-worker", "none"]) {
+    const deliveries: Row[] = [];
+    const acknowledgements: Row[] = [];
+    const logs: string[] = [];
+    const compiled = ts.transpileModule(readFileSync("src/trigger/yue2ContinuationDispatcher.ts", "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const loaded = { exports: {} as { dispatchPendingYuE2Continuations: (input: unknown) => Promise<unknown> } };
+    new Function("require", "module", "exports", compiled)((name: string) => {
+      if (name === "@trigger.dev/sdk") return {
+        idempotencyKeys: { create: async (seed: string, options: Row) => { assert.equal(options.scope, "global"); return seed; } },
+        tasks: { trigger: async (id: string, payload: Row, options: Row) => {
+          assert.equal(id, "run-pipeline");
+          const receipt = receipts.find(value => value.runId === payload.runId)!;
+          const { attempt, workerDeployment, ...expected } = receipt;
+          assert.deepEqual(payload, expected);
+          assert.deepEqual(options, { ...deployment.pipelineWorkerDeploymentDispatchOptions(workerDeployment),
+            concurrencyKey: receipt.channelId, idempotencyKey: ["yue2-audition-resume/v1", receipt.runId,
+              receipt.yue2AuditionResume.checkpointId, receipt.yue2AuditionResume.checkpointFingerprint,
+              receipt.yue2AuditionResume.approvalFingerprint, receipt.invocationSha256, attempt].join(":") });
+          deliveries.push(payload);
+          if (payload.runId === "run-0" && failure.startsWith("enqueue")) throw new Error("secret-provider-sentinel");
+          return { id: `trigger-${payload.runId}` };
+        } },
+      };
+      if (name.endsWith("/_generated/api")) return { api };
+      if (name.endsWith("/pipelineWorkerDeployment")) return deployment;
+      throw new Error(`Unexpected dependency ${name}`);
+    }, loaded, loaded.exports);
+    const preparedReceipts = structuredClone(receipts);
+    if (failure === "foreign-worker") preparedReceipts[0].workerDeployment!.environmentId = "foreign";
+    const input = { ownerId, preparedReceipts, log: (message: string) => logs.push(message),
+      dispatchContext: { projectId: "proj_original", environmentId: "env_original" },
+      convex: { mutation: async (ref: Parameters<typeof getFunctionName>[0], args: Row) => {
+        assert.equal(getFunctionName(ref), "yue2Continuations:recordDispatch");
+        acknowledgements.push(args);
+        if (args.runId === "run-0" && failure.includes("ack")) throw new Error("secret-database-sentinel");
+      } } };
+    if (failure.includes("ack")) {
+      await assert.rejects(loaded.exports.dispatchPendingYuE2Continuations(input), { message: "YuE2 continuation recovery failed for 1 of 25 receipts" });
+    } else {
+      assert.deepEqual(await loaded.exports.dispatchPendingYuE2Continuations(input), { pending: 25, triggered: failure === "none" ? 25 : 24 });
+    }
+    assert.equal(deliveries.length, failure === "foreign-worker" ? 24 : 25);
+    assert.equal(acknowledgements.length, 25);
+    assert.equal(acknowledgements[24].triggerRunId, "trigger-run-24");
+    for (const [index, acknowledgement] of acknowledgements.entries()) {
+      assert.deepEqual(acknowledgement, { ownerId, channelId: receipts[index].channelId, runId: receipts[index].runId,
+        resume: receipts[index].yue2AuditionResume, attempt: receipts[index].attempt,
+        ...(index === 0 && (failure.startsWith("enqueue") || failure === "foreign-worker") ? {} : { triggerRunId: `trigger-run-${index}` }) });
+    }
+    assert.doesNotMatch(logs.join("\n"), /secret-/);
+    await assert.rejects(loaded.exports.dispatchPendingYuE2Continuations({ ...input, preparedReceipts: [...receipts, receipts[0]] }), /at most 25/);
+    assert.equal(acknowledgements.length, 25, "oversized batches must fail before side effects");
   }
 });
 
