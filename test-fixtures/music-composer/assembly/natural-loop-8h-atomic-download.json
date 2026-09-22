@@ -1,0 +1,20 @@
+{
+  "schema": "isolated-r2-atomic-download-qualification-v1",
+  "dateUtc": "2026-09-22",
+  "storageSourceSha256": "229d34a133b16e04e31ce333501e8c9690521de717db994732d85181e317349b",
+  "bucket": "youtube-studio-ai-private",
+  "key": "operator/qualification/multipart-20260922/ea633df1-f9ca-4f83-aa2b-92e2c0c90212/timing-master.mp4",
+  "byteLength": 12983194060,
+  "sha256": "c413635329f976ab5b3d652e5708766883f4caa00aab231e39f6f2dc622e7d8d",
+  "downloadMs": 149244,
+  "downloadAndLocalHashMs": 178180,
+  "destinationObservations": 1490,
+  "partialDestinationObservations": 0,
+  "observationIntervalMs": 100,
+  "maxRssKiB": 140108,
+  "scratchCleanupVerified": true,
+  "localTestCopyRemoved": true,
+  "processExitCode": 0,
+  "scope": "real private R2 object to local disk through the shared helper, followed by whole-file hash; not a deployed pipeline or musical quality proof",
+  "productionPromoted": false
+}

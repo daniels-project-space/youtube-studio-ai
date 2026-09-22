@@ -697,7 +697,7 @@ export async function getObjectIntegrity(
   return { sha256: hash.digest("hex"), byteLength };
 }
 
-/** Stream a large R2 object directly to disk without buffering the render. */
+/** Stream to a private sibling file, exposing the destination only on completion. */
 export async function getObjectToFile(
   key: string,
   filePath: string,
@@ -707,16 +707,49 @@ export async function getObjectToFile(
     Bucket: getBucket(bucket),
     Key: key,
   });
-  const res = await getR2Client().send(command);
-  if (!res.Body) throw new Error(`R2 object has no body: ${key}`);
-  const body = res.Body as NodeJS.ReadableStream;
-  if (typeof body.pipe !== "function") {
-    throw new Error(`R2 object body is not a Node stream: ${key}`);
-  }
-  const [{ createWriteStream }, { pipeline }] = await Promise.all([
+  const [{ createWriteStream }, { pipeline }, { Transform }, { mkdtemp, rename, rm }, { dirname, join }] = await Promise.all([
     import("node:fs"),
     import("node:stream/promises"),
+    import("node:stream"),
+    import("node:fs/promises"),
+    import("node:path"),
   ]);
-  await pipeline(body, createWriteStream(filePath));
+  // Prepare disk before acquiring a response stream, so no setup awaits leave
+  // a live network body without pipeline error handlers.
+  const temporaryDirectory = await mkdtemp(join(dirname(filePath), ".r2-download-"));
+  let body: import("node:stream").Readable | undefined;
+  try {
+    const res = await getR2Client().send(command);
+    if (!res.Body) throw new Error(`R2 object has no body: ${key}`);
+    body = res.Body as import("node:stream").Readable;
+    if (typeof body.pipe !== "function") {
+      throw new Error(`R2 object body is not a Node stream: ${key}`);
+    }
+    const expected = res.ContentLength;
+    if (expected !== undefined && (!Number.isSafeInteger(expected) || expected < 0)) {
+      throw new Error("R2 download returned invalid ContentLength");
+    }
+    // Same-filesystem rename prevents readers observing a partial destination;
+    // each attempt owns its directory, including concurrent downloads.
+    const temporaryFile = join(temporaryDirectory, "object");
+    let bytes = 0;
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.byteLength;
+        if (!Number.isSafeInteger(bytes) || (expected !== undefined && bytes > expected)) {
+          callback(new Error("R2 download byte length exceeds ContentLength"));
+        } else callback(null, chunk);
+      },
+      flush(callback) {
+        callback(expected !== undefined && bytes !== expected
+          ? new Error("R2 download byte length does not match ContentLength") : undefined);
+      },
+    });
+    await pipeline(body, counter, createWriteStream(temporaryFile, { flags: "wx", mode: 0o600 }));
+    await rename(temporaryFile, filePath);
+  } finally {
+    if (typeof body?.destroy === "function") body.destroy();
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
   return filePath;
 }
