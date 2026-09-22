@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test, mock } from "node:test";
 import { getR2Client, putObjectFromFile } from "../storage";
 
-test("real SDK multipart upload preserves bytes, metadata, bounded parts and cleanup", async () => {
+test("real SDK multipart upload preserves bytes, metadata, bounded parts and cleanup", { timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "r2-multipart-"));
   const names = ["R2_ENDPOINT", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
   const saved = Object.fromEntries(names.map(name => [name, process.env[name]]));
@@ -17,6 +17,8 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
   const calls: string[] = [];
   const parts = new Map<number, { length: number; hash: string }>();
   let active = 0, maxActive = 0, singleBytes = 0;
+  let releaseFirstPart!: () => void;
+  let secondPartReached = new Promise<void>(resolve => { releaseFirstPart = resolve; });
   let mode: "success" | "part" | "complete" | "abort" | "lost-completion" | "missing-etag" | "create" = "success";
   const failure = new Error("fixture transfer failure"), cleanupFailure = new Error("fixture cleanup failure");
   const bodyBytes = Buffer.alloc(65 * 1024 ** 2, 0x57);
@@ -44,7 +46,10 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
       const number = input.PartNumber as number, bytes = input.Body as Buffer;
       assert.ok(Buffer.isBuffer(bytes)); assert.ok(bytes.length <= 32 * 1024 ** 2);
       parts.set(number, { length: bytes.length, hash: createHash("sha256").update(bytes).digest("hex") });
-      await new Promise(resolve => setTimeout(resolve, number === 1 ? 40 : 5));
+      // Hold the first slot until the second response has propagated through
+      // the SDK. Wall-clock delays race disk reads under concurrent test load.
+      if (number === 1) await secondPartReached;
+      else if (number === 2) setImmediate(releaseFirstPart);
       active--;
       if ((mode === "part" || mode === "abort") && number === 2) throw failure;
       if (mode === "missing-etag" && number === 2) return {};
@@ -65,7 +70,10 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
     throw new Error(`unexpected storage command ${name}`);
   });
   const options = { bucket: "fixture-private", contentType: "video/mp4", metadata: { source: "fixture" } };
-  const reset = () => { calls.length = 0; parts.clear(); active = 0; maxActive = 0; };
+  const reset = () => {
+    calls.length = 0; parts.clear(); active = 0; maxActive = 0;
+    secondPartReached = new Promise<void>(resolve => { releaseFirstPart = resolve; });
+  };
   try {
     await writeFile(path, bodyBytes); await writeFile(small, "small-file");
     assert.equal(await putObjectFromFile("owner/fixture/master", path, options), "owner/fixture/master");

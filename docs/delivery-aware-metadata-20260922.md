@@ -20,9 +20,15 @@ claims. Wrong runtime labels are rejected before judging and packaging.
 ## Compatibility and limits
 
 - Existing unversioned metadata execution and explicit legacy pins remain intact.
-- New-version execution requires an explicit version and delivery configuration.
-  Automatic creator selection is held until preview fingerprint parity and
-  weekly preparation admission are qualified. Existing creator output is intact.
+- Newly designed pipelines select this explicit version after structural policy
+  completion and before final duration enforcement. Read-only preview and
+  executable design produce the same pipeline; runtime validation still checks
+  the actual registered manifest before persistence/execution. Stored legacy
+  pipelines are not rewritten, and the default registry implementation is intact.
+- Weekly preparation admits this exact downstream metadata version only with a
+  valid delivery target. It does not execute or substitute for metadata. All
+  other explicit versions remain rejected. The frozen preparation digest binds
+  the metadata version and duration, so changing either invalidates old receipts.
 - The new version requires the configured creative reviewer; it refuses the
   legacy unreviewed fallback when credentials are unavailable.
 - Deterministic duration checks apply to the `music_loop` title profile, not
@@ -38,7 +44,7 @@ claims. Wrong runtime labels are rejected before judging and packaging.
 New tests exercise the registered module through the real pipeline runner with
 synthetic provider/evidence transports: short source versus long delivery,
 measured precedence, decision tampering, contradictory labels, invalid inputs,
-missing credentials, legacy fallback, and unchanged creator version selection.
+missing credentials, legacy fallback, and matching preview/runtime selection.
 
 These are contract/integration checks, not live creative-quality qualification,
 owner listening approval, production deployment, or measured cost savings.
@@ -50,3 +56,27 @@ preparation path. Automatic selection was removed, not those safeguards.
 The final six-file focused run passed both regressions and metadata integration,
 finishing, source handoff, and duration tests. Build/typecheck and scoped ESLint
 also passed after the correction. This is not a claim of a fresh 894/894 full run.
+
+## Creator integration follow-up
+
+The initial hold above prompted integration work, not removal of the preview or
+weekly safeguards. Version selection now occurs at the shared post-policy
+designer boundary. Existing preview API tests check exact fingerprints across
+all ten routed families and toggle variants. The metadata integration test also
+compares full preview/runtime pipelines for four families. All four real weekly
+producer entry points are exercised up to their retained-storage boundary with
+the selected metadata version; no provider or storage write is allowed there.
+Negative tests retain unsupported-version rejection, and digest tests bind both
+the new version and its duration. Runtime metadata execution remains covered by
+the registered-module/runner test with synthetic provider responses.
+
+Follow-up validation: build/typecheck, scoped ESLint, and all audits passed;
+Graphify was updated. The full non-thumbnail sweep passed 893/894 selected files
+with 30 thumbnail-named files excluded. Its sole failure was the multipart-upload
+fixture's timer-dependent ordering (three parts dispatched before the simulated
+failure instead of its expected two). Replacing the fixture delays with an
+explicit two-part synchronization boundary preserved the fail-fast assertion.
+The storage, rendered-file persistence, and loop-output recovery tests then
+passed together, and multipart passed ten consecutive isolated runs. No storage
+runtime change was needed. This is not a fresh full-suite pass after that
+test-only correction, nor a production deployment or creative-quality approval.

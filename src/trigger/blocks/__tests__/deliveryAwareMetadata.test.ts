@@ -44,8 +44,10 @@ async function main() {
     for (const family of ["music_loop", "sleep", "narrated_stock", "shorts"]) {
       const design = designPipeline({ family, nicheKey: family === "music_loop" ? "lofi" : "motivation" });
       const metadata = design.pipeline.find((entry: { block: string }) => entry.block === "metadata");
-      assert.notEqual(metadata.version, DELIVERY_METADATA_VERSION, "new metadata remains opt-in until preview and weekly admission are qualified");
-      assert.doesNotThrow(() => designPipelineCore({ family, nicheKey: "lofi" }, { validateRuntimeRegistry: false }));
+      assert.equal(metadata.version, DELIVERY_METADATA_VERSION);
+      assert.equal(metadata.params.targetDurationSec, design.episodeLengthSeconds);
+      const preview = designPipelineCore({ family, nicheKey: family === "music_loop" ? "lofi" : "motivation" }, { validateRuntimeRegistry: false });
+      assert.deepEqual(preview.pipeline, design.pipeline, "structural preview must preserve the exact executable selection");
     }
     const ctx = { ownerId: "owner-fixture", channelId: "channel-fixture", runId: "run-fixture", keyPrefix: "fixture/",
       params: { targetDurationSec: 7200 }, budgetUsd: 10, assertInlinePaidExecutionLease: async () => {}, log: () => {},

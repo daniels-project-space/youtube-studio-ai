@@ -4,10 +4,12 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
 import {
   normalizePlanWeekPreparationManifest,
+  planWeekPreparationManifestSha256,
   planWeekPreparationKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
@@ -137,6 +139,35 @@ async function main(): Promise<void> {
         ctx: { run: { id: "run-test", version: "test" }, attempt: { number: 1 } },
       }), /plan-week-ahead: unsupported explicit weekly preparation implementation versions/);
       assert.equal(mutations, 0, "week-ahead must refuse pins before reserving a paid batch");
+    }
+
+    const downstream = { block: "metadata", version: DELIVERY_METADATA_VERSION, params: { targetDurationSec: 7200 } };
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([downstream], "test"));
+    for (const bad of [
+      { ...downstream, block: "music" }, { ...downstream, version: "2.0.0-unqualified" },
+      { ...downstream, params: {} }, { ...downstream, params: { targetDurationSec: "7200" } },
+    ]) assert.throws(() => assertWeeklyPreparationVersionsSupported([bad], "test"), /unsupported explicit/);
+    const selected = normalizePlanWeekPreparationManifest({ ...base, execution: {
+      ...base.execution, pipeline: [...base.execution.pipeline, downstream],
+    } });
+    assert.deepEqual(selected.execution.pipeline.at(-1), downstream, "weekly freezing must not erase the downstream version");
+    for (const changed of [{ ...downstream, version: "1.0.0-migration" },
+      { ...downstream, params: { targetDurationSec: 3600 } }]) {
+      const altered = normalizePlanWeekPreparationManifest({ ...selected, execution: {
+        ...selected.execution, pipeline: [...base.execution.pipeline, changed],
+      } });
+      assert.notEqual(planWeekPreparationManifestSha256(selected), planWeekPreparationManifestSha256(altered),
+        "prepared receipts cannot survive a changed downstream version or delivery target");
+    }
+    manifestBytes = Buffer.from(canonicalJson(selected));
+    sidecarMode = "stop";
+    for (const [name, producer] of producers) {
+      reads = [];
+      await assert.rejects(() => producer.run({
+        ...scope, manifestKey, manifestSha256: sha256BytesHex(manifestBytes), maxCostUsd: 2,
+        shots: [{ id: "shot-1", prompt: "An archive with a sealed map", seed: 7 }],
+      }), error => error === sidecarBoundary);
+      assert.equal(reads.length, 2, `${name} admits deferred metadata without executing it`);
     }
 
     // Unversioned invocations still reach the original reuse path. Stop there,

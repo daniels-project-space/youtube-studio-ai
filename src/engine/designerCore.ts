@@ -22,6 +22,7 @@ import { certifiedFamilyAdmission } from "./certifiedFamilyAdmission";
 import { MAX_H3_EDIT_INTERVAL_SEC } from "./storySpine";
 import type { NovitaVideoRuntimeTarget } from "./runtimeCapability";
 import { subcategoryTags } from "@/lib/nicheCatalog";
+import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { nichePreset } from "./golden";
 import {
   briefToCreativeCapabilityIntent,
@@ -513,7 +514,7 @@ export function designPipelineCore(
         if (t.chapters === false) params.chapterCards = false;
       }
       if (e.block === "metadata") {
-        if (e.version === "2.0.0-delivery-aware") params.targetDurationSec = lenSec;
+        if (e.version === DELIVERY_METADATA_VERSION) params.targetDurationSec = lenSec;
         if (opts.locale) params.language = opts.locale;
         // Seed SEO tags from the chosen subcategory (v1 catalog defaults); the
         // metadata block expands them with AI at publish time.
@@ -1288,6 +1289,11 @@ export function designPipelineCore(
   // loop assembly, or family-specific renderers disagree about how long the
   // episode is. This is deliberately after every designer rewrite and policy
   // completion, so no later template step can reintroduce a competing value.
+  // Select after structural policy completion so read-only previews project
+  // the same versioned graph. Executable designs still validate it below.
+  pipeline = pipeline.map(entry => entry.block === "metadata" && entry.version === undefined
+    ? { ...entry, version: DELIVERY_METADATA_VERSION }
+    : entry);
   const enforcedLength = enforceLengthContract(
     pipeline,
     lenSec,
@@ -1447,7 +1453,7 @@ export function enforceLengthContract(
       pin("maxSeconds", envelope.maxSeconds);
     }
     if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
-    if (e.block === "metadata" && e.version === "2.0.0-delivery-aware") pin("targetDurationSec", lenSec);
+    if (e.block === "metadata" && e.version === DELIVERY_METADATA_VERSION) pin("targetDurationSec", lenSec);
     if (e.block === "loop_clips" && family === "music_loop") {
       const scaling = familyTimeScalingContract("music_loop");
       if (scaling.method !== "stream_loop") {
