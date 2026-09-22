@@ -69,7 +69,33 @@ export async function inspectYuE2OpenRelayAdmission(options: {
         cache: "no-store", signal: AbortSignal.timeout(20_000), redirect: "error",
       });
     } catch { throw new Error("OpenRelay read-only preflight transport unavailable"); }
-    if (!response.ok) throw new Error(`OpenRelay read-only preflight returned HTTP ${response.status}`);
+    if (!response.ok) {
+      let revoked = false;
+      // Only interpret a bounded, known machine code. Provider messages can
+      // echo submitted credentials and must never become operator output.
+      const reader = response.status === 401 ? response.body?.getReader() : undefined;
+      if (reader) {
+        try {
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          for (;;) {
+            const part = await reader.read();
+            if (part.done) break;
+            size += part.value.byteLength;
+            if (size > 4096) throw new Error("Oversized authentication error");
+            chunks.push(part.value);
+          }
+          const bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+          const evidence: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+          revoked = z.object({ code: z.literal("REVOKED_API_KEY") }).safeParse(evidence).success;
+        } catch { /* Untrusted or unreadable errors retain the status-only diagnosis. */ }
+        finally { void reader.cancel().catch(() => undefined); }
+      } else { void response.body?.cancel().catch(() => undefined); }
+      throw new Error(`OpenRelay read-only preflight returned HTTP ${response.status}${revoked
+        ? " (REVOKED_API_KEY); replace Studio's dedicated youtube/OPENRELAY_API_KEY through the vault" : ""}`);
+    }
     try { return await response.json(); }
     catch { throw new Error("OpenRelay read-only preflight returned invalid JSON evidence"); }
   }

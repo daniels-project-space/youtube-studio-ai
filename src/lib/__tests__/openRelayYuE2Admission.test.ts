@@ -123,6 +123,24 @@ async function main() {
     maximumHourlyCents: 18, fetchImpl: async () => new Response(key, { status: 401 }) }), error => {
     assert.ok(error instanceof Error && !error.message.includes(key)); return true;
   });
+  for (const [status, body, expectedRevoked] of [
+    [401, JSON.stringify({ code: "REVOKED_API_KEY", error: key }), true],
+    [401, JSON.stringify({ code: key, error: "api key revoked" }), false],
+    [403, JSON.stringify({ code: "REVOKED_API_KEY", error: key }), false],
+    [401, JSON.stringify({ code: "REVOKED_API_KEY", error: key.repeat(100) }), false],
+    [401, "null", false],
+  ] as const) {
+    let reads = 0;
+    await assert.rejects(() => inspectYuE2OpenRelayAdmission({ ...retainedOptions,
+      fetchImpl: async () => { reads++; return new Response(body, { status }); } }), error => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message.includes("REVOKED_API_KEY"), expectedRevoked);
+      assert.equal(error.message.includes("youtube/OPENRELAY_API_KEY"), expectedRevoked);
+      assert.ok(!error.message.includes(key));
+      return true;
+    });
+    assert.equal(reads, 1, "revoked identity cannot continue to inventory or provider mutation");
+  }
   await assert.rejects(() => inspectYuE2OpenRelayAdmission({ apiKey: key, expectedOrganizationId: org,
     maximumHourlyCents: 18, fetchImpl: async () => new Response(key) }), error => {
     assert.ok(error instanceof Error && !error.message.includes(key)); return true;

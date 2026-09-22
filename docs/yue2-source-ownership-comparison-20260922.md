@@ -29,7 +29,16 @@ review, not automatic acceptance.
 
 ## Live Provider Evidence
 
-On 22 September 2026, the vault-backed key authenticated through `/v1/whoami`
+Correction: the restart attempts below used the shared `openrelay` vault entry
+by mistake. Studio's canonical credential is `youtube/OPENRELAY_API_KEY`, as
+already enforced by application bootstrap. A later direct `/v1/whoami` check
+of that dedicated credential returned HTTP 401, `REVOKED_API_KEY`. Its SHA-256
+fingerprint prefix `becf652a4be6` matches the successful prior GPU session's
+operator ledger. A replacement must be stored in the dedicated vault entry;
+do not restore the revoked key or substitute the unrelated shared key. No
+project organization-permission change has been shown necessary.
+
+On 22 September 2026, the shared vault-backed key authenticated through `/v1/whoami`
 for organization `626c2959-4f58-4779-b867-2a74129e93e5`, reporting
 `clusters:read`, `vms:read`, and `vms:write`. The retained RTX 3090 VM
 `29e245a2-2e1a-431e-b5b3-654cf0ba1587` remained stopped.
@@ -41,8 +50,8 @@ response explicitly saying `not permitted for this organization`:
 - `c6ee2dce-eedb-462a-9b26-0ed9d9ba2ec1`
 
 The [documented restart endpoint](https://docs.openrelay.inc/docs/vms/restartVm)
-was used. No alternate identity, exposed historical key, replacement VM or
-permission bypass was attempted. Read access and reported scope labels do not
+was used. No exposed historical key, replacement VM or permission bypass was
+attempted. The wrong vault namespace above is the operator error. Read access and reported scope labels do not
 prove current write authorization. This is not evidence of inadequate funding
 or unavailable GPU capacity.
 

@@ -9,7 +9,7 @@ name. That result did not establish whether the retained VM could resume.
 The same operator CLI now accepts an optional explicit retained VM UUID:
 
 ```sh
-ai-vault openrelay OPENRELAY_API_KEY=OPENRELAY_API_KEY -- \
+ai-vault youtube OPENRELAY_API_KEY=OPENRELAY_API_KEY -- \
   npx tsx src/scripts/preflight-yue2-openrelay.ts \
   626c2959-4f58-4779-b867-2a74129e93e5 18 \
   29e245a2-2e1a-431e-b5b3-654cf0ba1587
@@ -22,11 +22,19 @@ rate ceiling and no disk billing. It does not query global availability or infer
 ownership from a name. Missing, mismatched, terminated or incompatible resources
 fail; none falls back to creating another VM.
 
-The live command passed at `2026-09-22T02:33:46.090Z`: retained VM stopped,
+The live read-only inspection passed at `2026-09-22T02:33:46.090Z`: retained VM stopped,
 28,672 MB guest RAM, 60 GB disk, 18 cents/hour, no disk billing. The report keeps
 `authorizedToCreate`, `authorizedToRestart`, `restartCapacityVerified`,
 `placementVerified` and `gpuQualified` false. It does not validate mounted model
 bytes, available guest RAM, GPU execution, or musical quality.
+
+Credential correction: that inspection used the shared `openrelay` vault entry,
+not Studio's dedicated `youtube` entry. Its successful reads prove only the
+reported resource state. The corrected command above uses the project-owned
+credential; subsequent `/v1/whoami` verification returned HTTP 401,
+`REVOKED_API_KEY`, for that credential. Do not treat the earlier shared-key 403s
+as evidence that Studio's organization settings need changing. Replace the
+dedicated revoked key through Project Hub, not by copying the shared key.
 
 Default new-allocation behavior is unchanged. In particular, the provider's
 `activeOnly=true` inventory filter was not removed: its documented meaning is
@@ -40,5 +48,5 @@ leakage. Existing new-allocation and paginated-inventory cases still pass.
 Typecheck and focused lint pass. No provider mutation, GPU inference, credential
 change, thumbnail work or production deployment is part of this change.
 
-This removes a misleading provisioning preflight, not the live organization
-permission refusal documented in `yue2-source-ownership-comparison-20260922.md`.
+This removes a misleading provisioning preflight, not the revoked Studio
+credential documented in `yue2-source-ownership-comparison-20260922.md`.
