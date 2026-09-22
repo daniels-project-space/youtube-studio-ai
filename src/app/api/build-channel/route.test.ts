@@ -216,6 +216,17 @@ async function main() {
       pipelinePreviewSnapshot: currentPreview,
       budget: 0,
     };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("unsupported music selection must not dispatch"); };
+    try {
+      for (const yue2Music of [{ musicIntent: { playback: "repeat", role: "primary_music", requestedDurationSec: 30 }, sourceParams: {} }, null, false]) {
+        const selectedDesign = { ...exactPreviewDesign, yue2Music };
+        const selected = await POST(request({ requestKey: requestKey(selectedDesign), design: selectedDesign }));
+        assert.equal(selected.status, 409);
+        assert.match((await selected.json() as { error: string }).error, /yue2Music/,
+          "the creator must refuse an unsupported source choice, not attest its legacy preview");
+      }
+    } finally { globalThis.fetch = originalFetch; }
     const exactPreview = await POST(request({
       requestKey: requestKey(exactPreviewDesign),
       design: exactPreviewDesign,

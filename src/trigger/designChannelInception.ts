@@ -1832,6 +1832,7 @@ export async function executeDesignChannel(
     syntheticScenario: routeSyntheticScenario ?? payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
+    yue2Music: payload.yue2Music,
     quizProfile: programRouteForCompile?.quizProfile ?? payload.quizProfile,
     ...(!isRouteLessLegacyRetry && submittedCreatorIntentDiagnosis
       ? {

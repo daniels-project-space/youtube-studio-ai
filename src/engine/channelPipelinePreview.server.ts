@@ -98,6 +98,9 @@ const PREVIEW_INPUT_FIELDS = [
   "sourceReferences",
   "claimEvidence",
   "capabilitySelections",
+  // Preserve unsupported executable selections so the strict preview schema
+  // rejects them; dropping one would attest a different, legacy pipeline.
+  "yue2Music",
 ] as const;
 
 /**
