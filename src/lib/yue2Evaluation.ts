@@ -463,7 +463,10 @@ export class YuE2EvaluationClient {
 
   private async json(path: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<{ status: number; value: unknown }> {
     const response = await this.transfer(path, method, this.maxResponseBytes, body);
-    if ((response.status < 200 || response.status >= 300) && !(response.status === 404 && method === "GET")) throw new YuE2EvaluationError("http_failure");
+    const admissionRefusal = response.status === 400 && method === "POST" && path === "/v1/jobs";
+    if ((response.status < 200 || response.status >= 300) && !(response.status === 404 && method === "GET") && !admissionRefusal) {
+      throw new YuE2EvaluationError("http_failure");
+    }
     try {
       return { status: response.status, value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(response.bytes)) as unknown };
     } catch { throw new YuE2EvaluationError("invalid_json"); }
@@ -521,6 +524,12 @@ export class YuE2EvaluationClient {
         if (options.beforeSubmit && !await options.beforeSubmit()) throw new YuE2EvaluationError("submission_already_reserved", id);
         try { response = await this.json("/v1/jobs", "POST", request.job); }
         catch { throw new YuE2EvaluationError("ambiguous_submission", id); }
+        if (response.status === 400) {
+          const refused = z.object({
+            contract: z.literal(YUE2_WORKER_CONTRACT), state: z.literal("refused"), error: z.literal("invalid_job"),
+          }).strict().safeParse(response.value).success;
+          throw new YuE2EvaluationError(refused ? "worker_rejected_invalid_job" : "ambiguous_submission", id);
+        }
       }
       const state = z.object({ contract: z.literal(YUE2_WORKER_CONTRACT), job_id: JobId, state: z.string(), job: YuE2JobSchema }).passthrough().parse(response.value);
       if (state.job_id !== id || canonicalJson(state.job) !== canonicalJson(request.job)) throw new Error("job mismatch");

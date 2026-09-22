@@ -50,3 +50,31 @@ policy-bearing requests; older runtimes reject the unknown field. No GPU job,
 thumbnail work, paid provider call, owner audition approval, automatic
 generation or publishing was performed. This checkpoint is not full music
 quality qualification or completion of the module-first MVP.
+
+## Cross-Language Admission Check
+
+The updated `scripts/test-yue2-supervised-integration.ts` now sends a policy-bound
+vocal score through the actual Studio client to the real supervised Python HTTP
+worker. Only inference is a synthetic CPU backend. It proves:
+
+- The forbidden score creates no job/queue directory or execution accounting.
+- The client makes one rejected POST and cannot automatically resubmit it;
+  status/accounting recovery remains GET-only.
+- A subsequent valid instrumental request completes with its exact job and
+  score policy intact. Receipts, native FLOAT WAV probing and supervised
+  accounting pass, and the worker reports exactly one synthetic inference.
+- The fixture intentionally emits one second of audio for a sixty-second score;
+  neither exact performance duration nor musical quality is claimed.
+
+The client now distinguishes an exact HTTP 400 `invalid_job` refusal using
+`worker_rejected_invalid_job`. Unexpected fields, other statuses/contracts,
+malformed responses and success-shaped bodies on HTTP 400 remain ambiguous
+failures. No raw worker text is exposed, and neither error class grants retry,
+fallback, a replacement job, or a claim about provider billing.
+
+Verification: the real supervised integration passed in an externally isolated
+network namespace. All four client/durable/shared-module regression files passed,
+including 73 client checks; scoped ESLint and the production build passed.
+Logs: `/tmp/studio-yue2-admission-regressions.log` and
+`/tmp/studio-yue2-admission-build.log`. No provider calls, GPU execution,
+thumbnail work, deployment or owner approval occurred.

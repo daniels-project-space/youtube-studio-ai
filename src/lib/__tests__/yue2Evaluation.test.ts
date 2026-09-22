@@ -466,6 +466,33 @@ async function main(): Promise<void> {
       assert.deepEqual(fixture.calls.find((call) => call.method === "POST")?.body, request.job);
       assert.equal(fixture.calls.filter((call) => call.method === "POST").length, 1);
     });
+    await test("only an exact worker admission refusal gets a specific sanitized error, never retry authority", async () => {
+      const refusal = { contract: YUE2_WORKER_CONTRACT, state: "refused", error: "invalid_job" };
+      for (const [status, body, specific] of [
+        [400, refusal, true],
+        [500, refusal, false],
+        [400, { ...refusal, contract: "unknown" }, false],
+        [400, { ...refusal, state: "completed" }, false],
+        [400, { ...refusal, error: token }, false],
+        [400, { ...refusal, detail: token }, false],
+        [400, pending(), false],
+      ] as const) {
+        const fixture = stub((path, init) => path.endsWith("/health") ? Response.json(health())
+          : init.method === "POST" ? Response.json(body, { status }) : absent());
+        await assert.rejects(fixture.client.evaluate(request, { submit: true }), (error: unknown) => {
+          assert.ok(error instanceof YuE2EvaluationError);
+          assert.equal(error.code, specific ? "worker_rejected_invalid_job" : "ambiguous_submission");
+          assert.equal(error.jobId, request.job.job_id);
+          assert.equal(error.retryable, false);
+          assert.equal(error.safeToFallback, false);
+          assert.ok(!error.message.includes(token));
+          return true;
+        });
+        await rejected(fixture.client.evaluate(request, { submit: true }));
+        await rejected(fixture.client.evaluate(request, { recoverOnly: true }));
+        assert.equal(fixture.calls.filter(call => call.method === "POST").length, 1);
+      }
+    });
     for (const failure of ["throw", "http", "malformed", "mismatched", "timeout"] as const) {
       await test(`ambiguous POST ${failure} never replays even if recovery GET says missing`, async () => {
         const fixture = stub((path, init) => {
