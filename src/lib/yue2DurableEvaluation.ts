@@ -401,6 +401,17 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
     let markerPersisted = marker !== undefined;
     const candidateBytes = await optionalRead(candidateKey);
     const savedProvenance = await optionalRead(provenanceKey);
+    const refusalBytes = jsonBytes({ version: "studio-yue2-admission-refusal/v1",
+      bindingSha256, jobId, status: 400, error: "invalid_job" });
+    if (savedProvenance && z.object({ version: z.literal("studio-yue2-admission-refusal/v1") })
+      .safeParse(parseJson(savedProvenance)).success) {
+      assertBytes(savedProvenance, refusalBytes);
+      if (!markerPersisted) throw new YuE2EvaluationError("durable_refusal_missing_submission_marker");
+      if (candidateBytes || await optionalRead(accountingKey)) {
+        throw new YuE2EvaluationError("durable_refusal_has_execution_evidence");
+      }
+      throw new YuE2EvaluationError("worker_rejected_invalid_job");
+    }
     let retainedAccounting: { verified: YuE2VerifiedExecutionAccounting; bytes: Uint8Array } | undefined;
     const verifyRetainedAccounting = (bytes: Uint8Array) => {
       const saved = z.object({ version: z.literal("studio-yue2-durable-accounting/v1"),
@@ -562,6 +573,15 @@ export async function executeDurableYuE2Evaluation(input: YuE2DurableEvaluationI
         },
       });
     } catch (error) {
+      if (error instanceof YuE2EvaluationError && error.code === "worker_rejected_invalid_job") {
+        // The client only emits this for the exact pre-queue HTTP 400 contract.
+        // Seal that terminal provenance without inventing execution accounting.
+        if (!markerPersisted || savedProvenance || candidateBytes || retainedAccounting) {
+          throw new YuE2EvaluationError("durable_refusal_conflicts_with_execution");
+        }
+        await immutable(provenanceKey, refusalBytes, "application/json");
+        throw error;
+      }
       if (error instanceof YuE2EvaluationError && error.code === "submission_already_reserved") {
         try { outcome = await client.evaluate(request, { recoverOnly: true, afterJobObserved }); }
         catch (recoveryError) {

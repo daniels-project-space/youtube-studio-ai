@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import Module, { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { yue2Sha256 } from "@/lib/yue2Evaluation";
+import { yue2Sha256, YuE2EvaluationError } from "@/lib/yue2Evaluation";
 import type { YuE2DurableEvaluationInput } from "@/lib/yue2DurableEvaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
 
@@ -14,7 +14,7 @@ const policy = { schema_version: 1, provider: "openrelay", allocation_basis: "su
   hourly_rate_usd_micros: 180000, max_execution_seconds: 600, termination_grace_seconds: 10, reserved_allocation_usd_micros: 30500 };
 const params = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 0.04, executionPolicy: policy };
 let calls: YuE2DurableEvaluationInput[] = [], waits = 0, bootstraps = 0, reads = 0;
-let mode: "complete" | "pending-complete" | "pending" | "held" | "throw" = "complete";
+let mode: "complete" | "pending-complete" | "pending" | "held" | "throw" | "refused" = "complete";
 let material = structuredClone(retained), authorize = false;
 const load = createRequire(__filename);
 const durable = load("@/lib/yue2DurableEvaluation") as typeof import("@/lib/yue2DurableEvaluation");
@@ -30,6 +30,7 @@ loader._load = function (id, ...args) {
       calls.push(input);
       if (authorize && !input.recoverOnly) await input.authorizeSubmission();
       if (mode === "throw") throw new Error("ambiguous provider response with confidential detail");
+      if (mode === "refused") throw new YuE2EvaluationError("worker_rejected_invalid_job", retained.candidate.jobId);
       if (mode === "pending" || (mode === "pending-complete" && calls.length === 1)) {
         return { status: "pending", jobId: retained.candidate.jobId, reused: false,
           bindingKey: retained.candidate.bindingKey, workerStatus: "running" };
@@ -176,7 +177,7 @@ async function main() {
   assert.equal(calls.length, dispatchesAtPause, "approved continuation must restore the exact candidate without new inference");
   assert.deepEqual(continued.store.yue2MusicCandidate, paused.store.yue2MusicCandidate);
 
-  for (const fault of ["held", "throw", "mismatch"] as const) {
+  for (const fault of ["held", "throw", "mismatch", "refused"] as const) {
     reset();
     if (fault === "mismatch") material.request.job.seed++;
     else mode = fault;
@@ -184,7 +185,11 @@ async function main() {
     const failure = await runPipeline(resolved, heldOptions);
     assert.equal(failure.ok, false); assert.match(failure.error ?? "", /RECONCILIATION_REQUIRED/);
     assert.doesNotMatch(failure.error ?? "", /confidential detail/);
-    assert.equal(failure.costTotal, fault === "throw" ? 0 : 0.004208, "known allocations survive rejected output");
+    assert.equal(failure.costTotal, fault === "throw" || fault === "refused" ? 0 : 0.004208, "known allocations survive rejected output; unknown costs are not invented");
+    if (fault === "refused") {
+      assert.match(failure.error ?? "", /rejected the frozen score\/request before queue admission/);
+      assert.equal(reads + waits, 0, "pre-queue refusal cannot wait for or substitute an audio candidate");
+    }
     assert.equal(calls.length, 1);
     assert.equal((await runPipeline(resolved, heldOptions)).ok, false);
     assert.equal(calls.length, 1, "ambiguous or rejected paid work cannot be re-purchased on engine resume");

@@ -7,7 +7,7 @@ import { manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { createYuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
+import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
 import { validateYuE2ExecutionPolicy } from "@/lib/yue2ExecutionAccounting";
 import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
 
@@ -87,6 +87,10 @@ const block: Block & { version: string } = {
       return { yue2MusicCandidate, [COST_PATCH_KEY]: charge };
     } catch (error) {
       if (error instanceof ExecutionError) throw error;
+      if (error instanceof YuE2EvaluationError && error.code === "worker_rejected_invalid_job") {
+        throw new ExecutionError("PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 worker rejected the frozen score/request before queue admission; review inputs explicitly, same-job retries cannot repair this refusal",
+          { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false });
+      }
       throw hold("source execution or retained verification requires reconciliation", charge);
     }
   },

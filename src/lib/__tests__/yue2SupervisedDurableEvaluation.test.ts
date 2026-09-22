@@ -129,7 +129,8 @@ function fixture() {
   return { objects: new Map<string, Buffer>(), calls: [] as string[], writes: [] as string[], reads: [] as string[],
     posts: 0, authorizations: 0, probes: 0, analyses: 0, failAnalysis: false, audio, preClampAudio: undefined as Buffer | undefined,
     remote: "missing" as Remote, postState: "completed" as Remote,
-    advertisedPolicy: policy, offline: false, observedPolicy: false, audioFailure: false,
+    advertisedPolicy: policy, offline: false, observedPolicy: false, audioFailure: false, refuseAdmission: false,
+    refusalBody: undefined as unknown,
     responseCount: 0, mutateEvidence: undefined as ((value: Bundle, sequence: number) => void) | undefined,
     putFault: undefined as ((key: string, bytes: Uint8Array) => void) | undefined };
 }
@@ -214,7 +215,10 @@ globalThis.fetch = async (input, init = {}) => {
     assert.equal(current.observedPolicy, true, "policy must be independently fetched before POST");
     assert.equal(new Headers(init.headers).get("X-YuE2-Execution-Policy-SHA256"), seal(policy).sha256);
     assert.deepEqual(JSON.parse(String(init.body)), request.job);
-    current.posts++; current.remote = current.postState;
+    current.posts++;
+    if (current.refuseAdmission) return Response.json(current.refusalBody ?? { contract: YUE2_WORKER_CONTRACT,
+      state: "refused", error: "invalid_job" }, { status: 400 });
+    current.remote = current.postState;
   }
   if (current.remote === "missing") return Response.json({ contract: YUE2_WORKER_CONTRACT, state: "refused", error: "job_not_found" }, { status: 404 });
   if (path.endsWith("/artifacts/audio-native.wav")) {
@@ -262,9 +266,19 @@ function assertReference(value: unknown, expectedStatus = "completed", expectedC
   assert.equal(verified.providerBilledCostUsdMicros, null);
 }
 async function recoverChild(path: string) {
-  const snapshot = JSON.parse(readFileSync(path, "utf8")) as { objects: Array<[string, string]>; remote: Remote };
+  const snapshot = JSON.parse(readFileSync(path, "utf8")) as { objects: Array<[string, string]>; remote: Remote; refused?: boolean };
   current.objects = new Map(snapshot.objects.map(([key, bytes]) => [key, Buffer.from(bytes, "base64")]));
   current.remote = snapshot.remote;
+  if (snapshot.refused) {
+    current.offline = true;
+    await assert.rejects(run(args({ recoverOnly: true })), (error: unknown) => {
+      assert.ok(error instanceof YuE2EvaluationError);
+      assert.equal(error.code, "worker_rejected_invalid_job");
+      return true;
+    });
+    console.log(JSON.stringify({ refused: true, calls: current.calls, posts: current.posts, writes: current.writes }));
+    return;
+  }
   const result = await run(args({ recoverOnly: true, authorizeSubmission: async () => { throw new Error("recovery cannot authorize"); } }));
   console.log(JSON.stringify({ result, calls: current.calls, posts: current.posts, writes: current.writes }));
 }
@@ -274,6 +288,80 @@ async function main() {
   async function test(name: string, fn: () => Promise<void> | void) {
     request = initialRequest; current = fixture(); await fn(); passed++; console.log(`PASS ${name}`);
   }
+  await test("verified pre-queue refusal survives offline recovery without accounting or resubmission", async () => {
+    current.refuseAdmission = true;
+    const refused = (operation: Promise<unknown>) => assert.rejects(operation, (error: unknown) => {
+      assert.ok(error instanceof YuE2EvaluationError);
+      assert.equal(error.code, "worker_rejected_invalid_job");
+      assert.equal(error.jobId, request.job.job_id);
+      assert.equal(error.retryable, false); assert.equal(error.safeToFallback, false);
+      return true;
+    });
+    await refused(run(args()));
+    assert.equal(current.posts, 1);
+    assert.equal(current.remote, "missing");
+    assert.equal(current.calls.at(-1), "POST /v1/jobs", "a refused job has no execution accounting to poll");
+    assert.ok(current.objects.has(markerKey), "refusal does not erase the no-resubmission fence");
+    assert.equal(current.objects.has(candidateKey), false);
+    assert.equal(current.objects.has(accountingKey), false, "no measured allocation or provider bill is invented");
+    const receipt = saved(provenanceKey);
+    assert.equal(receipt.version, "studio-yue2-admission-refusal/v1");
+    assert.equal(receipt.bindingSha256, yue2Sha256(current.objects.get(bindingKey)!));
+    const calls = current.calls.length, writes = current.writes.length, authorizations = current.authorizations;
+    current.offline = true;
+    await refused(run(args({ recoverOnly: true })));
+    await refused(run(args()));
+    assert.equal(current.calls.length, calls); assert.equal(current.writes.length, writes);
+    assert.equal(current.authorizations, authorizations);
+    const directory = mkdtempSync(join(tmpdir(), "yue2-refusal-restart-"));
+    try {
+      const snapshot = join(directory, "storage.json");
+      writeFileSync(snapshot, JSON.stringify({ objects: [...current.objects].map(([key, bytes]) =>
+        [key, bytes.toString("base64")]), remote: "missing", refused: true }));
+      const output = execFileSync(process.execPath, ["--import", "tsx", __filename, "--recover-fixture", snapshot],
+        { encoding: "utf8", timeout: 20_000 });
+      assert.deepEqual(JSON.parse(output.trim()), { refused: true, calls: [], posts: 0, writes: [] });
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+    const original = current.objects.get(provenanceKey)!;
+    for (const change of [{ jobId: `yue2-eval-${"0".repeat(64)}` }, { bindingSha256: "0".repeat(64) },
+      { status: 200 }, { error: "unknown" }]) {
+      current.objects.set(provenanceKey, Buffer.from(canonicalJson({ ...receipt, ...change })));
+      await assert.rejects(run(args({ recoverOnly: true })), (error: unknown) => {
+        assert.ok(error instanceof YuE2EvaluationError);
+        assert.notEqual(error.code, "worker_rejected_invalid_job");
+        return true;
+      });
+    }
+    current.objects.set(provenanceKey, original);
+    current.objects.set(accountingKey, Buffer.from("{}"));
+    await assert.rejects(run(args({ recoverOnly: true })), /durable_refusal_has_execution_evidence/);
+    current.objects.delete(accountingKey);
+    current.objects.delete(markerKey);
+    await assert.rejects(run(args({ recoverOnly: true })), /durable_refusal_missing_submission_marker/);
+    assert.equal(current.calls.length, calls);
+  });
+  await test("ambiguous HTTP 400 and failed refusal retention never create terminal refusal authority", async () => {
+    for (const body of [{}, { contract: "foreign", state: "refused", error: "invalid_job" },
+      { contract: YUE2_WORKER_CONTRACT, state: "refused", error: "invalid_job", unexpected: true }]) {
+      current = fixture(); current.refuseAdmission = true; current.refusalBody = body;
+      await rejected(run(args()));
+      assert.equal(current.objects.has(provenanceKey), false);
+      assert.equal(current.objects.has(markerKey), true);
+      assert.equal(current.posts, 1);
+    }
+    current = fixture(); current.refuseAdmission = true;
+    current.putFault = (key) => { if (key === provenanceKey) throw new Error("fixture retention failure"); };
+    await assert.rejects(run(args()), (error: unknown) => {
+      assert.ok(error instanceof YuE2EvaluationError);
+      assert.notEqual(error.code, "worker_rejected_invalid_job", "unretained terminal evidence cannot claim durable refusal");
+      return true;
+    });
+    assert.equal(current.objects.has(provenanceKey), false);
+    assert.equal(current.objects.has(markerKey), true);
+    current.putFault = undefined;
+    await rejected(run(args()));
+    assert.equal(current.posts, 1, "lost refusal evidence does not permit resubmitting");
+  });
   await test("checkpointed task recovers the exact submitted job without new generation", async () => {
     current.postState = "pending"; await run(args());
     const oldUrl = process.env.YUE2_EVALUATION_URL, oldToken = process.env.YUE2_EVALUATION_TOKEN;
