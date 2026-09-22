@@ -38,7 +38,7 @@ export async function dispatchDueSerializedProgramEpisodeRetries(input?: {
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const now = input?.now ?? Date.now();
-  const convex = new ConvexHttpClient(url);
+  const convex = new ConvexHttpClient(url, { requestTimeoutMs: 30_000 });
   const due = (await convex.query(api.runs.listDueSerializedProgramEpisodeRetries, {
     ownerId,
     now,

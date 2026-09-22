@@ -23,17 +23,27 @@ function serviceToken(): string {
 export class StudioConvexHttpClient extends BaseConvexHttpClient {
   constructor(
     address: string,
-    options?: ConstructorParameters<typeof BaseConvexHttpClient>[1],
+    options?: ConstructorParameters<typeof BaseConvexHttpClient>[1] & { requestTimeoutMs?: number },
   ) {
-    const explicitAuth = options?.auth;
-    const transport = options?.fetch ?? globalThis.fetch;
+    const { requestTimeoutMs, ...clientOptions } = options ?? {};
+    if (requestTimeoutMs !== undefined && (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 2 ** 31 - 1)) {
+      throw new Error("Convex request timeout must be a positive bounded integer");
+    }
+    const explicitAuth = clientOptions.auth;
+    const transport = clientOptions.fetch ?? globalThis.fetch;
     const authenticatedFetch: typeof globalThis.fetch = (input, init) => {
       const headers = new Headers(init?.headers);
       headers.set("Authorization", `Bearer ${explicitAuth ?? serviceToken()}`);
-      return transport(input, { ...init, headers });
+      const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      const deadline = requestTimeoutMs === undefined ? undefined : AbortSignal.timeout(requestTimeoutMs);
+      // Keep the fetch signal alive through body consumption, not just headers.
+      // A timed-out mutation may still commit; callers retain their durable fences.
+      return transport(input, { ...init, headers,
+        ...(deadline ? { signal: callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline } : {}),
+      });
     };
     super(address, {
-      ...options,
+      ...clientOptions,
       auth: explicitAuth ?? serviceToken(),
       fetch: authenticatedFetch,
     });

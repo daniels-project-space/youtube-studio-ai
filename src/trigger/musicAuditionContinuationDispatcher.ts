@@ -34,7 +34,7 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
   const log = input?.log ?? (message => console.log(`[music-audition-continuation-dispatcher] ${message}`));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
-  const convex = input?.convex ?? new ConvexHttpClient(url!);
+  const convex = input?.convex ?? new ConvexHttpClient(url!, { requestTimeoutMs: 30_000 });
   const { recovery, pending, yue2Pending } = await convex.mutation(musicAuditionCheckpointsApi.prepareResumeDispatch, {
     ownerId, now: Date.now(), limit: MUSIC_AUDITION_CONTINUATION_LIMIT, includeYuE2: true,
   } as never) as unknown as { recovery: { requeued: number; blocked: number }; pending: PendingMusicAuditionResume[]; yue2Pending: YuE2ContinuationReceipt[] };

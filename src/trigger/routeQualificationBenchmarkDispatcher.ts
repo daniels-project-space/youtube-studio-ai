@@ -199,7 +199,7 @@ export async function dispatchPendingRouteQualificationBenchmarks(input?: {
   const log = input?.log ?? ((message: string) => console.log(`[route-qualification-benchmark-dispatcher] ${message}`));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
-  const convex = input?.convex ?? new ConvexHttpClient(url!);
+  const convex = input?.convex ?? new ConvexHttpClient(url!, { requestTimeoutMs: 30_000 });
   const recovery = await convex.mutation(routeQualificationBenchmarkRunsApi.reapExpiredQueued, {
     ownerId,
     now: Date.now(),
