@@ -75,6 +75,7 @@ import {
   createFinalMasterReleaseCertificate,
   createFinalMasterReleaseCertificateReference,
   createVisualReviewReleaseReceipt,
+  visualReviewManifestFingerprint,
   FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
   finalMasterReleaseCertificateKey,
   parseFinalMasterReleaseCertificateBytes,
@@ -2506,6 +2507,7 @@ async function persistShortReleaseEvidence(args: {
     evidence: {
       source: { durationSec, sha256: afterReviewSha256 },
       manifestKey: visualEvidence.evidenceManifestKey,
+      manifestFingerprint: visualReviewManifestFingerprint(review.evidence),
       frameKeys: visualEvidence.evidenceFrameKeys,
       frameArtifacts: visualEvidence.evidenceFrameArtifacts,
     },

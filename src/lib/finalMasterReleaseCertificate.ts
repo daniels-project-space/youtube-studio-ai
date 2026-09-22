@@ -157,6 +157,8 @@ const visualReviewReceiptSchema = z.object({
       sha256,
     }).strict(),
     manifestKey: objectKey,
+    /** Canonical JSON fingerprint of the complete persisted evidence manifest. */
+    manifestFingerprint: sha256.optional(),
     frameKeys: z.array(objectKey).min(1).max(20_000),
     /** Older v1 receipts may omit this; release operations then fail closed. */
     frameArtifacts: z.array(evidenceFrameArtifactSchema).min(1).max(20_000).optional(),
@@ -164,6 +166,16 @@ const visualReviewReceiptSchema = z.object({
 }).strict();
 
 export type VisualReviewReleaseReceipt = z.infer<typeof visualReviewReceiptSchema>;
+
+export function visualReviewManifestFingerprint(manifest: unknown): string {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error("visual-review evidence manifest must be a JSON object");
+  }
+  return createHash("sha256")
+    .update("visual-review-manifest/v1\0")
+    .update(canonicalJson(manifest))
+    .digest("hex");
+}
 
 export const FinalMasterReleaseCertificateSchema = z.object({
   yue2AssemblySource: YuE2AssemblySourceSchema.optional(),
@@ -1094,6 +1106,14 @@ export function assertReleaseCertificateVisualReviewBindings(args: {
 }): void {
   const certificate = assertFinalMasterReleaseCertificate(args.certificate);
   const receipt = assertVisualReviewReleaseReceipt(args.receipt);
+  // The certificate already seals the entire release receipt. New receipts
+  // also seal coverage, frame-selection reasons and future evidence fields,
+  // not just the frame identity projection checked below. Legacy receipts
+  // remain readable without inventing a retroactive full-manifest attestation.
+  if (receipt.evidence.manifestFingerprint !== undefined &&
+    visualReviewManifestFingerprint(args.evidenceManifest) !== receipt.evidence.manifestFingerprint) {
+    throw new Error("final-master release certificate visual-review manifest fingerprint mismatch");
+  }
   const certificateFrameArtifacts = requireEvidenceFrameArtifacts({
     frameKeys: certificate.visualReview.evidenceFrameKeys,
     frameArtifacts: certificate.visualReview.evidenceFrameArtifacts,
