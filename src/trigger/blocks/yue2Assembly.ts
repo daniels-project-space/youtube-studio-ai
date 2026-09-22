@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { dirname, join } from "node:path";
 import { artifactContract } from "@/engine/artifactSchemas";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { prepareApprovedYuE2AssemblySource } from "@/lib/approvedYuE2AssemblySource";
+import { normalizeMusicLoopSource } from "@/lib/ffmpeg";
 import { createLoopAssemblyBlock } from "./lofiBlocks";
 import { createTimelineAssemblyBlock } from "./narratedBlocks";
 import { createComposerAwareAssemblyManifest } from "./composerAwareAssembly";
@@ -34,8 +36,19 @@ export function createYuE2AssemblyManifest(legacy: ModuleManifest, playback: "re
       }
       const source = await prepareApprovedYuE2AssemblySource(ctx, params.sourceCrossfadeSec, playback);
       try {
+      let musicPath = source.path;
+      if (legacy.id === "assemble") {
+        try {
+          musicPath = await normalizeMusicLoopSource(source.path, join(dirname(source.path), "assembly-mix.wav"),
+            Number(ctx.params.targetLufs), source.evidence.preparedFrames);
+        } catch (cause) {
+          throw Object.assign(new Error("required loop audio normalization failed", { cause }),
+            { code: "FINAL_AUDIO_NORMALIZATION_FAILED", retryable: false });
+        }
+        await source.assertCurrent();
+      }
       const delegate = legacy.id === "assemble"
-        ? createLoopAssemblyBlock(async () => source.path, { mixSampleRateHz: 48000,
+        ? createLoopAssemblyBlock(async () => musicPath, { mixSampleRateHz: 48000,
           assertOutputAuthority: source.assertCurrent, exactFinalDuration: true })
         : createTimelineAssemblyBlock(async () => source.path, 48000, source.assertCurrent,
           { retainRepairCheckpoint: false, musicPlayback: playback, requireAudioNormalization: true,
@@ -57,6 +70,6 @@ export function createYuE2AssemblyManifest(legacy: ModuleManifest, playback: "re
     configSchema: legacy.configSchema.and(routeConfig), block, execute: block.run,
     certification: { status: "contract", evidence: `Explicit private owner-reviewed YuE2 ${playback} source consumption; not final-media or publishing qualification.` },
   };
-  if (legacy.id === "timeline_assemble") manifest = createComposerAwareAssemblyManifest(manifest);
+  manifest = createComposerAwareAssemblyManifest(manifest);
   return { ...manifest, version };
 }

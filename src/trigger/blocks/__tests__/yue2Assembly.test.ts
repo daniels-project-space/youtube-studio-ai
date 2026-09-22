@@ -56,6 +56,7 @@ let failRepairDownload = false;
 let finalUploadFailures = 0;
 let afterFailedUpload = () => {};
 let failNormalization = false;
+const loopTargets: number[] = [];
 let deliveredDurationOffset = 0;
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
@@ -123,6 +124,12 @@ loader._load = function (id, ...args) {
       if (failNormalization) throw new Error("fixture normalization failed");
       return nativeEncode ? real.normalizeAudioOnly(...input) : encoded(input[1]);
     },
+    normalizeMusicLoopSource: async (...input: Parameters<typeof real.normalizeMusicLoopSource>) => {
+      loopTargets.push(input[2]);
+      if (failNormalization) throw new Error("fixture normalization failed");
+      await copyFile(input[0], input[1]);
+      return input[1];
+    },
     composeWithIntro: async (input: Parameters<typeof real.composeWithIntro>[0]) => {
       renders.push(input); temporary.add(dirname(input.outPath));
       const result = await (nativeEncode ? real.composeWithIntro(input) : encoded(input.outPath));
@@ -143,6 +150,7 @@ function reset() { approval = approved; source = wav; currentMaterial = material
   streamedRepairDownloads.length = 0; failRepairDownload = false;
   finalUploadFailures = 0; afterFailedUpload = () => {};
   failNormalization = false;
+  loopTargets.length = 0;
   deliveredDurationOffset = 0;
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
@@ -200,10 +208,12 @@ async function main() {
       assert.ok(key in manifest.consumes || key in manifest.optionalConsumes, `undeclared input ${key}`); return target[key];
     } });
     const result = await manifest.execute({ ...ctx, store, params: { durationSec: 3600, tailSec: 0, burnCaptions: false, transitions: "hardcut" } });
+    assert.deepEqual(loopTargets, id === "assemble" ? [-16] : [], "only primary loops master the short source");
     const evidence = validateArtifact(manifest.produces.yue2AssemblySource, result.yue2AssemblySource) as Record<string, unknown>;
     assert.equal(evidence.approvalFingerprint, approved.fingerprint); assert.equal(evidence.publishingApproved, false);
     assert.equal(evidence.preparedFrames, frames - 96000); assert.equal(renders.length, 1);
-    assert.equal(privateReads, 1); assert.equal(approvalReads, 4); assert.equal(durableReads, 1); assert.equal(leases, 4);
+    assert.equal(privateReads, 1); assert.equal(approvalReads, id === "assemble" ? 5 : 4);
+    assert.equal(durableReads, 1); assert.equal(leases, id === "assemble" ? 5 : 4);
     assert.ok(!("musicUrl" in result) && !("musicKey" in result));
     await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/, "private local source cleaned after render");
     if (id === "timeline_assemble") {
@@ -252,6 +262,17 @@ async function main() {
     }
   }
   nativeEncode = false;
+  reset();
+  await getManifest("assemble", "3.0.0-yue2-reviewed-loop")!.execute({ ...ctx, params: { durationSec: 3600, targetLufs: -20 } });
+  assert.deepEqual(loopTargets, [-20], "explicit assembly target wins over composer intent");
+  reset(); failNormalization = true;
+  await assert.rejects(getManifest("assemble", "3.0.0-yue2-reviewed-loop")!.execute({ ...ctx, params: { durationSec: 3600 } }), error => {
+    assert.match(String(error), /required loop audio normalization failed/);
+    assert.equal(classifyExecutionError(error).retryable, false);
+    return true;
+  });
+  assert.equal(renders.length, 0, "reject unattainable mastering before rendering hours of video");
+  assert.equal(uploads, 0);
   const { createTimelineAssemblyBlock } = load("../narratedBlocks") as typeof import("../narratedBlocks");
   for (const failed of [false, true]) {
     reset(); failPreOverlayUpload = failed;

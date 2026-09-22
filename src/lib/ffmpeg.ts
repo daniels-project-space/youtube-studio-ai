@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { probeYuE2NativeWav } from "./yue2NativeAudio";
 import {
   planThumbnailText,
   type ThumbnailHeadlineLine,
@@ -2347,6 +2348,46 @@ export async function masterAudioTransparentGain(
       `(measured ${Number.isFinite(verification.truePeakDbtp) ? verification.truePeakDbtp : "unavailable"}); ` +
       "refusing to release or silently limit the encoded master",
     );
+  }
+  return outPath;
+}
+
+/** Master the short native loop, not the expanded hours-long delivery. */
+export async function normalizeMusicLoopSource(
+  inPath: string, outPath: string, targetLufs: number, frames: number,
+): Promise<string> {
+  if (inPath === outPath || !Number.isFinite(targetLufs) || targetLufs < -23 || targetLufs > -12 ||
+    !Number.isSafeInteger(frames) || frames <= 0) {
+    throw new FfmpegError("loop mastering requires a separate output, native frame count and -23 to -12 LUFS target");
+  }
+  await probeYuE2NativeWav(inPath, { frames }, (await stat(inPath)).size);
+  const measure = async (path: string) => {
+    const { stderr } = await run(FFMPEG, [
+      "-hide_banner", "-nostats", "-i", path, "-map", "0:a:0",
+      "-af", "ebur128=peak=true:framelog=verbose", "-f", "null", "-",
+    ], 90_000, AUDIO_METER_OUTPUT_LIMIT);
+    const result = ebur128Summary(stderr);
+    if (!Number.isFinite(result.lufs) || !Number.isFinite(result.truePeakDbtp)) {
+      throw new FfmpegError("loop mastering could not measure loudness and true peak");
+    }
+    return result;
+  };
+  const source = await measure(inPath);
+  const gainDb = targetLufs - source.lufs;
+  // Fixed gain preserves the approved performance, dynamics and folded seam.
+  // Leave headroom for AAC reconstruction; never introduce an implicit limiter.
+  if (source.truePeakDbtp + gainDb > -1.5) {
+    throw new FfmpegError(`loop target ${targetLufs} LUFS exceeds available true-peak headroom; ` +
+      `revise the authored target or source (maximum ${(source.lufs - 1.5 - source.truePeakDbtp).toFixed(1)} LUFS)`);
+  }
+  await run(FFMPEG, [
+    "-v", "error", "-y", "-i", inPath, "-map", "0:a:0",
+    "-af", `volume=${gainDb.toFixed(3)}dB`, "-c:a", "pcm_f32le", outPath,
+  ], 90_000, AUDIO_METER_OUTPUT_LIMIT);
+  await probeYuE2NativeWav(outPath, { frames }, (await stat(outPath)).size);
+  const mastered = await measure(outPath);
+  if (Math.abs(mastered.lufs - targetLufs) > 0.3 || mastered.truePeakDbtp > -1.45) {
+    throw new FfmpegError("loop master missed authored loudness or true-peak headroom");
   }
   return outPath;
 }

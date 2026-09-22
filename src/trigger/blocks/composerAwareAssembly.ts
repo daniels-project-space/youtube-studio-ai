@@ -22,7 +22,7 @@ const profileName = z.enum(["none", "gentle", "standard", "aggressive"]);
 
 /** Exact opt-in executable; default discovery and the legacy block stay intact. */
 export function createComposerAwareAssemblyManifest(legacy: ModuleManifest): ModuleManifest {
-  if (legacy.id !== "timeline_assemble") throw new Error("composer mix requires timeline_assemble");
+  if (!["timeline_assemble", "assemble"].includes(legacy.id)) throw new Error("composer mix requires an assembly consumer");
   const block = {
     ...legacy.block,
     run: async (ctx: Parameters<ModuleManifest["execute"]>[0]) => {
@@ -36,7 +36,8 @@ export function createComposerAwareAssemblyManifest(legacy: ModuleManifest): Mod
       const bodyMusicVol = explicitGain ?? (selectedProfile === undefined ? undefined : profileGain[selectedProfile]) ??
         directives?.bodyMusicVol ?? ASSEMBLE_DEFAULTS.bodyMusicVol;
       const targetLufs = explicitLufs ?? directives?.targetLufs ?? ASSEMBLE_DEFAULTS.targetLufs;
-      return legacy.block.run({ ...ctx, params: { ...params, bodyMusicVol, targetLufs } });
+      return legacy.block.run({ ...ctx, params: { ...params, targetLufs,
+        ...(legacy.id === "timeline_assemble" ? { bodyMusicVol } : {}) } });
     },
   };
   return {
