@@ -1,0 +1,22 @@
+{
+  "schema": "reviewed-yue2-storage-parity/v1",
+  "baselineReceipt": "test-fixtures/music-composer/assembly/reviewed-source-1080p.json",
+  "currentProofDirectory": "/var/lib/youtube-studio-render/operator/reviewed-source-assembly-repair-copy-20260922",
+  "masterSha256": "b4728c643a6a2b3a787e77dbd39959ca94c49ea16d6cad7c773397863747c06d",
+  "wholeMasterBytesMatchBaseline": true,
+  "videoFrames": 300,
+  "width": 1920,
+  "height": 1080,
+  "durationSec": 10,
+  "audioSampleRateHz": 48000,
+  "sourceToneAmplitude": 0.010374816129770089,
+  "narrationToneAmplitude": 0.2592247353617822,
+  "wrongSourceToneRejected": true,
+  "masterStorageWrites": 1,
+  "bufferedVideoStorageWrites": 0,
+  "repairCheckpointRetained": false,
+  "sourceAndApproval": "synthetic_fixture",
+  "providerAndDatabase": "mocked_transport",
+  "encoder": "actual_production_ffmpeg",
+  "productionApproved": false
+}

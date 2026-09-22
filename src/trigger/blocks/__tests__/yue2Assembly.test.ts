@@ -48,6 +48,10 @@ const material = { ...retained, candidateSha256: candidate.candidateSha256, list
 let approval: unknown = approved, source: Uint8Array = wav, currentMaterial = material;
 let queries = 0, approvalReads = 0, privateReads = 0, durableReads = 0, leases = 0, revoked = false, revokeDuringPreparation = false;
 let uploads = 0, afterEncode = () => {}, afterUpload = () => {};
+const streamedUploads: string[] = [], bufferedVideoUploads: string[] = [];
+const streamedRepairDownloads: string[] = [];
+let failPreOverlayUpload = false;
+let failRepairDownload = false;
 let deliveredDurationOffset = 0;
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
@@ -82,8 +86,17 @@ loader._load = function (id, ...args) {
       assert.equal(key, candidate.listeningAudioKey, "no legacy/default music key fallback");
       assert.equal(bucket, "youtube-studio-ai-private"); privateReads++; return source;
     },
-    putObjectFromFile: async (_key: string, path: string) => { assert.ok((await readFile(path)).length); uploads++; afterUpload(); },
-    putObject: async () => { uploads++; },
+    getObjectToFile: async (key: string, path: string) => {
+      assert.ok(key.endsWith("/pre_overlay.mp4")); streamedRepairDownloads.push(key);
+      if (failRepairDownload) throw new Error("fixture repair download unavailable");
+      return encoded(path);
+    },
+    putObjectFromFile: async (key: string, path: string) => {
+      streamedUploads.push(key);
+      if (failPreOverlayUpload && key.endsWith("/pre_overlay.mp4")) throw new Error("fixture checkpoint storage unavailable");
+      assert.ok((await readFile(path)).length); uploads++; afterUpload();
+    },
+    putObject: async (key: string) => { if (key.endsWith(".mp4")) bufferedVideoUploads.push(key); uploads++; },
     publicUrl: (key: string) => `https://fixture.invalid/${key}`,
   };
   const actual = originalLoad.call(this, id, ...args);
@@ -115,6 +128,8 @@ loader._load = function (id, ...args) {
 const load = createRequire(__filename);
 function reset() { approval = approved; source = wav; currentMaterial = material; runOwner = candidate.ownerId;
   uploads = 0; afterEncode = () => {}; afterUpload = () => {};
+  streamedUploads.length = 0; bufferedVideoUploads.length = 0; failPreOverlayUpload = false;
+  streamedRepairDownloads.length = 0; failRepairDownload = false;
   deliveredDurationOffset = 0;
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
@@ -170,7 +185,12 @@ async function main() {
     assert.equal(privateReads, 1); assert.equal(approvalReads, 4); assert.equal(durableReads, 1); assert.equal(leases, 4);
     assert.ok(!("musicUrl" in result) && !("musicKey" in result));
     await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/, "private local source cleaned after render");
-    if (id === "timeline_assemble") assert.equal(renders[0].bodyMusicVol, 0.04, "composer intent reaches real narrated compositor");
+    if (id === "timeline_assemble") {
+      assert.equal(renders[0].bodyMusicVol, 0.04, "composer intent reaches real narrated compositor");
+      assert.deepEqual(bufferedVideoUploads, [], "a master-sized repair copy must never enter the buffered uploader");
+      assert.equal(streamedUploads.length, 1, "YuE2 prohibits repair reuse, so only the final master is uploaded");
+      assert.equal(result.preOverlayKey, ""); assert.equal(result.preOverlayLocalPath, "");
+    }
     if (nativeEncode && proofDirectory) {
       const inspection = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", String(result.videoLocalPath)], { encoding: "utf8" }));
       const video = inspection.streams.find((stream: { codec_type: string }) => stream.codec_type === "video");
@@ -202,6 +222,8 @@ async function main() {
         videoFrames: Number(video.nb_frames), width: video.width, height: video.height, durationSec: 10,
         audioSampleRateHz: Number(audio.sample_rate), masterSha256: hash(await readFile(String(result.videoLocalPath))),
         sourceToneAmplitude, narrationToneAmplitude, wrongSourceToneRejected: true,
+        masterStorageWrites: streamedUploads.length, bufferedVideoStorageWrites: bufferedVideoUploads.length,
+        repairCheckpointRetained: Boolean(result.preOverlayKey || result.preOverlayLocalPath),
         sourceAndApproval: "synthetic_fixture", providerAndDatabase: "mocked_transport", encoder: "actual_production_ffmpeg",
         productionApproved: false,
       }, null, 2) + "\n");
@@ -209,6 +231,30 @@ async function main() {
     }
   }
   nativeEncode = false;
+  const { createTimelineAssemblyBlock } = load("../narratedBlocks") as typeof import("../narratedBlocks");
+  for (const failed of [false, true]) {
+    reset(); failPreOverlayUpload = failed;
+    const legacyTimeline = await createTimelineAssemblyBlock(async () => narration).run({ ...ctx,
+      params: { tailSec: 0, burnCaptions: false, transitions: "hardcut" },
+    });
+    assert.deepEqual(streamedUploads.map(key => key.split("/").at(-1)), ["final.mp4", "pre_overlay.mp4"],
+      "legacy repair artifacts use the streaming/multipart path");
+    assert.deepEqual(bufferedVideoUploads, []);
+    assert.equal(Boolean(legacyTimeline.preOverlayKey), !failed);
+    assert.equal(Boolean(legacyTimeline.preOverlayLocalPath), !failed);
+    assert.ok(legacyTimeline.videoKey, "optional checkpoint failure preserves the completed master");
+  }
+  for (const failed of [false, true]) {
+    reset(); failRepairDownload = failed;
+    const repaired = await createTimelineAssemblyBlock(async () => narration).run({ ...ctx,
+      params: { tailSec: 0, burnCaptions: false, transitions: "hardcut" },
+      store: { ...ctx.store, healClasses: { timeline_assemble: ["overlay_finish"] } },
+    });
+    assert.equal(streamedRepairDownloads.length, 1, "repair reads the full video through the streamed downloader");
+    assert.equal(renders.length, failed ? 1 : 0, "only an unavailable repair checkpoint requires recomposition");
+    assert.equal(streamedUploads.length, 2); assert.deepEqual(bufferedVideoUploads, []);
+    assert.ok(repaired.videoKey); assert.ok(repaired.preOverlayKey);
+  }
   const loopManifest = getManifest("assemble", "3.0.0-yue2-reviewed-loop")!;
   for (const durationSec of [3600, 7200, 28800]) {
     reset();

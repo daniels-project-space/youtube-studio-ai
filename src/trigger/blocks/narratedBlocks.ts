@@ -224,7 +224,7 @@ import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, getObjectToFile } from "@/lib/storage";
 import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
@@ -3139,7 +3139,12 @@ export const quoteOverlaysBlock: Block = {
   },
 };
 
-export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) => Promise<string>, mixSampleRateHz?: 44100 | 48000, assertOutputAuthority?: () => Promise<void>): Block {
+export function createTimelineAssemblyBlock(
+  prepareMusic?: (ctx: StageContext) => Promise<string>,
+  mixSampleRateHz?: 44100 | 48000,
+  assertOutputAuthority?: () => Promise<void>,
+  options: { retainRepairCheckpoint?: boolean } = {},
+): Block {
   return {
   id: "timeline_assemble",
   consumes: [
@@ -3596,12 +3601,11 @@ export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) =
     } else if (healHints.length > 0) {
       ctx.log("timeline_assemble: heal payload carries no declared heal class — falling back to legacy hint matching");
     }
-    if (overlayClassHeal) {
+    if (overlayClassHeal && options.retainRepairCheckpoint !== false) {
       try {
         const preKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
-        const preBytes = await getObjectBytes(preKey);
         const prePath = join(tmp, "pre_overlay.mp4");
-        await writeBytes(prePath, preBytes);
+        await getObjectToFile(preKey, prePath);
         const preDur = (await probe(prePath)).durationSec || videoSec;
         ctx.log(`timeline_assemble: SURGICAL HEAL — re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
         // The pre-overlay video already contains the folded outro (it is the
@@ -3897,6 +3901,7 @@ export function createTimelineAssemblyBlock(prepareMusic?: (ctx: StageContext) =
       W, H, introSec, videoSec,
       outroApplied: Boolean(outroCardPath),
       assertOutputAuthority,
+      retainRepairCheckpoint: options.retainRepairCheckpoint,
     });
     return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
       ? finished
@@ -3919,7 +3924,7 @@ async function finishFromComposed(
   ctx: StageContext,
   composed: string,
   tmp: string,
-  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean; assertOutputAuthority?: () => Promise<void> },
+  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean; assertOutputAuthority?: () => Promise<void>; retainRepairCheckpoint?: boolean },
 ): Promise<Record<string, unknown>> {
   const { W, H, introSec, videoSec } = o;
   const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
@@ -4085,14 +4090,17 @@ async function finishFromComposed(
   // doesn't exist makes rehydrate (resume + the render-split child) report a
   // hard failure for the WHOLE block — re-rendering needlessly. preOverlay is
   // heal-only, so a blank just means "heal does a full rebuild" (safe).
-  let preOverlayKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
-  let preOverlayLocalPathOut = composed;
-  try {
-    await putObject(preOverlayKey, await readBytes(composed), { contentType: "video/mp4" });
-  } catch (e) {
-    ctx.log(`timeline_assemble: pre-overlay save failed (surgical heal unavailable): ${e instanceof Error ? e.message : e}`);
-    preOverlayKey = "";
-    preOverlayLocalPathOut = "";
+  let preOverlayKey = "";
+  let preOverlayLocalPathOut = "";
+  if (o.retainRepairCheckpoint !== false) {
+    const key = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
+    try {
+      await putObjectFromFile(key, composed, { contentType: "video/mp4" });
+      preOverlayKey = key;
+      preOverlayLocalPathOut = composed;
+    } catch (e) {
+      ctx.log(`timeline_assemble: pre-overlay save failed (surgical heal unavailable): ${e instanceof Error ? e.message : e}`);
+    }
   }
   await recordAsset(ctx, "video", videoKey, {
     durationSec: videoSec,

@@ -32,7 +32,8 @@ export function createYuE2AssemblyManifest(legacy: ModuleManifest): ModuleManife
       const delegate = legacy.id === "assemble"
         ? createLoopAssemblyBlock(async () => source.path, { mixSampleRateHz: 48000,
           assertOutputAuthority: source.assertCurrent, exactFinalDuration: true })
-        : createTimelineAssemblyBlock(async () => source.path, 48000, source.assertCurrent);
+        : createTimelineAssemblyBlock(async () => source.path, 48000, source.assertCurrent,
+          { retainRepairCheckpoint: false });
       const result = await delegate.run(ctx);
       // Storage writes are not atomic with the owner decision. Recheck before
       // returning artifacts so a mid-upload revocation cannot advance the run.
