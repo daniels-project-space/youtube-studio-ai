@@ -55,6 +55,7 @@ let failPreOverlayUpload = false;
 let failRepairDownload = false;
 let finalUploadFailures = 0;
 let afterFailedUpload = () => {};
+let failNormalization = false;
 let deliveredDurationOffset = 0;
 const renders: Record<string, unknown>[] = [], temporary = new Set<string>();
 let nativeEncode = false;
@@ -118,7 +119,10 @@ loader._load = function (id, ...args) {
     },
     measureLoopSeamDiff: async () => 0,
     assembleBeatBody: async (input: Parameters<typeof real.assembleBeatBody>[0]) => nativeEncode ? real.assembleBeatBody(input) : encoded(String(input.outPath)),
-    normalizeAudioOnly: async (...input: Parameters<typeof real.normalizeAudioOnly>) => nativeEncode ? real.normalizeAudioOnly(...input) : encoded(input[1]),
+    normalizeAudioOnly: async (...input: Parameters<typeof real.normalizeAudioOnly>) => {
+      if (failNormalization) throw new Error("fixture normalization failed");
+      return nativeEncode ? real.normalizeAudioOnly(...input) : encoded(input[1]);
+    },
     composeWithIntro: async (input: Parameters<typeof real.composeWithIntro>[0]) => {
       renders.push(input); temporary.add(dirname(input.outPath));
       const result = await (nativeEncode ? real.composeWithIntro(input) : encoded(input.outPath));
@@ -138,6 +142,7 @@ function reset() { approval = approved; source = wav; currentMaterial = material
   streamedUploads.length = 0; bufferedVideoUploads.length = 0; failPreOverlayUpload = false;
   streamedRepairDownloads.length = 0; failRepairDownload = false;
   finalUploadFailures = 0; afterFailedUpload = () => {};
+  failNormalization = false;
   deliveredDurationOffset = 0;
   queries = 0; approvalReads = 0; privateReads = 0; durableReads = 0; leases = 0; revoked = false; revokeDuringPreparation = false; renders.length = 0; }
 async function main() {
@@ -398,6 +403,25 @@ async function main() {
   assert.equal(queries, 0);
   setOnce(); revoked = true;
   await assert.rejects(onceManifest.execute(onceContext), /revoked/); assert.equal(privateReads, 0);
+  for (const playback of ["repeat", "once"] as const) {
+    if (playback === "once") setOnce(); else reset();
+    failNormalization = true;
+    const manifest = getManifest("timeline_assemble", playback === "once"
+      ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop")!;
+    await assert.rejects(manifest.execute(playback === "once" ? onceContext : { ...ctx, params: onceContext.params }),
+      error => {
+        assert.match(String(error), /required final audio normalization failed/);
+        assert.equal(classifyExecutionError(error).retryable, false, "normalization failure must not automatically rerender the stage");
+        assert.match(String((error as Error).cause), /fixture normalization failed/);
+        return true;
+      });
+    assert.equal(renders.length, 1, "normalization refusal must exercise the completed composition");
+    assert.equal(uploads, 0, "a required mix treatment cannot be silently skipped");
+    await assert.rejects(readFile(String(renders[0].musicPath)), /ENOENT/, "private source cleaned on normalization failure");
+  }
+  reset(); failNormalization = true;
+  const unnormalizedLegacy = await createTimelineAssemblyBlock(async () => narration).run({ ...ctx, params: onceContext.params });
+  assert.ok(unnormalizedLegacy.videoKey, "legacy best-effort normalization remains unchanged");
   reset();
   for (const params of [{ useAssemblyEdl: true }, { sourceCrossfadeSec: 4.5 }]) {
     await assert.rejects(getManifest("timeline_assemble", "3.0.0-yue2-reviewed-loop")!.execute({ ...ctx, params }));

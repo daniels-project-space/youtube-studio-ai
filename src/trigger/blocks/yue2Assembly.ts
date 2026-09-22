@@ -38,7 +38,7 @@ export function createYuE2AssemblyManifest(legacy: ModuleManifest, playback: "re
         ? createLoopAssemblyBlock(async () => source.path, { mixSampleRateHz: 48000,
           assertOutputAuthority: source.assertCurrent, exactFinalDuration: true })
         : createTimelineAssemblyBlock(async () => source.path, 48000, source.assertCurrent,
-          { retainRepairCheckpoint: false, musicPlayback: playback,
+          { retainRepairCheckpoint: false, musicPlayback: playback, requireAudioNormalization: true,
             ...(playback === "once" ? { musicSourceDurationSec: source.evidence.nativeFrames / 48000 } : {}) });
       const result = await delegate.run(ctx);
       // Storage writes are not atomic with the owner decision. Recheck before

@@ -3181,7 +3181,7 @@ export function createTimelineAssemblyBlock(
   prepareMusic?: (ctx: StageContext) => Promise<string>,
   mixSampleRateHz?: 44100 | 48000,
   assertOutputAuthority?: () => Promise<void>,
-  options: { retainRepairCheckpoint?: boolean; musicPlayback?: "repeat" | "once"; musicSourceDurationSec?: number } = {},
+  options: { retainRepairCheckpoint?: boolean; musicPlayback?: "repeat" | "once"; musicSourceDurationSec?: number; requireAudioNormalization?: boolean } = {},
 ): Block {
   return {
   id: "timeline_assemble",
@@ -3652,7 +3652,8 @@ export function createTimelineAssemblyBlock(
         ctx.log(`timeline_assemble: SURGICAL HEAL — re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
         // The pre-overlay video already contains the folded outro (it is the
         // compose output), so outroApplied mirrors the original build.
-        const finished = await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2, assertOutputAuthority });
+        const finished = await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2,
+          assertOutputAuthority, requireAudioNormalization: options.requireAudioNormalization });
         return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
           ? finished
           : { ...finished, onScreenTextCues: finalMasterFootageOnScreenTextCues });
@@ -3945,6 +3946,7 @@ export function createTimelineAssemblyBlock(
       outroApplied: Boolean(outroCardPath),
       assertOutputAuthority,
       retainRepairCheckpoint: options.retainRepairCheckpoint,
+      requireAudioNormalization: options.requireAudioNormalization,
     });
     return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
       ? finished
@@ -3967,7 +3969,7 @@ async function finishFromComposed(
   ctx: StageContext,
   composed: string,
   tmp: string,
-  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean; assertOutputAuthority?: () => Promise<void>; retainRepairCheckpoint?: boolean },
+  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean; assertOutputAuthority?: () => Promise<void>; retainRepairCheckpoint?: boolean; requireAudioNormalization?: boolean },
 ): Promise<Record<string, unknown>> {
   const { W, H, introSec, videoSec } = o;
   const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
@@ -4121,6 +4123,10 @@ async function finishFromComposed(
     finalVideo = norm;
     ctx.log(`timeline_assemble: final mix loudness-normalized to ${target} LUFS (audio-only pass)`);
   } catch (e) {
+    if (o.requireAudioNormalization) {
+      throw Object.assign(new ExecutionError("timeline_assemble: required final audio normalization failed; reconcile the completed composition before retrying",
+        { code: "FINAL_AUDIO_NORMALIZATION_FAILED", retryable: false }), { cause: e });
+    }
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
