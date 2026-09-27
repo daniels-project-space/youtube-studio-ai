@@ -46,13 +46,13 @@ function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promi
   return { calls, load, mode: modeExports.deliveryRecoveryMode as () => string };
 }
 
-test("exactly six individual crons or one shared cron are declared, never both", async () => {
+test("all recovery crons stay frozen while delivery modes remain isolated", async () => {
   for (const mode of [undefined, "individual", "shared"]) {
     const f = fixture(mode);
     const individual = Object.keys(handlers).map(file => f.load(file)[file] as Definition);
     const shared = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
-    assert.equal(individual.filter(task => task.cron === "* * * * *").length, mode === "shared" ? 0 : 6);
-    assert.equal(shared.cron, mode === "shared" ? "* * * * *" : undefined);
+    assert.equal(individual.filter(task => task.cron !== undefined).length, 0);
+    assert.equal(shared.cron, undefined);
     if (mode === "shared") {
       for (const task of individual) assert.deepEqual(await task.run(), { skipped: "shared-delivery-recovery" });
     } else {

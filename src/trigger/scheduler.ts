@@ -109,7 +109,7 @@ export const generationScheduler = schedules.task({
   // window without making the scheduler itself a spend path. The Convex claim
   // is idempotent per channel/run, so an extra tick only observes busy/not-due
   // state and never duplicates a video.
-  cron: "0 * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   // If the control-plane enqueue is briefly unavailable, replay the same
   // claimed run instead of waiting for the next hourly tick. Convex run
   // fences and Trigger idempotency keys prevent duplicate video work.

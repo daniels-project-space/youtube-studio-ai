@@ -250,7 +250,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
  */
 export const runArtifactRetentionSweeper = schedules.task({
   id: "run-artifact-retention-sweeper",
-  cron: "17 * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },

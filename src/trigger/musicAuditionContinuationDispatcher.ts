@@ -92,7 +92,7 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
 
 export const musicAuditionContinuationDispatcher = schedules.task({
   id: "music-audition-continuation-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120, retry: { maxAttempts: 1 },
   run: async (_payload, options) => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };

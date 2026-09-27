@@ -7,9 +7,11 @@ import { dispatchPendingReviewedDataStoryInitialRuns } from "./reviewedDataStory
 import { dispatchPendingRouteQualificationBenchmarks } from "./routeQualificationBenchmarkDispatcher";
 import { dispatchDueSerializedProgramEpisodeRetries } from "./serializedProgramEpisodeRetryDispatcher";
 
+// Keep malformed deployment mode fail-closed at import time while the cron is paused.
+deliveryRecoveryMode();
+
 export const sharedDeliveryRecovery = schedules.task({
   id: "shared-delivery-recovery",
-  ...(deliveryRecoveryMode() === "shared" ? { cron: "* * * * *" } : {}),
   // Inherit the project ceiling, as serialized recovery did before consolidation.
   // A shorter aggregate deadline could terminate still-valid delivery batches.
   retry: { maxAttempts: 1 },

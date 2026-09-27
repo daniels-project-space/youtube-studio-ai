@@ -52,7 +52,7 @@ export const refreshNicheResearchTask = task({
  */
 export const refreshNicheResearchSchedule = schedules.task({
   id: "refresh-niche-research-weekly",
-  cron: "0 6 * * 1", // Mondays 06:00 UTC
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 1800,
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);

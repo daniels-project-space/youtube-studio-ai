@@ -219,7 +219,7 @@ export async function sweepR2AssetRetention(input: {
 
 export const r2AssetRetentionSweeper = schedules.task({
   id: "r2-asset-retention-sweeper",
-  cron: "43 3 * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
