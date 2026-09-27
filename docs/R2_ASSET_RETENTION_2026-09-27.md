@@ -64,3 +64,31 @@ with a wrong ETag and still deleted it, so conditional delete is not used.
 An out-of-band writer with bucket write access could bypass the app's
 create-only atlas writer; credential scoping must exclude such writes before
 live deletion is enabled.
+
+## Binding audit, 27 September 2026, 19:07 UTC
+
+The saved read-only live inventory at
+`/root/render-rebuild-audit/r2-object-inventory-live-2026-09-27.jsonl`
+(file timestamp 16:27 UTC) contains 2,427 objects in `youtube-studio-ai`.
+The run namespace contains 60 fixed-name `final.mp4` objects (11.39 GB)
+and other fixed-name media; the bucket also contains model/runtime families
+such as `aiinfra` (104.38 GB), `models` (39.59 GB), and `wan-weights`
+(18.15 GB). A bucket-wide 30-day rule would therefore be unsafe. The
+read-only candidate report at 19:07 UTC identified 80 old unbound generated
+media objects (4.13 GB), seven unbound final videos (1.08 GB; none 180 days
+old), and 655 validation evidence objects. The 80 generated objects remain
+report-only because age and prefix alone do not prove ownership or absence
+of reusable references. The personal `travel-film-editor` bucket is separate
+and must remain untouched.
+
+A fresh read-only S3 `ListObjectsV2` and `GetBucketLifecycleConfiguration`
+attempt using the existing Studio checkout's local R2 credentials returned
+HTTP 401. It established neither the current object set nor the current
+lifecycle configuration. No lifecycle change or deletion was attempted.
+Before setting `YOUTUBE_STUDIO_R2_ACCOUNT_ID`, verify current lifecycle
+rules and key layout through an authenticated provider route; audit all
+credentials with write access to the exact bucket and revoke or constrain
+writers that can overwrite managed immutable keys; then exercise a dry run
+against current Convex release/reference state. Keep the production Trigger
+environment and queues paused while Studio is not ready. Binding alone does
+not run the task while those controls remain paused.
