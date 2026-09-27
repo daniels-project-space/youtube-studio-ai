@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  backfillReadyPlanBatchHandoff,
   claimPlanItem,
   claimPlanTopics,
   completePlanItem,
@@ -7,6 +8,7 @@ import {
   failPlanItem,
   failPlanTopics,
   finalizePlanBatch,
+  getPlanBatchRenderHandoff,
   listProvenReadyPlan,
   listProvenReadyPlanPage,
   markPlanItemProviderStarted,
@@ -45,6 +47,7 @@ import {
   planWeekPreparationManifestSha256,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
+import { assertPlanBatchHandoff, buildPlanBatchHandoff } from "@/lib/planBatchHandoffContract";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 
@@ -831,6 +834,73 @@ async function main() {
   const final = await invoke(finalizePlanBatch, ctx, { ownerId, channelId, batchId: admitted.batchId });
   assert.equal(final.status, "ready");
   assert.equal(final.actualCostUsd, finalizedRender.providerReceipt.costUsd);
+  const handoff = await invoke<NonNullable<Row["renderHandoff"]>>(getPlanBatchRenderHandoff, ctx, {
+    ownerId, batchId: admitted.batchId,
+  }) as ReturnType<typeof assertPlanBatchHandoff>;
+  assert.deepEqual(handoff.items.map((item) => item.itemId), [itemId]);
+  assert.equal(handoff.items[0].preparation.manifestKey, preparationPointer.manifestKey);
+  assert.equal(handoff.items[0].preparation.manifestSha256, preparationPointer.manifestSha256);
+  assert.deepEqual((await db.get(admitted.batchId))?.renderHandoff, handoff);
+  const frozenItem = (await db.get(itemId))!;
+  const firstHandoffSource = {
+    _id: itemId, ownerId, channelId, batchId: admitted.batchId,
+    itemKey: String(frozenItem.itemKey),
+    preparationState: String(frozenItem.preparationState),
+    preparationVersion: String(frozenItem.preparationVersion),
+    preparationManifestKey: String(frozenItem.preparationManifestKey),
+    preparationManifestSha256: String(frozenItem.preparationManifestSha256),
+    preparationFrozenAt: Number(frozenItem.preparationFrozenAt),
+  };
+  const secondItemId = "contentPlan:second-frozen-item";
+  const secondItem = {
+    ...firstHandoffSource,
+    _id: secondItemId,
+    itemKey: "second-frozen-key",
+    preparationManifestKey: planWeekPreparationKey({
+      ownerId, channelSlug: "test-channel", batchId: admitted.batchId, itemId: secondItemId,
+    }),
+  };
+  const ordered = buildPlanBatchHandoff({
+    ownerId, channelId, channelSlug: "test-channel", batchId: admitted.batchId,
+    requestKey: common.requestKey,
+    itemIds: [secondItemId, itemId],
+    items: [firstHandoffSource, secondItem],
+  });
+  assert.deepEqual(ordered.items.map((item) => item.itemId), [secondItemId, itemId]);
+  assert.throws(() => buildPlanBatchHandoff({
+    ownerId, channelId, channelSlug: "test-channel", batchId: admitted.batchId,
+    requestKey: common.requestKey, itemIds: [secondItemId, itemId],
+    items: [firstHandoffSource, { ...secondItem, preparationManifestSha256: "bad" }],
+  }), /manifest digest is invalid/);
+  assert.throws(() => buildPlanBatchHandoff({
+    ownerId, channelId, channelSlug: "test-channel", batchId: admitted.batchId,
+    requestKey: common.requestKey, itemIds: [secondItemId, itemId],
+    items: [firstHandoffSource, { ...secondItem, preparationManifestKey: "other/path" }],
+  }), /preparation path is invalid/);
+  await db.patch(itemId, { preparationManifestKey: "mutated/live-pointer" });
+  assert.deepEqual(await invoke(getPlanBatchRenderHandoff, ctx, { ownerId, batchId: admitted.batchId }), handoff,
+    "service reads the durable snapshot, not a mutable item projection");
+  await db.patch(itemId, { preparationManifestKey: preparationPointer.manifestKey });
+  assert.deepEqual(await invoke(finalizePlanBatch, ctx, { ownerId, channelId, batchId: admitted.batchId }), final,
+    "finalization replay must preserve the snapshot");
+  await assert.rejects(
+    invoke(getPlanBatchRenderHandoff, testContext(db, ownerId, "owner"), { ownerId, batchId: admitted.batchId }),
+    /bound studio service identity/,
+  );
+  await assert.rejects(
+    invoke(getPlanBatchRenderHandoff, testContext(db, "another-owner"), { ownerId, batchId: admitted.batchId }),
+    /Studio owner access denied/,
+  );
+  assert.throws(() => assertPlanBatchHandoff({
+    ...handoff,
+    items: [{ ...handoff.items[0], preparation: { ...handoff.items[0].preparation, manifestKey: "other/path" } }],
+  }), /digest is invalid/);
+  await db.patch(admitted.batchId, { renderHandoff: undefined });
+  assert.deepEqual(await invoke(backfillReadyPlanBatchHandoff, ctx, { ownerId, batchId: admitted.batchId }),
+    { state: "ready", reused: false });
+  assert.deepEqual(await invoke(backfillReadyPlanBatchHandoff, ctx, { ownerId, batchId: admitted.batchId }),
+    { state: "ready", reused: true });
+  assert.deepEqual((await db.get(admitted.batchId))?.renderHandoff, handoff);
   for (let index = 0; index < 30; index++) {
     db.seed("contentPlan", {
       ownerId,
@@ -859,6 +929,9 @@ async function main() {
       createdAt: Date.now() + index,
     }, `planBatches:invalid-ready-${index}`);
   }
+  assert.deepEqual(await invoke(backfillReadyPlanBatchHandoff, ctx, {
+    ownerId, batchId: "planBatches:invalid-ready-0",
+  }), { state: "unsupported_legacy" });
   const proven = await invoke<Row[]>(listProvenReadyPlan, ctx, { ownerId, channelId });
   assert.deepEqual(proven.map((row) => row._id), [itemId],
     "more than 24 newer invalid batches cannot crowd out an older proven row");

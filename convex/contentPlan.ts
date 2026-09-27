@@ -65,6 +65,11 @@ import {
   type RunExecutionLeaseSnapshot,
 } from "../src/lib/runLease";
 import { paginationOptsValidator } from "convex/server";
+import { requireStudioServiceIdentity } from "./studioFunctions";
+import {
+  assertPlanBatchHandoff,
+  buildPlanBatchHandoff,
+} from "../src/lib/planBatchHandoffContract";
 import {
   CHANNEL_PLAN_LIMIT,
   OWNER_PLAN_LIMIT,
@@ -1921,8 +1926,24 @@ export const finalizePlanBatch = mutation({
             : Boolean(item.usageCheckpointKey));
       });
     if (allReady && batch.accountingComplete && !batch.budgetExceeded) {
+      const renderHandoff = batch.contractVersion === PLAN_WEEK_CONTRACT_VERSION
+        ? buildPlanBatchHandoff({
+            ownerId: args.ownerId,
+            channelId: String(args.channelId),
+            channelSlug: batch.channelSlug,
+            batchId: String(args.batchId),
+            requestKey: batch.requestKey,
+            itemIds: expectedItemIds.map(String),
+            items: items.map((item) => ({ ...item, _id: String(item._id), channelId: String(item.channelId), batchId: String(item.batchId) })),
+          })
+        : undefined;
+      if (batch.renderHandoff && (!renderHandoff ||
+          assertPlanBatchHandoff(batch.renderHandoff).sha256 !== renderHandoff.sha256)) {
+        throw new Error("plan batch handoff replay mismatch");
+      }
       await ctx.db.patch(args.batchId, {
         status: "ready",
+        ...(renderHandoff && !batch.renderHandoff ? { renderHandoff } : {}),
         retryable: false,
         error: undefined,
         updatedAt: now,
@@ -1952,6 +1973,67 @@ export const finalizePlanBatch = mutation({
       return { status: "failed" as const, retryable, error: cleanError(error), actualCostUsd: batch.actualCostUsd };
     }
     return { status: "running" as const, planned: items.length, actualCostUsd: batch.actualCostUsd };
+  },
+});
+
+/** No provider work: fills only an eligible, already-ready current batch. */
+export const backfillReadyPlanBatchHandoff = mutation({
+  args: {
+    ownerId: v.string(),
+    batchId: v.id("planBatches"),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "plan batch handoff backfill");
+    const batch = await ctx.db.get(args.batchId);
+    if (!batch || batch.ownerId !== args.ownerId) throw new Error("plan batch ownership mismatch");
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) return { state: "unsupported_legacy" as const };
+    if (batch.renderHandoff) {
+      assertPlanBatchHandoff(batch.renderHandoff);
+      return { state: "ready" as const, reused: true };
+    }
+    if (batch.status !== "ready" || batch.topicState !== "complete" ||
+        !batch.accountingComplete || batch.budgetExceeded) {
+      return { state: "ineligible" as const };
+    }
+    const items = await ctx.db.query("contentPlan")
+      .withIndex("by_batch", (q) => q.eq("batchId", args.batchId)).collect();
+    if (items.some((item) => item.status !== "ready")) return { state: "ineligible" as const };
+    let renderHandoff;
+    try {
+      renderHandoff = buildPlanBatchHandoff({
+        ownerId: args.ownerId,
+        channelId: String(batch.channelId),
+        channelSlug: batch.channelSlug,
+        batchId: String(args.batchId),
+        requestKey: batch.requestKey,
+        itemIds: (batch.itemIds ?? []).map(String),
+        items: items.map((item) => ({ ...item, _id: String(item._id), channelId: String(item.channelId), batchId: String(item.batchId) })),
+      });
+    } catch {
+      // Old ready rows can lack a trustworthy frozen packet. Never synthesize one.
+      return { state: "ineligible" as const };
+    }
+    await ctx.db.patch(args.batchId, { renderHandoff });
+    return { state: "ready" as const, reused: false };
+  },
+});
+
+/** Owner-bound service handoff for the future Render Engine. */
+export const getPlanBatchRenderHandoff = query({
+  args: { ownerId: v.string(), batchId: v.id("planBatches") },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "plan batch render handoff");
+    const batch = await ctx.db.get(args.batchId);
+    if (!batch || batch.ownerId !== args.ownerId) throw new Error("plan batch ownership mismatch");
+    if (batch.status !== "ready" || !batch.renderHandoff) return null;
+    const handoff = assertPlanBatchHandoff(batch.renderHandoff);
+    if (handoff.batchId !== String(batch._id) || handoff.ownerId !== batch.ownerId ||
+        handoff.channelId !== String(batch.channelId) || handoff.channelSlug !== batch.channelSlug ||
+        handoff.requestKey !== batch.requestKey ||
+        handoff.items.map((item) => item.itemId).join("\0") !== (batch.itemIds ?? []).map(String).join("\0")) {
+      throw new Error("plan batch render handoff binding mismatch");
+    }
+    return handoff;
   },
 });
 
