@@ -157,7 +157,7 @@ export async function reoptimize(
 
 export const seoReoptimizeSchedule = schedules.task({
   id: "seo-reoptimize",
-  cron: studioScheduleCron("0 9 * * 1"), // weekly, Monday 09:00 — after the weekend's metrics settle
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

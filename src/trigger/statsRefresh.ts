@@ -870,7 +870,7 @@ export const statsRefreshTask = task({
 
 export const statsRefreshSchedule = schedules.task({
   id: "stats-refresh-6h",
-  cron: studioScheduleCron("0 */6 * * *"),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 1800,
   retry: { maxAttempts: 1 },
   run: async () => {

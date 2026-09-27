@@ -335,6 +335,7 @@ export async function dispatchPendingThumbnailRefreshCandidates(input?: {
 
 export const thumbnailRefreshDispatcher = schedules.task({
   id: "thumbnail-refresh-dispatcher",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   run: async () => dispatchPendingThumbnailRefreshCandidates(),
 });

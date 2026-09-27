@@ -52,12 +52,12 @@ function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promi
   return { calls, load, mode: modeExports.deliveryRecoveryMode as () => string };
 }
 
-test("shared recovery is armed by active work without an idle cron", async () => {
+test("all recovery crons stay frozen while active work remains armable", async () => {
   for (const mode of [undefined, "individual", "shared"]) {
     const f = fixture(mode);
     const individual = Object.keys(handlers).slice(0, 6).map(file => f.load(file)[file] as Definition);
     const shared = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
-    assert.equal(individual.filter(task => task.cron === "* * * * *").length, mode === "individual" ? 6 : 0);
+    assert.equal(individual.filter(task => task.cron !== undefined).length, 0);
     assert.equal(shared.cron, undefined);
     if (mode !== "individual") {
       for (const task of individual) assert.deepEqual(await task.run(), { skipped: "shared-delivery-recovery" });

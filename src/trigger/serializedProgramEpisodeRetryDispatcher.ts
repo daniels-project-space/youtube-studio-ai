@@ -101,7 +101,7 @@ export const serializedProgramEpisodeRetryDispatcher = schedules.task({
   id: "serialized-program-episode-retry-dispatcher",
   // A durable outbox retry must recover well before the queued-run lease can
   // expire. This performs only one indexed Convex read when no receipt exists.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   run: async (_payload, options) => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
     return dispatchDueSerializedProgramEpisodeRetries({

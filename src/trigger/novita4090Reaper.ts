@@ -206,6 +206,15 @@ export const novita4090Reaper = task({
   id: "novita-4090-reaper",
   // The create boundary arms the first delayed run. Subsequent runs are
   // scheduled only while durable leases or managed provider workers exist.
+  // Cost note (2026-08-17): every tick did an unconditional Convex query PLUS
+  // a live Novita listManagedInstances() provider call, even when idle. A
+  // cheap "skip the provider call if Convex has 0 candidates" pre-check was
+  // considered and rejected: the provider listing below also drives the
+  // ORPHAN sweep (an instance with NO Convex lease record at all, e.g. a
+  // Trigger process that died before persisting anything -- see file header
+  // comment). Convex has no signal for that case by definition, so gating on
+  // "candidates.length === 0" would silently disable the orphan safety net.
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 1_800,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000, factor: 2 },
   // A provider delete can take several polls. Serializing this task prevents

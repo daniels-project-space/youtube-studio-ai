@@ -104,7 +104,7 @@ function deletionArgs(row: Row, observedAt: number) {
       publishedAt: new Date(uploadedAt + 86_400_000).toISOString() } };
 }
 
-test("private→public transition waits actual release plus fourteen days and rechecks before deletion", async () => {
+test("private→public transition waits actual release plus thirty days and rechecks before deletion", async () => {
   const f = fixture();
   const row = await f.invoke(schedule, f.scheduleArgs);
   assert.equal(row.status, "awaiting_release");

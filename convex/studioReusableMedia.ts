@@ -15,6 +15,7 @@ import {
 } from "../src/engine/studioReusableMedia";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { ensureEpisodeAssetFolderAssignment } from "./studioEpisodeAssetFolders";
+import { assertR2KeyMayBePromoted } from "./r2ExpirationFence";
 
 type MediaRow = {
   readonly fingerprint: string;
@@ -143,6 +144,7 @@ export const recordEntry = mutation({
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "Studio reusable media promotion");
     const entry = assertStudioReusableMediaEntry(args.entry);
+    await assertR2KeyMayBePromoted(ctx, args.ownerId, entry.resource.r2Key);
     if (entry.ownerId !== args.ownerId) {
       throw new Error("studioReusableMedia: entry owner mismatch");
     }
