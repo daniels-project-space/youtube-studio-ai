@@ -45,8 +45,9 @@ assert.match(
 );
 assert.match(
   sweeper,
-  /parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?assets\.pruneRun[\s\S]*?runArtifactRetentions\.complete/,
-  "the worker must reload release certificates, verify/prune R2, prune asset rows, and only then complete the ledger",
+  /parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?await authorizeNextBatch\(\)[\s\S]*?runArtifactRetentions\.complete/,
+  "the worker must reload certificates, verify evidence, reauthorize release, and only then seal the ledger",
 );
+assert.doesNotMatch(sweeper, /deleteObjects|assets\.pruneRun/, "the hourly worker cannot delete mutable R2 keys or prune live asset rows");
 
 console.log("run artifact retention wiring tests passed");

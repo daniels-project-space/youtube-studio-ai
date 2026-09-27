@@ -5,8 +5,12 @@ confirmed public YouTube release plus 30 days, and final video masters after
 release plus 180 days. R2 `LastModified`, terminal run state, a completed
 release cleanup ledger, exact certificate binding, and an unlocked channel are
 also required. Reusable library revisions, thumbnails, release evidence, and
-explicit keep names are protected. The older release-aware sweeper now waits
-30 days after confirmed publication and protects reusable library keys.
+explicit keep names are protected. The older release-aware hourly worker now
+waits 30 days after confirmed publication, verifies the sealed release evidence,
+and records completion without deleting R2 objects or asset metadata. The daily
+worker uses that completed ledger as its release gate.
+The legacy operator-triggered footage prune task is inventory-only even when
+enabled; it cannot bypass the new deletion gates.
 
 **Automatic deletion is currently limited to run-scoped
 `novita/atlas-crops/...png`.** Its only application writer uses create-only PUT,

@@ -18,7 +18,6 @@ import { getAccessToken } from "@/lib/youtube";
 import { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 export { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 import {
-  deleteObjects,
   getObjectBytes,
   getObjectIntegrity,
   listObjects,
@@ -209,20 +208,14 @@ export async function sweepDueRunArtifactRetentions(input?: {
         getObjectBytes,
         getObjectIntegrity,
         listObjects,
-        deleteObjects: async (keys) => {
-          // Even an empty R2 list must not permit stale asset-row pruning.
-          if (!keys.length) await authorizeNextBatch();
-          return deleteObjects(keys, undefined, { beforeBatch: authorizeNextBatch });
-        },
       });
       removedObjects += pruning.removedObjects;
       if (!pruning.cleaned) {
         throw new Error(`${pruning.removedObjects} deletion(s) confirmed; ${pruning.error ?? "release evidence could not be revalidated"}`);
       }
-      await convex.mutation(api.assets.pruneRun, {
-        runId: retention.runId,
-        keepKinds: ["video", "thumbnail", "derived_short"],
-      });
+      // Evidence verification and live release authority seal this ledger.
+      // No key-only R2 deletion or asset-row pruning occurs on the hourly path.
+      await authorizeNextBatch();
       await convex.mutation(api.runArtifactRetentions.complete, {
         ownerId,
         retentionId: retention._id,
@@ -233,7 +226,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
         retainedReleaseEvidence: pruning.retainedReleaseEvidence,
       });
       completed++;
-      log(`completed ${retention.runId}: removed ${pruning.removedObjects} intermediate object(s)`);
+      log(`sealed ${retention.runId}: retained ${pruning.retainedObjectCount} object(s) for guarded retention`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failed = await convex.mutation(api.runArtifactRetentions.fail, {
