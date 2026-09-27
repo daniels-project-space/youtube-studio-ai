@@ -54,6 +54,21 @@ export function assertYouTubeStudioR2Bucket(bucket: string | undefined): typeof 
 }
 
 export type ListedR2Object = { key: string; lastModified?: Date; etag?: string; size?: number };
+export type RetentionObjectHead = { lastModified?: Date; etag?: string; metadata: Record<string, string> };
+
+/** Exact read-only identity and writer proof required before an object can expire. */
+export function hasExactImmutableRetentionProof(
+  record: ListedR2Object,
+  head: RetentionObjectHead | null,
+  kind: "asset" | "final_video" | "footage",
+): boolean {
+  if (kind === "footage" || !head?.lastModified || !head.etag || !record.lastModified || !record.etag ||
+      head.lastModified.getTime() !== record.lastModified.getTime() || head.etag !== record.etag) return false;
+  return kind === "asset"
+    ? hasImmutableIntroCardProof(record.key, head.metadata) || hasImmutableAtlasCropProof(record.key, head.metadata)
+    : hasImmutableQuizFinalProof(record.key, head.metadata);
+}
+
 export type RunR2RetentionScope = {
   runId: string;
   channelId?: string;

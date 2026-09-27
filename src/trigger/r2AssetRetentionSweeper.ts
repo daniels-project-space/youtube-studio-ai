@@ -5,7 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
 import { ASSET_RETENTION_MS, assertYouTubeStudioR2Bucket,
-  hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
+  hasExactImmutableRetentionProof,
   selectExpiredRunObjects,
   YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope } from "@/lib/r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "@/lib/youtubeR2Account";
@@ -96,12 +96,8 @@ export async function sweepR2AssetRetention(input: {
   const expire = async (record: ListedR2Object, runId: string, channelId: string,
     videoId: string, kind: "asset" | "final_video" | "footage") => {
     if (kind === "footage") return false; // fixed-name writer has no delete-safe proof
-    const hasProof = (metadata: Record<string, string>) => kind === "asset"
-      ? hasImmutableIntroCardProof(record.key, metadata) || hasImmutableAtlasCropProof(record.key, metadata)
-      : hasImmutableQuizFinalProof(record.key, metadata);
     const head = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
-    if (!head || !head.lastModified || !head.etag || head.lastModified.getTime() !== record.lastModified?.getTime() ||
-        !record.etag || head.etag !== record.etag || !hasProof(head.metadata)) return false;
+    if (!hasExactImmutableRetentionProof(record, head, kind) || !head?.lastModified || !head.etag) return false;
     const intent = await convex.mutation(api.r2Retention.prepareExpiration, {
       ownerId, runId: runId as Id<"runs">, r2Key: record.key,
       kind, lastModifiedAt: head.lastModified.getTime(), etag: head.etag,
@@ -112,9 +108,7 @@ export async function sweepR2AssetRetention(input: {
         ownerId, expirationId: intent.id, ...(await observeRelease(runId, channelId, videoId)),
       });
       const current = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
-      if (!current || !current.lastModified || current.lastModified.getTime() !== head.lastModified.getTime() ||
-          !record.etag || !current.etag || current.etag !== record.etag ||
-          !hasProof(current.metadata)) {
+      if (!hasExactImmutableRetentionProof(record, current, kind)) {
         throw new Error("R2 object identity changed before deletion");
       }
       await deleteObjects([record.key], YOUTUBE_STUDIO_R2_BUCKET);
@@ -165,9 +159,22 @@ export async function sweepR2AssetRetention(input: {
         }
         const records = await listObjectRecords(prefix, YOUTUBE_STUDIO_R2_BUCKET);
         const selection = selectExpiredRunObjects({ scope, records, protectedKeys, evidenceKeys, finalVideoKeys, now });
+        if (input.dryRun) {
+          // Report only objects that pass the same fresh identity and immutable
+          // writer proof used by the live path; this branch performs HEAD reads
+          // only and never creates Convex expiration intents.
+          for (const [kind, group] of [["asset", selection.expiredAssets], ["final_video", selection.expiredFinals]] as const) {
+            for (const record of group) {
+              const head = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
+              if (!hasExactImmutableRetentionProof(record, head, kind)) continue;
+              if (kind === "asset") expiredAssets++;
+              else expiredFinals++;
+            }
+          }
+          continue;
+        }
         expiredAssets += selection.expiredAssets.length;
         expiredFinals += selection.expiredFinals.length;
-        if (input.dryRun) continue;
         for (const [kind, group] of [["asset", selection.expiredAssets], ["final_video", selection.expiredFinals]] as const) {
           for (const record of group) {
           if (deleted >= MAX_DELETIONS) break;
@@ -210,7 +217,9 @@ export async function sweepR2AssetRetention(input: {
         !state.finishedAt || state.finishedAt > now - ASSET_RETENTION_MS ||
         state.retentionStatus !== "completed" || !state.releaseAt || !state.channelId || !state.releaseVideoId ||
         state.releaseAt > now - ASSET_RETENTION_MS || !state.retainUntil || state.retainUntil > now) continue;
-    expiredFootage++;
+    // This fixed-name family has no immutable proof and is never deletable.
+    // Keep it out of dry-run's projected delete counts; it remains inventory-only.
+    if (!input.dryRun) expiredFootage++;
     if (input.dryRun || deleted >= MAX_DELETIONS) continue;
     if (await expire(record, runId, state.channelId, state.releaseVideoId, "footage")) deleted++;
   }
