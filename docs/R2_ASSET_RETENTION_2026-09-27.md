@@ -12,28 +12,37 @@ worker uses that completed ledger as its release gate.
 The legacy operator-triggered footage prune task is inventory-only even when
 enabled; it cannot bypass the new deletion gates.
 
-**Automatic deletion is currently limited to run-scoped
-`novita/atlas-crops/...png`.** Its only application writer uses create-only PUT,
-source-derived unique names, and provenance metadata. The shared storage APIs
-reject overwriteable writes to this exact family. The deletion mutation itself
-rejects every other kind and key, even if a caller misclassifies it. Fixed-name
-final masters, footage clips, and other intermediates are report-only because
-their writers allow replacement at the same R2 key. The user-requested 180-day
-final cleanup therefore remains unimplemented until final writers have a
-delete-safe immutable or reserved-key design.
+**Automatic deletion is limited to two future writer families:** run-scoped
+content-hashed intro-card MP4s at release plus 30 days, and quiz-year or
+quiz-short final MP4s named with their content SHA-256 at release plus 180
+days. Each writer transactionally reserves the exact run key before its R2
+upload and closes the reservation only after re-reading and hashing the stored
+bytes. Quiz final files use create-only upload and matching digest metadata;
+renders over R2's single-PUT limit fail closed. Shared storage APIs reject
+overwriteable writes to either exact family. The deletion mutation itself
+rejects other keys and an `asset` kind applied to a final. Existing fixed-name
+final masters, footage clips, atlas crops without writer reservations, and
+other intermediates remain report-only. Broad 30-day asset and
+180-day final cleanup remains incomplete until those writers have a safe
+immutable or reserved-key design.
 
 The task requires the exact `youtube-studio-ai` bucket and an independently
 configured `YOUTUBE_STUDIO_R2_ACCOUNT_ID` matching `R2_ACCOUNT_ID`. An explicit
-`R2_ENDPOINT` must be the canonical endpoint for that account. No independent
-account binding has been found in the current app configuration; without it the
-task fails closed before listing or deleting. No bucket-wide lifecycle rule is
+`R2_ENDPOINT` must be the canonical endpoint for that account. The code also
+pins the SHA-256 of the account ID verified by a read-only Cloudflare Get Bucket
+request using the app vault's separate API token on 27 September 2026. The
+deployment binding is still absent from current app configuration, so the task
+fails closed before listing or deleting until that binding is supplied.
+No bucket-wide lifecycle rule is
 used because model/runtime weights and reusable assets share this bucket.
 
-For each deletion the worker verifies exact R2 identity and atlas metadata,
+For each deletion the worker verifies exact R2 identity and writer metadata,
 records a Convex intent, observes the exact public/processed YouTube video on
 its bound channel, transactionally rechecks release and reusable references,
+the completed writer reservation, and every asset row with that R2 key,
 then rechecks the R2 object before deletion. Pending intents prevent new
-library promotion and channel locking. An uncertain delete stays pending while
+library promotion, asset references, writer reservations, and channel locking.
+An uncertain delete stays pending while
 the object exists; it is never canceled or automatically retried. Confirmed
 absence permits the receipt and asset metadata to be finalized. A changed
 object needs manual reconciliation. The task deletes at most 100 objects per

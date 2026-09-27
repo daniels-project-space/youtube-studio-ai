@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { isManagedRetentionKey } from "../src/lib/r2AssetRetention";
 
 /**
  * Media artifact registry. Bytes live in R2; rows here index them by r2Key and
@@ -16,6 +17,27 @@ export const recordAsset = mutation({
   },
   returns: v.id("assets"),
   handler: async (ctx, args) => {
+    if (isManagedRetentionKey(args.r2Key)) {
+      if (!args.runId) throw new Error("managed R2 asset requires its exact run");
+      const [run, channel] = await Promise.all([ctx.db.get(args.runId), ctx.db.get(args.channelId)]);
+      if (!run || !channel || run.ownerId !== args.ownerId || run.channelId !== args.channelId ||
+          channel.ownerId !== args.ownerId ||
+          !args.r2Key.startsWith(`owner/${args.ownerId}/channel/${channel.slug}/runs/${args.runId}/`)) {
+        throw new Error("managed R2 asset owner, channel, or run is mismatched");
+      }
+      const [expiration, write, references] = await Promise.all([
+        ctx.db.query("r2AssetExpirations")
+          .withIndex("by_owner_key", (q) => q.eq("ownerId", args.ownerId).eq("r2Key", args.r2Key)).unique(),
+        ctx.db.query("r2ImmutableWrites")
+          .withIndex("by_owner_key", (q) => q.eq("ownerId", args.ownerId).eq("r2Key", args.r2Key)).unique(),
+        ctx.db.query("assets").withIndex("by_r2_key", (q) => q.eq("r2Key", args.r2Key)).collect(),
+      ]);
+      if (expiration || !write || write.status !== "finished" || write.runId !== args.runId ||
+          write.channelId !== args.channelId ||
+          references.some((row) => row.ownerId !== args.ownerId || row.channelId !== args.channelId || row.runId !== args.runId)) {
+        throw new Error("managed R2 asset is expired, unwritten, or referenced by another run");
+      }
+    }
     return await ctx.db.insert("assets", {
       ownerId: args.ownerId,
       channelId: args.channelId,

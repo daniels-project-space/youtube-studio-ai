@@ -203,12 +203,12 @@ assert.match(
 assert.match(
   retentionSweeper,
   /additionalCertificateKeys\.map[\s\S]*?parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence\([\s\S]*?getObjectIntegrity/,
-  "the deferred sweeper must reload derivative certificates and stream/hash durable Short bytes before deletion",
+  "the deferred sealer must reload derivative certificates and stream/hash durable Short bytes before ledger completion",
 );
-assert.match(
+assert.doesNotMatch(
   retentionSweeper,
-  /keepKinds: \["video", "thumbnail", "derived_short"\]/,
-  "deferred cleanup must retain the Short's Library asset row",
+  /assets\.pruneRun|deleteObjects/,
+  "hourly sealing must retain all Short asset rows and R2 objects",
 );
 assert.match(
   lofi,

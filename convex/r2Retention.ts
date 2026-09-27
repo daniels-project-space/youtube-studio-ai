@@ -4,12 +4,12 @@ import { v } from "convex/values";
 import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
 import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
 import { isChannelLocked } from "./channelLock";
-import { assertNoReusableReference } from "./r2ExpirationFence";
+import { assertManagedWriterAndReferences, assertNoReusableReference } from "./r2ExpirationFence";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { evaluateRunArtifactRelease, RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
   RUN_ARTIFACT_RETENTION_MS } from "../src/lib/runArtifactRetention";
 import type { Doc } from "./_generated/dataModel";
-import { isImmutableAtlasCropKey } from "../src/lib/r2AssetRetention";
+import { immutableIntroCardDigest, immutableQuizFinalDigest } from "../src/lib/r2AssetRetention";
 
 function assertCompletedRelease(row: Doc<"runArtifactRetentions"> | null, run: Doc<"runs">, now: number, age: number): void {
   if (!row || row.ownerId !== run.ownerId || row.channelId !== run.channelId || row.runId !== run._id ||
@@ -121,8 +121,9 @@ export const prepareExpiration = mutation({
     lastModifiedAt: v.number(), etag: v.string() },
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "R2 asset expiration preparation");
-    if (args.kind !== "asset" || !isImmutableAtlasCropKey(args.r2Key)) {
-      throw new Error("R2 expiration requires a proven create-only atlas crop writer; other media are report-only");
+    if (!(args.kind === "asset" && immutableIntroCardDigest(args.r2Key)) &&
+        !(args.kind === "final_video" && immutableQuizFinalDigest(args.r2Key))) {
+      throw new Error("R2 expiration requires a proven create-only asset or final writer; other media are report-only");
     }
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerId !== args.ownerId) throw new Error("R2 expiration run owner mismatch");
@@ -131,7 +132,7 @@ export const prepareExpiration = mutation({
       throw new Error("R2 expiration channel is missing or locked");
     }
     const now = Date.now();
-    const age = 30 * DAY_MS;
+    const age = (args.kind === "final_video" ? 180 : 30) * DAY_MS;
     const retention = await ctx.db.query("runArtifactRetentions")
       .withIndex("by_run", (q) => q.eq("runId", args.runId)).unique();
     assertCompletedRelease(retention, run, now, age);
@@ -143,6 +144,11 @@ export const prepareExpiration = mutation({
     const runPrefix = `owner/${args.ownerId}/channel/${channel.slug}/runs/${args.runId}/`;
     if (!args.r2Key.startsWith(runPrefix) || args.r2Key.length <= runPrefix.length) {
       throw new Error("R2 expiration key escapes its exact owned run namespace");
+    }
+    const assets = await assertManagedWriterAndReferences(ctx, args.ownerId, args.runId, run.channelId, args.r2Key);
+    if (args.kind === "final_video" &&
+        !assets.some((asset) => asset.kind === "video" || asset.kind === "derived_short")) {
+      throw new Error("immutable final has no exact bound video asset");
     }
     await assertNoReusableReference(ctx, args.ownerId, args.r2Key);
     const prior = await ctx.db.query("r2AssetExpirations")
@@ -199,6 +205,11 @@ export const authorizeExpirationDelete = mutation({
       throw new Error("R2 expiration video is not currently public and processed on its bound channel");
     }
     await assertNoReusableReference(ctx, args.ownerId, row.r2Key);
+    const assets = await assertManagedWriterAndReferences(ctx, args.ownerId, row.runId, row.channelId, row.r2Key);
+    if (row.kind === "final_video" &&
+        !assets.some((asset) => asset.kind === "video" || asset.kind === "derived_short")) {
+      throw new Error("immutable final video asset binding changed");
+    }
     return { authorizedAt: Date.now() };
   },
 });

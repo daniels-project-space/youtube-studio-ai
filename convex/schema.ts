@@ -1411,7 +1411,8 @@ export default defineSchema({
     // Library projections only need the retained video/thumbnail rows. Keep
     // intermediate keyframes, clips, music, and captions out of card reads.
     .index("by_run_kind", ["runId", "kind"])
-    .index("by_run", ["runId"]),
+    .index("by_run", ["runId"])
+    .index("by_r2_key", ["r2Key"]),
 
   // Release-aware deletion ledger for per-run media. A successful upload
   // schedules this row; it never deletes bytes itself. The Trigger sweeper
@@ -1483,6 +1484,20 @@ export default defineSchema({
     .index("by_owner_key", ["ownerId", "r2Key"])
     .index("by_channel_status", ["channelId", "status"])
     .index("by_owner_status", ["ownerId", "status"]),
+
+  // A managed-key writer reserves its exact key before sending any R2 PUT.
+  // Stalled writes remain fenced until manual reconciliation.
+  r2ImmutableWrites: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    r2Key: v.string(),
+    claimId: v.string(),
+    status: v.union(v.literal("active"), v.literal("finished")),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_owner_key", ["ownerId", "r2Key"]),
 
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource

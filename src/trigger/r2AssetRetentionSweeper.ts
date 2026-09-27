@@ -4,9 +4,11 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
-import { ASSET_RETENTION_MS, assertYouTubeStudioR2Account, assertYouTubeStudioR2Bucket,
-  hasImmutableAtlasCropProof, selectExpiredRunObjects,
+import { ASSET_RETENTION_MS, assertYouTubeStudioR2Bucket,
+  hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
+  selectExpiredRunObjects,
   YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope } from "@/lib/r2AssetRetention";
+import { assertYouTubeStudioR2Account } from "@/lib/youtubeR2Account";
 import { loadR2RetentionProtectedKeys } from "@/lib/r2RetentionProtectedKeys";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { deleteObjects, getObjectBytes, headObjectMetadata, listObjectRecords } from "@/lib/storage";
@@ -85,10 +87,13 @@ export async function sweepR2AssetRetention(input: {
 
   const expire = async (record: ListedR2Object, runId: string, channelId: string,
     videoId: string, kind: "asset" | "final_video" | "footage") => {
-    if (kind !== "asset") return false; // mutable writers have no delete-safe proof
+    if (kind === "footage") return false; // fixed-name writer has no delete-safe proof
+    const hasProof = (metadata: Record<string, string>) => kind === "asset"
+      ? hasImmutableIntroCardProof(record.key, metadata)
+      : hasImmutableQuizFinalProof(record.key, metadata);
     const head = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
     if (!head || !head.lastModified || !head.etag || head.lastModified.getTime() !== record.lastModified?.getTime() ||
-        !record.etag || head.etag !== record.etag || !hasImmutableAtlasCropProof(record.key, head.metadata)) return false;
+        !record.etag || head.etag !== record.etag || !hasProof(head.metadata)) return false;
     const intent = await convex.mutation(api.r2Retention.prepareExpiration, {
       ownerId, runId: runId as Id<"runs">, r2Key: record.key,
       kind, lastModifiedAt: head.lastModified.getTime(), etag: head.etag,
@@ -101,7 +106,7 @@ export async function sweepR2AssetRetention(input: {
       const current = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
       if (!current || !current.lastModified || current.lastModified.getTime() !== head.lastModified.getTime() ||
           !record.etag || !current.etag || current.etag !== record.etag ||
-          !hasImmutableAtlasCropProof(record.key, current.metadata)) {
+          !hasProof(current.metadata)) {
         throw new Error("R2 object identity changed before deletion");
       }
       await deleteObjects([record.key], YOUTUBE_STUDIO_R2_BUCKET);

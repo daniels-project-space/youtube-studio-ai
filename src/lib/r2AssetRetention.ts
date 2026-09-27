@@ -2,18 +2,6 @@ export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
-/** A separate deployment binding is required; a generic R2 account alone is not authority. */
-export function assertYouTubeStudioR2Account(input: {
-  accountId?: string; expectedAccountId?: string; endpoint?: string;
-}): void {
-  const { accountId, expectedAccountId, endpoint } = input;
-  if (!accountId || !expectedAccountId || !/^[a-f0-9]{32}$/iu.test(expectedAccountId) ||
-      accountId !== expectedAccountId ||
-      (endpoint && endpoint !== `https://${expectedAccountId}.r2.cloudflarestorage.com`)) {
-    throw new Error("R2 retention requires a separately pinned YouTube Studio Cloudflare account and endpoint");
-  }
-}
-
 /** This exact family has one create-only writer; all other run media remain report-only. */
 export function isImmutableAtlasCropKey(key: string): boolean {
   return /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/novita\/atlas-crops\/[^/]+\/c[0-9]{2}-[a-f0-9]{12}-[a-f0-9]{16}-[^/]+\.png$/u.test(key);
@@ -23,6 +11,32 @@ export function hasImmutableAtlasCropProof(key: string, metadata: Record<string,
   const normalized = Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k.toLowerCase(), v]));
   return isImmutableAtlasCropKey(key) && /^[a-f0-9]{64}$/u.test(normalized.cropsha256 ?? "") &&
     Boolean(normalized.atlasruntime && normalized.atlasplan);
+}
+
+/** Future quiz masters have a single create-only file writer and digest-bearing key. */
+export function immutableQuizFinalDigest(key: string): string | null {
+  const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/(quiz-year|quiz-short)\/\1-([a-f0-9]{64})\.mp4$/u.exec(key);
+  return match?.[2] ?? null;
+}
+
+export function hasImmutableQuizFinalProof(key: string, metadata: Record<string, string>): boolean {
+  const digest = immutableQuizFinalDigest(key);
+  const normalized = Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k.toLowerCase(), v]));
+  return digest !== null && normalized.retentionfinalsha256 === digest && normalized.retentionwriter === "quiz-final/v1";
+}
+
+export function immutableIntroCardDigest(key: string): string | null {
+  return /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/introcard-([a-f0-9]{64})\.mp4$/u.exec(key)?.[1] ?? null;
+}
+
+export function hasImmutableIntroCardProof(key: string, metadata: Record<string, string>): boolean {
+  const digest = immutableIntroCardDigest(key);
+  const normalized = Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k.toLowerCase(), v]));
+  return digest !== null && normalized.retentionintrosha256 === digest && normalized.retentionwriter === "intro-card/v1";
+}
+
+export function isManagedRetentionKey(key: string): boolean {
+  return immutableIntroCardDigest(key) !== null || immutableQuizFinalDigest(key) !== null;
 }
 
 export function assertYouTubeStudioR2Bucket(bucket: string | undefined): typeof YOUTUBE_STUDIO_R2_BUCKET {
@@ -96,7 +110,8 @@ export function selectExpiredRunObjects(args: {
       if (age! <= now - FINAL_VIDEO_RETENTION_MS && scope.releaseAt! <= now - FINAL_VIDEO_RETENTION_MS) {
         expiredFinals.push(record);
       } else skipped++;
-    } else if (age! <= now - ASSET_RETENTION_MS && isImmutableAtlasCropKey(record.key)) {
+    } else if (age! <= now - ASSET_RETENTION_MS &&
+        immutableIntroCardDigest(record.key)) {
       expiredAssets.push(record);
     } else skipped++;
   }

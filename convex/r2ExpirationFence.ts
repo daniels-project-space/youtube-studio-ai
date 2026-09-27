@@ -25,6 +25,23 @@ export async function assertNoReusableReference(ctx: FenceCtx, ownerId: string, 
   }
 }
 
+/** A managed R2 key must have one completed writer and no foreign asset pointer. */
+export async function assertManagedWriterAndReferences(
+  ctx: FenceCtx, ownerId: string, runId: Id<"runs">, channelId: Id<"channels">, r2Key: string,
+): Promise<Array<{ kind: string; r2Key: string }>> {
+  const [write, assets] = await Promise.all([
+    ctx.db.query("r2ImmutableWrites")
+      .withIndex("by_owner_key", (q) => q.eq("ownerId", ownerId).eq("r2Key", r2Key)).unique(),
+    ctx.db.query("assets").withIndex("by_r2_key", (q) => q.eq("r2Key", r2Key)).collect(),
+  ]);
+  if (!write || write.status !== "finished" || write.ownerId !== ownerId ||
+      write.runId !== runId || write.channelId !== channelId ||
+      assets.some((row) => row.ownerId !== ownerId || row.runId !== runId || row.channelId !== channelId)) {
+    throw new Error("R2 expiration lacks a completed unique writer or has another asset reference");
+  }
+  return assets;
+}
+
 /** Promotions after a deletion intent must copy bytes to a new unique key. */
 export async function assertR2KeyMayBePromoted(ctx: FenceCtx, ownerId: string, r2Key: string): Promise<void> {
   const keyOwner = /^owner\/([^/]+)\//u.exec(r2Key)?.[1];

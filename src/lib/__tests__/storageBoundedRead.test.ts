@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { test } from "node:test";
 import ts from "typescript";
 import type { getObjectBytes } from "../storage";
+import { isImmutableAtlasCropKey } from "../r2AssetRetention";
 
 const compiled = ts.transpileModule(readFileSync("src/lib/storage.ts", "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -34,6 +35,7 @@ function fixture(send: (call: number, signal?: AbortSignal) => Promise<Response>
   const requireFixture = (name: string) => {
     if (name === "@aws-sdk/client-s3") return { S3Client: Client, GetObjectCommand: Command };
     if (name === "@aws-sdk/s3-request-presigner") return {};
+    if (name === "@/lib/r2AssetRetention") return { isImmutableAtlasCropKey };
     if (name === "@/lib/vault") return { listByService: async (service: string) => {
       assert.equal(service, "cloudflare"); state.vaultCalls++;
       if (hooks.refresh) return await hooks.refresh();

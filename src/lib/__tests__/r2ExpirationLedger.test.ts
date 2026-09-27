@@ -7,8 +7,9 @@ const now = Date.now();
 const releaseAt = now - 200 * day;
 const runId = "run-fixture";
 const channelId = "channel-fixture";
-const key = `owner/alice/channel/show/runs/${runId}/novita/atlas-crops/shot-123/c01-${"a".repeat(12)}-${"b".repeat(16)}-r1c1.png`;
+const key = `owner/alice/channel/show/runs/${runId}/introcard-${"a".repeat(64)}.mp4`;
 const finalKey = `owner/alice/channel/show/runs/${runId}/final.mp4`;
+const immutableFinalKey = `owner/alice/channel/show/runs/${runId}/quiz-year/quiz-year-${"d".repeat(64)}.mp4`;
 const rows = new Map<string, Record<string, unknown>>([
   [runId, { _id: runId, ownerId: "alice", channelId, status: "ok", finishedAt: now - 200 * day,
     youtubeVideoId: "abcdefghijk", videoAssetId: "asset-fixture",
@@ -22,6 +23,8 @@ const rows = new Map<string, Record<string, unknown>>([
   ["connector-fixture", { _id: "connector-fixture", ownerId: "alice", channelId,
     status: "active", tokenVersion: 1, ytChannelId: "UC-fixture" }],
   ["asset-fixture", { _id: "asset-fixture", ownerId: "alice", channelId, runId, kind: "image", r2Key: key }],
+  ["write-fixture", { _id: "write-fixture", ownerId: "alice", channelId, runId,
+    r2Key: key, status: "finished", claimId: "claim-fixture" }],
 ]);
 const ctx = {
   auth: { getUserIdentity: async () => ({ role: "service", owner_id: "alice", subject: "service:youtube-studio-ai" }) },
@@ -38,12 +41,20 @@ const ctx = {
     delete: async (id: string) => { rows.delete(id); },
     query: (table: string) => ({
       take: async () => [],
-      withIndex: (_name: string, _fn: unknown) => ({
+      withIndex: (name: string, fn: (q: { eq: (field: string, value: unknown) => unknown }) => unknown) => {
+        let keyFilter: unknown;
+        const q = { eq(field: string, value: unknown) { if (field === "r2Key") keyFilter = value; return q; } };
+        fn(q);
+        return {
         unique: async () => table === "r2AssetExpirations" ? rows.get("expiration-fixture") ?? null
-          : table === "runArtifactRetentions" ? rows.get("retention-fixture") ?? null : null,
-        collect: async () => table === "assets" ? [...rows.values()].filter((row) => row._id === "asset-fixture") : [],
+          : table === "runArtifactRetentions" ? rows.get("retention-fixture") ?? null
+            : table === "r2ImmutableWrites" ? rows.get("write-fixture") ?? null : null,
+        collect: async () => table === "assets" ? [...rows.values()].filter((row) =>
+          (row._id === "asset-fixture" || row._id === "final-asset") &&
+          (name !== "by_r2_key" || row.r2Key === keyFilter)) : [],
         take: async () => [],
-      }),
+        };
+      },
     }),
   },
 };
@@ -82,6 +93,22 @@ async function main() {
   assert.equal(rows.has("asset-fixture"), false);
   assert.equal(rows.get(runId)?.videoAssetId, undefined);
   assert.equal((await confirm(ctx, { ownerId: "alice", expirationId: prepared.id }) as { status: string }).status, "expired");
+  rows.delete("expiration-fixture");
+  rows.set("final-asset", { _id: "final-asset", ownerId: "alice", channelId, runId,
+    kind: "video", r2Key: immutableFinalKey });
+  rows.get("write-fixture")!.r2Key = immutableFinalKey;
+  rows.get(runId)!.videoAssetId = "final-asset";
+  await assert.rejects(() => prepare(ctx, { ownerId: "alice", runId, r2Key: immutableFinalKey,
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"final-etag"' }), /proven create-only/);
+  await assert.rejects(() => prepare(ctx, { ownerId: "alice", runId, r2Key: immutableFinalKey,
+    kind: "final_video", lastModifiedAt: now - 31 * day, etag: '"final-etag"' }), /old enough/);
+  const finalPrepared = await prepare(ctx, { ownerId: "alice", runId, r2Key: immutableFinalKey,
+    kind: "final_video", lastModifiedAt: now - 181 * day, etag: '"final-etag"' });
+  assert.equal(finalPrepared.status, "pending");
+  const finalConfirmed = await confirm(ctx, { ownerId: "alice", expirationId: finalPrepared.id }) as { status: string };
+  assert.equal(finalConfirmed.status, "expired");
+  assert.equal(rows.has("final-asset"), false);
+  assert.equal(rows.get(runId)?.videoAssetId, undefined);
   console.log("R2 expiration ledger tests passed");
 }
 void main();

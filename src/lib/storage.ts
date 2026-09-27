@@ -27,7 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
+import { immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -134,6 +134,8 @@ export async function presignUpload(
   opts: PresignOptions = {},
 ): Promise<string> {
   if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use overwriteable presigned uploads");
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz finals cannot use overwriteable presigned uploads");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use overwriteable presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -218,6 +220,12 @@ export async function putObject(
       !opts.metadata.atlasRuntime || !opts.metadata.atlasPlan)) {
     throw new Error("immutable atlas crop requires create-only upload and provenance metadata");
   }
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz final requires its create-only file writer");
+  const introDigest = immutableIntroCardDigest(key);
+  if (introDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionIntroSha256 !== introDigest ||
+      opts.metadata?.retentionWriter !== "intro-card/v1")) {
+    throw new Error("immutable intro card requires create-only upload and matching digest metadata");
+  }
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -271,6 +279,12 @@ export async function putObjectFromFile(
   opts: PutOptions = {},
 ): Promise<string> {
   if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use file upload writer");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use file upload writer");
+  const finalDigest = immutableQuizFinalDigest(key);
+  if (finalDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionFinalSha256 !== finalDigest ||
+      opts.metadata?.retentionWriter !== "quiz-final/v1")) {
+    throw new Error("immutable quiz final requires create-only file upload and matching digest metadata");
+  }
   const { createReadStream } = await import("node:fs");
   const { stat } = await import("node:fs/promises");
   const file = await stat(filePath);
