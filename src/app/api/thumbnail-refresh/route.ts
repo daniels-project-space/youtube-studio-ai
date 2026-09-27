@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY,
-  ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID,
-  assertPinnedErnieThumbnailRefreshBatch,
-} from "@/lib/ernieThumbnailRefreshBatch";
 import { getStudioActor, StudioAuthError } from "@/lib/operatorSession";
-import { getObjectBytes, presignDownload } from "@/lib/storage";
+import { presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { listThumbnailRefreshInventory } from "@/lib/thumbnailRefreshRuntime";
 import { thumbnailRefreshRuntimeApi } from "@/lib/thumbnailRefreshRuntime";
@@ -95,32 +90,6 @@ export function candidatePreviewIds(value: string | null): string[] | null {
   return [...new Set(ids)];
 }
 
-async function reviewedErnieBatchPreview(input: {
-  ownerId: string;
-  inventory: Awaited<ReturnType<typeof listThumbnailRefreshInventory>>;
-}) {
-  if (input.ownerId !== ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID) return null;
-  const raw = await getObjectBytes(ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY, undefined, { timeoutMs: 30_000 });
-  const manifest = assertPinnedErnieThumbnailRefreshBatch(
-    JSON.parse(new TextDecoder().decode(raw)) as unknown,
-  );
-  const sourceRows = new Map(input.inventory.map((item) => [String(item.runId), item]));
-  return {
-    count: manifest.candidates.length,
-    candidates: await Promise.all(manifest.candidates.map(async (candidate) => {
-      const source = sourceRows.get(candidate.sourceRunId);
-      return {
-        sourceRunId: candidate.sourceRunId,
-        channelSlug: candidate.channelSlug,
-        channelName: source?.channelName ?? candidate.channelSlug,
-        title: source?.title ?? `Video ${candidate.youtubeVideoId}`,
-        youtubeVideoId: candidate.youtubeVideoId,
-        previewUrl: await thumbnailPreviewUrl(candidate.ernieSceneKey),
-      };
-    })),
-  };
-}
-
 /**
  * Browser-safe inventory of thumbnail provenance. The Convex record may carry
  * an internal R2 key; this projection intentionally reduces it to presence so
@@ -128,13 +97,19 @@ async function reviewedErnieBatchPreview(input: {
  */
 export async function GET(request: Request) {
   try {
+    const searchParams = new URL(request.url).searchParams;
+    if (searchParams.get("ernieBatch") === "reviewed") {
+      return NextResponse.json(
+        { ok: false, error: "The reviewed ERNIE trial batch has been retired" },
+        { status: 410, headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     const actor = await getStudioActor(request);
     const ownerId = actor?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
     const inventory = await listThumbnailRefreshInventory({
       client: convexClient(),
       ownerId,
     });
-    const searchParams = new URL(request.url).searchParams;
     const previewRunId = searchParams.get("previewRunId");
     const candidatePreviewRunId = searchParams.get("candidatePreviewRunId");
     const candidatePreviewRunIds = candidatePreviewIds(searchParams.get("candidatePreviewRunIds"));
@@ -177,16 +152,9 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
-    if (searchParams.get("ernieBatch") === "reviewed" && !actor) {
-      throw new StudioAuthError("authentication required");
-    }
-    const ernieBatch = searchParams.get("ernieBatch") === "reviewed"
-      ? await reviewedErnieBatchPreview({ ownerId, inventory })
-      : null;
     return NextResponse.json(
       {
         ok: true,
-        ...(ernieBatch ? { ernieBatch } : {}),
         inventory: inventory.map((item) => ({
           runId: item.runId,
           channelId: item.channelId,
