@@ -72,11 +72,12 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 const originalLog = console.log;
-const originalEnv = { url: process.env.NEXT_PUBLIC_CONVEX_URL, engagement: process.env.STUDIO_ENGAGEMENT_AUTOMATION, allow: process.env.STUDIO_AUTO_CHANNELS, owner: process.env.STUDIO_OWNER_ID };
+const originalEnv = { url: process.env.NEXT_PUBLIC_CONVEX_URL, engagement: process.env.STUDIO_ENGAGEMENT_AUTOMATION, allow: process.env.STUDIO_AUTO_CHANNELS, owner: process.env.STUDIO_OWNER_ID, recoveryMode: process.env.STUDIO_DELIVERY_RECOVERY_MODE };
 process.env.NEXT_PUBLIC_CONVEX_URL = "https://convex.invalid";
 process.env.STUDIO_ENGAGEMENT_AUTOMATION = "off";
 process.env.STUDIO_AUTO_CHANNELS = "";
 process.env.STUDIO_OWNER_ID = "owner-a";
+process.env.STUDIO_DELIVERY_RECOVERY_MODE = "individual";
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
 console.log = () => {};
 loader._load = function (id, ...args) {
@@ -218,7 +219,7 @@ async function main() {
 }
 void main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   loader._load = originalLoad; globalThis.fetch = originalFetch; console.log = originalLog;
-  for (const [key, value] of Object.entries({ NEXT_PUBLIC_CONVEX_URL: originalEnv.url, STUDIO_ENGAGEMENT_AUTOMATION: originalEnv.engagement, STUDIO_AUTO_CHANNELS: originalEnv.allow, STUDIO_OWNER_ID: originalEnv.owner })) {
+  for (const [key, value] of Object.entries({ NEXT_PUBLIC_CONVEX_URL: originalEnv.url, STUDIO_ENGAGEMENT_AUTOMATION: originalEnv.engagement, STUDIO_AUTO_CHANNELS: originalEnv.allow, STUDIO_OWNER_ID: originalEnv.owner, STUDIO_DELIVERY_RECOVERY_MODE: originalEnv.recoveryMode })) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
 });
