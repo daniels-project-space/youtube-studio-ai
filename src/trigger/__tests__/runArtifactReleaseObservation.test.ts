@@ -115,6 +115,7 @@ test("a confirmed release records the exact final copy; copy failure defers rele
   };
   const receipt = {
     sourceKey: `${keyPrefix}runs/run-copy/final.mp4`,
+    sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
     r2Key: releasedFinalVideoKey(keyPrefix, "run-copy", releaseAt, "a".repeat(64)),
     sha256: "a".repeat(64), byteLength: 42, releaseAt,
     expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS,

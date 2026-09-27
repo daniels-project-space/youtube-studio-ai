@@ -175,7 +175,7 @@ export const recordReleaseObservations = mutation({
       error: v.optional(v.string()),
       observation: releaseObservation,
       finalVideo: v.optional(v.object({
-        sourceKey: v.string(), r2Key: v.string(), sha256: v.string(),
+        sourceKey: v.string(), sourceEtag: v.string(), r2Key: v.string(), sha256: v.string(),
         byteLength: v.number(), releaseAt: v.number(), expiresAt: v.number(),
       })),
     })),
@@ -215,6 +215,7 @@ export const recordReleaseObservations = mutation({
             finalVideo.expiresAt !== decision.releaseAt + FINAL_VIDEO_RETENTION_MS ||
             !Number.isSafeInteger(finalVideo.byteLength) || finalVideo.byteLength < 1 ||
             !finalVideo.sourceKey.startsWith(`${row.keyPrefix}runs/${row.runId}/`) ||
+            !/^"?[a-f0-9]{32}(?:-[0-9]+)?"?$/iu.test(finalVideo.sourceEtag) ||
             finalVideo.sourceKey === finalVideo.r2Key ||
             finalVideo.r2Key !== releasedFinalVideoKey(row.keyPrefix, String(row.runId), decision.releaseAt, finalVideo.sha256)) {
           throw new Error("release observation requires an exact immutable final video copy receipt");

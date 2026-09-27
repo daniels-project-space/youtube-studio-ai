@@ -21,8 +21,23 @@ digest and the copied bytes, and records the release timestamp and its 180-day
 deadline in both R2 metadata and the Convex retention receipt. Library and run
 playback use the copied key; the original certificate source stays available
 for QA and thumbnail lineage. A failed copy defers release recording. A master
-larger than R2's single-PUT create-only limit also defers recording until a
-qualified multipart create-only writer exists.
+larger than R2's single-PUT limit uses conditional multipart completion with
+`If-None-Match: *`. The source HEAD ETag is required on its GET, then the full
+download SHA-256 and byte length are checked against the certificate before
+upload. The source ETag is stored in the copy metadata and Convex receipt.
+
+Cloudflare's [R2 release notes](https://developers.cloudflare.com/r2/platform/release-notes/)
+say conditional multipart publish is supported and a failed condition aborts
+the upload. The [R2 S3 compatibility table](https://developers.cloudflare.com/r2/api/s3/api/)
+lists `CompleteMultipartUpload` but does not enumerate that header; the
+installed AWS SDK sends `IfNoneMatch` on `CompleteMultipartUpload`. A bounded
+live probe on 2026-09-27 wrote two 6 MiB multipart attempts to one random
+`codex-probes/conditional-multipart/` key in the Studio bucket: the first
+completion succeeded, the second returned HTTP 412, and the original ETag and
+full SHA-256 were unchanged. The exact probe key was removed and HEAD returned
+404. No production media key was touched. The production writer uses the same
+conditional completion and verifies the resulting full bytes on R2 before
+recording a release receipt.
 
 The 180-day receipt is an expiry schedule, not deletion authority. The final
 copy has no enabled expiration path yet, and original certificate sources stay
@@ -39,8 +54,8 @@ lifecycle rules yet. Remaining gates:
 2. Remove or scope the four known account-wide R2 write tokens, audit unknown
    user tokens, and prove no writer can overwrite an expiry-managed key.
 3. Move ordinary generated asset writers to a 30-day class; finish final-video
-   reader/certificate reference migration and prove large-master create-only
-   uploads before enabling any 180-day final expiration.
+   reader/certificate reference migration and exercise a real large-master
+   release replay before enabling any 180-day final expiration.
 4. Audit promotions from every other library writer. Copy and verify bytes
    into a permanent key before rebinding an immutable library revision; keep
    historical revisions protected until their references are accounted for.

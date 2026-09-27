@@ -75,6 +75,7 @@ const finalSha256 = "a".repeat(64);
 const actualRelease = uploadedAt + 86_400_000;
 const finalVideo = {
   sourceKey: `${keyPrefix}runs/run-a/final.mp4`,
+  sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
   r2Key: releasedFinalVideoKey(keyPrefix, "run-a", actualRelease, finalSha256),
   sha256: finalSha256, byteLength: 1234,
   releaseAt: actualRelease, expiresAt: actualRelease + FINAL_VIDEO_RETENTION_MS,

@@ -318,9 +318,6 @@ export async function putObjectFromFile(
   if (!file.isFile() || !Number.isSafeInteger(size) || size < 0 || size > 5 * 1024 ** 4 - singlePutLimit) {
     throw new Error("R2 upload requires a regular file within the object-size limit");
   }
-  if (opts.ifNoneMatch && size > singlePutLimit) {
-    throw new Error("R2 multipart create-only writes are not qualified; refusing to weaken IfNoneMatch");
-  }
   const Bucket = getBucket(opts.bucket);
   const client = getR2Client();
   const body = createReadStream(filePath);
@@ -334,7 +331,7 @@ export async function putObjectFromFile(
     IfNoneMatch: opts.ifNoneMatch,
   };
   try {
-    if (size <= 64 * 1024 ** 2 || opts.ifNoneMatch) {
+    if (size <= 64 * 1024 ** 2) {
       await client.send(new PutObjectCommand(params));
     } else {
       const { Upload } = await import("@aws-sdk/lib-storage");
@@ -351,6 +348,9 @@ export async function putObjectFromFile(
           throw error;
         }
       }) as typeof client.send;
+      // lib-storage carries IfNoneMatch from params to CompleteMultipartUpload.
+      // R2 evaluates that condition when publishing the assembled object; a
+      // preceding HEAD cannot prevent a competing completion from winning.
       const upload = new Upload({
         client: uploadClient, params, queueSize: 2,
         partSize: Math.max(32 * 1024 ** 2, Math.ceil(size / 10_000)),
@@ -776,10 +776,12 @@ export async function getObjectToFile(
   key: string,
   filePath: string,
   bucket?: string,
+  expectedEtag?: string,
 ): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: getBucket(bucket),
     Key: key,
+    ...(expectedEtag ? { IfMatch: expectedEtag } : {}),
   });
   const [{ createWriteStream }, { pipeline }, { Transform }, { mkdtemp, rename, rm }, { dirname, join }] = await Promise.all([
     import("node:fs"),

@@ -9,6 +9,7 @@ import { getObjectBytes, getObjectIntegrity, getObjectToFile, headObjectMetadata
 
 export type ReleasedFinalVideoReceipt = {
   sourceKey: string;
+  sourceEtag: string;
   r2Key: string;
   sha256: string;
   byteLength: number;
@@ -27,8 +28,13 @@ export async function copyReleasedFinalVideo(input: {
       source.sha256 !== source.sha256.toLowerCase()) {
     throw new Error("release copy source must be the exact run-local certificate master with a byte receipt");
   }
+  const sourceHead = await headObjectMetadata(source.r2Key, YOUTUBE_STUDIO_R2_BUCKET);
+  if (!sourceHead?.etag || sourceHead.contentLength !== source.byteLength) {
+    throw new Error("release copy source has no matching ETag and byte length");
+  }
   const receipt: ReleasedFinalVideoReceipt = {
     sourceKey: source.r2Key,
+    sourceEtag: sourceHead.etag,
     r2Key: releasedFinalVideoKey(input.keyPrefix, input.runId, input.releaseAt, source.sha256),
     sha256: source.sha256,
     byteLength: source.byteLength,
@@ -42,6 +48,7 @@ export async function copyReleasedFinalVideo(input: {
     retentionReleaseAt: String(receipt.releaseAt),
     retentionExpiresAt: String(receipt.expiresAt),
     retentionSourceKey: receipt.sourceKey,
+    retentionSourceEtag: receipt.sourceEtag,
   };
   const verifyExisting = async () => {
     const head = await headObjectMetadata(receipt.r2Key, YOUTUBE_STUDIO_R2_BUCKET);
@@ -62,7 +69,7 @@ export async function copyReleasedFinalVideo(input: {
   const tempDir = await makeRunTempDir(`release-copy-${input.runId}`);
   try {
     const path = join(tempDir, "final.mp4");
-    await getObjectToFile(source.r2Key, path, YOUTUBE_STUDIO_R2_BUCKET);
+    await getObjectToFile(source.r2Key, path, YOUTUBE_STUDIO_R2_BUCKET, sourceHead.etag);
     const file = await stat(path);
     const hash = createHash("sha256");
     for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
