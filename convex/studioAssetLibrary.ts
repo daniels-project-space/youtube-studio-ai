@@ -10,6 +10,7 @@ import {
   type StudioAssetLibraryEntry,
 } from "../src/engine/studioAssetLibrary";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
+import { assertR2KeyMayBePromoted } from "./r2ExpirationFence";
 
 type AssetRow = {
   readonly _id: string;
@@ -44,6 +45,7 @@ export const recordEntry = mutation({
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "Studio Asset Library entry promotion");
     const entry = assertStudioAssetLibraryEntry(args.entry);
+    if (entry.resource) await assertR2KeyMayBePromoted(ctx, args.ownerId, entry.resource.r2Key);
     if (entry.channelId) {
       const channel = await ctx.db.get(entry.channelId as Id<"channels">);
       if (!channel || channel.ownerId !== args.ownerId) {

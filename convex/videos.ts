@@ -99,7 +99,7 @@ async function recordedMasterKey(
     .unique();
   // A pending intent hides playback until its R2 outcome is reconciled. A
   // failed cross-provider confirmation must not leave a broken signed link.
-  return expiration ? null : key;
+  return expiration && expiration.status !== "canceled" ? null : key;
 }
 
 type LibraryChannelIdentity = { family?: unknown; contentLane?: unknown } | null;

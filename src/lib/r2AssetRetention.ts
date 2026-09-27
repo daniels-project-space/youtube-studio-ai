@@ -1,11 +1,24 @@
 export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
+export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
+
+export function assertYouTubeStudioR2Bucket(bucket: string | undefined): typeof YOUTUBE_STUDIO_R2_BUCKET {
+  if (bucket !== YOUTUBE_STUDIO_R2_BUCKET) {
+    throw new Error("R2 retention requires the exact YouTube Studio bucket");
+  }
+  return YOUTUBE_STUDIO_R2_BUCKET;
+}
 
 export type ListedR2Object = { key: string; lastModified?: Date; etag?: string; size?: number };
 export type RunR2RetentionScope = {
   runId: string;
+  channelId?: string;
+  releaseVideoId?: string;
   keyPrefix: string;
   runStatus: string;
+  retentionStatus?: string;
+  releaseAt?: number;
+  retainUntil?: number;
   channelLocked?: boolean;
   finishedAt?: number;
   certificateKey: string;
@@ -28,6 +41,11 @@ export function selectExpiredRunObjects(args: {
   const prefix = `${scope.keyPrefix}runs/${scope.runId}/`;
   if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(scope.keyPrefix) ||
       !["ok", "failed", "canceled"].includes(scope.runStatus) ||
+      scope.retentionStatus !== "completed" ||
+      !Number.isSafeInteger(scope.releaseAt) ||
+      scope.releaseAt! > now - ASSET_RETENTION_MS ||
+      !Number.isSafeInteger(scope.retainUntil) ||
+      scope.retainUntil! > now ||
       scope.channelLocked ||
       !Number.isSafeInteger(scope.finishedAt) || scope.finishedAt! > now - ASSET_RETENTION_MS ||
       !Number.isSafeInteger(now) || now < 0) {
@@ -52,7 +70,7 @@ export function selectExpiredRunObjects(args: {
       continue;
     }
     if (args.finalVideoKeys.has(record.key)) {
-      if (age! <= now - FINAL_VIDEO_RETENTION_MS && scope.finishedAt! <= now - FINAL_VIDEO_RETENTION_MS) {
+      if (age! <= now - FINAL_VIDEO_RETENTION_MS && scope.releaseAt! <= now - FINAL_VIDEO_RETENTION_MS) {
         expiredFinals.push(record);
       } else skipped++;
     } else if (age! <= now - ASSET_RETENTION_MS) {

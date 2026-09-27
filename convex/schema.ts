@@ -1462,21 +1462,26 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_owner", ["ownerId"])
     .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"])
+    .index("by_channel_status", ["channelId", "status"])
     .index("by_owner_release_check", ["ownerId", "status", "nextReleaseCheckAt"]),
 
   // Cross-provider deletion fence. A pending row survives a worker crash;
   // confirmation removes exact asset pointers and hides expired masters.
   r2AssetExpirations: defineTable({
     ownerId: v.string(),
+    channelId: v.id("channels"),
     runId: v.id("runs"),
     r2Key: v.string(),
     kind: v.union(v.literal("asset"), v.literal("final_video"), v.literal("footage")),
-    status: v.union(v.literal("pending"), v.literal("expired")),
+    etag: v.string(),
+    status: v.union(v.literal("pending"), v.literal("expired"), v.literal("canceled")),
     lastModifiedAt: v.number(),
     preparedAt: v.number(),
     expiredAt: v.optional(v.number()),
   })
     .index("by_run_key", ["runId", "r2Key"])
+    .index("by_owner_key", ["ownerId", "r2Key"])
+    .index("by_channel_status", ["channelId", "status"])
     .index("by_owner_status", ["ownerId", "status"]),
 
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes

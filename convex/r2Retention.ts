@@ -4,7 +4,24 @@ import { v } from "convex/values";
 import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
 import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
 import { isChannelLocked } from "./channelLock";
+import { assertNoReusableReference } from "./r2ExpirationFence";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
+import { evaluateRunArtifactRelease, RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
+  RUN_ARTIFACT_RETENTION_MS } from "../src/lib/runArtifactRetention";
+import type { Doc } from "./_generated/dataModel";
+
+function assertCompletedRelease(row: Doc<"runArtifactRetentions"> | null, run: Doc<"runs">, now: number, age: number): void {
+  if (!row || row.ownerId !== run.ownerId || row.channelId !== run.channelId || row.runId !== run._id ||
+      !row.certificateKey || run.releaseEvidenceStatus !== "release_evidence_recorded" ||
+      run.releaseEvidenceCertificateKey !== row.certificateKey ||
+      row.status !== "completed" || !Number.isSafeInteger(row.releaseAt) ||
+      !Number.isSafeInteger(row.retainUntil) || row.retainUntil! > now ||
+      !row.releaseConfirmedAt || !row.completedAt || !row.releaseVideoId || !row.releaseYouTubeChannelId ||
+      run.youtubeVideoId !== row.releaseVideoId || row.releaseAt! > now - age ||
+      row.releaseAt! > now - RUN_ARTIFACT_RETENTION_MS) {
+    throw new Error("R2 expiration requires completed, exact-video release retention");
+  }
+}
 
 /** All revisions are protected: deprecation does not prove bytes are unused. */
 export const protectedKeysPage = query({
@@ -54,8 +71,10 @@ export const runScopesPage = query({
         throw new Error("R2 retention asset owner/channel mismatch");
       }
       return {
-        runId: String(row.runId), keyPrefix: row.keyPrefix,
+        runId: String(row.runId), channelId: String(row.channelId), releaseVideoId: row.releaseVideoId,
+        keyPrefix: row.keyPrefix,
         runStatus: run.status, finishedAt: run.finishedAt,
+        retentionStatus: row.status, releaseAt: row.releaseAt, retainUntil: row.retainUntil,
         channelLocked: isChannelLocked(channel),
         certificateKey: row.certificateKey,
         additionalCertificateKeys: row.additionalCertificateKeys,
@@ -79,16 +98,26 @@ export const footageRunScope = query({
     if (!run || run.ownerId !== args.ownerId) return null;
     const channel = await ctx.db.get(run.channelId);
     if (!channel || channel.ownerId !== args.ownerId || channel.slug !== args.channelSlug) return null;
-    return { status: run.status, finishedAt: run.finishedAt, channelLocked: isChannelLocked(channel) };
+    const retention = await ctx.db.query("runArtifactRetentions")
+      .withIndex("by_run", (q) => q.eq("runId", id)).unique();
+    return { status: run.status, finishedAt: run.finishedAt, channelLocked: isChannelLocked(channel),
+      retentionStatus: retention?.status, releaseAt: retention?.releaseAt, retainUntil: retention?.retainUntil,
+      channelId: String(run.channelId), releaseVideoId: retention?.releaseVideoId };
   },
 });
 
 const expirationKind = v.union(v.literal("asset"), v.literal("final_video"), v.literal("footage"));
+const releaseObservation = v.object({
+  videoId: v.string(), channelId: v.string(),
+  privacyStatus: v.optional(v.string()), uploadStatus: v.optional(v.string()),
+  publishedAt: v.optional(v.string()),
+});
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 /** Persist an intent before the cross-provider delete; a crash leaves a retryable row. */
 export const prepareExpiration = mutation({
-  args: { ownerId: v.string(), runId: v.id("runs"), r2Key: v.string(), kind: expirationKind, lastModifiedAt: v.number() },
+  args: { ownerId: v.string(), runId: v.id("runs"), r2Key: v.string(), kind: expirationKind,
+    lastModifiedAt: v.number(), etag: v.string() },
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "R2 asset expiration preparation");
     const run = await ctx.db.get(args.runId);
@@ -99,9 +128,12 @@ export const prepareExpiration = mutation({
     }
     const now = Date.now();
     const age = (args.kind === "final_video" ? 180 : 30) * DAY_MS;
+    const retention = await ctx.db.query("runArtifactRetentions")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId)).unique();
+    assertCompletedRelease(retention, run, now, age);
     if (!["ok", "failed", "canceled"].includes(run.status) ||
         !Number.isSafeInteger(run.finishedAt) || run.finishedAt! > now - age ||
-        !Number.isSafeInteger(args.lastModifiedAt) || args.lastModifiedAt > now - age) {
+        !Number.isSafeInteger(args.lastModifiedAt) || args.lastModifiedAt > now - age || !/^"[^"\r\n]+"$/u.test(args.etag)) {
       throw new Error("R2 expiration run or object is not old enough");
     }
     const runPrefix = `owner/${args.ownerId}/channel/${channel.slug}/runs/${args.runId}/`;
@@ -111,20 +143,73 @@ export const prepareExpiration = mutation({
       : !args.r2Key.startsWith(runPrefix) || args.r2Key.length <= runPrefix.length) {
       throw new Error("R2 expiration key escapes its exact owned run namespace");
     }
+    await assertNoReusableReference(ctx, args.ownerId, args.r2Key);
     const prior = await ctx.db.query("r2AssetExpirations")
       .withIndex("by_run_key", (q) => q.eq("runId", args.runId).eq("r2Key", args.r2Key))
       .unique();
     if (prior) {
-      if (prior.ownerId !== args.ownerId || prior.kind !== args.kind || prior.lastModifiedAt !== args.lastModifiedAt) {
+      if (prior.ownerId !== args.ownerId || prior.channelId !== run.channelId ||
+          prior.kind !== args.kind || prior.lastModifiedAt !== args.lastModifiedAt || prior.etag !== args.etag) {
         throw new Error("R2 expiration replay conflicts with its immutable intent");
       }
-      return { id: prior._id, status: prior.status };
+      if (prior.status === "canceled") await ctx.db.patch(prior._id, { status: "pending", preparedAt: now });
+      return { id: prior._id, status: prior.status === "canceled" ? "pending" as const : prior.status };
     }
     const id = await ctx.db.insert("r2AssetExpirations", {
-      ownerId: args.ownerId, runId: args.runId, r2Key: args.r2Key, kind: args.kind,
+      ownerId: args.ownerId, channelId: run.channelId, runId: args.runId, r2Key: args.r2Key, kind: args.kind,
+      etag: args.etag,
       status: "pending", lastModifiedAt: args.lastModifiedAt, preparedAt: now,
     });
     return { id, status: "pending" as const };
+  },
+});
+
+/** Last transactional check immediately before the R2 request. */
+export const authorizeExpirationDelete = mutation({
+  args: { ownerId: v.string(), expirationId: v.id("r2AssetExpirations"),
+    connectorId: v.id("youtubeAuth"), connectorVersion: v.number(),
+    observedAt: v.number(), observation: releaseObservation },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "R2 expiration deletion authority");
+    const row = await ctx.db.get(args.expirationId);
+    if (!row || row.ownerId !== args.ownerId || row.status !== "pending") throw new Error("R2 expiration intent is not pending");
+    const [run, channel, connector] = await Promise.all([
+      ctx.db.get(row.runId), ctx.db.get(row.channelId), ctx.db.get(args.connectorId),
+    ]);
+    if (!run || !channel || run.ownerId !== args.ownerId || run.channelId !== row.channelId ||
+        channel.ownerId !== args.ownerId || isChannelLocked(channel)) throw new Error("R2 expiration scope is locked or changed");
+    const retention = await ctx.db.query("runArtifactRetentions")
+      .withIndex("by_run", (q) => q.eq("runId", row.runId)).unique();
+    assertCompletedRelease(retention, run, Date.now(), (row.kind === "final_video" ? 180 : 30) * DAY_MS);
+    const now = Date.now();
+    if (!connector || connector.ownerId !== args.ownerId || connector.channelId !== row.channelId ||
+        (connector.status ?? "active") !== "active" ||
+        (connector.tokenVersion ?? 1) !== args.connectorVersion ||
+        !Number.isSafeInteger(args.observedAt) || args.observedAt > now ||
+        now - args.observedAt >= RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS) {
+      throw new Error("R2 expiration has no fresh bound YouTube connector observation");
+    }
+    const decision = evaluateRunArtifactRelease({
+      expectedVideoId: retention!.releaseVideoId!, expectedChannelId: connector.ytChannelId ?? "",
+      observedAt: args.observedAt, observation: args.observation,
+    });
+    if (!decision.released || decision.releaseAt !== retention!.releaseAt ||
+        args.observation.channelId !== retention!.releaseYouTubeChannelId) {
+      throw new Error("R2 expiration video is not currently public and processed on its bound channel");
+    }
+    await assertNoReusableReference(ctx, args.ownerId, row.r2Key);
+    return { authorizedAt: Date.now() };
+  },
+});
+
+export const cancelExpiration = mutation({
+  args: { ownerId: v.string(), expirationId: v.id("r2AssetExpirations") },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "R2 expiration cancellation");
+    const row = await ctx.db.get(args.expirationId);
+    if (!row || row.ownerId !== args.ownerId) throw new Error("R2 expiration receipt owner mismatch");
+    if (row.status === "pending") await ctx.db.patch(row._id, { status: "canceled" });
+    return await ctx.db.get(row._id);
   },
 });
 
@@ -159,6 +244,7 @@ export const pendingExpirationsPage = query({
     const page = await ctx.db.query("r2AssetExpirations")
       .withIndex("by_owner_status", (q) => q.eq("ownerId", args.ownerId).eq("status", "pending"))
       .paginate(args.paginationOpts);
-    return { ...page, page: page.page.map((row) => ({ id: row._id, r2Key: row.r2Key })) };
+    return { ...page, page: page.page.map((row) => ({ id: row._id, r2Key: row.r2Key,
+      etag: row.etag, lastModifiedAt: row.lastModifiedAt, preparedAt: row.preparedAt })) };
   },
 });
