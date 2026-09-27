@@ -34,14 +34,8 @@ export const dispatchPublishIntentTask = task({
   },
 });
 
-export const publishIntentScheduler = schedules.task({
-  id: "publish-intent-scheduler",
-  // Keep delivery automatic for every completed run. The autopilot gate below
-  // still fail-closes the scheduler, while channel policy remains the final
-  // authority for public/scheduled release. Private-first intents are safe to
-  // dispatch automatically as soon as their pipeline has passed QA.
-  cron: "*/5 * * * *",
-  run: async () => {
+/** Recovery sweep for intents whose direct or delayed enqueue was missed. */
+export const dispatchDuePublishIntents = async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
     if (!gate.enabled) return gate;
 
@@ -62,5 +56,9 @@ export const publishIntentScheduler = schedules.task({
       triggered++;
     }
     return { triggered, due: due.length, disabled: false };
-  },
+};
+
+export const publishIntentScheduler = schedules.task({
+  id: "publish-intent-scheduler",
+  run: dispatchDuePublishIntents,
 });

@@ -10,6 +10,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { api } from "../../convex/_generated/api";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { studioSchedulesEnabled } from "@/lib/studioScheduleControl";
+import { armNovita4090Watchdog } from "@/lib/novitaWatchdog";
 import {
   assertNovitaVideoPhaseProfileRuntime,
   assessNovitaVideoProfileRuntime,
@@ -1641,6 +1643,9 @@ async function startWorker(args: {
 }): Promise<StartedNovitaWorker> {
   const { worker, control, convex } = args;
   const secret = control.config.internalSecret;
+  if (!studioSchedulesEnabled()) {
+    throw new Error("Studio channel runs are paused; Novita GPU creation is disabled");
+  }
   // A durable worker reservation can block the recovered generation even
   // without a provider POST. Fence it too, not only the later create, so a
   // stale child cannot strand an otherwise valid retry behind its lease row.
@@ -1686,6 +1691,10 @@ async function startWorker(args: {
     // than two observers racing completion and deletion.
     throw new ExecutionClaimInProgressError(worker.workerName);
   }
+
+  // If Trigger dies after the provider accepts create, this delayed task
+  // still finds the durable lease and reconciles the paid worker.
+  await armNovita4090Watchdog();
 
   if (lease.status === "delete_requested") {
     // A retry must never turn a persisted teardown intent into a fresh paid

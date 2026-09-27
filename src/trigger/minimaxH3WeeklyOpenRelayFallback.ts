@@ -8,6 +8,8 @@
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { ensureOpenRelayH3Ready } from "@/lib/openRelayH3";
+import { armOpenRelayIdleSchedule } from "@/lib/openRelayIdleSchedule";
+import { studioSchedulesEnabled } from "@/lib/studioScheduleControl";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_OPENRELAY_GPU_MODEL,
@@ -184,7 +186,13 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
     const pendingJobs = pendingIndexes.map((index) => payload.jobs[index]!);
     // Start once before the batch rather than once per shot. The persistent
     // disk validates locally after a restart; no model pull is on this path.
-    if (pendingJobs.length) await ensureOpenRelayH3Ready();
+    if (pendingJobs.length) {
+      if (!studioSchedulesEnabled()) throw new Error("Studio channel runs are paused");
+      const vmId = process.env.MINIMAX_H3_OPENRELAY_VM_ID?.trim();
+      if (!vmId) throw new Error("H3 VM identity is unavailable");
+      await armOpenRelayIdleSchedule("openrelay-h3-idle-reaper", vmId);
+      await ensureOpenRelayH3Ready();
+    }
     await renderMiniMaxH3WeeklyBatch(pendingJobs, {
       provider: "openrelay",
       execution: "weekly-fallback",

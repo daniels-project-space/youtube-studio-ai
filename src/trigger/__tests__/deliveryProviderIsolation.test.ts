@@ -57,6 +57,7 @@ function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure: boole
     if (name === "@/lib/serializedProgramEpisode") return serialized;
     if (name === "@/lib/pipelineWorkerDeployment") return deployment;
     if (name === "@/lib/deliveryRecoveryMode") return { deliveryRecoveryMode: () => "individual" };
+    if (name === "@/lib/studioScheduleControl") return { studioScheduleCron: (pattern: string) => pattern };
     throw new Error(`Provider/bootstrap import forbidden in delivery-only task: ${name}`);
   };
   // Execute real dispatcher bodies with real payload builders; no network or provider credentials.

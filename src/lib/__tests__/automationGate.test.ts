@@ -66,8 +66,8 @@ const scheduleContracts: ScheduleContract[] = [
   },
   {
     file: "src/trigger/publishScheduler.ts",
-    exportName: "publishIntentScheduler",
-    cron: "*/5 * * * *",
+    exportName: "dispatchDuePublishIntents",
+    cron: null,
     gate: STUDIO_AUTOMATION_GATES.autopilot,
     hazardousCall: "await bootstrapSecrets",
   },
@@ -122,7 +122,7 @@ for (const contract of scheduleContracts) {
     );
   } else {
     assert.ok(
-      schedule.includes(`cron: "${contract.cron}"`),
+      schedule.includes(`cron: studioScheduleCron("${contract.cron}")`),
       `${contract.exportName} must declare cron ${contract.cron}`,
     );
   }

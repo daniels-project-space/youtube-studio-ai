@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { randomBytes } from "node:crypto";
 import { schedules } from "@trigger.dev/sdk";
 
@@ -294,7 +295,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
  */
 export const runArtifactRetentionSweeper = schedules.task({
   id: "run-artifact-retention-sweeper",
-  cron: "17 * * * *",
+  cron: studioScheduleCron("17 3 * * *"),
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },

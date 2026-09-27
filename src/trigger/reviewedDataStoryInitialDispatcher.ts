@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { schedules, tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
@@ -121,7 +122,7 @@ export const reviewedDataStoryInitialDispatcher = schedules.task({
   id: "reviewed-data-story-initial-dispatcher",
   // This provider-free minute scanner is the only component that turns an
   // owner-created immutable admission into a Trigger delivery.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async () => {

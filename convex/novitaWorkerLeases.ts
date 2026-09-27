@@ -1055,6 +1055,22 @@ export const getByWorkerName = query({
   },
 });
 
+/** The watchdog only needs to know whether any managed lease still needs care. */
+export const hasOpenManagedLeases = query({
+  args: { secret: v.string() },
+  handler: async (ctx, args) => {
+    assertInternalSecret(args.secret, "novitaWorkerLeases.hasOpenManagedLeases");
+    for (const status of ACTIVE_STATUSES) {
+      const row = await ctx.db
+        .query("novitaWorkerLeases")
+        .withIndex("by_status_last_work", (q) => q.eq("status", status))
+        .first();
+      if (row) return true;
+    }
+    return false;
+  },
+});
+
 /**
  * Bounded indexed query used by the cloud reaper.  It includes hard deadline
  * breaches even while a stale worker keeps sending heartbeats, so heartbeat

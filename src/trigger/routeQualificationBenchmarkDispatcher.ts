@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { schedules, tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
@@ -300,7 +301,7 @@ export async function dispatchPendingRouteQualificationBenchmarks(input?: {
 
 export const routeQualificationBenchmarkDispatcher = schedules.task({
   id: "route-qualification-benchmark-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async () => {
