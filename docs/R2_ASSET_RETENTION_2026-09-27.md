@@ -81,14 +81,34 @@ report-only because age and prefix alone do not prove ownership or absence
 of reusable references. The personal `travel-film-editor` bucket is separate
 and must remain untouched.
 
-A fresh read-only S3 `ListObjectsV2` and `GetBucketLifecycleConfiguration`
-attempt using the existing Studio checkout's local R2 credentials returned
-HTTP 401. It established neither the current object set nor the current
-lifecycle configuration. No lifecycle change or deletion was attempted.
-Before setting `YOUTUBE_STUDIO_R2_ACCOUNT_ID`, verify current lifecycle
-rules and key layout through an authenticated provider route; audit all
-credentials with write access to the exact bucket and revoke or constrain
-writers that can overwrite managed immutable keys; then exercise a dry run
-against current Convex release/reference state. Keep the production Trigger
-environment and queues paused while Studio is not ready. Binding alone does
-not run the task while those controls remain paused.
+The first S3 `ListObjectsV2` and `HeadObject` attempts with the checkout's
+local credentials returned HTTP 401. The account ID still matched the pinned
+account and the endpoint was canonical with the required `auto` S3 region.
+The Project Hub `cloudflare` vault held a different access-key pair. Using it,
+`HeadObject` for a known Studio final and `ListObjectsV2` both returned HTTP
+200. This establishes that the local pair is stale, not that R2 is unavailable.
+The Trigger production environment has `R2_BUCKET` and `VAULT_ACCESS_TOKEN`
+but no direct R2 key/account override; its normal worker bootstrap reads the
+vault's `cloudflare` service. The exact runtime value of its vault bearer was
+not exposed by this read-only check.
+
+At 19:23 UTC, the vault's independent `R2_API_TOKEN` returned HTTP 200 from
+Cloudflare's official Get Bucket and Get Lifecycle routes. The bucket is in
+the default jurisdiction. Its sole active lifecycle rule aborts incomplete
+multipart uploads after 604,800 seconds (seven days); **no object-expiration
+rule exists**. A fresh, fully paginated S3 listing returned 2,427 objects and
+203,696,950,292 bytes, matching the saved inventory. Account-token listing
+through the vault's `WORKERS_API_TOKEN` returned four active account-owned
+tokens, all with account-wide R2 Storage Write. The vault's working S3 access
+key corresponds to one of them; the stale local key corresponds to none.
+User-owned token listing returned HTTP 403, so that class of writer has not
+been inventoried. Other account-wide write tokens can overwrite a managed
+object outside the app's reservations and defeat the final HEAD-before-delete
+identity check through a race. Read-only credentials cannot rule this out.
+
+Before setting `YOUTUBE_STUDIO_R2_ACCOUNT_ID`, exclude external writers from
+the managed key families, audit user-owned tokens and Worker bucket
+bindings, and dry-run against current Convex release/reference state. The
+30/180-day policy cannot be expressed as a bucket-wide lifecycle rule in this
+mixed bucket. Keep the production Trigger environment and queues paused while
+Studio is not ready. No lifecycle change or deletion was attempted.
