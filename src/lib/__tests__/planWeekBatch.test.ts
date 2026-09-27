@@ -39,6 +39,7 @@ import {
   planWeekProviderResultFixture,
 } from "@/lib/__tests__/planWeekRenderReceiptFixture";
 import { isFinalizedPlanWeekRenderReceipt } from "@/lib/planWeekRenderReceipt";
+import { LEGACY_PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
 import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
 import { PLAN_WEEK_RECOVERY_GUARD_VERSION } from "@/lib/planWeekRecoveryContract";
 import {
@@ -841,6 +842,12 @@ async function main() {
   assert.equal(handoff.items[0].preparation.manifestKey, preparationPointer.manifestKey);
   assert.equal(handoff.items[0].preparation.manifestSha256, preparationPointer.manifestSha256);
   assert.deepEqual((await db.get(admitted.batchId))?.renderHandoff, handoff);
+  await db.patch(admitted.batchId, { contractVersion: LEGACY_PLAN_WEEK_CONTRACT_VERSION });
+  assert.equal(await invoke(getPlanBatchRenderHandoff, ctx, { ownerId, batchId: admitted.batchId }), null,
+    "legacy ready batches cannot be served even if they contain a plausible handoff snapshot");
+  assert.deepEqual(await invoke(backfillReadyPlanBatchHandoff, ctx, { ownerId, batchId: admitted.batchId }),
+    { state: "unsupported_legacy" }, "legacy batches cannot be backfilled");
+  await db.patch(admitted.batchId, { contractVersion: PLAN_WEEK_CONTRACT_VERSION });
   const frozenItem = (await db.get(itemId))!;
   const firstHandoffSource = {
     _id: itemId, ownerId, channelId, batchId: admitted.batchId,

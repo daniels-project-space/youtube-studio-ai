@@ -2025,7 +2025,8 @@ export const getPlanBatchRenderHandoff = query({
     await requireStudioServiceIdentity(ctx, args.ownerId, "plan batch render handoff");
     const batch = await ctx.db.get(args.batchId);
     if (!batch || batch.ownerId !== args.ownerId) throw new Error("plan batch ownership mismatch");
-    if (batch.status !== "ready" || !batch.renderHandoff) return null;
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION ||
+        batch.status !== "ready" || !batch.renderHandoff) return null;
     const handoff = assertPlanBatchHandoff(batch.renderHandoff);
     if (handoff.batchId !== String(batch._id) || handoff.ownerId !== batch.ownerId ||
         handoff.channelId !== String(batch.channelId) || handoff.channelSlug !== batch.channelSlug ||
