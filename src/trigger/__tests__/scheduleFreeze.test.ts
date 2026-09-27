@@ -6,12 +6,12 @@ import ts from "typescript";
 const expected = new Set([
   "automatic-thumbnail-replacement-dispatcher", "bundle-fanout-dispatcher",
   "factual-review-continuation-dispatcher", "generation-scheduler", "learning-refresh",
-  "music-audition-continuation-dispatcher", "novita-4090-reaper", "openrelay-h3-idle-reaper",
+  "music-audition-continuation-dispatcher", "openrelay-h3-idle-reaper",
   "openrelay-qwen-idle-reaper", "pipeline-doctor", "publish-intent-scheduler",
   "r2-asset-retention-sweeper", "refresh-niche-research-weekly",
   "reviewed-data-story-initial-dispatcher", "route-qualification-benchmark-dispatcher",
   "run-artifact-retention-sweeper", "seo-reoptimize", "serialized-program-episode-retry-dispatcher",
-  "shared-delivery-recovery", "stats-refresh-6h", "thumbnail-performance-pull",
+  "stats-refresh-6h", "thumbnail-performance-pull",
   "thumbnail-refresh-dispatcher", "title-ctr-swap", "weekly-operations-digest",
   "weekly-plan-ahead", "weekly-plan-ahead-recovery",
 ]);
@@ -36,3 +36,12 @@ for (const file of readdirSync(join(process.cwd(), "src/trigger")).filter(name =
 }
 assert.deepEqual(new Set(found), expected, "new or removed schedules require an explicit freeze review");
 assert.equal(found.length, expected.size, "schedule IDs must remain unique");
+for (const [file, id] of [
+  ["novita4090Reaper.ts", "novita-4090-reaper"],
+  ["sharedDeliveryRecovery.ts", "shared-delivery-recovery"],
+]) {
+  const source = readFileSync(join(process.cwd(), "src/trigger", file), "utf8");
+  assert.match(source, new RegExp(`export const \\w+ = task\\(\\{\\s*id: "${id}"`),
+    `${id} must remain an on-demand task`);
+  assert.doesNotMatch(source, /\bcron\s*:/, `${id} must remain without a declarative cron`);
+}
