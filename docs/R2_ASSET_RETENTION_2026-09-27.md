@@ -106,6 +106,30 @@ been inventoried. Other account-wide write tokens can overwrite a managed
 object outside the app's reservations and defeat the final HEAD-before-delete
 identity check through a race. Read-only credentials cannot rule this out.
 
+Repeat the credential and lifecycle check with
+`scripts/diagnose-studio-r2-retention.ts`. It uses `listByService("cloudflare")`
+when an authorized `VAULT_ACCESS_TOKEN` is present. The Codex operator can
+instead inject only fresh Project Hub values into that one process:
+
+```bash
+STUDIO_R2_DIAGNOSTIC_VAULT_INJECTED=1 /root/.local/bin/codex-vault-exec cloudflare \
+  R2_ACCOUNT_ID=R2_ACCOUNT_ID R2_ENDPOINT=R2_ENDPOINT \
+  R2_ACCESS_KEY_ID=R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY=R2_SECRET_ACCESS_KEY \
+  R2_API_TOKEN=R2_API_TOKEN -- \
+  node_modules/.bin/tsx scripts/diagnose-studio-r2-retention.ts \
+  lustig-short/final_2k.mp4 /home/ubuntu/youtube-studio-ai/.env.local
+```
+
+The script pins the account and canonical endpoint, uses S3 region `auto`,
+checks a bounded `owner/` list and exact HEAD, and reads the bucket and
+lifecycle through the official Cloudflare API. It reports only status,
+failure class, lifecycle rules, and whether the checkout key differs. A 401
+with a different checkout key points to stale local credentials; a 403
+indicates scope, a 404 HEAD indicates the probe object is missing, and a
+transport or other provider failure stays inconclusive. Supply a current
+known key as the first argument if the default example has been removed.
+No write, delete, lifecycle PUT, or retention binding is performed.
+
 Before setting `YOUTUBE_STUDIO_R2_ACCOUNT_ID`, exclude external writers from
 the managed key families, audit user-owned tokens and Worker bucket
 bindings, and dry-run against current Convex release/reference state. The
