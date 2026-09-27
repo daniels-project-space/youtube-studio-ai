@@ -167,8 +167,8 @@ function estimatedPerCandidateCost(candidate: ReviewedCandidate): number {
   // Store the reproducible proportional spot estimate rather than fabricate a
   // provider charge. The import mutation independently caps it at $0.40.
   // A zero sourceReviewCount makes this 0/0 = NaN, and a NaN cost is the one
-  // value a budget cannot compare against. Same fix as the library twin in
-  // src/lib/ernieThumbnailRefreshBatch.ts.
+  // value a budget cannot compare against. This historical importer keeps
+  // its own bounded estimate after the one-shot batch runtime is retired.
   const estimate = (candidate.controller.elapsedSeconds / 3_600 * ERNIE_SPOT_HOURLY_USD) / candidate.sourceReviewCount;
   return boundedNumber(Number(estimate.toFixed(6)), 0, 0, 0.4);
 }

@@ -27,7 +27,6 @@ import assert from "node:assert/strict";
 import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 import { ttsConcurrency } from "@/trigger/blocks/narratedBlocks";
 import { withMusicGenerationCost } from "@/lib/music";
-import { ernieThumbnailRefreshCandidateCost } from "@/lib/ernieThumbnailRefreshBatch";
 
 /* ============================ 1. mapPool: a pool with no workers ============================
  * Array.from({ length: NaN }) is [], so a non-finite limit spawned ZERO workers.
@@ -105,24 +104,7 @@ for (const [units, unitCost] of [[Number.NaN, 0.02], [3, Number.NaN]] as const) 
   assert.ok(Number.isFinite(entry.additionalObservedCostUsd), `AFTER: NaN in (${units}, ${unitCost}) is settled`);
 }
 
-/* ============================ 4. A NaN cost estimate ============================
- * A candidate with zero source reviews divides zero by zero. */
-
-assert.ok(Number.isNaN(0 / 0), "BEFORE: 0 elapsed over 0 reviews is NaN");
-const zeroReview = ernieThumbnailRefreshCandidateCost({
-  elapsedSeconds: 0,
-  sourceReviewCount: 0,
-} as Parameters<typeof ernieThumbnailRefreshCandidateCost>[0]);
-assert.ok(Number.isFinite(zeroReview), "AFTER: an unreviewed candidate has a finite cost");
-assert.equal(zeroReview, 0, "AFTER: and it is zero, not NaN");
-
-const normal = ernieThumbnailRefreshCandidateCost({
-  elapsedSeconds: 3_600,
-  sourceReviewCount: 1,
-} as Parameters<typeof ernieThumbnailRefreshCandidateCost>[0]);
-assert.equal(normal, 0.335, "AFTER: an ordinary candidate is unchanged");
-
-/* ============================ 5. visual_inserts: the cap that never fired ============================
+/* ============================ 4. visual_inserts: the cap that never fired ============================
  * NaN did two things, both silent: it reached the PROMPT as literal text, and it
  * removed the cap, because `out.length >= NaN` is false for every length. */
 
@@ -144,7 +126,7 @@ assert.equal(fixedMaxInserts, 4, "AFTER: it falls back to the narration-derived 
 assert.equal(50 >= fixedMaxInserts, true, "AFTER: and the cap fires again");
 assert.equal(boundedInteger(6, 4, 1, 8), 6, "AFTER: a real param still wins");
 
-/* ============================ 6. The insert span crash ============================
+/* ============================ 5. The insert span crash ============================
  * endSentenceIdx comes from MODEL JSON, so it can be "seven" as easily as 7.
  * That made every clamp NaN, timings[NaN] undefined, and `.end` a TypeError that
  * killed the whole visual_inserts stage. */
@@ -171,7 +153,7 @@ assert.equal(timings[fixedEndIdx("seven", 1)]!.end, 2, "AFTER: and the lookup su
 assert.equal(fixedEndIdx(3, 1), 3, "AFTER: a real span is unchanged");
 assert.equal(fixedEndIdx(99, 1), 3, "AFTER: an over-long span is still clamped to the timeline");
 
-/* ============================ 7. Operator length silently dropped ============================
+/* ============================ 6. Operator length silently dropped ============================
  * whiteboard_scribe's own comment records that the wizard's length "never
  * reached this engine" — a bug they fixed. NaN reinstated it exactly: it fails
  * `targetSeconds > 0`, so panels and targetWords both go undefined and the
@@ -186,7 +168,7 @@ assert.equal(boundedNumber(600, 0, 0, 7_200), 600, "AFTER: a real length is hono
 assert.equal(boundedNumber("600", 0, 0, 7_200), 600, "AFTER: params round-trip as JSON strings");
 assert.equal(boundedNumber(99_999, 0, 0, 7_200), 7_200, "AFTER: an absurd length is capped");
 
-/* ============================ 8. Paid render geometry and counts ============================ */
+/* ============================ 7. Paid render geometry and counts ============================ */
 
 assert.ok(Number.isNaN(Math.max(1280, Math.min(2560, Number("1080p")))), "BEFORE: NaN render width");
 assert.equal(boundedInteger("1080p", 1920, 1280, 2560), 1920, "AFTER: the documented default");
@@ -207,4 +189,4 @@ assert.ok(
 );
 assert.equal(boundedSceneDuration(Number.NaN, boundedNumber("five", 5, 5, 10)), 5, "AFTER: it falls back");
 
-console.log("NaN CLAMP SWEEP PASS — 8 converted sites, each proven against its original expression");
+console.log("NaN CLAMP SWEEP PASS — 7 active converted sites, each proven against its original expression");
