@@ -2,6 +2,18 @@ export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
+/** Reusable bytes live outside run expiry scopes and bind their full content digest. */
+export function permanentReusableMediaKey(keyPrefix: string, sha256: string): string {
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new Error("permanent reusable media needs an owned channel prefix and SHA-256");
+  }
+  return `${keyPrefix}library/reusable-media/v1/${sha256}.mp4`;
+}
+
+export function permanentReusableMediaDigest(key: string): string | null {
+  return /^owner\/[^/]+\/channel\/[^/]+\/library\/reusable-media\/v1\/([a-f0-9]{64})\.mp4$/u.exec(key)?.[1] ?? null;
+}
+
 /** This exact family has one create-only writer; all other run media remain report-only. */
 export function isImmutableAtlasCropKey(key: string): boolean {
   return /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/novita\/atlas-crops\/[^/]+\/c[0-9]{2}-[a-f0-9]{12}-[a-f0-9]{16}-[^/]+\.png$/u.test(key);

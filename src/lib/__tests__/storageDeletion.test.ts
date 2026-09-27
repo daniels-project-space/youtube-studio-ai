@@ -59,6 +59,8 @@ test("empty and invalid input sends no storage request", async () => {
         return true;
       });
     }
+    await assert.rejects(deleteObjects([`owner/daniel/channel/show/library/reusable-media/v1/${"f".repeat(64)}.mp4`]),
+      /Permanent reusable media/);
     assert.equal(send.mock.callCount(), 0);
   } finally { send.mock.restore(); }
 });

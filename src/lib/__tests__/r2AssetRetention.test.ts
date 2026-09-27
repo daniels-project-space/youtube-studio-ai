@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 
 import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
-  immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, selectExpiredRunObjects,
+  immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, permanentReusableMediaDigest,
+  permanentReusableMediaKey, selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
 import { presignUpload, putObject, putObjectFromFile } from "../storage";
@@ -65,6 +66,12 @@ assert.equal(classifyUnboundR2Key("validation/inked-histories/v1/runs/v1/visual-
 assert.equal(classifyUnboundR2Key("videocraft/a-dying-art/final_2k.mp4"), "final_video");
 assert.equal(classifyUnboundR2Key("models/wan/weights.safetensors"), "outside");
 assert.equal(assertYouTubeStudioR2Bucket("youtube-studio-ai"), "youtube-studio-ai");
+const permanentKey = permanentReusableMediaKey("owner/daniel/channel/show/", "f".repeat(64));
+assert.equal(permanentKey, `owner/daniel/channel/show/library/reusable-media/v1/${"f".repeat(64)}.mp4`);
+assert.equal(permanentReusableMediaDigest(permanentKey), "f".repeat(64));
+assert.equal(permanentReusableMediaDigest(`${prefix}studio-media/${"f".repeat(64)}.mp4`), null);
+assert.throws(() => permanentReusableMediaKey("owner/daniel/channel/show/runs/r1/", "f".repeat(64)), /owned channel/);
+assert.throws(() => permanentReusableMediaKey("owner/daniel/channel/show/", "F".repeat(64)), /SHA-256/);
 assert.throws(() => assertYouTubeStudioR2Bucket("travel-film-editor"), /exact YouTube Studio bucket/);
 assert.equal(immutableAtlasCropDigest(`${prefix}${managedCropName}`), "c".repeat(64));
 assert.equal(immutableAtlasCropDigest(`${prefix}${cropName}`), null);
@@ -109,5 +116,8 @@ void (async () => {
   await assert.rejects(() => presignUpload(`${prefix}${quizFinalName}`), /overwriteable presigned uploads/);
   await assert.rejects(() => putObject(`${prefix}${quizFinalName}`, "bytes"), /create-only file writer/);
   await assert.rejects(() => putObjectFromFile(`${prefix}${quizFinalName}`, "/unused"), /create-only file upload/);
+  await assert.rejects(() => presignUpload(permanentKey), /overwriteable presigned uploads/);
+  await assert.rejects(() => putObject(permanentKey, "bytes"), /create-only digest-bound upload/);
+  await assert.rejects(() => putObjectFromFile(permanentKey, "/unused"), /verified byte writer/);
   console.log("R2 asset retention tests passed");
 })().catch((error: unknown) => { throw error; });
