@@ -10,6 +10,7 @@ const ownerId = "alice";
 const runId = "run-one";
 const channelId = "channel-one";
 const key = `owner/${ownerId}/channel/show/runs/${runId}/quiz-year/quiz-year-${"a".repeat(64)}.mp4`;
+const cropKey = `owner/${ownerId}/channel/show/runs/${runId}/novita/atlas-crops/shot-1/c01-${"b".repeat(12)}-${"c".repeat(16)}-A1-${"d".repeat(64)}.png`;
 const claimId = "11111111-1111-4111-8111-111111111111";
 const rows = new Map<string, Record<string, unknown>>([
   [runId, { _id: runId, ownerId, channelId, status: "running",
@@ -68,6 +69,9 @@ async function main() {
   assert.deepEqual(await invoke(finish, writeArgs), { status: "finished" });
   const assetId = await invoke<string>(recordAsset, assetArgs);
   assert.ok(rows.has(assetId));
+  const cropWriteArgs = { ...writeArgs, r2Key: cropKey };
+  assert.deepEqual(await invoke(begin, cropWriteArgs), { status: "active" });
+  assert.deepEqual(await invoke(finish, cropWriteArgs), { status: "finished" });
   await assert.rejects(() => invoke(recordAsset, { ...assetArgs, runId: "another-run" }), /mismatched/);
   Object.assign(rows.get(runId)!, { status: "ok", finishedAt: now - 200 * day });
   const foreignId = await db.insert("assets", { ownerId, channelId, runId: "another-run", kind: "video", r2Key: key });
@@ -77,6 +81,11 @@ async function main() {
   rows.delete(foreignId);
   const expiration = await invoke<{ status: string }>(prepareExpiration, expirationArgs);
   assert.equal(expiration.status, "pending");
+  await assert.rejects(() => invoke(prepareExpiration, { ...expirationArgs, r2Key: cropKey }), /proven create-only asset/);
+  const cropExpiration = await invoke<{ status: string }>(prepareExpiration, {
+    ...expirationArgs, r2Key: cropKey, kind: "asset", lastModifiedAt: now - 31 * day,
+  });
+  assert.equal(cropExpiration.status, "pending");
   await assert.rejects(() => invoke(recordAsset, assetArgs), /expired/);
   await assert.rejects(() => invoke(finish, writeArgs), /deletion intent/);
   await assert.rejects(() => invoke(begin, writeArgs), /active owned run|deletion intent/);

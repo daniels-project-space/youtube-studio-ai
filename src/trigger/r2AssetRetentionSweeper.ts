@@ -5,7 +5,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
 import { ASSET_RETENTION_MS, assertYouTubeStudioR2Bucket,
-  hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
+  hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
   selectExpiredRunObjects,
   YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope } from "@/lib/r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "@/lib/youtubeR2Account";
@@ -97,7 +97,7 @@ export async function sweepR2AssetRetention(input: {
     videoId: string, kind: "asset" | "final_video" | "footage") => {
     if (kind === "footage") return false; // fixed-name writer has no delete-safe proof
     const hasProof = (metadata: Record<string, string>) => kind === "asset"
-      ? hasImmutableIntroCardProof(record.key, metadata)
+      ? hasImmutableIntroCardProof(record.key, metadata) || hasImmutableAtlasCropProof(record.key, metadata)
       : hasImmutableQuizFinalProof(record.key, metadata);
     const head = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
     if (!head || !head.lastModified || !head.etag || head.lastModified.getTime() !== record.lastModified?.getTime() ||

@@ -9,8 +9,14 @@ export function isImmutableAtlasCropKey(key: string): boolean {
 
 export function hasImmutableAtlasCropProof(key: string, metadata: Record<string, string>): boolean {
   const normalized = Object.fromEntries(Object.entries(metadata).map(([k, v]) => [k.toLowerCase(), v]));
-  return isImmutableAtlasCropKey(key) && /^[a-f0-9]{64}$/u.test(normalized.cropsha256 ?? "") &&
-    Boolean(normalized.atlasruntime && normalized.atlasplan);
+  const digest = immutableAtlasCropDigest(key);
+  return digest !== null && normalized.cropsha256 === digest &&
+    normalized.retentionwriter === "atlas-crop/v1" && Boolean(normalized.atlasruntime && normalized.atlasplan);
+}
+
+/** New crop keys carry the complete derivative digest; older crop names stay report-only. */
+export function immutableAtlasCropDigest(key: string): string | null {
+  return /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/novita\/atlas-crops\/[^/]+\/c[0-9]{2}-[a-f0-9]{12}-[a-f0-9]{16}-[^/]+-([a-f0-9]{64})\.png$/u.exec(key)?.[1] ?? null;
 }
 
 /** Future quiz masters have a single create-only file writer and digest-bearing key. */
@@ -36,7 +42,8 @@ export function hasImmutableIntroCardProof(key: string, metadata: Record<string,
 }
 
 export function isManagedRetentionKey(key: string): boolean {
-  return immutableIntroCardDigest(key) !== null || immutableQuizFinalDigest(key) !== null;
+  return immutableIntroCardDigest(key) !== null || immutableQuizFinalDigest(key) !== null ||
+    immutableAtlasCropDigest(key) !== null;
 }
 
 export function assertYouTubeStudioR2Bucket(bucket: string | undefined): typeof YOUTUBE_STUDIO_R2_BUCKET {
@@ -111,7 +118,7 @@ export function selectExpiredRunObjects(args: {
         expiredFinals.push(record);
       } else skipped++;
     } else if (age! <= now - ASSET_RETENTION_MS &&
-        immutableIntroCardDigest(record.key)) {
+        (immutableIntroCardDigest(record.key) || immutableAtlasCropDigest(record.key))) {
       expiredAssets.push(record);
     } else skipped++;
   }

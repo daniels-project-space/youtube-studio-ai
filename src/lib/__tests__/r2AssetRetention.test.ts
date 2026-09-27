@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
-  immutableIntroCardDigest, immutableQuizFinalDigest, selectExpiredRunObjects,
+  immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
 import { presignUpload, putObject, putObjectFromFile } from "../storage";
@@ -24,10 +24,11 @@ const scope: RunR2RetentionScope = {
 };
 const record = (name: string, days: number) => ({ key: `${prefix}${name}`, lastModified: new Date(now - days * day) });
 const cropName = `novita/atlas-crops/shot-123/c01-${"a".repeat(12)}-${"b".repeat(16)}-r1c1.png`;
+const managedCropName = `novita/atlas-crops/shot-123/c01-${"a".repeat(12)}-${"b".repeat(16)}-r1c1-${"c".repeat(64)}.png`;
 const quizFinalName = `quiz-year/quiz-year-${"d".repeat(64)}.mp4`;
 const introName = `introcard-${"e".repeat(64)}.mp4`;
 const records = [
-  record("clip.mp4", 31), record(cropName, 31), record(introName, 31), record("new.mp4", 29),
+  record("clip.mp4", 31), record(cropName, 31), record(managedCropName, 31), record(introName, 31), record("new.mp4", 29),
   record("final.mp4", 181), record(quizFinalName, 181),
   record("thumbnail.jpg", 300), record("visual-review/frames/f1.jpg", 300),
   record("library/promoted.png", 300), record("thumbnail-checkpoints/source.png", 300),
@@ -38,7 +39,7 @@ const selected = selectExpiredRunObjects({
   evidenceKeys: new Set([`${prefix}visual-review/frames/f1.jpg`]),
   finalVideoKeys: new Set([`${prefix}final.mp4`, `${prefix}${quizFinalName}`]),
 });
-assert.deepEqual(selected.expiredAssets.map((item) => item.key), [`${prefix}${introName}`]);
+assert.deepEqual(selected.expiredAssets.map((item) => item.key), [`${prefix}${managedCropName}`, `${prefix}${introName}`]);
 assert.deepEqual(selected.expiredFinals.map((item) => item.key), [`${prefix}final.mp4`, `${prefix}${quizFinalName}`]);
 assert.equal(selectExpiredRunObjects({
   scope: { ...scope, runStatus: "running" }, records, now,
@@ -65,9 +66,17 @@ assert.equal(classifyUnboundR2Key("videocraft/a-dying-art/final_2k.mp4"), "final
 assert.equal(classifyUnboundR2Key("models/wan/weights.safetensors"), "outside");
 assert.equal(assertYouTubeStudioR2Bucket("youtube-studio-ai"), "youtube-studio-ai");
 assert.throws(() => assertYouTubeStudioR2Bucket("travel-film-editor"), /exact YouTube Studio bucket/);
-assert.equal(hasImmutableAtlasCropProof(`${prefix}${cropName}`, {
-  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64),
+assert.equal(immutableAtlasCropDigest(`${prefix}${managedCropName}`), "c".repeat(64));
+assert.equal(immutableAtlasCropDigest(`${prefix}${cropName}`), null);
+assert.equal(hasImmutableAtlasCropProof(`${prefix}${managedCropName}`, {
+  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64), retentionWriter: "atlas-crop/v1",
 }), true);
+assert.equal(hasImmutableAtlasCropProof(`${prefix}${cropName}`, {
+  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64), retentionWriter: "atlas-crop/v1",
+}), false);
+assert.equal(hasImmutableAtlasCropProof(`${prefix}${managedCropName}`, {
+  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "d".repeat(64), retentionWriter: "atlas-crop/v1",
+}), false);
 assert.equal(hasImmutableAtlasCropProof(`${prefix}final.mp4`, {
   atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64),
 }), false);

@@ -296,6 +296,8 @@ export async function materializeStoryboardAtlasCrops(input: {
   readonly plan: StoryboardAtlasRenderPlan;
   readonly result: NovitaRenderResult;
   readonly keyPrefix: string;
+  /** Caller reserves the exact run key and verifies R2 bytes before returning. */
+  readonly writeCrop: (key: string, bytes: Uint8Array, metadata: Record<string, string>) => Promise<void>;
   readonly runtime?: StoryboardAtlasMaterializeRuntime;
 }): Promise<readonly AtlasManifestItem[]> {
   const runtime = input.runtime ?? DEFAULT_MATERIALIZE_RUNTIME;
@@ -368,13 +370,14 @@ export async function materializeStoryboardAtlasCrops(input: {
       const shotToken = `${safeToken(cell.shotId)}-${sha256Hex(cell.shotId).slice(0, 10)}`;
       const key = `${input.keyPrefix.replace(/\/$/u, "")}/atlas-crops/${shotToken}/` +
         `c${String(cell.candidateIndex + 1).padStart(2, "0")}-${requestSha256.slice(0, 12)}-` +
-        `${sourceContentSha256.slice(0, 16)}-${cell.coordinate}.png`;
-      await runtime.putImmutable(key, bytes, "image/png", {
+        `${sourceContentSha256.slice(0, 16)}-${cell.coordinate}-${contentSha256}.png`;
+      await input.writeCrop(key, bytes, {
         atlasRuntime: STORYBOARD_ATLAS_RUNTIME_VERSION,
         atlasPlan: input.plan.fingerprint,
         sourceOutput: source.outputId,
         sourceSha256: sourceContentSha256,
         cropSha256: contentSha256,
+        retentionWriter: "atlas-crop/v1",
         coordinate: cell.coordinate,
       });
       items.push({

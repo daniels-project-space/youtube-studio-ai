@@ -27,7 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
+import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -219,6 +219,10 @@ export async function putObject(
   if (isImmutableAtlasCropKey(key) && (opts.ifNoneMatch !== "*" || !opts.metadata?.cropSha256 ||
       !opts.metadata.atlasRuntime || !opts.metadata.atlasPlan)) {
     throw new Error("immutable atlas crop requires create-only upload and provenance metadata");
+  }
+  const cropDigest = immutableAtlasCropDigest(key);
+  if (cropDigest && (opts.metadata?.cropSha256 !== cropDigest || opts.metadata?.retentionWriter !== "atlas-crop/v1")) {
+    throw new Error("managed atlas crop requires matching digest and writer metadata");
   }
   if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz final requires its create-only file writer");
   const introDigest = immutableIntroCardDigest(key);

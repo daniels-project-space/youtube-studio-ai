@@ -9,7 +9,7 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import { evaluateRunArtifactRelease, RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
   RUN_ARTIFACT_RETENTION_MS } from "../src/lib/runArtifactRetention";
 import type { Doc } from "./_generated/dataModel";
-import { immutableIntroCardDigest, immutableQuizFinalDigest } from "../src/lib/r2AssetRetention";
+import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest } from "../src/lib/r2AssetRetention";
 
 function assertCompletedRelease(row: Doc<"runArtifactRetentions"> | null, run: Doc<"runs">, now: number, age: number): void {
   if (!row || row.ownerId !== run.ownerId || row.channelId !== run.channelId || row.runId !== run._id ||
@@ -121,7 +121,7 @@ export const prepareExpiration = mutation({
     lastModifiedAt: v.number(), etag: v.string() },
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "R2 asset expiration preparation");
-    if (!(args.kind === "asset" && immutableIntroCardDigest(args.r2Key)) &&
+    if (!(args.kind === "asset" && (immutableIntroCardDigest(args.r2Key) || immutableAtlasCropDigest(args.r2Key))) &&
         !(args.kind === "final_video" && immutableQuizFinalDigest(args.r2Key))) {
       throw new Error("R2 expiration requires a proven create-only asset or final writer; other media are report-only");
     }

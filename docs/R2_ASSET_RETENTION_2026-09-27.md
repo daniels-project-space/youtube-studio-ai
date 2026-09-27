@@ -12,16 +12,16 @@ worker uses that completed ledger as its release gate.
 The legacy operator-triggered footage prune task is inventory-only even when
 enabled; it cannot bypass the new deletion gates.
 
-**Automatic deletion is limited to two future writer families:** run-scoped
-content-hashed intro-card MP4s at release plus 30 days, and quiz-year or
-quiz-short final MP4s named with their content SHA-256 at release plus 180
-days. Each writer transactionally reserves the exact run key before its R2
+**Automatic deletion is limited to three future writer families:** run-scoped
+content-hashed intro-card MP4s and storyboard atlas crop PNGs at release plus
+30 days, and quiz-year or quiz-short final MP4s named with their content
+SHA-256 at release plus 180 days. Each writer transactionally reserves the exact run key before its R2
 upload and closes the reservation only after re-reading and hashing the stored
 bytes. Quiz final files use create-only upload and matching digest metadata;
 renders over R2's single-PUT limit fail closed. Shared storage APIs reject
 overwriteable writes to either exact family. The deletion mutation itself
 rejects other keys and an `asset` kind applied to a final. Existing fixed-name
-final masters, footage clips, atlas crops without writer reservations, and
+final masters, footage clips, older atlas crops without full derivative digests and writer reservations, and
 other intermediates remain report-only. Broad 30-day asset and
 180-day final cleanup remains incomplete until those writers have a safe
 immutable or reserved-key design.
