@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 /**
  * `generation-scheduler` (Phase 6) — the spine of autonomous operation. On a
  * cron, it triggers a new video run for each ACTIVE, opted-in channel that is
@@ -109,7 +110,7 @@ export const generationScheduler = schedules.task({
   // window without making the scheduler itself a spend path. The Convex claim
   // is idempotent per channel/run, so an extra tick only observes busy/not-due
   // state and never duplicates a video.
-  cron: "0 * * * *",
+  cron: studioScheduleCron("0 * * * *"),
   // If the control-plane enqueue is briefly unavailable, replay the same
   // claimed run instead of waiting for the next hourly tick. Convex run
   // fences and Trigger idempotency keys prevent duplicate video work.

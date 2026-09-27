@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 /**
  * `seo-reoptimize` — the publish-side half of the learning loop. The learning
  * task (learn.ts) records each published video's CTR + retention in the per-channel
@@ -156,7 +157,7 @@ export async function reoptimize(
 
 export const seoReoptimizeSchedule = schedules.task({
   id: "seo-reoptimize",
-  cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle
+  cron: studioScheduleCron("0 9 * * 1"), // weekly, Monday 09:00 — after the weekend's metrics settle
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

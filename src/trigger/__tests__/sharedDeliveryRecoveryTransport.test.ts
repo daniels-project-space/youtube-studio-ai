@@ -51,11 +51,16 @@ test("six actual recovery handlers share bounded HTTP, isolate a stalled outbox,
     }).outputText;
     const evaluated = { exports: {} as Record<string, unknown> };
     const requireFixture = (name: string): unknown => {
-      if (name === "@trigger.dev/sdk") return { schedules: { task: (value: unknown) => value },
+      if (name === "@trigger.dev/sdk") return { schedules: { task: (value: unknown) => value }, task: (value: unknown) => value,
         tasks: { trigger: forbidden }, idempotencyKeys: { create: forbidden } };
       if (name === "../../convex/_generated/api") return { api };
       if (name === "@/lib/studioConvexHttpClient") return { StudioConvexHttpClient: FixtureClient };
       if (name === "@/lib/deliveryRecoveryMode") return { deliveryRecoveryMode: () => "shared" };
+      if (name === "@/lib/studioScheduleControl") return { studioScheduleCron: () => undefined };
+      if (name === "@/lib/deliveryRecoveryWatchdog") return { armDeliveryRecoveryWatchdog: async () => undefined };
+      if (name === "./thumbnailRefreshCandidate") return { dispatchPendingThumbnailRefreshCandidates: async () => ({ pending: 0, triggered: 0 }) };
+      if (name === "./automaticThumbnailReplacementCore") return { dispatchAutomaticThumbnailReplacements: async () => ({ pending: 0, triggered: 0 }) };
+      if (name === "./publishScheduler") return { dispatchDuePublishIntents: async () => ({ pending: 0, triggered: 0 }) };
       if (name.startsWith("./") && name.endsWith("Dispatcher")) return load(name.slice(2));
       return new Proxy({}, { get: () => forbidden });
     };
@@ -73,7 +78,7 @@ test("six actual recovery handlers share bounded HTTP, isolate a stalled outbox,
     const [first, second] = await Promise.all([task.run(), task.run()]);
     assert.equal(clients, 12);
     assert.deepEqual(calls.slice().sort(), [...expected, ...expected].sort());
-    assert.equal(Object.keys(first).length, 6);
+    assert.equal(Object.keys(first).length, 9);
     assert.deepEqual(first, second);
     assert.ok(Object.values(first).every(result => result.triggered === 0));
     for (const failure of ["headers", "body"] as const) {

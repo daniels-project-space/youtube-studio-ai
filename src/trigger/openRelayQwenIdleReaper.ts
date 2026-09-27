@@ -6,6 +6,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { OpenRelayVmClient } from "@/lib/openRelay";
+import { disarmOpenRelayIdleSchedule } from "@/lib/openRelayIdleSchedule";
 import {
   drainOpenRelayQwenWorker,
   fetchOpenRelayQwenHealth,
@@ -32,13 +33,11 @@ function isPinnedQwenVm(vm: {
 
 export const openRelayQwenIdleReaper = schedules.task({
   id: "openrelay-qwen-idle-reaper",
-  // A one-minute check means the externally observed 300-second idle ceiling
-  // has at most one additional minute of provider billing before shutdown.
-  cron: "* * * * *",
+  // The caller arms this minute check only while the VM is in use.
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },
-  run: async () => {
+  run: async (payload) => {
     const log = (message: string, extra?: Record<string, unknown>) =>
       console.log(`[openrelay-qwen-idle-reaper] ${message}`, extra ?? "");
     await bootstrapSecrets(log, {
@@ -54,10 +53,13 @@ export const openRelayQwenIdleReaper = schedules.task({
     const client = new OpenRelayVmClient({ apiKey: required("OPENRELAY_API_KEY", 32) });
     const id = required("OPENRELAY_QWEN_VM_ID", 36);
     const vm = await client.getVm(id);
+    if (vm.status !== "running") {
+      if (vm.status === "stopped") await disarmOpenRelayIdleSchedule(payload.scheduleId);
+      return { action: "noop", reason: `vm_${vm.status}` };
+    }
     if (!isPinnedQwenVm(vm)) {
       throw new Error("refusing to manage an OpenRelay VM outside the pinned private Qwen 3090 / 30 GB identity");
     }
-    if (vm.status !== "running") return { action: "noop", reason: `vm_${vm.status}` };
 
     // No blind provider stop: an unavailable endpoint could be actively
     // rendering. The worker itself reports busy/idle state and rejects new
@@ -65,6 +67,7 @@ export const openRelayQwenIdleReaper = schedules.task({
     const health = await fetchOpenRelayQwenHealth();
     if (health.draining) {
       await client.stopVm(id);
+      await disarmOpenRelayIdleSchedule(payload.scheduleId);
       return { action: "stopped", reason: "previous_drain_recovered", idleSeconds: health.idleSeconds };
     }
     if (health.busy || health.idleSeconds < OPENRELAY_QWEN_IDLE_SECONDS) {
@@ -75,6 +78,7 @@ export const openRelayQwenIdleReaper = schedules.task({
       return { action: "noop", reason: "became_busy", idleSeconds: health.idleSeconds };
     }
     await client.stopVm(id);
+    await disarmOpenRelayIdleSchedule(payload.scheduleId);
     log("stopped drained persistent Qwen VM", { idleSeconds: health.idleSeconds });
     return { action: "stopped", reason: "idle_drained", idleSeconds: health.idleSeconds };
   },

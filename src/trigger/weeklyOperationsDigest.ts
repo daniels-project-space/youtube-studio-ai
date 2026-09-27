@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { schedules } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -15,7 +16,7 @@ const automaticOperationsDigestsApi = (api as unknown as {
 /** Snapshot the completed UTC week without making provider calls or changing runs. */
 export const weeklyOperationsDigestSchedule = schedules.task({
   id: "weekly-operations-digest",
-  cron: "15 6 * * 1",
+  cron: studioScheduleCron("15 6 * * 1"),
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
     if (!gate.enabled) return { skipped: true, reason: "STUDIO_AUTOPILOT is not on" };

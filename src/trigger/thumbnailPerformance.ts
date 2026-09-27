@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 /**
  * THUMBNAIL PERFORMANCE PULL.
  *
@@ -122,7 +123,7 @@ export async function pullThumbnailPerformance(args: ThumbnailPerformanceInput):
  */
 export const thumbnailPerformanceSchedule = schedules.task({
   id: "thumbnail-performance-pull",
-  cron: "0 4 * * 1",
+  cron: studioScheduleCron("0 4 * * 1"),
   run: async () => {
     // The channel roster and its run -> youtubeVideoId join live in Convex and
     // are supplied by the caller in production; this schedule is the seam that

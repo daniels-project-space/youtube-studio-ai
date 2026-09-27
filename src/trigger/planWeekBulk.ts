@@ -5,6 +5,7 @@
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { armDeliveryRecoveryWatchdog } from "@/lib/deliveryRecoveryWatchdog";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -23,6 +24,7 @@ export const planWeekBulkTask = task({
   run: async (payload: PlanWeekBulkArgs, { ctx }) => {
     await bootstrapSecrets(() => undefined);
     const order = buildPlanWeekBulkOrder(payload);
+    await armDeliveryRecoveryWatchdog(order.ownerId);
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("plan-week bulk: NEXT_PUBLIC_CONVEX_URL is not configured");
     const convex = new StudioConvexHttpClient(url);

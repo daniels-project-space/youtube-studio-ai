@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 /**
  * PIPELINE DOCTOR — the nightly meta-loop over everything the system produced.
  *
@@ -633,7 +634,7 @@ export const pipelineDoctorSchedule = schedules.task({
   // RE-ENABLED 2026-07-04: the Doctor is the root-cause loop — paused, every
   // defect class it exists to catch (advisory rot, grounding gaps, heal
   // treadmills) accumulated unseen. Daily, after learning-refresh (07:00).
-  cron: "30 7 * * *",
+  cron: studioScheduleCron("30 7 * * *"),
   run: async (_payload, options) => sweep(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`),
     options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined),
 });

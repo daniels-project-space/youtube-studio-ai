@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 /**
  * `refresh-niche-research` Trigger tasks (competitor-intelligence engine).
  *
@@ -52,7 +53,7 @@ export const refreshNicheResearchTask = task({
  */
 export const refreshNicheResearchSchedule = schedules.task({
   id: "refresh-niche-research-weekly",
-  cron: "0 6 * * 1", // Mondays 06:00 UTC
+  cron: studioScheduleCron("0 6 * * 1"), // Mondays 06:00 UTC
   maxDuration: 1800,
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);

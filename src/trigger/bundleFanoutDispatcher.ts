@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
@@ -103,7 +104,7 @@ export const bundleFanoutDispatcher = schedules.task({
   id: "bundle-fanout-dispatcher",
   // Recovery happens well inside the bounded outbox deadline. Empty ticks are
   // one indexed read and never admit a fresh render.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
   maxDuration: 120,
   run: async () => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };

@@ -2,6 +2,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { OpenRelayVmClient } from "@/lib/openRelay";
+import { disarmOpenRelayIdleSchedule } from "@/lib/openRelayIdleSchedule";
 import {
   drainOpenRelayH3Worker,
   fetchOpenRelayH3Health,
@@ -18,11 +19,11 @@ function required(name: string, minimumLength = 1): string {
 
 export const openRelayH3IdleReaper = schedules.task({
   id: "openrelay-h3-idle-reaper",
-  cron: "* * * * *",
+  // Armed on demand by the H3 fallback while its VM is in use.
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },
-  run: async () => {
+  run: async (payload) => {
     await bootstrapSecrets(() => undefined, {
       services: ["youtube"],
       required: ["OPENRELAY_API_KEY", "MINIMAX_H3_OPENRELAY_VM_ID", "MINIMAX_H3_OPENRELAY_WORKER_URL", "MINIMAX_H3_OPENRELAY_WORKER_TOKEN"],
@@ -30,13 +31,17 @@ export const openRelayH3IdleReaper = schedules.task({
     const client = new OpenRelayVmClient({ apiKey: required("OPENRELAY_API_KEY", 32) });
     const id = required("MINIMAX_H3_OPENRELAY_VM_ID", 36);
     const vm = await client.getVm(id);
+    if (vm.status !== "running") {
+      if (vm.status === "stopped") await disarmOpenRelayIdleSchedule(payload.scheduleId);
+      return { action: "noop", reason: `vm_${vm.status}` };
+    }
     if (vm.name !== OPENRELAY_H3_VM_NAME || vm.public || vm.gpuCount !== 1 || !vm.gpuModelName.includes("A100") || vm.diskSizeGb !== OPENRELAY_H3_DISK_SIZE_GB) {
       throw new Error("refusing to manage an OpenRelay VM outside the pinned private H3 A100 / 100 GB identity");
     }
-    if (vm.status !== "running") return { action: "noop", reason: `vm_${vm.status}` };
     const health = await fetchOpenRelayH3Health();
     if (health.draining) {
       await client.stopVm(id);
+      await disarmOpenRelayIdleSchedule(payload.scheduleId);
       return { action: "stopped", reason: "previous_drain_recovered", idleSeconds: health.idleSeconds };
     }
     if (health.busy || health.idleSeconds < OPENRELAY_H3_IDLE_SECONDS) {
@@ -44,6 +49,7 @@ export const openRelayH3IdleReaper = schedules.task({
     }
     if (!(await drainOpenRelayH3Worker())) return { action: "noop", reason: "became_busy", idleSeconds: health.idleSeconds };
     await client.stopVm(id);
+    await disarmOpenRelayIdleSchedule(payload.scheduleId);
     return { action: "stopped", reason: "idle_drained", idleSeconds: health.idleSeconds };
   },
 });

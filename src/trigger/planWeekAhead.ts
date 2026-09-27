@@ -15,6 +15,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { armDeliveryRecoveryWatchdog } from "@/lib/deliveryRecoveryWatchdog";
 import { channelPrefix, getObjectBytes, headObjectMetadata, putObject } from "@/lib/storage";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
@@ -350,6 +351,7 @@ export const planWeekAheadTask = task({
   run: async (payload: PlanWeekArgs, { ctx }) => {
     const binding: BulkChildProgressBinding = {};
     try {
+      await armDeliveryRecoveryWatchdog(payload.ownerId);
       return await runPlanWeekAhead(payload, ctx, binding);
     } catch (error) {
       if (payload.bulkOrderFingerprint && binding.convex && binding.ownerId && binding.channelId) {
