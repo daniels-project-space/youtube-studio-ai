@@ -27,6 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -132,6 +133,7 @@ export async function presignUpload(
   key: string,
   opts: PresignOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use overwriteable presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -212,6 +214,10 @@ export async function putObject(
   body: PutBody,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key) && (opts.ifNoneMatch !== "*" || !opts.metadata?.cropSha256 ||
+      !opts.metadata.atlasRuntime || !opts.metadata.atlasPlan)) {
+    throw new Error("immutable atlas crop requires create-only upload and provenance metadata");
+  }
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -264,6 +270,7 @@ export async function putObjectFromFile(
   filePath: string,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use file upload writer");
   const { createReadStream } = await import("node:fs");
   const { stat } = await import("node:fs/promises");
   const file = await stat(filePath);

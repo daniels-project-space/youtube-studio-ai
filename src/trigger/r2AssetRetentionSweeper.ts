@@ -4,7 +4,8 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
-import { ASSET_RETENTION_MS, assertYouTubeStudioR2Bucket, selectExpiredRunObjects,
+import { ASSET_RETENTION_MS, assertYouTubeStudioR2Account, assertYouTubeStudioR2Bucket,
+  hasImmutableAtlasCropProof, selectExpiredRunObjects,
   YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope } from "@/lib/r2AssetRetention";
 import { loadR2RetentionProtectedKeys } from "@/lib/r2RetentionProtectedKeys";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -34,6 +35,8 @@ export async function sweepR2AssetRetention(input: {
     required: ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "STUDIO_CONVEX_JWT_PRIVATE_KEY"],
   });
   assertYouTubeStudioR2Bucket(process.env.R2_BUCKET);
+  assertYouTubeStudioR2Account({ accountId: process.env.R2_ACCOUNT_ID,
+    expectedAccountId: process.env.YOUTUBE_STUDIO_R2_ACCOUNT_ID, endpoint: process.env.R2_ENDPOINT });
   const ownerId = input.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   if (!/^[A-Za-z0-9_-]+$/u.test(ownerId)) throw new Error("R2 retention owner ID is not a safe namespace segment");
   const now = input.now ?? Date.now();
@@ -68,11 +71,11 @@ export async function sweepR2AssetRetention(input: {
         const current = await headObjectMetadata(row.r2Key, YOUTUBE_STUDIO_R2_BUCKET);
         if (!current) {
           await convex.mutation(api.r2Retention.confirmExpiration, { ownerId, expirationId: row.id });
-        } else if (current.etag === row.etag && current.lastModified?.getTime() === row.lastModifiedAt) {
-          await convex.mutation(api.r2Retention.cancelExpiration, { ownerId, expirationId: row.id });
-        } else {
+        } else if (current.etag !== row.etag || current.lastModified?.getTime() !== row.lastModifiedAt) {
           throw new Error("pending R2 expiration key was replaced; manual reconciliation required");
         }
+        // A timed-out delete can still complete later. Keep the intent and its
+        // promotion/lock fences until R2 absence is confirmed.
       }
       if (!pending.isDone && pending.continueCursor === pendingCursor) throw new Error("R2 pending expiration inventory did not advance");
       pendingCursor = pending.isDone ? null : pending.continueCursor;
@@ -82,33 +85,31 @@ export async function sweepR2AssetRetention(input: {
 
   const expire = async (record: ListedR2Object, runId: string, channelId: string,
     videoId: string, kind: "asset" | "final_video" | "footage") => {
+    if (kind !== "asset") return false; // mutable writers have no delete-safe proof
     const head = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
     if (!head || !head.lastModified || !head.etag || head.lastModified.getTime() !== record.lastModified?.getTime() ||
-        !record.etag || head.etag !== record.etag) return false;
+        !record.etag || head.etag !== record.etag || !hasImmutableAtlasCropProof(record.key, head.metadata)) return false;
     const intent = await convex.mutation(api.r2Retention.prepareExpiration, {
       ownerId, runId: runId as Id<"runs">, r2Key: record.key,
       kind, lastModifiedAt: head.lastModified.getTime(), etag: head.etag,
     });
-    if (intent.status === "expired") return false;
+    if (intent.status === "expired" || intent.reused) return false;
     try {
       await convex.mutation(api.r2Retention.authorizeExpirationDelete, {
         ownerId, expirationId: intent.id, ...(await observeRelease(runId, channelId, videoId)),
       });
       const current = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
       if (!current || !current.lastModified || current.lastModified.getTime() !== head.lastModified.getTime() ||
-          !record.etag || !current.etag || current.etag !== record.etag) {
+          !record.etag || !current.etag || current.etag !== record.etag ||
+          !hasImmutableAtlasCropProof(record.key, current.metadata)) {
         throw new Error("R2 object identity changed before deletion");
       }
       await deleteObjects([record.key], YOUTUBE_STUDIO_R2_BUCKET);
       await convex.mutation(api.r2Retention.confirmExpiration, { ownerId, expirationId: intent.id });
       return true;
     } catch (error) {
-      // Only cancel when the same object still exists. If R2 removed it but the
-      // Convex receipt failed, leave the pending row for the next reconciliation.
-      const current = await headObjectMetadata(record.key, YOUTUBE_STUDIO_R2_BUCKET);
-      if (current?.etag === head.etag && current.lastModified?.getTime() === head.lastModified.getTime()) {
-        await convex.mutation(api.r2Retention.cancelExpiration, { ownerId, expirationId: intent.id });
-      }
+      // The provider request may still complete after a timeout. Never clear
+      // this fence based on a HEAD that temporarily still sees the object.
       throw error;
     }
   };

@@ -9,6 +9,7 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import { evaluateRunArtifactRelease, RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
   RUN_ARTIFACT_RETENTION_MS } from "../src/lib/runArtifactRetention";
 import type { Doc } from "./_generated/dataModel";
+import { isImmutableAtlasCropKey } from "../src/lib/r2AssetRetention";
 
 function assertCompletedRelease(row: Doc<"runArtifactRetentions"> | null, run: Doc<"runs">, now: number, age: number): void {
   if (!row || row.ownerId !== run.ownerId || row.channelId !== run.channelId || row.runId !== run._id ||
@@ -120,6 +121,9 @@ export const prepareExpiration = mutation({
     lastModifiedAt: v.number(), etag: v.string() },
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "R2 asset expiration preparation");
+    if (args.kind !== "asset" || !isImmutableAtlasCropKey(args.r2Key)) {
+      throw new Error("R2 expiration requires a proven create-only atlas crop writer; other media are report-only");
+    }
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerId !== args.ownerId) throw new Error("R2 expiration run owner mismatch");
     const channel = await ctx.db.get(run.channelId);
@@ -127,7 +131,7 @@ export const prepareExpiration = mutation({
       throw new Error("R2 expiration channel is missing or locked");
     }
     const now = Date.now();
-    const age = (args.kind === "final_video" ? 180 : 30) * DAY_MS;
+    const age = 30 * DAY_MS;
     const retention = await ctx.db.query("runArtifactRetentions")
       .withIndex("by_run", (q) => q.eq("runId", args.runId)).unique();
     assertCompletedRelease(retention, run, now, age);
@@ -137,10 +141,7 @@ export const prepareExpiration = mutation({
       throw new Error("R2 expiration run or object is not old enough");
     }
     const runPrefix = `owner/${args.ownerId}/channel/${channel.slug}/runs/${args.runId}/`;
-    const footagePrefix = `owner/${args.ownerId}/channel/${channel.slug}/footage/run/${args.runId}/`;
-    if (args.kind === "footage"
-      ? !args.r2Key.startsWith(footagePrefix) || !/^clip_[0-9]+\.mp4$/u.test(args.r2Key.slice(footagePrefix.length))
-      : !args.r2Key.startsWith(runPrefix) || args.r2Key.length <= runPrefix.length) {
+    if (!args.r2Key.startsWith(runPrefix) || args.r2Key.length <= runPrefix.length) {
       throw new Error("R2 expiration key escapes its exact owned run namespace");
     }
     await assertNoReusableReference(ctx, args.ownerId, args.r2Key);
@@ -152,15 +153,15 @@ export const prepareExpiration = mutation({
           prior.kind !== args.kind || prior.lastModifiedAt !== args.lastModifiedAt || prior.etag !== args.etag) {
         throw new Error("R2 expiration replay conflicts with its immutable intent");
       }
-      if (prior.status === "canceled") await ctx.db.patch(prior._id, { status: "pending", preparedAt: now });
-      return { id: prior._id, status: prior.status === "canceled" ? "pending" as const : prior.status };
+      if (prior.status === "canceled") throw new Error("canceled R2 deletion intent requires manual reconciliation");
+      return { id: prior._id, status: prior.status, reused: true };
     }
     const id = await ctx.db.insert("r2AssetExpirations", {
       ownerId: args.ownerId, channelId: run.channelId, runId: args.runId, r2Key: args.r2Key, kind: args.kind,
       etag: args.etag,
       status: "pending", lastModifiedAt: args.lastModifiedAt, preparedAt: now,
     });
-    return { id, status: "pending" as const };
+    return { id, status: "pending" as const, reused: false };
   },
 });
 
@@ -202,17 +203,6 @@ export const authorizeExpirationDelete = mutation({
   },
 });
 
-export const cancelExpiration = mutation({
-  args: { ownerId: v.string(), expirationId: v.id("r2AssetExpirations") },
-  handler: async (ctx, args) => {
-    await requireStudioServiceIdentity(ctx, args.ownerId, "R2 expiration cancellation");
-    const row = await ctx.db.get(args.expirationId);
-    if (!row || row.ownerId !== args.ownerId) throw new Error("R2 expiration receipt owner mismatch");
-    if (row.status === "pending") await ctx.db.patch(row._id, { status: "canceled" });
-    return await ctx.db.get(row._id);
-  },
-});
-
 /** Called only after exact-key R2 deletion acknowledgement or confirmed absence. */
 export const confirmExpiration = mutation({
   args: { ownerId: v.string(), expirationId: v.id("r2AssetExpirations") },
@@ -221,6 +211,7 @@ export const confirmExpiration = mutation({
     const row = await ctx.db.get(args.expirationId);
     if (!row || row.ownerId !== args.ownerId) throw new Error("R2 expiration receipt owner mismatch");
     if (row.status === "expired") return row;
+    if (row.status !== "pending") throw new Error("R2 expiration confirmation requires pending intent");
     const run = await ctx.db.get(row.runId);
     if (!run || run.ownerId !== args.ownerId) throw new Error("R2 expiration run owner changed");
     const assets = await ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", row.runId)).collect();

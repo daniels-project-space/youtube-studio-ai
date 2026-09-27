@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 
-import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key, selectExpiredRunObjects,
+import { assertYouTubeStudioR2Account, assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
+  hasImmutableAtlasCropProof, selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
+import { presignUpload, putObject, putObjectFromFile } from "../storage";
 
 const day = 24 * 60 * 60 * 1_000;
 const now = Date.UTC(2026, 8, 27);
@@ -18,8 +20,9 @@ const scope: RunR2RetentionScope = {
   ],
 };
 const record = (name: string, days: number) => ({ key: `${prefix}${name}`, lastModified: new Date(now - days * day) });
+const cropName = `novita/atlas-crops/shot-123/c01-${"a".repeat(12)}-${"b".repeat(16)}-r1c1.png`;
 const records = [
-  record("clip.mp4", 31), record("new.mp4", 29), record("final.mp4", 181),
+  record("clip.mp4", 31), record(cropName, 31), record("new.mp4", 29), record("final.mp4", 181),
   record("thumbnail.jpg", 300), record("visual-review/frames/f1.jpg", 300),
   record("library/promoted.png", 300), record("thumbnail-checkpoints/source.png", 300),
 ];
@@ -29,7 +32,7 @@ const selected = selectExpiredRunObjects({
   evidenceKeys: new Set([`${prefix}visual-review/frames/f1.jpg`]),
   finalVideoKeys: new Set([`${prefix}final.mp4`]),
 });
-assert.deepEqual(selected.expiredAssets.map((item) => item.key), [`${prefix}clip.mp4`]);
+assert.deepEqual(selected.expiredAssets.map((item) => item.key), [`${prefix}${cropName}`]);
 assert.deepEqual(selected.expiredFinals.map((item) => item.key), [`${prefix}final.mp4`]);
 assert.equal(selectExpiredRunObjects({
   scope: { ...scope, runStatus: "running" }, records, now,
@@ -56,4 +59,20 @@ assert.equal(classifyUnboundR2Key("videocraft/a-dying-art/final_2k.mp4"), "final
 assert.equal(classifyUnboundR2Key("models/wan/weights.safetensors"), "outside");
 assert.equal(assertYouTubeStudioR2Bucket("youtube-studio-ai"), "youtube-studio-ai");
 assert.throws(() => assertYouTubeStudioR2Bucket("travel-film-editor"), /exact YouTube Studio bucket/);
-console.log("R2 asset retention tests passed");
+assert.equal(hasImmutableAtlasCropProof(`${prefix}${cropName}`, {
+  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64),
+}), true);
+assert.equal(hasImmutableAtlasCropProof(`${prefix}final.mp4`, {
+  atlasRuntime: "v1", atlasPlan: "plan", cropSha256: "c".repeat(64),
+}), false);
+assert.throws(() => assertYouTubeStudioR2Account({ accountId: "a".repeat(32) }), /separately pinned/);
+assert.throws(() => assertYouTubeStudioR2Account({ accountId: "a".repeat(32),
+  expectedAccountId: "a".repeat(32), endpoint: "https://other.r2.cloudflarestorage.com" }), /separately pinned/);
+assert.doesNotThrow(() => assertYouTubeStudioR2Account({ accountId: "a".repeat(32),
+  expectedAccountId: "a".repeat(32), endpoint: `https://${"a".repeat(32)}.r2.cloudflarestorage.com` }));
+void (async () => {
+  await assert.rejects(() => presignUpload(`${prefix}${cropName}`), /overwriteable presigned uploads/);
+  await assert.rejects(() => putObject(`${prefix}${cropName}`, "bytes"), /create-only upload/);
+  await assert.rejects(() => putObjectFromFile(`${prefix}${cropName}`, "/unused"), /file upload writer/);
+  console.log("R2 asset retention tests passed");
+})().catch((error: unknown) => { throw error; });

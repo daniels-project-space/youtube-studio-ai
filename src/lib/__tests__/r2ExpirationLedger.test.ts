@@ -7,7 +7,8 @@ const now = Date.now();
 const releaseAt = now - 200 * day;
 const runId = "run-fixture";
 const channelId = "channel-fixture";
-const key = `owner/alice/channel/show/runs/${runId}/final.mp4`;
+const key = `owner/alice/channel/show/runs/${runId}/novita/atlas-crops/shot-123/c01-${"a".repeat(12)}-${"b".repeat(16)}-r1c1.png`;
+const finalKey = `owner/alice/channel/show/runs/${runId}/final.mp4`;
 const rows = new Map<string, Record<string, unknown>>([
   [runId, { _id: runId, ownerId: "alice", channelId, status: "ok", finishedAt: now - 200 * day,
     youtubeVideoId: "abcdefghijk", videoAssetId: "asset-fixture",
@@ -20,7 +21,7 @@ const rows = new Map<string, Record<string, unknown>>([
     releaseVideoId: "abcdefghijk", releaseYouTubeChannelId: "UC-fixture" }],
   ["connector-fixture", { _id: "connector-fixture", ownerId: "alice", channelId,
     status: "active", tokenVersion: 1, ytChannelId: "UC-fixture" }],
-  ["asset-fixture", { _id: "asset-fixture", ownerId: "alice", channelId, runId, kind: "video", r2Key: key }],
+  ["asset-fixture", { _id: "asset-fixture", ownerId: "alice", channelId, runId, kind: "image", r2Key: key }],
 ]);
 const ctx = {
   auth: { getUserIdentity: async () => ({ role: "service", owner_id: "alice", subject: "service:youtube-studio-ai" }) },
@@ -40,7 +41,7 @@ const ctx = {
       withIndex: (_name: string, _fn: unknown) => ({
         unique: async () => table === "r2AssetExpirations" ? rows.get("expiration-fixture") ?? null
           : table === "runArtifactRetentions" ? rows.get("retention-fixture") ?? null : null,
-        collect: async () => table === "assets" ? [...rows.values()].filter((row) => row.kind === "video") : [],
+        collect: async () => table === "assets" ? [...rows.values()].filter((row) => row._id === "asset-fixture") : [],
         take: async () => [],
       }),
     }),
@@ -52,13 +53,18 @@ const authorize = (authorizeExpirationDelete as unknown as {
   _handler: (ctx: unknown, args: unknown) => Promise<unknown> })._handler;
 
 async function main() {
+  await assert.rejects(() => prepare(ctx, { ownerId: "alice", runId, r2Key: finalKey,
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' }), /proven create-only/);
   rows.get("retention-fixture")!.status = "pending";
   await assert.rejects(() => prepare(ctx, { ownerId: "alice", runId, r2Key: key,
-    kind: "final_video", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' }), /completed/);
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' }), /completed/);
   rows.get("retention-fixture")!.status = "completed";
   const prepared = await prepare(ctx, { ownerId: "alice", runId, r2Key: key,
-    kind: "final_video", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' });
-  assert.deepEqual(prepared, { id: "expiration-fixture", status: "pending" });
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' });
+  assert.deepEqual(prepared, { id: "expiration-fixture", status: "pending", reused: false });
+  assert.deepEqual(await prepare(ctx, { ownerId: "alice", runId, r2Key: key,
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' }),
+    { id: "expiration-fixture", status: "pending", reused: true });
   assert.ok(rows.has("asset-fixture"), "preparation cannot remove playback metadata before R2 deletion");
   const authority = { ownerId: "alice", expirationId: prepared.id, connectorId: "connector-fixture",
     connectorVersion: 1, observedAt: Date.now(),
@@ -66,6 +72,11 @@ async function main() {
       publishedAt: new Date(releaseAt).toISOString(), privacyStatus: "private", uploadStatus: "processed" } };
   await assert.rejects(() => authorize(ctx, authority), /not currently public/);
   await authorize(ctx, { ...authority, observation: { ...authority.observation, privacyStatus: "public" } });
+  rows.get("expiration-fixture")!.status = "canceled";
+  await assert.rejects(() => confirm(ctx, { ownerId: "alice", expirationId: prepared.id }), /pending intent/);
+  await assert.rejects(() => prepare(ctx, { ownerId: "alice", runId, r2Key: key,
+    kind: "asset", lastModifiedAt: now - 181 * day, etag: '"fixture-etag"' }), /manual reconciliation/);
+  rows.get("expiration-fixture")!.status = "pending";
   const confirmed = await confirm(ctx, { ownerId: "alice", expirationId: prepared.id }) as { status: string };
   assert.equal(confirmed.status, "expired");
   assert.equal(rows.has("asset-fixture"), false);
