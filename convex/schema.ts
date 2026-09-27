@@ -2221,6 +2221,27 @@ export default defineSchema({
     topicProviderStartedBy: v.optional(v.string()),
     topicUsageCheckpointKey: v.optional(v.string()),
     itemIds: v.optional(v.array(v.id("contentPlan"))),
+    // Written once at readiness; future render consumers read this exact
+    // ordered preparation ledger without consulting mutable contentPlan rows.
+    renderHandoff: v.optional(v.object({
+      version: v.literal("plan-batch-handoff/v1"),
+      ownerId: v.string(),
+      channelId: v.string(),
+      channelSlug: v.string(),
+      batchId: v.string(),
+      requestKey: v.string(),
+      items: v.array(v.object({
+        itemId: v.string(),
+        itemKey: v.string(),
+        preparation: v.object({
+          version: v.literal("plan-week-preparation/inputs-v1"),
+          manifestKey: v.string(),
+          manifestSha256: v.string(),
+        }),
+        preparationFrozenAt: v.number(),
+      })),
+      sha256: v.string(),
+    })),
     accountingComplete: v.boolean(),
     budgetExceeded: v.boolean(),
     error: v.optional(v.string()),
