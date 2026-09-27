@@ -192,8 +192,11 @@ jobs:
           # that targets the documented empty production deployment.
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx --no-install convex dev --once --typecheck=disable
+      - name: Hold Trigger production deployment
+        if: steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED != 'true'
+        run: echo 'Trigger production deployment held; set Production variable STUDIO_TRIGGER_DEPLOY_ENABLED=true only after Studio is ready.' >> "$GITHUB_STEP_SUMMARY"
       - name: Deploy Trigger production tasks
-        if: steps.release_policy.outputs.deploy == 'true'
+        if: steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED == 'true'
         env:
           TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
         # Runtime/provider values stay in Trigger's protected Production
