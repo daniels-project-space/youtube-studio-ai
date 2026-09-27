@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import test from "node:test";
 
 import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
   immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, permanentReusableMediaDigest,
-  permanentReusableMediaKey, selectExpiredRunObjects,
+  permanentReusableMediaKey, releasedFinalVideoIdentity, releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS,
+  selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
 import { presignUpload, putObject, putObjectFromFile } from "../storage";
@@ -12,6 +14,18 @@ import { presignUpload, putObject, putObjectFromFile } from "../storage";
 const day = 24 * 60 * 60 * 1_000;
 const now = Date.UTC(2026, 8, 27);
 const prefix = "owner/daniel/channel/show/runs/run-1/";
+const releasedAt = now - 2 * day;
+const releasedKey = releasedFinalVideoKey("owner/daniel/channel/show/", "run-1", releasedAt, "f".repeat(64));
+assert.deepEqual(releasedFinalVideoIdentity(releasedKey), { releaseAt: releasedAt, sha256: "f".repeat(64) });
+assert.equal(releasedFinalVideoIdentity(`${prefix}final.mp4`), null);
+test("released finals reject overwriteable writers and mismatched expiry", async () => {
+  await assert.rejects(() => presignUpload(releasedKey), /released final videos cannot use presigned uploads/);
+  await assert.rejects(() => putObject(releasedKey, "bytes"), /released final video requires its create-only file writer/);
+  await assert.rejects(() => putObjectFromFile(releasedKey, "/missing", {
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-final/v1", retentionFinalSha256: "f".repeat(64),
+      retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + FINAL_VIDEO_RETENTION_MS - 1) },
+  }), /expiry-bound/);
+});
 const scope: RunR2RetentionScope = {
   runId: "run-1", keyPrefix: "owner/daniel/channel/show/", runStatus: "ok",
   retentionStatus: "completed", releaseAt: now - 200 * day, retainUntil: now - 170 * day,

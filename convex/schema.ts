@@ -1442,6 +1442,10 @@ export default defineSchema({
     releaseObservationAt: v.optional(v.number()),
     releaseVideoId: v.optional(v.string()),
     releaseYouTubeChannelId: v.optional(v.string()),
+    releasedFinalVideo: v.optional(v.object({
+      sourceKey: v.string(), r2Key: v.string(), sha256: v.string(),
+      byteLength: v.number(), releaseAt: v.number(), expiresAt: v.number(),
+    })),
     status: v.union(
       v.literal("awaiting_release"),
       v.literal("pending"),

@@ -2,6 +2,22 @@ export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
+/** Release copies are separate from the certificate's immutable source master. */
+export function releasedFinalVideoKey(keyPrefix: string, runId: string, releaseAt: number, sha256: string): string {
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
+      !Number.isSafeInteger(releaseAt) || releaseAt < 0 || !/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new Error("released final video needs an owned run, release time, and SHA-256");
+  }
+  return `${keyPrefix}runs/${runId}/released-final/v1/${releaseAt}-${sha256}.mp4`;
+}
+
+export function releasedFinalVideoIdentity(key: string): { releaseAt: number; sha256: string } | null {
+  const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-final\/v1\/([0-9]+)-([a-f0-9]{64})\.mp4$/u.exec(key);
+  if (!match) return null;
+  const releaseAt = Number(match[1]);
+  return Number.isSafeInteger(releaseAt) && releaseAt >= 0 ? { releaseAt, sha256: match[2] } : null;
+}
+
 /** Reusable bytes live outside run expiry scopes and bind their full content digest. */
 export function permanentReusableMediaKey(keyPrefix: string, sha256: string): string {
   if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[a-f0-9]{64}$/u.test(sha256)) {

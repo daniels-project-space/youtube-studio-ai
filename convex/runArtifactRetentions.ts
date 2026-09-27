@@ -16,6 +16,7 @@ import {
   validateRunArtifactKeepNames,
   validateRunArtifactRetentionObjectKeys,
 } from "../src/lib/runArtifactRetention";
+import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "../src/lib/r2AssetRetention";
 
 const MAX_CLEANUP_ATTEMPTS = 5;
 
@@ -153,6 +154,8 @@ export const listReleaseChecks = query({
         retentionId: row._id,
         channelId: row.channelId,
         runId: row.runId,
+        keyPrefix: row.keyPrefix,
+        certificateKey: row.certificateKey,
         videoId: run?.ownerId === args.ownerId && run.channelId === row.channelId
           ? run.youtubeVideoId : undefined,
       };
@@ -171,6 +174,10 @@ export const recordReleaseObservations = mutation({
       connectorVersion: v.optional(v.number()),
       error: v.optional(v.string()),
       observation: releaseObservation,
+      finalVideo: v.optional(v.object({
+        sourceKey: v.string(), r2Key: v.string(), sha256: v.string(),
+        byteLength: v.number(), releaseAt: v.number(), expiresAt: v.number(),
+      })),
     })),
   },
   returns: v.any(),
@@ -203,6 +210,18 @@ export const recordReleaseObservations = mutation({
         observation: item.error ? null : item.observation,
       });
       if (decision.released) {
+        const finalVideo = item.finalVideo;
+        if (!finalVideo || finalVideo.releaseAt !== decision.releaseAt ||
+            finalVideo.expiresAt !== decision.releaseAt + FINAL_VIDEO_RETENTION_MS ||
+            !Number.isSafeInteger(finalVideo.byteLength) || finalVideo.byteLength < 1 ||
+            !finalVideo.sourceKey.startsWith(`${row.keyPrefix}runs/${row.runId}/`) ||
+            finalVideo.sourceKey === finalVideo.r2Key ||
+            finalVideo.r2Key !== releasedFinalVideoKey(row.keyPrefix, String(row.runId), decision.releaseAt, finalVideo.sha256)) {
+          throw new Error("release observation requires an exact immutable final video copy receipt");
+        }
+        if (row.releasedFinalVideo && JSON.stringify(row.releasedFinalVideo) !== JSON.stringify(finalVideo)) {
+          throw new Error("release final video copy changed after its first receipt");
+        }
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,
@@ -211,6 +230,7 @@ export const recordReleaseObservations = mutation({
           releaseObservationAt: args.observedAt,
           releaseVideoId: item.observation!.videoId,
           releaseYouTubeChannelId: item.observation!.channelId,
+          releasedFinalVideo: finalVideo,
           nextReleaseCheckAt: Math.max(decision.retainUntil, args.observedAt),
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: undefined, updatedAt: args.observedAt,

@@ -16,6 +16,8 @@ import {
 } from "@/lib/runArtifactRetention";
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { getAccessToken } from "@/lib/youtube";
+import { evaluateRunArtifactRelease } from "@/lib/runArtifactRetention";
+import { copyReleasedFinalVideo, type ReleasedFinalVideoReceipt } from "@/lib/releasedFinalVideo";
 import { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 export { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 import {
@@ -31,6 +33,8 @@ export interface RunArtifactReleaseCheck {
   channelId: Id<"channels">;
   runId: Id<"runs">;
   videoId?: string;
+  keyPrefix?: string;
+  certificateKey?: string;
 }
 
 export interface RunArtifactObservedRelease {
@@ -39,6 +43,7 @@ export interface RunArtifactObservedRelease {
   connectorVersion?: number;
   error?: string;
   observation: RunArtifactReleaseObservation | null;
+  finalVideo?: ReleasedFinalVideoReceipt;
 }
 
 /** Shared production/test coordinator: group by connector, persist every outcome. */
@@ -47,8 +52,10 @@ export async function reconcileRunArtifactReleaseChecks(args: {
   observeChannel: (channelId: Id<"channels">, videoIds: string[]) => Promise<{
     connectorId: Id<"youtubeAuth">;
     connectorVersion: number;
+    ytChannelId?: string;
     videos: Map<string, RunArtifactReleaseObservation>;
   }>;
+  copyFinal?: (check: RunArtifactReleaseCheck, releaseAt: number) => Promise<ReleasedFinalVideoReceipt>;
   record: (observations: RunArtifactObservedRelease[], observedAt: number) => Promise<{
     confirmed: number; deferred: number;
   }>;
@@ -67,11 +74,26 @@ export async function reconcileRunArtifactReleaseChecks(args: {
     try {
       const videoIds = [...new Set(checks.flatMap((check) => check.videoId ? [check.videoId] : []))];
       const result = videoIds.length ? await args.observeChannel(channelId, videoIds) : undefined;
-      observations = checks.map((check) => ({
-        retentionId: check.retentionId,
-        ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
-        ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
-        observation: check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null,
+      observations = await Promise.all(checks.map(async (check) => {
+        const observation = check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null;
+        const base = {
+          retentionId: check.retentionId,
+          ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
+          ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
+          observation,
+        };
+        if (!args.copyFinal || !observation) return base;
+        const decision = evaluateRunArtifactRelease({
+          expectedVideoId: check.videoId ?? "", expectedChannelId: result?.ytChannelId ?? "",
+          observedAt: (args.now ?? Date.now)(), observation,
+        });
+        if (!decision.released) return base;
+        try {
+          return { ...base, finalVideo: await args.copyFinal(check, decision.releaseAt) };
+        } catch (error) {
+          return { ...base, observation: null,
+            error: `Release copy unavailable: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000) };
+        }
       }));
     } catch (error) {
       observations = checks.map((check) => ({
@@ -141,8 +163,14 @@ export async function sweepDueRunArtifactRetentions(input?: {
       return {
         connectorId: connector.connectorId,
         connectorVersion: connector.tokenVersion,
+        ytChannelId: connector.ytChannelId,
         videos: await fetchRunArtifactReleaseObservations({ accessToken, videoIds }),
       };
+    },
+    copyFinal: async (check, releaseAt) => {
+      if (!check.keyPrefix || !check.certificateKey) throw new Error("retention check lacks the source certificate");
+      return copyReleasedFinalVideo({ keyPrefix: check.keyPrefix, runId: String(check.runId),
+        certificateKey: check.certificateKey, releaseAt });
     },
     record: (observations, observedAt) => convex.mutation(api.runArtifactRetentions.recordReleaseObservations, {
       ownerId, observedAt, observations,

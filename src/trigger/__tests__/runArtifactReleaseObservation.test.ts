@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
 import {
   fetchRunArtifactReleaseObservations,
   reconcileRunArtifactReleaseChecks,
@@ -102,4 +103,36 @@ test("failed observation persistence aborts the caller before cleanup can begin"
     observeChannel: async () => ({ connectorId, connectorVersion: 1, videos: new Map([[videoId, publicVideo]]) }),
     record: async () => { throw new Error("durable write unavailable"); },
   }), /durable write unavailable/);
+});
+
+test("a confirmed release records the exact final copy; copy failure defers release", async () => {
+  const releaseAt = Date.parse(publicVideo.publishedAt);
+  const keyPrefix = "owner/o/channel/c/";
+  const check: RunArtifactReleaseCheck = {
+    retentionId: "ret-copy" as Id<"runArtifactRetentions">,
+    runId: "run-copy" as Id<"runs">, channelId, videoId,
+    keyPrefix, certificateKey: `${keyPrefix}runs/run-copy/release.json`,
+  };
+  const receipt = {
+    sourceKey: `${keyPrefix}runs/run-copy/final.mp4`,
+    r2Key: releasedFinalVideoKey(keyPrefix, "run-copy", releaseAt, "a".repeat(64)),
+    sha256: "a".repeat(64), byteLength: 42, releaseAt,
+    expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS,
+  };
+  const recorded: RunArtifactObservedRelease[][] = [];
+  const common = {
+    checks: [check], now: () => releaseAt + 1000,
+    observeChannel: async () => ({ connectorId, connectorVersion: 1, ytChannelId: "UC-test",
+      videos: new Map([[videoId, publicVideo]]) }),
+    record: async (rows: RunArtifactObservedRelease[]) => {
+      recorded.push(rows); return { confirmed: rows[0].observation ? 1 : 0, deferred: rows[0].observation ? 0 : 1 };
+    },
+  };
+  await reconcileRunArtifactReleaseChecks({ ...common, copyFinal: async (_check, at) => {
+    assert.equal(at, releaseAt); return receipt;
+  } });
+  assert.deepEqual(recorded[0][0].finalVideo, receipt);
+  await reconcileRunArtifactReleaseChecks({ ...common, copyFinal: async () => { throw new Error("R2 unavailable"); } });
+  assert.equal(recorded[1][0].observation, null);
+  assert.match(recorded[1][0].error!, /R2 unavailable/);
 });

@@ -7,6 +7,7 @@ import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
   RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
+import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "lte"; value: unknown };
@@ -70,6 +71,14 @@ const videoId = "abcdefghijk";
 const ytChannelId = "UC-channel";
 const keyPrefix = `owner/${ownerId}/channel/a/`;
 const certificateKey = `${keyPrefix}runs/run-a/release.json`;
+const finalSha256 = "a".repeat(64);
+const actualRelease = uploadedAt + 86_400_000;
+const finalVideo = {
+  sourceKey: `${keyPrefix}runs/run-a/final.mp4`,
+  r2Key: releasedFinalVideoKey(keyPrefix, "run-a", actualRelease, finalSha256),
+  sha256: finalSha256, byteLength: 1234,
+  releaseAt: actualRelease, expiresAt: actualRelease + FINAL_VIDEO_RETENTION_MS,
+};
 
 function fixture() {
   const db = new MemoryDb();
@@ -87,11 +96,21 @@ function fixture() {
   const scheduleArgs = { ownerId, channelId: "channel-a", runId: "run-a", keyPrefix,
     certificateKey, additionalCertificateKeys: [], keepNames: ["final.mp4"],
     uploadedAt, releaseMode: "private_draft" };
-  const observe = (retentionId: string, observedAt: number, patch: Record<string, unknown> = {}) => invoke(recordReleaseObservations, {
-    ownerId, observedAt, observations: [{ retentionId, connectorId: "connector-a", connectorVersion: 4,
+  const observe = async (retentionId: string, observedAt: number, patch: Record<string, unknown> = {}) => {
+    const row = await db.get(retentionId);
+    const runId = String(row?.runId ?? "run-a");
+    const releaseAt = typeof patch.publishedAt === "string" ? Date.parse(patch.publishedAt) : actualRelease;
+    const receipt = { ...finalVideo,
+      sourceKey: `${keyPrefix}runs/${runId}/final.mp4`,
+      r2Key: releasedFinalVideoKey(keyPrefix, runId, releaseAt, finalSha256),
+      releaseAt, expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS,
+    };
+    return invoke(recordReleaseObservations, {
+    ownerId, observedAt, observations: [{ retentionId, connectorId: "connector-a", connectorVersion: 4, finalVideo: receipt,
       observation: { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
         publishedAt: new Date(uploadedAt + 86_400_000).toISOString(), ...patch } }],
   });
+  };
   const claim = (now: number) => invoke<Row | null>(claimDue, { ownerId, now, leaseToken: "a".repeat(64) });
   return { db, ctx, invoke, scheduleArgs, observe, claim };
 }

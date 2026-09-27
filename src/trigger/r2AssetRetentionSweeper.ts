@@ -141,18 +141,22 @@ export async function sweepR2AssetRetention(input: {
       }
       try {
         const evidenceKeys = new Set<string>();
+        const certifiedSourceKeys = new Set<string>();
         const finalVideoKeys = new Set<string>(scope.assets
           .filter((asset) => asset.kind === "video" || asset.kind === "derived_short")
           .map((asset) => asset.r2Key));
         for (const certificateKey of [scope.certificateKey, ...scope.additionalCertificateKeys]) {
           const certificate = parseFinalMasterReleaseCertificateBytes(await getObjectBytes(certificateKey, YOUTUBE_STUDIO_R2_BUCKET));
           finalVideoKeys.add(certificate.finalMaster.r2Key);
+          certifiedSourceKeys.add(certificate.finalMaster.r2Key);
           for (const key of retainedFinalMasterReleaseObjectKeys({
             keyPrefix: scope.keyPrefix, runId: scope.runId, certificateKey, certificate,
           })) evidenceKeys.add(key);
         }
         for (const key of scope.retainedReleaseEvidence) evidenceKeys.add(key);
-        for (const key of finalVideoKeys) evidenceKeys.delete(key);
+        // Certificates still bind their original master. A release copy does
+        // not make that source disposable while QA and provenance read it.
+        for (const key of finalVideoKeys) if (!certifiedSourceKeys.has(key)) evidenceKeys.delete(key);
         const prefix = `${scope.keyPrefix}runs/${scope.runId}/`;
         if ([...finalVideoKeys, ...evidenceKeys].some((key) => !key.startsWith(prefix))) {
           throw new Error("R2 retention protection key escaped the run namespace");

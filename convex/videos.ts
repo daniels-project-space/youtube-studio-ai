@@ -102,6 +102,18 @@ async function recordedMasterKey(
   return expiration && expiration.status !== "canceled" ? null : key;
 }
 
+/** Use the release copy for playback while keeping the certificate source for QA and thumbnails. */
+async function releasedPlaybackKey(ctx: QueryCtx, runId: Id<"runs">, sourceKey: string | null | undefined): Promise<string | null> {
+  if (!sourceKey) return null;
+  const retention = await ctx.db.query("runArtifactRetentions")
+    .withIndex("by_run", (q) => q.eq("runId", runId)).unique();
+  const copy = retention?.releasedFinalVideo;
+  if (!copy || copy.sourceKey !== sourceKey || copy.releaseAt !== retention?.releaseAt) return sourceKey;
+  const expiration = await ctx.db.query("r2AssetExpirations")
+    .withIndex("by_run_key", (q) => q.eq("runId", runId).eq("r2Key", copy.r2Key)).unique();
+  return expiration && expiration.status !== "canceled" ? null : copy.r2Key;
+}
+
 type LibraryChannelIdentity = { family?: unknown; contentLane?: unknown } | null;
 
 /**
@@ -200,14 +212,15 @@ async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
   const thumbAsset = assets.find((asset) => asset.kind === "thumbnail");
-  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const sourceVideoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = await releasedPlaybackKey(ctx, run._id, sourceVideoKey);
   const thumbnail = await currentLibraryThumbnail(ctx, {
     ownerId: run.ownerId,
     runId: run._id,
     channelId: run.channelId,
     channel,
     sourceThumbnail: thumbAsset,
-    sourceVideoKey: videoKey,
+    sourceVideoKey,
   });
   return {
     assets,
@@ -387,7 +400,8 @@ async function projectLibraryVideo(
   const videoAsset = sealedMasterKey
     ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
-  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = await releasedPlaybackKey(ctx, run._id,
+    sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null);
 
   const isFinished =
     Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
