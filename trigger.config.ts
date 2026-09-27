@@ -176,6 +176,7 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
  *    resolving to the hardcoded default inside workers.
  */
 const FORWARDED_ENV = [
+  "YOUTUBE_STUDIO_R2_ACCOUNT_ID",
   "INTERNAL_QUERY_SECRET",
   "STUDIO_CONVEX_JWT_PRIVATE_KEY",
   "STUDIO_INTERNAL_API_TOKEN",

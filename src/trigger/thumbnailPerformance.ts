@@ -122,7 +122,7 @@ export async function pullThumbnailPerformance(args: ThumbnailPerformanceInput):
  */
 export const thumbnailPerformanceSchedule = schedules.task({
   id: "thumbnail-performance-pull",
-  cron: "0 4 * * 1",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   run: async () => {
     // The channel roster and its run -> youtubeVideoId join live in Convex and
     // are supplied by the caller in production; this schedule is the seam that

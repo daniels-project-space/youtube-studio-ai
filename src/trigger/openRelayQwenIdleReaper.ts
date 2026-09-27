@@ -32,9 +32,7 @@ function isPinnedQwenVm(vm: {
 
 export const openRelayQwenIdleReaper = schedules.task({
   id: "openrelay-qwen-idle-reaper",
-  // A one-minute check means the externally observed 300-second idle ceiling
-  // has at most one additional minute of provider billing before shutdown.
-  cron: "* * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },

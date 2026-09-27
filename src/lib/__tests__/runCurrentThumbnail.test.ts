@@ -82,6 +82,7 @@ function fixture(music = false) {
         async collect() { return read(); },
         async take(limit: number) { return read().slice(0, limit); },
         async first() { return read(true)[0] ?? null; },
+        async unique() { return read(true)[0] ?? null; },
         async *[Symbol.asyncIterator]() { yield* read(); },
       };
       return query;
@@ -326,7 +327,7 @@ test("combined media retains the sealed master contract, including absent asset 
     const media = await f.media();
     assert.equal(media.currentThumbnail.videoKey, sealedKey, "certificate master wins even when registry video is missing");
     assert.deepEqual(media.assets, f.originalAssets());
-    assert.equal(f.reads.length, 5, "sealed media adds exactly the existing QA/artifact lineage reads");
+    assert.equal(f.reads.length, 6, "sealed media includes one exact-key expiration fence read");
     assert.deepEqual(media.currentThumbnail, thumbnailFields(await f.detail()));
     assert.equal((await f.library()).find((row) => row._id === sourceRunId)?.videoKey, sealedKey);
   }

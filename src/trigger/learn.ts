@@ -1037,7 +1037,7 @@ async function refresh(ownerId: string, log: Logger) {
 
 export const learningRefreshSchedule = schedules.task({
   id: "learning-refresh",
-  cron: "0 7 * * *", // daily, after metrics settle
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

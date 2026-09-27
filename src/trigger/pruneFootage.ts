@@ -8,20 +8,17 @@
  * already clears completed runs; footage from failed/abandoned runs lingers and grows
  * (~8 GB reclaimed manually on 2026-07-08). This task keeps it swept.
  *
- * SAFETY: matches ONLY keys containing `/footage/run/` whose filename starts with
- * `clip_` or `pre_overlay`, older than AGE_DAYS. Gated OFF by default — set env
- * `ENABLE_FOOTAGE_PRUNE=true` in the Trigger project to activate. It is
- * operator-triggered rather than scheduled, so disabled cleanup never spends a
- * daily Trigger run.
+ * Legacy operator task is inventory-only. Its fixed-name clip writers can
+ * replace bytes, so key-only R2 deletion cannot be made safe by an age check.
  */
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getR2Client, getBucket } from "../lib/storage";
 
 const AGE_DAYS = 14; // conservative — footage older than this is definitively stale
 const OWNER_PREFIX = "owner/";
 
-async function pruneFootage(dryRun: boolean) {
+async function pruneFootage() {
   const s3 = getR2Client();
   const Bucket = getBucket();
   const cutoff = Date.now() - AGE_DAYS * 86_400_000;
@@ -49,22 +46,12 @@ async function pruneFootage(dryRun: boolean) {
   } while (token);
 
   logger.info(
-    `prune-footage: scanned=${scanned} match=${toDelete.length} bytes=${bytes} dryRun=${dryRun}`,
+    `prune-footage inventory: scanned=${scanned} match=${toDelete.length} bytes=${bytes}`,
   );
-  if (!dryRun) {
-    for (let i = 0; i < toDelete.length; i += 1000) {
-      await s3.send(
-        new DeleteObjectsCommand({
-          Bucket,
-          Delete: { Objects: toDelete.slice(i, i + 1000), Quiet: true },
-        }),
-      );
-    }
-  }
-  return { scanned, matched: toDelete.length, deleted: dryRun ? 0 : toDelete.length, bytes };
+  return { scanned, matched: toDelete.length, deleted: 0, bytes };
 }
 
-// Run deliberately after enabling cleanup; disabled cleanup creates no runs.
+// Operator-triggered inventory only; enabling it cannot bypass retention fences.
 export const pruneFootageSchedule = task({
   id: "prune-footage",
   run: async () => {
@@ -72,6 +59,6 @@ export const pruneFootageSchedule = task({
       logger.info("prune-footage: disabled (set ENABLE_FOOTAGE_PRUNE=true to activate)");
       return { skipped: true as const };
     }
-    return pruneFootage(false);
+    return pruneFootage();
   },
 });

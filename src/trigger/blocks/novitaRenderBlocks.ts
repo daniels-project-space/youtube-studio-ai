@@ -93,7 +93,8 @@ import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnv
 import { sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { getObjectBytes } from "@/lib/storage";
+import { getObjectBytes, getObjectIntegrity, headObjectMetadata, putObject } from "@/lib/storage";
+import { writeReservedImmutableR2Object } from "@/lib/reservedImmutableR2Write";
 import type { PlanWeekPreparedImages } from "@/lib/planWeekPreparation";
 import {
   createStoryboardAtlasRenderPlan,
@@ -1339,6 +1340,23 @@ export const novitaRenderImages: Block = {
           plan: atlasPlan,
           result,
           keyPrefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
+          writeCrop: async (key, bytes, metadata) => {
+            await writeReservedImmutableR2Object({
+              ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId, r2Key: key,
+              write: async () => {
+                await putObject(key, bytes, { contentType: "image/png", metadata, ifNoneMatch: "*" });
+              },
+              verifyStoredBytes: async () => {
+                const [integrity, head] = await Promise.all([getObjectIntegrity(key), headObjectMetadata(key)]);
+                const stored = Object.fromEntries(Object.entries(head?.metadata ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
+                if (integrity.sha256 !== metadata.cropSha256 || integrity.byteLength !== bytes.byteLength ||
+                    stored.cropsha256 !== metadata.cropSha256 || stored.retentionwriter !== "atlas-crop/v1" ||
+                    stored.atlasplan !== metadata.atlasPlan || stored.atlasruntime !== metadata.atlasRuntime) {
+                  throw new Error("immutable atlas crop upload conflict has different stored bytes or provenance");
+                }
+              },
+            });
+          },
         })
       : result.candidates.map((candidate) => ({
           shotId: candidate.shotId,

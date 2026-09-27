@@ -195,6 +195,10 @@ const ownerContext = {
   db: {
     normalizeId: () => "channels:owner-module-lock",
     get: async () => ownerChannel,
+    query: (table: string) => {
+      assert.ok(["r2AssetExpirations", "runArtifactRetentions"].includes(table));
+      return { withIndex: () => ({ first: async () => null }) };
+    },
     patch: async (_id: unknown, patch: Record<string, unknown>) => {
       ownerChannel = { ...ownerChannel, ...patch };
     },

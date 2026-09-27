@@ -1,5 +1,5 @@
 export const RUN_ARTIFACT_RETENTION_VERSION = "run-artifact-retention/v1" as const;
-export const RUN_ARTIFACT_RETENTION_MS = 14 * 24 * 60 * 60 * 1_000;
+export const RUN_ARTIFACT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const RUN_ARTIFACT_RETENTION_LEASE_MS = 90 * 60 * 1_000;
 export const RUN_ARTIFACT_RELEASE_CHECK_MS = 6 * 60 * 60 * 1_000;
 export const RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS = 5 * 60 * 1_000;

@@ -216,7 +216,7 @@ export async function runTitleCtrSwap(
  */
 export const titleCtrSwapSchedule = schedules.task({
   id: "title-ctr-swap",
-  cron: "0 10 * * 1", // Monday 10:00, an hour after the weekend metrics settle
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md. // Monday 10:00, an hour after the weekend metrics settle
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;
