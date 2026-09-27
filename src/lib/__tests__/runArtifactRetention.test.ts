@@ -82,7 +82,7 @@ test("only exact public processed observations start the clock at real publicati
   assert.equal(evaluateRunArtifactRelease({ ...args, observation: null }).released, false);
 });
 
-test("a due cleanup requires a fresh observation and an exact fourteen-day clock", () => {
+test("a due cleanup requires a fresh observation and an exact thirty-day clock", () => {
   const now = 1_800_000_000_000;
   const evidence = {
     now, releaseAt: now - RUN_ARTIFACT_RETENTION_MS,

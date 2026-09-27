@@ -4,6 +4,7 @@ import { schedules } from "@trigger.dev/sdk";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { parseFinalMasterReleaseCertificateBytes } from "@/lib/finalMasterReleaseCertificate";
+import { loadR2RetentionProtectedKeys } from "@/lib/r2RetentionProtectedKeys";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -168,6 +169,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
   const convex = convexClient();
+  let protectedKeysPromise: Promise<Set<string>> | undefined;
   const releaseChecks = await convex.query(api.runArtifactRetentions.listReleaseChecks, {
     ownerId, now: input?.now ?? Date.now(),
   }) as RunArtifactReleaseCheck[];
@@ -236,6 +238,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
           certificate: parseFinalMasterReleaseCertificateBytes(await getObjectBytes(certificateKey)),
         })),
       );
+      const protectedKeys = await (protectedKeysPromise ??= loadR2RetentionProtectedKeys(convex, ownerId));
       const pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
         keyPrefix: retention.keyPrefix,
         runId: String(retention.runId),
@@ -243,6 +246,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
         certificate,
         additionalCertificates,
         keepNames: retention.keepNames,
+        keepKeys: [...protectedKeys].filter((key) => key.startsWith(`${retention.keyPrefix}runs/${retention.runId}/`)),
         getObjectBytes,
         getObjectIntegrity,
         listObjects,

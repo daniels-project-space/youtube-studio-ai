@@ -360,7 +360,7 @@ async function retentionWorkerDeletionOutcomes() {
       }
       const operations: string[] = [];
       const events: string[] = [];
-      const publishedAt = new Date(Date.now() - 15 * 86_400_000).toISOString();
+      const publishedAt = new Date(Date.now() - 31 * 86_400_000).toISOString();
       const retention: Record<string, unknown> = {
         _id: "retention-fixture", ownerId: "alice", channelId: "channel-fixture", runId,
         keyPrefix, certificateKey: f.certificateKey, additionalCertificateKeys: [], keepNames: ["final.mp4"],
@@ -430,6 +430,7 @@ async function retentionWorkerDeletionOutcomes() {
       const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
         const name = getFunctionName(reference);
         if (name === "runArtifactRetentions:listReleaseChecks") return [];
+        if (name === "r2Retention:protectedKeysPage") return { page: [], isDone: true, continueCursor: "" };
         assert.equal(name, "youtubeAuth:getForChannel");
         return connector;
       });

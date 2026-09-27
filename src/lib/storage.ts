@@ -232,6 +232,7 @@ export async function headObjectMetadata(
   contentLength?: number;
   contentType?: string;
   etag?: string;
+  lastModified?: Date;
   metadata: Record<string, string>;
 } | null> {
   try {
@@ -243,6 +244,7 @@ export async function headObjectMetadata(
       ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
       ...(response.ContentType ? { contentType: response.ContentType } : {}),
       ...(response.ETag ? { etag: response.ETag } : {}),
+      ...(response.LastModified ? { lastModified: response.LastModified } : {}),
       metadata: response.Metadata ?? {},
     };
   } catch (error) {
@@ -346,6 +348,29 @@ export async function listObjects(prefix: string, bucket?: string): Promise<stri
     ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
   } while (ContinuationToken);
   return keys;
+}
+
+/** Paginated R2 inventory with server recorded age; missing timestamps fail closed. */
+export async function listObjectRecords(prefix: string, bucket?: string): Promise<Array<{
+  key: string; lastModified?: Date; etag?: string; size?: number;
+}>> {
+  const records: Array<{ key: string; lastModified?: Date; etag?: string; size?: number }> = [];
+  let ContinuationToken: string | undefined;
+  do {
+    const page = await getR2Client().send(new ListObjectsV2Command({
+      Bucket: getBucket(bucket), Prefix: prefix, ContinuationToken,
+    }));
+    for (const item of page.Contents ?? []) {
+      if (!item.Key) continue;
+      records.push({ key: item.Key, lastModified: item.LastModified,
+        etag: item.ETag, size: item.Size });
+    }
+    if (page.IsTruncated && !page.NextContinuationToken) {
+      throw new Error("R2 listing was truncated without a continuation token");
+    }
+    ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return records;
 }
 
 /** An incomplete delete may already have removed some objects; never call it preserved. */

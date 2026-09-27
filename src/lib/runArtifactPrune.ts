@@ -20,6 +20,8 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
     certificate: FinalMasterReleaseCertificate;
   }[];
   keepNames: readonly string[];
+  /** Exact reusable-library keys, including superseded revisions. */
+  keepKeys?: readonly string[];
   getObjectBytes: (key: string) => Promise<Uint8Array>;
   getObjectIntegrity: (key: string) => Promise<{ sha256: string; byteLength: number }>;
   listObjects: (prefix: string) => Promise<string[]>;
@@ -57,9 +59,13 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
     );
     retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
     const prefix = `${args.keyPrefix}runs/${args.runId}/`;
+    if (args.keepKeys?.some((key) => !key.startsWith(prefix))) {
+      throw new Error("reusable library key escapes the scoped run namespace");
+    }
     const keep = new Set([
       ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
       ...retainedReleaseEvidence,
+      ...(args.keepKeys ?? []),
     ]);
     const all = await args.listObjects(prefix);
     if (all.some((key) => typeof key !== "string" || !key.startsWith(prefix) || key === prefix) ||
