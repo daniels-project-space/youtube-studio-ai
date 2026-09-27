@@ -32,6 +32,14 @@ function client(): StudioConvexHttpClient {
 export async function sweepR2AssetRetention(input: {
   ownerId?: string; now?: number; dryRun?: boolean;
 } = {}): Promise<{ scannedScopes: number; expiredAssets: number; expiredFinals: number; expiredFootage: number; deleted: number; skippedScopes: number }> {
+  // This independent deployment binding is deliberately not hydrated from the
+  // app vault. Until it is set after the bucket writer audit, the scheduled
+  // task exits before fetching credentials, querying Convex, or touching R2.
+  if (!process.env.YOUTUBE_STUDIO_R2_ACCOUNT_ID?.trim()) {
+    console.log("[r2-retention] skipped: YouTube Studio R2 account binding is not configured");
+    return { scannedScopes: 0, expiredAssets: 0, expiredFinals: 0,
+      expiredFootage: 0, deleted: 0, skippedScopes: 0 };
+  }
   await bootstrapSecrets((message) => console.log(`[r2-retention] ${message}`), {
     services: ["cloudflare", "youtube"],
     required: ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "STUDIO_CONVEX_JWT_PRIVATE_KEY"],

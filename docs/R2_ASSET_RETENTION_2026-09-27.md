@@ -31,8 +31,10 @@ configured `YOUTUBE_STUDIO_R2_ACCOUNT_ID` matching `R2_ACCOUNT_ID`. An explicit
 `R2_ENDPOINT` must be the canonical endpoint for that account. The code also
 pins the SHA-256 of the account ID verified by a read-only Cloudflare Get Bucket
 request using the app vault's separate API token on 27 September 2026. The
-deployment binding is still absent from current app configuration, so the task
-fails closed before listing or deleting until that binding is supplied.
+deployment binding is still absent from current app configuration, so the daily
+task logs a skip and returns before vault access, Convex queries, or R2 calls.
+With a binding present, the exact account and bucket assertions still fail
+closed before listing or deleting if their identities differ.
 No bucket-wide lifecycle rule is
 used because model/runtime weights and reusable assets share this bucket.
 
