@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
-import { studioScheduleCron } from "@/lib/studioScheduleControl";
+import { studioRetentionMaintenanceCron, studioScheduleCron } from "@/lib/studioScheduleControl";
 
 test("the paused fleet registers no declarative Trigger schedules", () => {
   const previous = process.env.STUDIO_SCHEDULES_ENABLED;
@@ -15,6 +15,39 @@ test("the paused fleet registers no declarative Trigger schedules", () => {
   } finally {
     if (previous === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
     else process.env.STUDIO_SCHEDULES_ENABLED = previous;
+  }
+});
+
+test("retention maintenance has an independent fail-closed schedule switch", () => {
+  const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
+  const previousMaintenance = process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+  try {
+    delete process.env.STUDIO_SCHEDULES_ENABLED;
+    delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+    assert.equal(studioScheduleCron("0 * * * *"), undefined);
+    assert.equal(studioRetentionMaintenanceCron("17 3 * * *"), undefined);
+
+    process.env.STUDIO_SCHEDULES_ENABLED = "true";
+    assert.equal(studioRetentionMaintenanceCron("17 3 * * *"), undefined,
+      "enabling the render schedule fleet must not enable retention maintenance");
+
+    delete process.env.STUDIO_SCHEDULES_ENABLED;
+    process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = "true";
+    assert.equal(studioScheduleCron("0 * * * *"), undefined,
+      "enabling retention maintenance must not enable render schedules");
+    assert.equal(studioRetentionMaintenanceCron("17 3 * * *"), "17 3 * * *");
+
+    const config = readFileSync("trigger.config.ts", "utf8");
+    assert.match(config, /FORWARDED_ENV = \[([\s\S]*?)"STUDIO_RETENTION_MAINTENANCE_ENABLED"/,
+      "Trigger deployment must explicitly forward the independent opt-in");
+    const secretForwarding = /SECRET_FORWARDED_ENV = new Set\(\[([\s\S]*?)\]\)/.exec(config)?.[1] ?? "";
+    assert.doesNotMatch(secretForwarding, /STUDIO_RETENTION_MAINTENANCE_ENABLED/,
+      "the boolean schedule opt-in is not a secret");
+  } finally {
+    if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
+    else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;
+    if (previousMaintenance === undefined) delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+    else process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = previousMaintenance;
   }
 });
 

@@ -318,19 +318,29 @@ export const recordReleaseObservations = mutation({
           nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : Math.max(decision.retainUntil, args.observedAt),
           nextFinalCopyCheckAt: finalCopy?.status === "finished" ||
             decision.releaseAt + FINAL_VIDEO_RETENTION_MS <= args.observedAt
-            ? args.observedAt + 24 * 60 * 60_000 : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
+            ? undefined : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: copyOnly ? row.lastError : undefined, updatedAt: args.observedAt,
         });
         confirmed++;
       } else {
+        const priorFinalCopy = copyOnly && row.finalCopyReleaseAt !== undefined
+          ? await ctx.db.query("releasedFinalMasters")
+            .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", row.finalCopyReleaseAt!)).unique()
+          : null;
+        const finalCopyClockStopped = copyOnly && (
+          priorFinalCopy?.status === "finished" ||
+          (row.finalCopyReleaseAt !== undefined &&
+            row.finalCopyReleaseAt + FINAL_VIDEO_RETENTION_MS <= args.observedAt)
+        );
         await ctx.db.patch(row._id, {
           status: copyOnly ? row.status : "awaiting_release",
           // Preserve historical release timestamps for audit, but remove the
           // fresh observation which is mandatory for any cleanup claim.
           releaseObservationAt: copyOnly ? row.releaseObservationAt : undefined,
           finalCopyObservationAt: undefined,
-          nextFinalCopyCheckAt: copyOnly ? args.observedAt + 24 * 60 * 60_000 : undefined,
+          nextFinalCopyCheckAt: copyOnly && !finalCopyClockStopped
+            ? args.observedAt + 24 * 60 * 60_000 : undefined,
           nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: copyOnly ? row.lastError : (item.error ?? decision.reason).slice(0, 1_000),

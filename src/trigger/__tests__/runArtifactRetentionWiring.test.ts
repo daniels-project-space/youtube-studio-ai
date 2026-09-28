@@ -7,6 +7,7 @@ const schema = source("convex/schema.ts");
 const ledger = source("convex/runArtifactRetentions.ts");
 const upload = source("src/trigger/blocks/lofiBlocks.ts");
 const sweeper = source("src/trigger/runArtifactRetentionSweeper.ts");
+const triggerConfig = source("trigger.config.ts");
 
 assert.match(
   schema,
@@ -49,5 +50,28 @@ assert.match(
   "the worker must reload certificates, verify evidence, reauthorize release, and only then seal the ledger",
 );
 assert.doesNotMatch(sweeper, /deleteObjects|assets\.pruneRun/, "the hourly worker cannot delete mutable R2 keys or prune live asset rows");
+assert.match(
+  sweeper,
+  /id: "studio-retention-maintenance"[\s\S]*?cron: studioRetentionMaintenanceCron\("17 3 \* \* \*"\)[\s\S]*?run: async \(\) => runStudioRetentionMaintenance\(\)/,
+  "the dedicated schedule is gated independently and calls only maintenance work",
+);
+const maintenanceOnly = sweeper.slice(
+  sweeper.indexOf("async function observeAndCopyReleasedFinalMasters"),
+  sweeper.indexOf("async function runStudioRetentionMaintenance"),
+);
+assert.match(maintenanceOnly, /listReleaseChecks[\s\S]*?listFinalCopyChecks[\s\S]*?recordReleaseObservations[\s\S]*?createVerifiedReleasedFinalCopy/);
+assert.doesNotMatch(maintenanceOnly, /claimDue|runArtifactRetentions\.complete|tasks\.trigger|run-pipeline|dispatch-publish-intent|shared-delivery-recovery|publishIntents/,
+  "maintenance observation/copy work must never claim cleanup rows or dispatch render/publish tasks");
+assert.match(
+  sweeper,
+  /id: "run-artifact-retention-sweeper"[\s\S]*?cron: studioScheduleCron\("17 3 \* \* \*"\)/,
+  "the existing cleanup sweeper remains behind the global schedule gate",
+);
+assert.match(sweeper, /if \(!studioRetentionMaintenanceEnabled\(\)\) \{[\s\S]*?observeAndCopyReleasedFinalMasters[\s\S]*?\n  \}/,
+  "the legacy cleanup sweep delegates only its observation/copy phase to dedicated maintenance");
+assert.match(sweeper, /afterRecord: async \(\) => \{[\s\S]*?args\.cleanupHandoff\(\)[\s\S]*?\n    \},[\s\S]*?const copies = await copyReleasedFinalMasters/,
+  "the dedicated controller hands each channel's fresh observation to cleanup before final-copy work");
+assert.match(triggerConfig, /"STUDIO_SCHEDULES_ENABLED"[\s\S]*?"STUDIO_RETENTION_MAINTENANCE_ENABLED"/,
+  "the worker receives the global schedule gate used by the maintenance cleanup handoff");
 
 console.log("run artifact retention wiring tests passed");
