@@ -12,6 +12,7 @@ import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
+  MiniMaxH3OpeningMotionRejectedRenderError,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderedVideo,
@@ -27,6 +28,9 @@ import {
   materializePreparedFootage,
   miniMaxH3WeeklyJobReceiptKey,
   readPreparedFootageManifest,
+  reconcileWeeklyRejectedJobs,
+  reconcileWeeklyOrderRejections,
+  persistWeeklyRejectedJob,
   renderedResultsFromPersistedReceipt,
   type PersistedWeeklyJobReceipt,
   type PersistedWeeklyReceipt,
@@ -99,6 +103,10 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) throw new Error("weekly H3 Novita fallback requires the signed owner and Salad hold start");
     await bootstrapSecrets(() => undefined, { services: ["cloudflare", "novita"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN"] });
     const sourceRequestKeys = await readFrozenPacket(payload);
+    const rejected = await reconcileWeeklyOrderRejections({
+      receiptKey: payload.receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+    });
+    if (rejected.length > 0) return { state: "repair_required" as const, repairDisposition: "owner_review_new_order_required" as const, rejected };
     const prior = await readAggregate(payload.receiptKey, payload.ownerId);
     if (prior) {
       const priorProvider = prior.schema === "minimax-h3-weekly-batch/v2" ? prior.fallback?.provider : "salad";
@@ -116,7 +124,24 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
     }));
     const pendingIndexes = results.flatMap((item, index) => item === undefined ? [index] : []);
     const pendingJobs = pendingIndexes.map((index) => payload.jobs[index]!);
-    await renderMiniMaxH3WeeklyBatch(pendingJobs, { provider: "novita", execution: "weekly-fallback", onJobComplete: async (pendingIndex, rendered) => { const originalIndex = pendingIndexes[pendingIndex]; if (originalIndex === undefined) throw new Error("weekly H3 Novita fallback completion index is invalid"); await persistFallbackClaim({ receiptKey: payload.receiptKey, orderKey: payload.orderKey, result: rendered }); results[originalIndex] = rendered; } });
+    try {
+      await renderMiniMaxH3WeeklyBatch(pendingJobs, { provider: "novita", execution: "weekly-fallback",
+        onJobRejected: async (pendingIndex, error) => {
+          const originalIndex = pendingIndexes[pendingIndex];
+          if (originalIndex === undefined) throw new Error("weekly H3 Novita fallback rejection index is invalid");
+          await persistWeeklyRejectedJob({ receiptKey: payload.receiptKey, orderKey: payload.orderKey,
+            expectedRequestKey: requestKeys[originalIndex]!, expectedOutputKey: payload.jobs[originalIndex]!.output.r2Key,
+            error, provider: "novita" });
+        },
+        onJobComplete: async (pendingIndex, rendered) => { const originalIndex = pendingIndexes[pendingIndex]; if (originalIndex === undefined) throw new Error("weekly H3 Novita fallback completion index is invalid"); await persistFallbackClaim({ receiptKey: payload.receiptKey, orderKey: payload.orderKey, result: rendered }); results[originalIndex] = rendered; } });
+    } catch (error) {
+      if (error instanceof MiniMaxH3OpeningMotionRejectedRenderError) {
+        const rejected = await reconcileWeeklyRejectedJobs({ receiptKey: payload.receiptKey, orderKey: payload.orderKey,
+          requestKeys, outputKeys: payload.jobs.map((job) => job.output.r2Key), provider: "novita" });
+        if (rejected.length > 0) return { state: "repair_required" as const, repairDisposition: "owner_review_new_order_required" as const, rejected };
+      }
+      throw error;
+    }
     if (!results.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) throw new Error("weekly H3 Novita fallback completed without every shot result");
     const receipt = createMiniMaxH3WeeklyFallbackReceipt({ orderKey: payload.orderKey, sourceRequestKeys, result: results, waitedMs: Math.max(0, Date.now() - payload.capacityHoldStartedAt) });
     const body = canonicalJson(receipt);

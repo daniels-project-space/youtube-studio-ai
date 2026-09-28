@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { runs } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes } from "@/lib/storage";
-import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
+import { miniMaxH3RequestKey, miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
+import { assertMiniMaxH3WeeklyBatchArgs, reconcileWeeklyOrderRejections, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
 import {
   isMiniMaxH3CapacityHoldError,
   summarizeMiniMaxH3Receipt,
@@ -71,8 +72,9 @@ export async function GET(request: Request) {
     const run = await runs.retrieve(runId);
     let receipt: MiniMaxH3ReceiptSummary | undefined;
     let requestPacketState: RequestPacketState = "not-applicable";
-    let receiptState: "pending" | "held" | "complete" | "reconciliation_required" = "pending";
+    let receiptState: "pending" | "held" | "complete" | "reconciliation_required" | "repair_required" = "pending";
     let paidRequestStarted: boolean | undefined;
+    let rejected: Awaited<ReturnType<typeof reconcileWeeklyOrderRejections>> = [];
     try {
       const bytes = await getObjectBytes(receiptKey);
       const receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
@@ -107,10 +109,28 @@ export async function GET(request: Request) {
       try {
         const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
         requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
+        if (requestPacketState === "frozen") {
+          const frozen = packet as PersistedWeeklyRequestPacket;
+          const payload = assertMiniMaxH3WeeklyBatchArgs({
+            ownerId: actor.ownerId, orderKey: frozen.orderKey, receiptKey, jobs: frozen.jobs,
+          });
+          const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({ ...job, provider: "salad", execution: "weekly-batch" }));
+          if (requestKeys.some((key, index) => key !== frozen.requestKeys[index])) {
+            requestPacketState = "invalid";
+          } else {
+            rejected = await reconcileWeeklyOrderRejections({
+              receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+            });
+            if (rejected.length > 0) receiptState = "repair_required";
+          }
+        }
       } catch (packetError) {
-        if (!notFound(packetError)) requestPacketState = "invalid";
+        if (!notFound(packetError)) {
+          requestPacketState = "invalid";
+          receiptState = "reconciliation_required";
+        }
       }
-      if (["COMPLETED", "FAILED", "CANCELED"].includes(String(run.status).toUpperCase())) {
+      if (receiptState !== "repair_required" && ["COMPLETED", "FAILED", "CANCELED"].includes(String(run.status).toUpperCase())) {
         if (requestPacketState === "frozen" && isMiniMaxH3CapacityHoldError(run.error)) {
           receiptState = "held";
           paidRequestStarted = false;
@@ -126,6 +146,7 @@ export async function GET(request: Request) {
       state: receiptState,
       requestPacketState,
       receipt: receipt ?? null,
+      ...(rejected.length > 0 ? { rejected, repairDisposition: "owner_review_new_order_required" as const } : {}),
       ...(paidRequestStarted === undefined ? {} : { paidRequestStarted }),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

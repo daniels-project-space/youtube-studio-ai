@@ -16,6 +16,7 @@ import {
   MINIMAX_H3_OPENRELAY_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
+  MiniMaxH3OpeningMotionRejectedRenderError,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderedVideo,
@@ -31,6 +32,9 @@ import {
   materializePreparedFootage,
   miniMaxH3WeeklyJobReceiptKey,
   readPreparedFootageManifest,
+  reconcileWeeklyRejectedJobs,
+  reconcileWeeklyOrderRejections,
+  persistWeeklyRejectedJob,
   renderedResultsFromPersistedReceipt,
   type PersistedWeeklyJobReceipt,
   type PersistedWeeklyReceipt,
@@ -148,6 +152,10 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
       ],
     });
     const sourceRequestKeys = await readFrozenPacket(payload);
+    const rejected = await reconcileWeeklyOrderRejections({
+      receiptKey: payload.receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+    });
+    if (rejected.length > 0) return { state: "repair_required" as const, repairDisposition: "owner_review_new_order_required" as const, rejected };
     const prior = await readAggregate(payload.receiptKey, payload.ownerId);
     if (prior) {
       const priorProvider = prior.schema === "minimax-h3-weekly-batch/v2" ? prior.fallback?.provider : "salad";
@@ -193,16 +201,30 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
       await armOpenRelayIdleSchedule("openrelay-h3-idle-reaper", vmId);
       await ensureOpenRelayH3Ready();
     }
-    await renderMiniMaxH3WeeklyBatch(pendingJobs, {
+    try { await renderMiniMaxH3WeeklyBatch(pendingJobs, {
       provider: "openrelay",
       execution: "weekly-fallback",
+      onJobRejected: async (pendingIndex, error) => {
+        const originalIndex = pendingIndexes[pendingIndex];
+        if (originalIndex === undefined) throw new Error("weekly H3 OpenRelay fallback rejection index is invalid");
+        await persistWeeklyRejectedJob({ receiptKey: payload.receiptKey, orderKey: payload.orderKey,
+          expectedRequestKey: requestKeys[originalIndex]!, expectedOutputKey: payload.jobs[originalIndex]!.output.r2Key,
+          error, provider: "openrelay" });
+      },
       onJobComplete: async (pendingIndex, rendered) => {
         const originalIndex = pendingIndexes[pendingIndex];
         if (originalIndex === undefined) throw new Error("weekly H3 OpenRelay fallback completion index is invalid");
         await persistFallbackClaim({ receiptKey: payload.receiptKey, orderKey: payload.orderKey, result: rendered });
         results[originalIndex] = rendered;
       },
-    });
+    }); } catch (error) {
+      if (error instanceof MiniMaxH3OpeningMotionRejectedRenderError) {
+        const rejected = await reconcileWeeklyRejectedJobs({ receiptKey: payload.receiptKey, orderKey: payload.orderKey,
+          requestKeys, outputKeys: payload.jobs.map((job) => job.output.r2Key), provider: "openrelay" });
+        if (rejected.length > 0) return { state: "repair_required" as const, repairDisposition: "owner_review_new_order_required" as const, rejected };
+      }
+      throw error;
+    }
     if (!results.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) {
       throw new Error("weekly H3 OpenRelay fallback completed without every shot result");
     }

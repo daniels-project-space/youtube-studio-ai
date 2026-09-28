@@ -19,6 +19,7 @@ import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
 import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
 import {
   assertMiniMaxH3WeeklyBatchArgs,
+  reconcileWeeklyOrderRejections,
   queueMiniMaxH3WeeklyCapacityRetry,
   type MiniMaxH3WeeklyBatchArgs,
 } from "./minimaxH3WeeklyBatch";
@@ -77,6 +78,10 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
       return { state: "reconciled" as const, receiptKey: payload.receiptKey };
     }
     await assertFrozenPacket(payload);
+    const rejected = await reconcileWeeklyOrderRejections({
+      receiptKey: payload.receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+    });
+    if (rejected.length > 0) return { state: "repair_required" as const, repairDisposition: "owner_review_new_order_required" as const, rejected };
     const now = Date.now();
     const deadline = payload.capacityHoldStartedAt + MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS;
     if (now >= deadline) {
