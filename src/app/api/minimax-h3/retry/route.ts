@@ -9,7 +9,7 @@ import {
   miniMaxH3WeeklyRequestPacketKey,
 } from "@/lib/minimaxH3";
 import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
-import { assertMiniMaxH3WeeklyBatchArgs, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
+import { assertMiniMaxH3WeeklyBatchArgs, miniMaxH3WeeklyOrderTag, reconcileWeeklyOrderRejections, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
 
 export const runtime = "nodejs";
 
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
 
     let payload;
     try {
-      payload = assertMiniMaxH3WeeklyBatchArgs({ ...packet, ownerId: actor.ownerId });
+      payload = assertMiniMaxH3WeeklyBatchArgs({ ...packet, receiptKey, ownerId: actor.ownerId });
     } catch {
       return NextResponse.json({ ok: false, error: "frozen H3 request packet failed validation" }, { status: 409 });
     }
@@ -124,6 +124,12 @@ export async function POST(request: Request) {
     if (requestKeys.length !== packet.requestKeys.length || requestKeys.some((key, index) => key !== packet.requestKeys[index])) {
       return NextResponse.json({ ok: false, error: "frozen H3 request identities do not match the packet" }, { status: 409 });
     }
+    const rejected = await reconcileWeeklyOrderRejections({
+      receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+    });
+    if (rejected.length > 0) {
+      return NextResponse.json({ ok: false, state: "repair_required", repairDisposition: "owner_review_new_order_required", rejected }, { status: 409 });
+    }
 
     const idempotencyKey = await idempotencyKeys.create(
       `minimax-h3-weekly-capacity-retry:${actor.ownerId}:${runId}`,
@@ -132,6 +138,7 @@ export async function POST(request: Request) {
     const handle = await tasks.trigger("minimax-h3-weekly-batch", payload, {
       concurrencyKey: `minimax-h3-weekly:${actor.ownerId}`,
       idempotencyKey,
+      tags: [miniMaxH3WeeklyOrderTag({ ownerId: actor.ownerId, receiptKey, orderKey: payload.orderKey })],
     });
     return NextResponse.json({
       ok: true,

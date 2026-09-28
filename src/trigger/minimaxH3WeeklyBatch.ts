@@ -8,6 +8,9 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_RUNTIME_ID,
+  MINIMAX_H3_NOVITA_CAPACITY_MODE,
+  MINIMAX_H3_OPENRELAY_CAPACITY_MODE,
+  miniMaxH3GpuModel,
   miniMaxH3RuntimeId,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_WORKER_CONTRACT,
@@ -16,6 +19,7 @@ import {
   assertMiniMaxH3SaladCapacity,
   miniMaxH3WeeklyRequestPacketKey,
   miniMaxH3RequestKey,
+  MiniMaxH3OpeningMotionRejectedRenderError,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderedVideo,
   type MiniMaxH3Receipt,
@@ -61,6 +65,15 @@ export interface MiniMaxH3WeeklyBatchArgs {
     manifestSha256: string;
     sceneIds: string[];
   };
+}
+
+/** Shared Trigger tag for every run that can touch one frozen weekly order. */
+export function miniMaxH3WeeklyOrderTag(args: { ownerId: string; receiptKey: string; orderKey: string }): string {
+  const ownerId = safeIdentifier(args.ownerId, "owner id");
+  const receiptKey = scopedReceiptKey(args.receiptKey);
+  const orderKey = safeIdentifier(args.orderKey, "order key");
+  if (!receiptKey.startsWith(`owner/${ownerId}/`)) throw new Error("weekly MiniMax H3 order tag is outside the owner scope");
+  return `h3-weekly-${sha256Hex(canonicalJson({ ownerId, receiptKey, orderKey }))}`;
 }
 
 function safeIdentifier(value: unknown, label: string): string {
@@ -136,9 +149,18 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
     throw new Error("weekly MiniMax H3 payload must contain 1..60 jobs");
   }
   const jobs = payload.jobs as MiniMaxH3WeeklyBatchArgs["jobs"];
+  if (typeof payload.ownerId === "string" &&
+      (typeof payload.receiptKey !== "string" || !payload.receiptKey.startsWith(`owner/${payload.ownerId}/`))) {
+    throw new Error("weekly MiniMax H3 receipt key is outside the owner scope");
+  }
   const requestKeys = new Set<string>();
   const outputKeys = new Set<string>();
   for (const [index, job] of jobs.entries()) {
+    if (typeof payload.ownerId === "string" &&
+        (!job?.firstFrame?.r2Key?.startsWith(`owner/${payload.ownerId}/`) ||
+         !job?.output?.r2Key?.startsWith(`owner/${payload.ownerId}/`))) {
+      throw new Error(`weekly MiniMax H3 job ${index + 1} is outside the owner scope`);
+    }
     if (!job || typeof job !== "object" || Array.isArray(job) || !job.output || typeof job.output !== "object" ||
         typeof job.output.r2Key !== "string" || !job.output.r2Key.startsWith("owner/") ||
         job.output.r2Key.length <= "owner/".length || job.output.r2Key.includes("\\") ||
@@ -232,6 +254,43 @@ export type PersistedWeeklyJobReceipt = {
   providerReceipt: MiniMaxH3Receipt;
   createdAt: number;
 };
+
+export const MINIMAX_H3_WEEKLY_REJECTED_JOB_SCHEMA = "minimax-h3-weekly-rejected-job/v1" as const;
+export type PersistedWeeklyRejectedJob = {
+  schema: typeof MINIMAX_H3_WEEKLY_REJECTED_JOB_SCHEMA;
+  orderKey: string;
+  requestKey: string;
+  providerReceipt: MiniMaxH3Receipt;
+  openingMotionQa: MiniMaxH3OpeningMotionRejectedRenderError["evidence"];
+  createdAt: number;
+};
+
+export function miniMaxH3WeeklyRejectedJobKey(receiptKey: string, requestKey: string): string {
+  return miniMaxH3WeeklyJobReceiptKey(receiptKey, requestKey).replace(/\.job-([a-f0-9]{64})\.json$/u, ".rejected-$1.json");
+}
+
+export function createMiniMaxH3WeeklyRejectedJob(args: {
+  orderKey: string;
+  error: MiniMaxH3OpeningMotionRejectedRenderError;
+  createdAt?: number;
+}): PersistedWeeklyRejectedJob {
+  const createdAt = args.createdAt ?? Date.now();
+  if (!Number.isSafeInteger(createdAt) || createdAt <= 0 ||
+      args.error.requestKey !== args.error.receipt.requestKey ||
+      args.error.outputBytes.byteLength !== args.error.receipt.output.byteLength ||
+      sha256BytesHex(args.error.outputBytes) !== args.error.receipt.output.contentSha256 ||
+      !["fail", "unavailable"].includes(args.error.evidence.verdict)) {
+    throw new Error("weekly MiniMax H3 rejected job evidence is invalid");
+  }
+  return {
+    schema: MINIMAX_H3_WEEKLY_REJECTED_JOB_SCHEMA,
+    orderKey: args.orderKey,
+    requestKey: args.error.requestKey!,
+    providerReceipt: args.error.receipt,
+    openingMotionQa: args.error.evidence,
+    createdAt,
+  };
+}
 
 export function createMiniMaxH3WeeklyJobReceipt(args: {
   orderKey: string;
@@ -372,6 +431,7 @@ export async function queueMiniMaxH3WeeklyCapacityRetry(args: {
     delay: new Date(nextCheckAt),
     concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
     idempotencyKey,
+    tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
   });
   return { triggerRunId: handle.id, nextCheckAt, capacityHoldStartedAt };
 }
@@ -499,6 +559,135 @@ async function readPersistedReceipt(
 
 function isNotFound(error: unknown): boolean {
   return objectNotFound(error);
+}
+
+/** Read-only, exact-byte reconciliation. A rejected take is never reusable footage. */
+export async function readPersistedRejectedJob(args: {
+  receiptKey: string;
+  orderKey: string;
+  requestKey: string;
+  outputKey: string;
+  provider?: "salad" | "novita" | "openrelay";
+}): Promise<PersistedWeeklyRejectedJob | null> {
+  const key = miniMaxH3WeeklyRejectedJobKey(args.receiptKey, args.requestKey);
+  let bytes: Uint8Array;
+  try { bytes = await getObjectBytes(key); } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+  let parsed: PersistedWeeklyRejectedJob;
+  try { parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as PersistedWeeklyRejectedJob; }
+  catch { throw new Error("weekly MiniMax H3 rejected job claim is not valid JSON"); }
+  const receipt = parsed?.providerReceipt;
+  const evidence = parsed?.openingMotionQa;
+  const provider = args.provider ?? "salad";
+  const expectedCapacityMode = provider === "salad" ? ["medium", "high"] :
+    provider === "novita" ? [MINIMAX_H3_NOVITA_CAPACITY_MODE] : [MINIMAX_H3_OPENRELAY_CAPACITY_MODE];
+  if (parsed?.schema !== MINIMAX_H3_WEEKLY_REJECTED_JOB_SCHEMA ||
+      parsed.orderKey !== args.orderKey || parsed.requestKey !== args.requestKey ||
+      !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0 ||
+      receipt?.schema !== MINIMAX_H3_WORKER_CONTRACT || receipt.requestKey !== args.requestKey ||
+      receipt.execution !== (provider === "salad" ? "weekly-batch" : "weekly-fallback") || receipt.runtime?.provider !== provider ||
+      receipt.runtime.gpuModel !== miniMaxH3GpuModel(provider) || receipt.runtime.runtimeId !== miniMaxH3RuntimeId(provider) ||
+      receipt.runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
+      !expectedCapacityMode.includes(receipt.runtime.capacityMode) ||
+      canonicalJson(receipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE) ||
+      receipt.output?.r2Key !== args.outputKey ||
+      !/^[a-f0-9]{64}$/u.test(receipt.output?.contentSha256 ?? "") ||
+      !Number.isSafeInteger(receipt.output?.byteLength) || receipt.output.byteLength < 1_024 ||
+      !Number.isFinite(receipt.runtime.costUsd) || receipt.runtime.costUsd < 0 ||
+      evidence?.contract !== "minimax-h3-opening-motion-qa/v1" ||
+      (evidence.verdict !== "fail" && evidence.verdict !== "unavailable") ||
+      !Number.isFinite(evidence.openingFrozenHoldSec) ||
+      !Number.isFinite(evidence.maxOpeningFrozenHoldSec)) {
+    throw new Error("weekly MiniMax H3 rejected job claim is bound to a different request or invalid");
+  }
+  const output = await getObjectBytes(args.outputKey);
+  if (output.byteLength !== receipt.output.byteLength || sha256BytesHex(output) !== receipt.output.contentSha256) {
+    throw new Error("weekly MiniMax H3 rejected job claim does not match its retained R2 output");
+  }
+  return parsed;
+}
+
+export async function persistWeeklyRejectedJob(args: {
+  receiptKey: string;
+  orderKey: string;
+  expectedRequestKey: string;
+  expectedOutputKey: string;
+  error: MiniMaxH3OpeningMotionRejectedRenderError;
+  provider?: "salad" | "novita" | "openrelay";
+}): Promise<void> {
+  if (args.error.requestKey !== args.expectedRequestKey ||
+      args.error.receipt.output.r2Key !== args.expectedOutputKey) {
+    throw new Error("weekly MiniMax H3 rejected job identity changed");
+  }
+  const claim = createMiniMaxH3WeeklyRejectedJob(args);
+  const body = canonicalJson(claim);
+  const key = miniMaxH3WeeklyRejectedJobKey(args.receiptKey, args.expectedRequestKey);
+  try {
+    await putObject(key, body, {
+      contentType: "application/json",
+      metadata: { "h3-rejected-job": MINIMAX_H3_WEEKLY_REJECTED_JOB_SCHEMA, sha256: sha256Hex(body) },
+      ifNoneMatch: "*",
+    });
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+  }
+  const persisted = await readPersistedRejectedJob({
+    receiptKey: args.receiptKey,
+    orderKey: args.orderKey,
+    requestKey: args.expectedRequestKey,
+    outputKey: args.expectedOutputKey,
+    provider: args.provider,
+  });
+  if (!persisted || canonicalJson(persisted.providerReceipt) !== canonicalJson(claim.providerReceipt) ||
+      canonicalJson(persisted.openingMotionQa) !== canonicalJson(claim.openingMotionQa)) {
+    throw new Error("weekly MiniMax H3 rejected job claim changed after create-only write");
+  }
+}
+
+export async function reconcileWeeklyRejectedJobs(args: {
+  receiptKey: string;
+  orderKey: string;
+  requestKeys: readonly string[];
+  outputKeys: readonly string[];
+  provider?: "salad" | "novita" | "openrelay";
+}): Promise<Array<{ index: number; requestKey: string; claimKey: string; outputKey: string; costUsd: number; openingMotionQa: PersistedWeeklyRejectedJob["openingMotionQa"] }>> {
+  if (args.requestKeys.length !== args.outputKeys.length) throw new Error("weekly MiniMax H3 rejection lineage length changed");
+  const rejected = [] as Array<{ index: number; requestKey: string; claimKey: string; outputKey: string; costUsd: number; openingMotionQa: PersistedWeeklyRejectedJob["openingMotionQa"] }>;
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(8, args.requestKeys.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= args.requestKeys.length) return;
+      const requestKey = args.requestKeys[index]!;
+      const outputKey = args.outputKeys[index]!;
+      const claim = await readPersistedRejectedJob({ receiptKey: args.receiptKey, orderKey: args.orderKey, requestKey, outputKey, provider: args.provider });
+      if (claim) rejected.push({
+        index, requestKey, claimKey: miniMaxH3WeeklyRejectedJobKey(args.receiptKey, requestKey),
+        outputKey, costUsd: claim.providerReceipt.runtime.costUsd, openingMotionQa: claim.openingMotionQa,
+      });
+    }
+  }));
+  return rejected.sort((a, b) => a.index - b.index);
+}
+
+/** All existing weekly paid routes share the same frozen order and output keys. */
+export async function reconcileWeeklyOrderRejections(args: {
+  receiptKey: string;
+  orderKey: string;
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+}) {
+  const outputKeys = args.jobs.map((job) => job.output.r2Key);
+  const providers = ["salad", "novita", "openrelay"] as const;
+  const groups = await Promise.all(providers.map(async (provider) => {
+    const execution = provider === "salad" ? "weekly-batch" : "weekly-fallback";
+    const requestKeys = args.jobs.map((job) => miniMaxH3RequestKey({ ...job, provider, execution }));
+    const claims = await reconcileWeeklyRejectedJobs({ ...args, requestKeys, outputKeys, provider });
+    return claims.map((claim) => ({ ...claim, provider }));
+  }));
+  return groups.flat().sort((a, b) => a.index - b.index);
 }
 
 /** Read one durable shot claim and re-verify its output bytes before reuse. */
@@ -843,6 +1032,22 @@ export const minimaxH3WeeklyBatchTask = task({
       requestKeys,
       outputKeys,
     });
+    const priorRejections = await reconcileWeeklyOrderRejections({
+      receiptKey: payload.receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
+    });
+    if (priorRejections.length > 0) {
+      if (priorRejections.some((claim) => recoveredJobResults[claim.index] !== undefined)) {
+        throw new Error("weekly MiniMax H3 shot has conflicting accepted and rejected claims");
+      }
+      return {
+        state: "repair_required" as const,
+        repairDisposition: "owner_review_new_order_required" as const,
+        receiptKey: payload.receiptKey, requestPacketKey,
+        rejected: priorRejections,
+        acceptedShotCount: recoveredJobResults.filter(Boolean).length,
+        reconciled: true as const,
+      };
+    }
     if (recoveredJobResults.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) {
       const reconciledResult = recoveredJobResults;
       const reconciledReceipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, reconciledResult);
@@ -1002,6 +1207,15 @@ export const minimaxH3WeeklyBatchTask = task({
       const pendingJobs = pendingIndexes.map((index) => payload.jobs[index]!);
       await renderMiniMaxH3WeeklyBatch(pendingJobs, {
         saladCapacityMode: capacity.capacityMode,
+        onJobRejected: async (pendingIndex, error) => {
+          const originalIndex = pendingIndexes[pendingIndex];
+          if (originalIndex === undefined) throw new Error("weekly MiniMax H3 rejection index is invalid");
+          await persistWeeklyRejectedJob({
+            receiptKey: payload.receiptKey, orderKey: payload.orderKey,
+            expectedRequestKey: requestKeys[originalIndex]!,
+            expectedOutputKey: outputKeys[originalIndex]!, error,
+          });
+        },
         onJobComplete: async (pendingIndex, rendered) => {
           const originalIndex = pendingIndexes[pendingIndex];
           if (originalIndex === undefined) throw new Error("weekly MiniMax H3 completion index is invalid");
@@ -1061,6 +1275,22 @@ export const minimaxH3WeeklyBatchTask = task({
       };
     } catch (error) {
       if (!providerStarted) await releaseFleetReservation("pre-provider-failure");
+      if (providerStarted) {
+        const rejected = await reconcileWeeklyRejectedJobs({
+          receiptKey: payload.receiptKey, orderKey: payload.orderKey, requestKeys, outputKeys,
+        });
+        if (error instanceof MiniMaxH3OpeningMotionRejectedRenderError && rejected.length > 0) {
+          await releaseFleetReservation("rejected-shot-repair-required");
+          return {
+            state: "repair_required" as const,
+            repairDisposition: "owner_review_new_order_required" as const,
+            receiptKey: payload.receiptKey, requestPacketKey,
+            rejected,
+            acceptedShotCount: (await readPersistedJobReceipts({ receiptKey: payload.receiptKey, orderKey: payload.orderKey, requestKeys, outputKeys })).filter(Boolean).length,
+            reconciled: false as const,
+          };
+        }
+      }
       throw error;
     }
   },

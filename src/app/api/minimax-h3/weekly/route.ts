@@ -8,7 +8,7 @@ import {
   MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
-import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
+import { assertMiniMaxH3WeeklyBatchArgs, miniMaxH3WeeklyOrderTag } from "@/trigger/minimaxH3WeeklyBatch";
 
 export const runtime = "nodejs";
 
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     const handle = await tasks.trigger("minimax-h3-weekly-batch", payload, {
       concurrencyKey: `minimax-h3-weekly:${actor.ownerId}`,
       idempotencyKey,
+      tags: [miniMaxH3WeeklyOrderTag({ ownerId: actor.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
     });
     return NextResponse.json({
       ok: true,

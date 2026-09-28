@@ -23,6 +23,7 @@ import {
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { createMiniMaxH3WeeklyRejectedJob, miniMaxH3WeeklyRejectedJobKey } from "@/trigger/minimaxH3WeeklyBatch";
 
 const saved = { ...process.env };
 function configure(provider: "salad" | "novita" | "openrelay") {
@@ -415,8 +416,13 @@ async function test() {
   assert.equal(reconciledOpenRelay.receipt.runtime.provider, "openrelay");
   assert.equal(reconciliationPolls, 2, "a gateway timeout must poll the retained receipt without submitting a second render");
 
+  let rejectedClaim: MiniMaxH3OpeningMotionRejectedRenderError | undefined;
   await assert.rejects(
-    () => renderMiniMaxH3(salad, {
+    () => renderMiniMaxH3WeeklyBatch([salad], {
+      onJobRejected: async (index, error) => {
+        assert.equal(index, 0);
+        rejectedClaim = error;
+      },
       presignRead: async () => "https://r2.example/read",
       presignWrite: async () => "https://r2.example/write",
       readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
@@ -452,6 +458,24 @@ async function test() {
       error.evidence.openingFrozenHoldSec === 0.25,
     "the shared H3 boundary must deny a frozen output while retaining exact paid-work evidence",
   );
+  assert(rejectedClaim, "weekly controller must receive the paid rejected take before the batch fails");
+  const claimedError = rejectedClaim;
+  assert.equal(claimedError.receipt.runtime.costUsd, 0.2);
+  assert.equal(sha256BytesHex(claimedError.outputBytes), claimedError.receipt.output.contentSha256);
+  const rejectedReceipt = createMiniMaxH3WeeklyRejectedJob({ orderKey: "week-1", error: claimedError, createdAt: 1234 });
+  assert.equal(rejectedReceipt.providerReceipt.requestKey, rejectedReceipt.requestKey);
+  assert.equal(rejectedReceipt.openingMotionQa.verdict, "fail");
+  assert.match(miniMaxH3WeeklyRejectedJobKey("owner/o/week/receipt.json", rejectedReceipt.requestKey), /receipt\.rejected-[a-f0-9]{64}\.json$/u);
+  assert.throws(() => createMiniMaxH3WeeklyRejectedJob({
+    orderKey: "week-1",
+    error: new MiniMaxH3OpeningMotionRejectedRenderError({
+      requestKey: rejectedReceipt.requestKey,
+      status: 200,
+      receipt: claimedError.receipt,
+      outputBytes: new Uint8Array(claimedError.outputBytes.byteLength),
+      evidence: claimedError.evidence,
+    }),
+  }), /evidence is invalid/, "a claim cannot be created for bytes that differ from the paid receipt");
 
   // The selected high fallback must still dispatch when the medium flag is
   // absent; this exercises the actual paid-route readiness seam, not only

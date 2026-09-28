@@ -471,6 +471,8 @@ export type MiniMaxH3WeeklyBatchOptions = Parameters<typeof renderMiniMaxH3>[1] 
   execution?: MiniMaxH3Execution;
   /** Called after the output has been re-read and receipt-validated. */
   onJobComplete?: (index: number, result: MiniMaxH3RenderedVideo) => void | Promise<void>;
+  /** Called for a paid, receipt-validated take rejected by the motion gate. */
+  onJobRejected?: (index: number, error: MiniMaxH3OpeningMotionRejectedRenderError) => void | Promise<void>;
 };
 
 export class MiniMaxH3Error extends Error {
@@ -991,6 +993,7 @@ export async function renderMiniMaxH3WeeklyBatch(
   if (new Set(outputKeys).size !== outputKeys.length) throw new MiniMaxH3Error("weekly MiniMax H3 batch has duplicate output keys");
   const {
     onJobComplete,
+    onJobRejected,
     provider = "salad",
     execution = provider === "salad" ? "weekly-batch" : "weekly-fallback",
     ...renderOptions
@@ -1015,14 +1018,29 @@ export async function renderMiniMaxH3WeeklyBatch(
   };
   const result: MiniMaxH3RenderedVideo[] = new Array(jobs.length);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
+  let stopDispatch = false;
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
     for (;;) {
+      if (stopDispatch) return;
       const index = next++;
       if (index >= jobs.length) return;
-      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider, execution }, batchRenderOptions);
+      let rendered: MiniMaxH3RenderedVideo;
+      try {
+        rendered = await renderMiniMaxH3({ ...jobs[index]!, provider, execution }, batchRenderOptions);
+      } catch (error) {
+        stopDispatch = true;
+        if (error instanceof MiniMaxH3OpeningMotionRejectedRenderError) await onJobRejected?.(index, error);
+        throw error;
+      }
       result[index] = rendered;
-      await onJobComplete?.(index, rendered);
+      try { await onJobComplete?.(index, rendered); }
+      catch (error) { stopDispatch = true; throw error; }
     }
   }));
+  // Do not return while another already-paid worker is still writing its claim.
+  const failures = workers.filter((worker): worker is PromiseRejectedResult => worker.status === "rejected");
+  // An unknown paid outcome takes precedence over a known QA rejection.
+  const failed = failures.find((worker) => !(worker.reason instanceof MiniMaxH3OpeningMotionRejectedRenderError)) ?? failures[0];
+  if (failed) throw failed.reason;
   return result;
 }

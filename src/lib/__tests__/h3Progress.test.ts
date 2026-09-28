@@ -8,6 +8,7 @@ assert.equal(h3ProgressPercent({ state: "pending", triggerStatus: "EXECUTING", r
 assert.equal(h3ProgressPercent({ state: "pending", triggerStatus: "EXECUTING", receipt: { completedCount: 3, requestCount: 3 } }), 94);
 assert.equal(h3ProgressPercent({ state: "held", triggerStatus: "HELD", receipt: null }), 8);
 assert.equal(h3ProgressPercent({ state: "reconciliation_required", triggerStatus: "FAILED", receipt: null }), 92);
+assert.equal(h3ProgressPercent({ state: "repair_required", triggerStatus: "COMPLETED", receipt: null }), 92);
 assert.equal(h3ProgressPercent({ state: "complete", triggerStatus: "COMPLETED", receipt: { completedCount: 3, requestCount: 3 } }), 100);
 
 console.log("H3 progress projection contracts passed");

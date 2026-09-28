@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const source = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/status/route.ts"), "utf8");
 const projection = readFileSync(resolve(process.cwd(), "src/lib/minimaxH3Status.ts"), "utf8");
+const statusProjection = readFileSync(resolve(process.cwd(), "src/lib/h3StatusProjection.ts"), "utf8");
 assert.match(source, /requireStudioActor/);
 assert.match(source, /ownerReceiptKey/);
 assert.match(source, /startsWith\(`owner\/\$\{ownerId\}\/`\)/);
@@ -14,9 +15,24 @@ assert.match(source, /requestPacketState/);
 assert.match(projection, /capacityMode/);
 assert.match(projection, /provider capacity provenance is malformed/);
 assert.match(source, /minimax-h3-weekly-request\/v1/);
-assert.match(source, /reconciliation_required/);
+assert.match(statusProjection, /reconciliation_required/);
 assert.match(source, /isMiniMaxH3CapacityHoldError/);
-assert.match(source, /receiptState = "held"/);
+assert.match(source, /projectH3ReceiptState\(/);
+assert.match(source, /reconcileWeeklyOrderRejections\(/);
+assert(source.indexOf("reconcileWeeklyOrderRejections(") < source.indexOf("projectH3ReceiptState({"),
+  "weekly claims must be reconciled before the status is projected, including when an aggregate exists");
+assert.match(source, /aggregate_and_rejected_shot/);
+assert.match(source, /runs\.list\(\{ tag, limit: 100 \}\)/, "terminal rejection status must enumerate tagged child runs");
+for (const path of [
+  "src/app/api/minimax-h3/weekly/route.ts",
+  "src/app/api/minimax-h3/retry/route.ts",
+  "src/trigger/minimaxH3WeeklyBatch.ts",
+  "src/trigger/minimaxH3WeeklyCapacityRetry.ts",
+  "src/trigger/planWeekPreparedImages.ts",
+]) {
+  const dispatch = readFileSync(resolve(process.cwd(), path), "utf8");
+  assert.match(dispatch, /tags: \[miniMaxH3WeeklyOrderTag\(/, `${path} must tag its weekly H3 child runs`);
+}
 assert.match(source, /paidRequestStarted/);
 assert.doesNotMatch(source, /run\.error\s*\}\s*,/, "status must not expose raw Trigger error text");
 assert.match(source, /Cache-Control.*private, no-store/);
