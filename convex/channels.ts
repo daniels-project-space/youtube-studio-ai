@@ -17,6 +17,7 @@ import {
   summarizeChannelCardRuns,
 } from "@/lib/channelCardProjection";
 import { currentLibraryThumbnail } from "./videos";
+import { assertNoPendingChannelExpiration } from "./r2ExpirationFence";
 import {
   beginChannelInceptionLedger,
   checkpointChannelInceptionLedgerStage,
@@ -2123,6 +2124,7 @@ export const lockChannel = mutation({
         versionNumber,
       };
     }
+    await assertNoPendingChannelExpiration(ctx, args.channelId);
     const lockedAt = Date.now();
     await ctx.db.patch(args.channelId, {
       locked: true,

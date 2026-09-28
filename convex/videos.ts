@@ -77,7 +77,7 @@ async function metadataOutputs(
 async function recordedMasterKey(
   ctx: QueryCtx,
   runId: Id<"runs">,
-): Promise<string | undefined> {
+): Promise<string | null | undefined> {
   const [qaStage, artifacts] = await Promise.all([
     ctx.db
       .query("runStages")
@@ -88,11 +88,18 @@ async function recordedMasterKey(
       .withIndex("by_run", (q) => q.eq("runId", runId))
       .collect(),
   ]);
-  return recordedReleaseEvidenceMasterKey({
+  const key = recordedReleaseEvidenceMasterKey({
     runId,
     qaStage: qaStage ? { status: qaStage.status, outputs: qaStage.outputs } : null,
     artifacts,
   });
+  if (!key) return key;
+  const expiration = await ctx.db.query("r2AssetExpirations")
+    .withIndex("by_run_key", (q) => q.eq("runId", runId).eq("r2Key", key))
+    .unique();
+  // A pending intent hides playback until its R2 outcome is reconciled. A
+  // failed cross-provider confirmation must not leave a broken signed link.
+  return expiration && expiration.status !== "canceled" ? null : key;
 }
 
 type LibraryChannelIdentity = { family?: unknown; contentLane?: unknown } | null;
@@ -193,7 +200,7 @@ async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
   const thumbAsset = assets.find((asset) => asset.kind === "thumbnail");
-  const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
   const thumbnail = await currentLibraryThumbnail(ctx, {
     ownerId: run.ownerId,
     runId: run._id,
@@ -374,13 +381,13 @@ async function projectLibraryVideo(
     ? await recordedMasterKey(ctx, run._id)
     : undefined;
   const releaseEvidenceStatus =
-    storedReleaseEvidenceStatus === "release_evidence_recorded" && !sealedMasterKey
+    storedReleaseEvidenceStatus === "release_evidence_recorded" && sealedMasterKey === undefined
       ? "evidence_incomplete"
       : storedReleaseEvidenceStatus;
   const videoAsset = sealedMasterKey
     ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
-  const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
 
   const isFinished =
     Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");

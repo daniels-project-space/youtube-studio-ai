@@ -99,16 +99,18 @@ assert.deepEqual(job.steps.slice(admissionIndex + 1, guardIndex + 1).map(step =>
 ], "node setup, dependency install, and final guard require early admission");
 assert.equal(job.steps[guardIndex-1].name,"Install deploy tooling");
 assert.deepEqual(job.steps.slice(guardIndex+1).map(step=>step.if),[
-  "steps.release_policy.outputs.deploy == 'true'", "steps.release_policy.outputs.deploy == 'true'",
+  "steps.release_policy.outputs.deploy == 'true'",
+  "steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED != 'true'",
+  "steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED == 'true'",
 ]);
 const deployment = workflow.slice(workflow.indexOf("  deploy-cloud-runtimes:"));
 assert.match(deployment,/group: youtube-studio-cloud-runtimes[\s\S]*?queue: max\s+cancel-in-progress: false/,
   "a late stale job must not cancel the latest pending revision");
 assert.match(deployment,/id: release_policy[\s\S]*run: node scripts\/cloud-runtime-release-policy\.mjs/);
 assert.ok(deployment.indexOf("id: release_policy") > deployment.indexOf("npm ci"), "check directly before cloud writes, after tooling install");
-for (const name of ["Deploy canonical Convex runtime","Deploy Trigger production tasks"]) {
-  assert.match(deployment,new RegExp(`name: ${name}\\n\\s+if: steps\\.release_policy\\.outputs\\.deploy == 'true'`));
-}
+assert.match(deployment,/name: Deploy canonical Convex runtime\n\s+if: steps\.release_policy\.outputs\.deploy == 'true'/);
+assert.match(deployment,/name: Hold Trigger production deployment\n\s+if: steps\.release_policy\.outputs\.deploy == 'true' && vars\.STUDIO_TRIGGER_DEPLOY_ENABLED != 'true'/);
+assert.match(deployment,/name: Deploy Trigger production tasks\n\s+if: steps\.release_policy\.outputs\.deploy == 'true' && vars\.STUDIO_TRIGGER_DEPLOY_ENABLED == 'true'/);
 assert.match(deployment,/convex dev --once --typecheck=disable/);
 assert.match(deployment,/--skip-sync-env-vars/);
 assert.match(workflow,/needs: typecheck/);

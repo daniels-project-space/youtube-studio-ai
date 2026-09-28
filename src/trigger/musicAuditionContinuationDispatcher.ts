@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 import { dispatchPendingYuE2Continuations, type YuE2ContinuationReceipt } from "./yue2ContinuationDispatcher";
@@ -92,7 +93,7 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
 
 export const musicAuditionContinuationDispatcher = schedules.task({
   id: "music-audition-continuation-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120, retry: { maxAttempts: 1 },
   run: async (_payload, options) => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };

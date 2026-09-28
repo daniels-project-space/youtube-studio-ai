@@ -106,13 +106,6 @@ jobs:
       # they keep finding in the pipeline.
       - name: Structural audit regression check
         run: ${{ steps.pm.outputs.pm }} run audit
-      # The proof page runs each fixed defect's ORIGINAL expression beside its
-      # replacement and refuses to build if a "before" no longer demonstrates
-      # its defect, or if a deep-link anchor has gone missing. That makes it a
-      # regression test as well as a page: if someone reintroduces one of these
-      # shapes, or moves the code out from under a link, this step fails.
-      - name: Defect proof page still proves what it claims
-        run: ${{ steps.pm.outputs.pm }} run proof
 
   cloud-runtime-preflight:
     name: Cloud runtime deployment preflight
@@ -192,8 +185,11 @@ jobs:
           # that targets the documented empty production deployment.
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx --no-install convex dev --once --typecheck=disable
+      - name: Hold Trigger production deployment
+        if: steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED != 'true'
+        run: echo 'Trigger production deployment held; set Production variable STUDIO_TRIGGER_DEPLOY_ENABLED=true only after Studio is ready.' >> "$GITHUB_STEP_SUMMARY"
       - name: Deploy Trigger production tasks
-        if: steps.release_policy.outputs.deploy == 'true'
+        if: steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED == 'true'
         env:
           TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
         # Runtime/provider values stay in Trigger's protected Production

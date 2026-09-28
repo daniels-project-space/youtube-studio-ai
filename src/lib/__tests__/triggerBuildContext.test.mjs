@@ -19,7 +19,7 @@ const root = process.cwd();
 const workflow = yaml.load(readFileSync(".github/workflows/ci.yml", "utf8"));
 const job = workflow.jobs["deploy-cloud-runtimes"];
 const step = job.steps.find(step => step.name === "Deploy Trigger production tasks");
-assert.equal(step.if, "steps.release_policy.outputs.deploy == 'true'");
+assert.equal(step.if, "steps.release_policy.outputs.deploy == 'true' && vars.STUDIO_TRIGGER_DEPLOY_ENABLED == 'true'");
 assert.equal(step.shell, "bash");
 assert.ok(job.steps.findIndex(s => s.name === "Deploy canonical Convex runtime") < job.steps.indexOf(step));
 assert.ok(workflow.jobs.typecheck.steps.some(s => s.run?.includes("run test:production-readiness")));

@@ -88,6 +88,7 @@ import {
   type AutomaticProviderPlan,
 } from "@/lib/automaticOperations";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { armDeliveryRecoveryWatchdog } from "@/lib/deliveryRecoveryWatchdog";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry, ResumeRehydrationRequest } from "@/engine/types";
 import { throwForTaskRetryPolicy } from "@/trigger/taskRetryPolicy";
@@ -520,6 +521,7 @@ export const runPipelineTask = task({
     if (!durableRun) {
       throw new Error(`run-pipeline run not found after admission: ${payload.runId}`);
     }
+    await armDeliveryRecoveryWatchdog(ownerId);
     const hasInvocationSnapshot = durableRun.pipelineInvocationSnapshot !== undefined;
     const hasInvocationHash = durableRun.pipelineInvocationSha256 !== undefined;
     if (hasInvocationSnapshot !== hasInvocationHash) {

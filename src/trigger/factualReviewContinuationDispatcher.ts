@@ -1,3 +1,4 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
@@ -144,7 +145,7 @@ export const factualReviewContinuationDispatcher = schedules.task({
   id: "factual-review-continuation-dispatcher",
   // Empty ticks are one bounded owner-scoped recovery transaction. This does not admit
   // fresh work and does not call a model/browser/render provider.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async (_payload, options) => {

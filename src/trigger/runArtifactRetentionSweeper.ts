@@ -1,9 +1,11 @@
+import { studioScheduleCron } from "@/lib/studioScheduleControl";
 import { randomBytes } from "node:crypto";
 import { schedules } from "@trigger.dev/sdk";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { parseFinalMasterReleaseCertificateBytes } from "@/lib/finalMasterReleaseCertificate";
+import { loadR2RetentionProtectedKeys } from "@/lib/r2RetentionProtectedKeys";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -14,8 +16,9 @@ import {
 } from "@/lib/runArtifactRetention";
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { getAccessToken } from "@/lib/youtube";
+import { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
+export { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 import {
-  deleteObjects,
   getObjectBytes,
   getObjectIntegrity,
   listObjects,
@@ -36,49 +39,6 @@ export interface RunArtifactObservedRelease {
   connectorVersion?: number;
   error?: string;
   observation: RunArtifactReleaseObservation | null;
-}
-
-/** One bounded read for this channel, with no provider writes or public API key. */
-export async function fetchRunArtifactReleaseObservations(args: {
-  accessToken: string;
-  videoIds: readonly string[];
-  fetchImpl?: typeof fetch;
-}): Promise<Map<string, RunArtifactReleaseObservation>> {
-  const ids = [...new Set(args.videoIds)];
-  if (!ids.length) return new Map();
-  if (ids.length > 50 || ids.some((id) => !/^[a-zA-Z0-9_-]{11}$/.test(id))) {
-    throw new Error("YouTube release observation requires 1–50 exact video IDs");
-  }
-  const params = new URLSearchParams({
-    part: "snippet,status",
-    id: ids.join(","),
-    fields: "items(id,snippet(channelId,publishedAt),status(privacyStatus,uploadStatus))",
-  });
-  const response = await (args.fetchImpl ?? fetch)(
-    `https://www.googleapis.com/youtube/v3/videos?${params.toString()}`,
-    { headers: { Authorization: `Bearer ${args.accessToken}` }, signal: AbortSignal.timeout(30_000) },
-  );
-  if (!response.ok) throw new Error(`YouTube release observation HTTP ${response.status}`);
-  const body = await response.json() as { items?: Array<{
-    id?: string;
-    snippet?: { channelId?: string; publishedAt?: string };
-    status?: { privacyStatus?: string; uploadStatus?: string };
-  }> };
-  if (!Array.isArray(body.items)) throw new Error("YouTube release observation response is malformed");
-  const output = new Map<string, RunArtifactReleaseObservation>();
-  for (const item of body.items) {
-    if (!item.id || !ids.includes(item.id) || output.has(item.id)) {
-      throw new Error("YouTube release observation returned an unexpected or duplicate video");
-    }
-    output.set(item.id, {
-      videoId: item.id,
-      channelId: item.snippet?.channelId ?? "",
-      ...(item.snippet?.publishedAt === undefined ? {} : { publishedAt: item.snippet.publishedAt }),
-      ...(item.status?.privacyStatus === undefined ? {} : { privacyStatus: item.status.privacyStatus }),
-      ...(item.status?.uploadStatus === undefined ? {} : { uploadStatus: item.status.uploadStatus }),
-    });
-  }
-  return output;
 }
 
 /** Shared production/test coordinator: group by connector, persist every outcome. */
@@ -168,6 +128,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
   const convex = convexClient();
+  let protectedKeysPromise: Promise<Set<string>> | undefined;
   const releaseChecks = await convex.query(api.runArtifactRetentions.listReleaseChecks, {
     ownerId, now: input?.now ?? Date.now(),
   }) as RunArtifactReleaseCheck[];
@@ -236,6 +197,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
           certificate: parseFinalMasterReleaseCertificateBytes(await getObjectBytes(certificateKey)),
         })),
       );
+      const protectedKeys = await (protectedKeysPromise ??= loadR2RetentionProtectedKeys(convex, ownerId));
       const pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
         keyPrefix: retention.keyPrefix,
         runId: String(retention.runId),
@@ -243,23 +205,18 @@ export async function sweepDueRunArtifactRetentions(input?: {
         certificate,
         additionalCertificates,
         keepNames: retention.keepNames,
+        keepKeys: [...protectedKeys].filter((key) => key.startsWith(`${retention.keyPrefix}runs/${retention.runId}/`)),
         getObjectBytes,
         getObjectIntegrity,
         listObjects,
-        deleteObjects: async (keys) => {
-          // Even an empty R2 list must not permit stale asset-row pruning.
-          if (!keys.length) await authorizeNextBatch();
-          return deleteObjects(keys, undefined, { beforeBatch: authorizeNextBatch });
-        },
       });
       removedObjects += pruning.removedObjects;
       if (!pruning.cleaned) {
         throw new Error(`${pruning.removedObjects} deletion(s) confirmed; ${pruning.error ?? "release evidence could not be revalidated"}`);
       }
-      await convex.mutation(api.assets.pruneRun, {
-        runId: retention.runId,
-        keepKinds: ["video", "thumbnail", "derived_short"],
-      });
+      // Evidence verification and live release authority seal this ledger.
+      // No key-only R2 deletion or asset-row pruning occurs on the hourly path.
+      await authorizeNextBatch();
       await convex.mutation(api.runArtifactRetentions.complete, {
         ownerId,
         retentionId: retention._id,
@@ -270,7 +227,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
         retainedReleaseEvidence: pruning.retainedReleaseEvidence,
       });
       completed++;
-      log(`completed ${retention.runId}: removed ${pruning.removedObjects} intermediate object(s)`);
+      log(`sealed ${retention.runId}: retained ${pruning.retainedObjectCount} object(s) for guarded retention`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failed = await convex.mutation(api.runArtifactRetentions.fail, {
@@ -294,7 +251,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
  */
 export const runArtifactRetentionSweeper = schedules.task({
   id: "run-artifact-retention-sweeper",
-  cron: "17 * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },

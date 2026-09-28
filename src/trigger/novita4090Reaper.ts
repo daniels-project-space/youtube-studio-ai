@@ -7,13 +7,14 @@
  * provider responses, expired boot windows, and managed instances that have
  * no durable lease at all.
  */
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { NovitaGpuApiClient, type NovitaManagedInstance } from "@/lib/novitaFleet";
 import { waitForNovitaRenderPoll } from "@/lib/novitaPollWait";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
+import { armNovita4090Watchdog } from "@/lib/novitaWatchdog";
 
 const MANAGED_WORKER_NAME = /^yt-render-4090-[a-z0-9][a-z0-9-]{0,120}$/;
 // Workers heartbeat every minute. Two missed heartbeats avoid racing a
@@ -201,8 +202,10 @@ async function reapUnleasedProviderWorker(args: {
   });
 }
 
-export const novita4090Reaper = schedules.task({
+export const novita4090Reaper = task({
   id: "novita-4090-reaper",
+  // The create boundary arms the first delayed run. Subsequent runs are
+  // scheduled only while durable leases or managed provider workers exist.
   // Cost note (2026-08-17): every tick did an unconditional Convex query PLUS
   // a live Novita listManagedInstances() provider call, even when idle. A
   // cheap "skip the provider call if Convex has 0 candidates" pre-check was
@@ -211,10 +214,7 @@ export const novita4090Reaper = schedules.task({
   // Trigger process that died before persisting anything -- see file header
   // comment). Convex has no signal for that case by definition, so gating on
   // "candidates.length === 0" would silently disable the orphan safety net.
-  // Widened the cadence instead: 5 minutes still bounds an undetected GPU
-  // leak to well under an hour, at 1/5th the invocation (and provider-call)
-  // volume of the previous 1-minute cron.
-  cron: "*/5 * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 1_800,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000, factor: 2 },
   // A provider delete can take several polls. Serializing this task prevents
@@ -237,11 +237,15 @@ export const novita4090Reaper = schedules.task({
       limit: REAP_LIMIT,
     })) as ReapCandidate[];
 
+    const hasOpenLeases = await convex.query(api.novitaWorkerLeases.hasOpenManagedLeases, { secret });
+    if (hasOpenLeases) await armNovita4090Watchdog();
+
     // This provider-side listing is the second half of the safety contract:
     // it spots a worker whose Trigger process died before it persisted a lease.
     const providerInstances = (await novita.listManagedInstances()).filter((instance) =>
       MANAGED_WORKER_NAME.test(instance.name),
     );
+    if (!hasOpenLeases && providerInstances.length) await armNovita4090Watchdog();
 
     let deleted = 0;
     let deletionUnverified = 0;

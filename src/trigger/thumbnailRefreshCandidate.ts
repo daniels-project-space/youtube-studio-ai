@@ -7,6 +7,7 @@ import { makeConvexSink } from "@/engine/convexSink";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { preflight, validatePipeline } from "@/engine/validate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { armDeliveryRecoveryWatchdog } from "@/lib/deliveryRecoveryWatchdog";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import { channelPrefix } from "@/lib/storage";
 import {
@@ -262,8 +263,10 @@ export const thumbnailRefreshCandidateTask = task({
   maxDuration: 900,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },
-  run: async (payload: CandidatePayload, { ctx }) =>
-    executeThumbnailRefreshCandidate(payload, ctx.run.id),
+  run: async (payload: CandidatePayload, { ctx }) => {
+    await armDeliveryRecoveryWatchdog(payload.ownerId);
+    return executeThumbnailRefreshCandidate(payload, ctx.run.id);
+  },
 });
 
 export async function dispatchPendingThumbnailRefreshCandidates(input?: {
@@ -332,7 +335,7 @@ export async function dispatchPendingThumbnailRefreshCandidates(input?: {
 
 export const thumbnailRefreshDispatcher = schedules.task({
   id: "thumbnail-refresh-dispatcher",
-  cron: "* * * * *",
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   run: async () => dispatchPendingThumbnailRefreshCandidates(),
 });

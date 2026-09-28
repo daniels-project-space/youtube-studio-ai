@@ -12,6 +12,9 @@ const handlers = {
   reviewedDataStoryInitialDispatcher: "dispatchPendingReviewedDataStoryInitialRuns",
   routeQualificationBenchmarkDispatcher: "dispatchPendingRouteQualificationBenchmarks",
   serializedProgramEpisodeRetryDispatcher: "dispatchDueSerializedProgramEpisodeRetries",
+  thumbnailRefreshCandidate: "dispatchPendingThumbnailRefreshCandidates",
+  automaticThumbnailReplacementCore: "dispatchAutomaticThumbnailReplacements",
+  publishScheduler: "dispatchDuePublishIntents",
 } as const;
 
 function evaluate(path: string, requireFixture: (name: string) => unknown, env: Row = {}): Row {
@@ -25,11 +28,14 @@ function evaluate(path: string, requireFixture: (name: string) => unknown, env: 
 
 function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promise<unknown> = async () => ({ pending: 0, triggered: 0 })) {
   const calls: { name: string; args: unknown }[] = [];
-  const env = mode === undefined ? {} : { STUDIO_DELIVERY_RECOVERY_MODE: mode };
+  const env = { STUDIO_SCHEDULES_ENABLED: "true", ...(mode === undefined ? {} : { STUDIO_DELIVERY_RECOVERY_MODE: mode }) };
   const modeExports = evaluate("src/lib/deliveryRecoveryMode.ts", name => { throw new Error(name); }, env);
   const requireFixture = (name: string): unknown => {
-    if (name === "@trigger.dev/sdk") return { schedules: { task: (definition: Definition) => definition } };
+    if (name === "@trigger.dev/sdk") return { schedules: { task: (definition: Definition) => definition }, task: (definition: Definition) => definition };
     if (name === "@/lib/deliveryRecoveryMode") return modeExports;
+    if (name === "@/lib/studioScheduleControl") return { studioScheduleCron: (pattern: string) => pattern };
+    if (name === "@/lib/deliveryRecoveryWatchdog") return { armDeliveryRecoveryWatchdog: async () => undefined };
+    if (name === "@/lib/studioConvexHttpClient") return { StudioConvexHttpClient: class {} };
     if (name === "../../convex/_generated/api") return { api: {} };
     const file = name.startsWith("./") ? name.slice(2) : "";
     if (file in handlers) return { [handlers[file as keyof typeof handlers]]: (args: unknown) => {
@@ -46,14 +52,14 @@ function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promi
   return { calls, load, mode: modeExports.deliveryRecoveryMode as () => string };
 }
 
-test("exactly six individual crons or one shared cron are declared, never both", async () => {
+test("all recovery crons stay frozen while active work remains armable", async () => {
   for (const mode of [undefined, "individual", "shared"]) {
     const f = fixture(mode);
-    const individual = Object.keys(handlers).map(file => f.load(file)[file] as Definition);
+    const individual = Object.keys(handlers).slice(0, 6).map(file => f.load(file)[file] as Definition);
     const shared = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
-    assert.equal(individual.filter(task => task.cron === "* * * * *").length, mode === "shared" ? 0 : 6);
-    assert.equal(shared.cron, mode === "shared" ? "* * * * *" : undefined);
-    if (mode === "shared") {
+    assert.equal(individual.filter(task => task.cron !== undefined).length, 0);
+    assert.equal(shared.cron, undefined);
+    if (mode !== "individual") {
       for (const task of individual) assert.deepEqual(await task.run(), { skipped: "shared-delivery-recovery" });
     } else {
       assert.deepEqual(await shared.run(), { skipped: "individual-delivery-recovery" });
@@ -73,19 +79,19 @@ test("invalid deployment mode fails closed during task declaration", () => {
   }
 });
 
-test("shared tick invokes all six real entry points directly and passes exact deployment scope", async () => {
+test("shared tick invokes all nine recovery entry points directly and passes exact deployment scope", async () => {
   const f = fixture("shared");
   const shared = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
   const ctx = { project: { id: "project-a" }, environment: { id: "production-a" } };
   const result = await shared.run({}, { ctx });
-  assert.equal(f.calls.length, 6);
+  assert.equal(f.calls.length, 9);
   assert.deepEqual(new Set(f.calls.map(call => call.name)), new Set(Object.keys(handlers)));
   for (const call of f.calls) {
     if (["musicAuditionContinuationDispatcher", "factualReviewContinuationDispatcher", "serializedProgramEpisodeRetryDispatcher"].includes(call.name)) {
       assert.deepEqual(call.args, { dispatchContext: { projectId: "project-a", environmentId: "production-a" } });
     } else assert.equal(call.args, undefined);
   }
-  assert.equal(Object.keys(result as Row).length, 6);
+  assert.equal(Object.keys(result as Row).length, 9);
   assert.equal(shared.retry?.maxAttempts, 1, "a failed aggregate must not automatically replay successful sibling handlers");
   assert.equal(shared.maxDuration, undefined, "inherit the legacy serialized recovery ceiling rather than truncating its batch");
 });
@@ -101,7 +107,7 @@ test("one synchronous failure does not suppress other handlers and aggregate wai
   let settled = false;
   const outcome = shared.run().then(() => { settled = true; return null; }, error => { settled = true; return error; });
   await Promise.resolve();
-  assert.equal(f.calls.length, 6);
+  assert.equal(f.calls.length, 9);
   assert.equal(settled, false);
   release();
   const error = await outcome;

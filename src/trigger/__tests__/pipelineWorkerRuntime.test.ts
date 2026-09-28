@@ -151,6 +151,9 @@ async function exercise(test: Case): Promise<void> {
       calls.nextGuard++;
       throw new Error(NEXT_GUARD);
     },
+    armDeliveryRecoveryWatchdog: async (ownerId: string) => {
+      assert.equal(ownerId, "owner-fixture");
+    },
     bootstrapSecrets: forbiddenProvider,
     runPipeline: forbiddenProvider,
   };

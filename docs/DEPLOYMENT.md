@@ -36,9 +36,16 @@ merge/push main → CI quality gate → credential preflight →
 Convex dev:astute-camel-689 → Trigger production remote build
 ```
 
-The two runtime deployments are automatic after CI passes and do not use a
-local machine, VPS, or local Docker build. Convex is deliberately deployed
-first because Trigger tasks call its functions.
+While Studio is paused, CI deploys Trigger only when the GitHub Production
+environment variable `STUDIO_TRIGGER_DEPLOY_ENABLED` is exactly `true`. Leave
+it unset during the current pause. A main push can still deploy the canonical
+Convex runtime after the usual quality and credential checks; the skipped
+Trigger step records that it was held in the workflow summary.
+
+The Convex runtime deployment is automatic after CI passes. The Trigger
+runtime deployment also requires the explicit Production variable above.
+Neither CI step uses a local machine, VPS, or local Docker build. Convex is
+deployed first because Trigger tasks call its functions.
 
 Before the job can deploy, add these GitHub **Production** environment secrets:
 

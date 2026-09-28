@@ -105,7 +105,8 @@ test("verifier inventory tracks actual scheduled task declarations", () => {
   for (const file of files) {
     const source = ts.createSourceFile(file, readFileSync(`src/trigger/${file}.ts`, "utf8"), ts.ScriptTarget.Latest, true);
     function visit(node) {
-      if (ts.isCallExpression(node) && node.expression.getText(source) === "schedules.task") {
+      if (ts.isCallExpression(node) && (node.expression.getText(source) === "schedules.task" ||
+          (file === "sharedDeliveryRecovery" && node.expression.getText(source) === "task"))) {
         const options = node.arguments[0];
         assert.ok(ts.isObjectLiteralExpression(options));
         const id = options.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(source) === "id");

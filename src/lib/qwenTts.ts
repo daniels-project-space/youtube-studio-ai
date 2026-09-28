@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { ensureOpenRelayQwenReady } from "@/lib/openRelayQwen";
+import { studioSchedulesEnabled } from "@/lib/studioScheduleControl";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
@@ -816,7 +817,12 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   const expectedWorkerImageDigest = workerImageDigest();
   const runtimeProfile = qwenTtsRuntimeProfile();
   const managedOpenRelay = runtimeProfile.provider === "openrelay" && Boolean(process.env.OPENRELAY_QWEN_VM_ID?.trim());
-  if (managedOpenRelay) await ensureOpenRelayQwenReady();
+  if (managedOpenRelay) {
+    if (!studioSchedulesEnabled()) throw new Error("Studio channel runs are paused");
+    const { armOpenRelayIdleSchedule } = await import("@/lib/openRelayIdleSchedule");
+    await armOpenRelayIdleSchedule("openrelay-qwen-idle-reaper", process.env.OPENRELAY_QWEN_VM_ID!.trim());
+    await ensureOpenRelayQwenReady();
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Idempotency-Key": requestKey,
