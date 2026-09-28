@@ -40,7 +40,8 @@ let sidecar = prepared;
 let started = 0, active = 0, peak = 0, providerCalls = 0;
 let failure = false;
 const writes: string[] = [];
-let inputUploads = 0, stagedJobs = 0;
+let inputUploads = 0, stagedJobs = 0, qualificationCalls = 0;
+let stagedState = "awaiting-input-qualification";
 let release!: () => void;
 let gate = new Promise<void>(resolve => { release = resolve; });
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
@@ -74,8 +75,11 @@ loader._load = function (name, ...args) {
       inputUploads++;
       return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
     },
-    stageH3RequestInRenderEngine: async () => ({ jobId: `job${++stagedJobs}`, state: "awaiting-input-qualification", manifestSha256: "b".repeat(64) }),
-    qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => ({ jobId, state: "awaiting-final-qualification" }),
+    stageH3RequestInRenderEngine: async () => ({ jobId: `job${++stagedJobs}`, state: stagedState, manifestSha256: "b".repeat(64) }),
+    qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => {
+      qualificationCalls++;
+      return { jobId, state: "awaiting-final-qualification" };
+    },
   };
   if (name === "@/lib/novitaRenderFarm") return {
     renderImages: async () => { providerCalls++; throw new Error("generation forbidden"); },
@@ -155,9 +159,23 @@ async function main() {
   assert.equal(peak, 1);
   assert.equal(inputUploads, 12);
   assert.equal(stagedJobs, 12);
+  assert.equal(qualificationCalls, 12, "only fresh input-qualification jobs call the qualifier");
+  for (const terminalState of ["completed", "failed", "cancelled"] as const) {
+    stagedState = terminalState;
+    qualificationCalls = 0;
+    const replayIds = await dispatchPreparedFootage(footageManifest, payload, prepared);
+    assert.equal(replayIds?.length, 12);
+    assert.equal(qualificationCalls, 0, `${terminalState} replays must not requalify the original input`);
+  }
+  stagedState = "awaiting-final-qualification";
+  qualificationCalls = 0;
+  await dispatchPreparedFootage(footageManifest, payload, prepared);
+  assert.equal(qualificationCalls, 0, "a previously qualified job must not requalify its input");
+  stagedState = "awaiting-input-qualification";
+  const stagedBeforeFailure = stagedJobs;
   started = 0; failure = true;
   await assert.rejects(dispatchPreparedFootage(footageManifest, payload, prepared), /fixture transfer limit/);
-  assert.equal(stagedJobs, 12, "a failed source-frame copy cannot stage H3");
+  assert.equal(stagedJobs, stagedBeforeFailure, "a failed source-frame copy cannot stage H3");
   assert.equal(active, 0);
   assert.equal(providerCalls, 0);
   if (priorToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
