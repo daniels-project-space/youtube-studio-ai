@@ -119,3 +119,12 @@ test("a newly promoted reusable resource revokes an existing deletion lease", as
   await assert.rejects(f.invoke(authorizeDeletion, { ownerId: f.ownerId,
     retentionId: row._id, now: due, leaseToken: token }), /authority/);
 });
+
+test("reusable episode media holds the matching R2 key", async () => {
+  const f = fixture(); const { channelId, runId } = await f.seed();
+  const key = `owner/${f.ownerId}/channel/birds/runs/${runId}/reusable.mp4`;
+  await f.invoke(recordAsset, { ownerId: f.ownerId, channelId, runId, kind: "clip", r2Key: key });
+  const row = f.db.rows("studioR2AssetRetentions")[0];
+  await f.db.insert("studioReusableMediaAssets", { ownerId: f.ownerId, entry: { resource: { r2Key: key } } });
+  assert.equal(await f.invoke(claimDue, { ownerId: f.ownerId, now: Number(row.expiresAt) + 1, leaseToken: "d".repeat(64) }), null);
+});

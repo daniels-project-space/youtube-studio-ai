@@ -13,18 +13,19 @@ const rowArgs = { ownerId: v.string(), retentionId: v.id("studioR2AssetRetention
 function validLease(token: string): boolean { return /^[a-f0-9]{64}$/.test(token); }
 
 async function isProtected(ctx: MutationCtx, row: Doc<"studioR2AssetRetentions">): Promise<boolean> {
-  const [asset, run, channel, references, runRetention, library, candidates] = await Promise.all([
+  const [asset, run, channel, references, runRetention, library, reusableMedia, candidates] = await Promise.all([
     ctx.db.get(row.assetId), ctx.db.get(row.runId), ctx.db.get(row.channelId),
     ctx.db.query("assets").withIndex("by_r2_key", (q) => q.eq("r2Key", row.r2Key)).take(2),
     ctx.db.query("runArtifactRetentions").withIndex("by_run", (q) => q.eq("runId", row.runId)).first(),
     ctx.db.query("studioAssetLibraryEntries").withIndex("by_owner", (q) => q.eq("ownerId", row.ownerId)).take(1001),
+    ctx.db.query("studioReusableMediaAssets").withIndex("by_owner", (q) => q.eq("ownerId", row.ownerId)).take(1001),
     ctx.db.query("studioAssetPromotionCandidates").withIndex("by_owner", (q) => q.eq("ownerId", row.ownerId)).take(1001),
   ]);
   if (!asset || asset.ownerId !== row.ownerId || asset.channelId !== row.channelId ||
       asset.runId !== row.runId || asset.r2Key !== row.r2Key || !run || run.ownerId !== row.ownerId ||
       run.channelId !== row.channelId || !channel || channel.ownerId !== row.ownerId ||
       references.length !== 1 || references[0]._id !== row.assetId ||
-      library.length > 1000 || candidates.length > 1000) return true;
+      library.length > 1000 || reusableMedia.length > 1000 || candidates.length > 1000) return true;
   if (classifyStudioR2Asset({ ownerId: row.ownerId, channelSlug: channel.slug,
     runId: row.runId, kind: asset.kind, r2Key: row.r2Key }) !== row.classification) return true;
   if (run.status !== "ok" || !run.finishedAt || run.finishedAt > row.expiresAt) return true;
@@ -32,6 +33,7 @@ async function isProtected(ctx: MutationCtx, row: Doc<"studioR2AssetRetentions">
   // Even deprecated/revoked entries and unapproved candidates retain their
   // referenced bytes until their own lifecycle is explicitly reconciled.
   if (library.some((entry) => (entry.entry as { resource?: { r2Key?: unknown } } | null)?.resource?.r2Key === row.r2Key)) return true;
+  if (reusableMedia.some((entry) => (entry.entry as { resource?: { r2Key?: unknown } } | null)?.resource?.r2Key === row.r2Key)) return true;
   if (candidates.some((candidate) => JSON.stringify(candidate.candidate).includes(JSON.stringify(row.r2Key)))) return true;
   return false;
 }

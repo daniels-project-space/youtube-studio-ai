@@ -146,6 +146,11 @@ export const recordEntry = mutation({
     if (entry.ownerId !== args.ownerId) {
       throw new Error("studioReusableMedia: entry owner mismatch");
     }
+    const retainedKey = await ctx.db.query("studioR2AssetRetentions")
+      .withIndex("by_owner_key", (q) => q.eq("ownerId", args.ownerId).eq("r2Key", entry.resource.r2Key)).first();
+    if (retainedKey?.status === "processing" || retainedKey?.status === "deleted") {
+      throw new Error("studioReusableMedia: resource key is under retention cleanup");
+    }
     const channelId = entry.channelId as Id<"channels">;
     const sourceRunId = entry.origin.sourceRunId as Id<"runs">;
     const [channel, run] = await Promise.all([ctx.db.get(channelId), ctx.db.get(sourceRunId)]);
