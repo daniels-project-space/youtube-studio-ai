@@ -11,9 +11,23 @@ export type RenderEngineH3StageRequest = Readonly<{
   profileRevisionSha256: string;
 }>;
 
+/** Every durable state that a staged Engine H3 request may return on replay. */
+export type RenderEngineH3StageState =
+  | "awaiting-input-qualification"
+  | "awaiting-final-qualification"
+  | "queued"
+  | "capacity-checking"
+  | "waiting-for-capacity"
+  | "launching"
+  | "running"
+  | "shutdown-requested"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export type RenderEngineH3StageReceipt = Readonly<{
   jobId: string;
-  state: "awaiting-input-qualification" | "awaiting-final-qualification";
+  state: RenderEngineH3StageState;
   manifestSha256: string;
 }>;
 
@@ -176,13 +190,17 @@ function validateStageRequest(value: unknown, projectName: string): asserts valu
 }
 
 function parseStageReceipt(value: unknown): RenderEngineH3StageReceipt {
+  const states: readonly RenderEngineH3StageState[] = [
+    "awaiting-input-qualification", "awaiting-final-qualification", "queued", "capacity-checking",
+    "waiting-for-capacity", "launching", "running", "shutdown-requested", "completed", "failed", "cancelled",
+  ];
   if (!isRecord(value) || !hasExactKeys(value, ["jobId", "state", "manifestSha256"]) ||
       typeof value.jobId !== "string" || !CONVEX_ID.test(value.jobId) ||
-      (value.state !== "awaiting-input-qualification" && value.state !== "awaiting-final-qualification") || typeof value.manifestSha256 !== "string" ||
+      typeof value.state !== "string" || !states.includes(value.state as RenderEngineH3StageState) || typeof value.manifestSha256 !== "string" ||
       !HEX_SHA256.test(value.manifestSha256)) {
     throw new Error("Render Engine returned an invalid H3 staging receipt");
   }
-  return { jobId: value.jobId, state: value.state, manifestSha256: value.manifestSha256 };
+  return { jobId: value.jobId, state: value.state as RenderEngineH3StageState, manifestSha256: value.manifestSha256 };
 }
 
 function parseInputQualificationReceipt(value: unknown, jobId: string): RenderEngineH3InputQualificationReceipt {

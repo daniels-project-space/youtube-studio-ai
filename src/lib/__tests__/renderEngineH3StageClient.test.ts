@@ -56,16 +56,21 @@ test("rejects requests outside the Engine's exact 720p stage contract before sen
   assert.equal(calls, 0);
 });
 
-test("rejects prompt-only routes, malformed receipts, and any non-staged state", async () => {
+test("accepts durable replay states and rejects malformed staging receipts", async () => {
   let callCount = 0;
   const fetchImpl: typeof fetch = async (_input, init) => {
     callCount += 1;
     const body = JSON.parse(String(init?.body));
     assert.equal(Object.hasOwn(body, "prompt"), false);
-    return jsonResponse({ jobId: "job1234567890", state: "queued", manifestSha256: "d".repeat(64) });
+    return jsonResponse({ jobId: "job1234567890", state: "not-a-job-state", manifestSha256: "d".repeat(64) });
   };
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, fetchImpl }), /invalid H3 staging receipt/);
   assert.equal(callCount, 1);
+  const replay = await stageH3RequestInRenderEngine({
+    ...config,
+    fetchImpl: async () => jsonResponse({ jobId: "jd75yszsg3yt0nrgr2g43brtdd8f6f6t", state: "completed", manifestSha256: "d".repeat(64) }),
+  });
+  assert.equal(replay.state, "completed", "an idempotent replay must not turn a terminal job into input work");
 });
 
 test("rejects unsafe Engine origins and non-202 responses", async () => {
