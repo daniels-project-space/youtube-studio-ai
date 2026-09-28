@@ -1,5 +1,19 @@
 # Studio R2 retention class migration checkpoint
 
+## Current lifecycle scope
+
+The `v1` copy paths described below are historical nested keys. The current
+bucket has R2 expiration rules only for root `released-ordinary/v2/` keys
+(30 days after upload) and root `released-final/v2/` keys (180 days after
+upload). These prefix rules do not expire general Studio assets. Reusable
+library media and other objects outside those namespaces are outside their
+scope. Studio's v2 readers enforce a separate `releaseAt + 30/180 days`
+deadline, and its promotion fence rejects direct promotion from either
+expiring namespace (`src/lib/r2AssetRetention.ts`,
+`convex/r2ExpirationFence.ts`). See
+[`R2_ASSET_RETENTION_2026-09-27.md`](R2_ASSET_RETENTION_2026-09-27.md) for the
+exact live rules and the distinction from the application deletion sweeper.
+
 This branch moves the only active reusable-media promotion writer to
 `owner/<owner>/channel/<slug>/library/reusable-media/v1/<sha256>.mp4`.
 The writer hashes the source bytes, uses an R2 create-only PUT, and verifies
@@ -39,10 +53,11 @@ full SHA-256 were unchanged. The exact probe key was removed and HEAD returned
 conditional completion and verifies the resulting full bytes on R2 before
 recording a release receipt.
 
-The 180-day receipt is an expiry schedule, not deletion authority. The final
-copy has no enabled expiration path yet, and original certificate sources stay
-protected. Historical keys and other release readers still need a full
-reference migration before any final media can be deleted safely.
+The 180-day receipt is an application expiry schedule, not deletion authority.
+This historical nested `v1` final-copy key is outside the root `v2` lifecycle
+prefix, and original certificate sources stay protected. Historical keys and
+other release readers still need a full reference migration before any
+additional final media can be deleted safely.
 
 New Lo-Fi runs mark the accepted per-run Novita keyframe asset as
 `lofi-keyframe/v1`. At confirmed release, the observer selects that exact
@@ -69,9 +84,10 @@ recording. There is no live writer of the schema's old `upscaled` kind, so
 those legacy rows remain untouched. Other clips and loop units, thumbnails,
 reusable music, and final videos remain outside this ordinary class.
 
-The deletion path remains disabled by the independent
-`YOUTUBE_STUDIO_R2_ACCOUNT_ID` binding. Do not enable the sweeper or R2
-lifecycle rules yet. Remaining gates:
+The application deletion path remains disabled by the independent
+`YOUTUBE_STUDIO_R2_ACCOUNT_ID` binding. The R2 lifecycle rules are already
+configured only for the two root `v2` prefixes above; do not enable the
+application sweeper or broaden those rules to other keyspaces. Remaining gates:
 
 1. Inventory every legacy object and its live and historical pointers, then
    reconcile unknown keys and unregistered writers. The existing bucket has
@@ -80,13 +96,13 @@ lifecycle rules yet. Remaining gates:
    user tokens, and prove no writer can overwrite an expiry-managed key.
 3. Move remaining ordinary generated asset writers to a 30-day class; finish final-video
    reader/certificate reference migration and exercise a real large-master
-   release replay before enabling any 180-day final expiration.
+   release replay before extending 180-day expiration to legacy final/source keys.
 4. Audit promotions from every other library writer. Copy and verify bytes
    into a permanent key before rebinding an immutable library revision; keep
    historical revisions protected until their references are accounted for.
 5. Exercise the full read, release, retention, lock, promotion, crash-recovery,
-   and expiry path on a disposable scope before setting the deployment binding
-   or any Cloudflare lifecycle rule.
+   and expiry path on a disposable scope before setting the application
+   deletion binding or broadening either Cloudflare lifecycle rule.
 
 This change performs no R2 deletion, lifecycle mutation, Trigger resume,
 or paid render.

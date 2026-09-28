@@ -1,42 +1,61 @@
 # YouTube Studio R2 asset retention
 
-The daily `r2-asset-retention-sweeper` reports generated run assets after a
-confirmed public YouTube release plus 30 days, and final video masters after
-release plus 180 days. R2 `LastModified`, terminal run state, a completed
-release cleanup ledger, exact certificate binding, and an unlocked channel are
-also required. Reusable library revisions, thumbnails, release evidence, and
-explicit keep names are protected. The older release-aware hourly worker now
-waits 30 days after confirmed publication, verifies the sealed release evidence,
-and records completion without deleting R2 objects or asset metadata. The daily
-worker uses that completed ledger as its release gate.
-The legacy operator-triggered footage prune task is inventory-only even when
-enabled; it cannot bypass the new deletion gates.
+## Current scope
 
-**Automatic deletion is limited to three future writer families:** run-scoped
-content-hashed intro-card MP4s and storyboard atlas crop PNGs at release plus
-30 days, and quiz-year or quiz-short final MP4s named with their content
-SHA-256 at release plus 180 days. Each writer transactionally reserves the exact run key before its R2
-upload and closes the reservation only after re-reading and hashing the stored
-bytes. Quiz final files use create-only upload and matching digest metadata;
-renders over R2's single-PUT limit fail closed. Shared storage APIs reject
-overwriteable writes to either exact family. The deletion mutation itself
-rejects other keys and an `asset` kind applied to a final. Existing fixed-name
-final masters, footage clips, older atlas crops without full derivative digests and writer reservations, and
-other intermediates remain report-only. Broad 30-day asset and
-180-day final cleanup remains incomplete until those writers have a safe
-immutable or reserved-key design.
+The two enabled R2 object-expiration rules match only keys beginning at the
+bucket root with `released-ordinary/v2/` (30 days after upload) or
+`released-final/v2/` (180 days after upload). They are not a general 30-day
+cleanup of Studio assets or a general 180-day cleanup of every final video.
+R2 evaluates each key prefix and upload age; it does not inspect Studio
+metadata, Convex references, release time, or object purpose. Any object put
+inside either reserved prefix will therefore match its rule.
+
+The v2 writers place marked Lo-Fi keyframes, clips, and loop units under
+`released-ordinary/v2/`, and certified final-master copies under
+`released-final/v2/`. Studio separately checks each copy's encoded
+`releaseAt + 30/180 days` deadline before serving it; R2's upload-age clock and
+the reader's release-age clock are distinct. Reusable media uses permanent
+library keys outside these prefixes, and the promotion fence rejects direct
+promotion from either expiring namespace (`src/lib/r2AssetRetention.ts`,
+`convex/r2ExpirationFence.ts`). Thus reusable media and other Studio objects
+outside the two prefixes do not match these lifecycle rules. Keep the prefixes
+reserved: an object written there by another writer still expires, regardless
+of its metadata or references. See Cloudflare's [R2 object lifecycle
+documentation](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
+
+This prefix-based expiry is separate from the application sweeper. The daily
+`r2-asset-retention-sweeper` reports due classed v2 copies but does not delete
+them; its separate run cleanup path can delete only exact, certified run
+objects after release, reference, owner, and account checks pass. The account
+binding remains unset, so that application deletion path exits before
+credentials, Convex, or R2 access. The older release-aware hourly worker
+records completion without deleting R2 objects or asset metadata. The legacy
+operator-triggered footage prune task is inventory-only
+(`src/trigger/r2AssetRetentionSweeper.ts`,
+`src/trigger/runArtifactRetentionSweeper.ts`).
+
+The application deletion path separately handles a bounded set of
+release-certified, run-scoped asset families and final masters. It requires
+exact writer reservations, release evidence, reference checks, and other
+fences. Fixed-name masters, unbound footage, older atlas crops without complete
+derivative receipts, thumbnails, and unrelated intermediates do not become
+eligible through age alone. This application path is distinct from the two R2
+lifecycle rules, which apply to every object under their exact root prefixes.
 
 The task requires the exact `youtube-studio-ai` bucket and an independently
 configured `YOUTUBE_STUDIO_R2_ACCOUNT_ID` matching `R2_ACCOUNT_ID`. An explicit
 `R2_ENDPOINT` must be the canonical endpoint for that account. The code also
 pins the SHA-256 of the account ID verified by a read-only Cloudflare Get Bucket
 request using the app vault's separate API token on 27 September 2026. The
-deployment binding is still absent from current app configuration, so the daily
-task logs a skip and returns before vault access, Convex queries, or R2 calls.
+deployment binding is still absent from current app configuration, so the
+application deletion task logs a skip and returns before vault access, Convex
+queries, or R2 calls. This binding does not disable the separately configured
+R2 lifecycle rules for the two v2 prefixes.
 With a binding present, the exact account and bucket assertions still fail
 closed before listing or deleting if their identities differ.
-No bucket-wide lifecycle rule is
-used because model/runtime weights and reusable assets share this bucket.
+No bucket-wide lifecycle rule is used because model/runtime weights and
+reusable assets share this bucket. The two enabled lifecycle rules below are
+limited to the classed-release v2 root prefixes.
 
 For each deletion the worker verifies exact R2 identity and writer metadata,
 records a Convex intent, observes the exact public/processed YouTube video on
@@ -133,7 +152,7 @@ No write, delete, lifecycle PUT, or retention binding is performed.
 Before setting `YOUTUBE_STUDIO_R2_ACCOUNT_ID`, exclude external writers from
 the managed key families, audit user-owned tokens and Worker bucket
 bindings, and dry-run against current Convex release/reference state. The
-30/180-day policy cannot be expressed as a bucket-wide lifecycle rule in this
+broader 30/180-day asset policy cannot be expressed as a bucket-wide lifecycle rule in this
 mixed bucket. Keep the production Trigger environment and queues paused while
 Studio is not ready. No lifecycle change or deletion was attempted during
 the 27 September inspection; see the live v2 rules recorded below.
@@ -191,11 +210,11 @@ actual age-based deletion. The installer then verified the exact three-rule
 configuration by S3 GET. No probe object remains.
 
 The slash-terminated v2 prefixes exclude nested v1 copies, reusable library
-objects, thumbnails, and legacy keys. Account-wide R2 write tokens still
-exist and could write into these reserved namespaces outside Studio's
-create-only writer; prefix exclusivity is an operational contract, not a
-credential-enforced boundary. R2 expiration may lag eligibility by roughly
-24 hours or more, so Studio's read deadline remains the immediate access
-boundary ([Cloudflare object lifecycle documentation](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)).
+objects, thumbnails, and legacy keys. The lifecycle rules are prefix-wide and
+will expire any object written into either reserved namespace, including an
+object from another writer. Account-wide R2 write tokens still exist, so
+prefix exclusivity is an operational contract, not a credential-enforced
+boundary. R2 expiration may lag eligibility by roughly 24 hours or more, while
+Studio's reader applies the release-based deadline.
 PR #66 production code remains undeployed and Trigger tasks remain paused; no Studio deploy,
 render, publish, or live media deletion was performed with this change.
