@@ -73,32 +73,54 @@ test("maintenance controller does nothing when its own opt-in is absent", async 
   }
 });
 
-test("legacy sweeper skips duplicate observation/copy work while the dedicated gate is enabled", async () => {
+test("legacy sweeper keeps global cleanup work while delegating observation/copy under both gates", async () => {
   const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
   const previousMaintenance = process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
   process.env.STUDIO_SCHEDULES_ENABLED = "true";
   process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = "true";
+  const env = {
+    R2_ACCOUNT_ID: "fixture", R2_ACCESS_KEY_ID: "fixture", R2_SECRET_ACCESS_KEY: "fixture", R2_BUCKET: "fixture",
+    STUDIO_CONVEX_JWT_PRIVATE_KEY: generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey
+      .export({ format: "pem", type: "pkcs8" }).toString(),
+    NEXT_PUBLIC_CONVEX_URL: "https://retention-fixture.convex.cloud", STUDIO_OWNER_ID: "owner-fixture",
+    VAULT_URL: "https://vault-fixture.invalid", VAULT_ACCESS_TOKEN: "fixture",
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
   const calls: string[] = [];
-  const fetchMock = mock.method(globalThis, "fetch", async () => {
-    calls.push("fetch");
-    throw new Error("the delegated sweeper must not bootstrap");
+  const services: string[] = [];
+  const fetchMock = mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    assert.equal(url, "https://vault-fixture.invalid/api/query");
+    services.push(JSON.parse(String(init?.body)).args.service);
+    return Response.json({ status: "success", value: [] });
   });
-  const query = mock.method(StudioConvexHttpClient.prototype, "query", async () => {
-    calls.push("query");
-    throw new Error("the delegated sweeper must not observe");
+  const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
+    const name = getFunctionName(reference);
+    calls.push(name);
+    assert.fail(`delegated maintenance query should not run in legacy sweeper: ${name}`);
+  });
+  const mutation = mock.method(StudioConvexHttpClient.prototype, "mutation", async (reference: never) => {
+    const name = getFunctionName(reference);
+    calls.push(name);
+    assert.equal(name, "runArtifactRetentions:claimDue");
+    return null;
   });
   try {
     assert.deepEqual(await runScheduledArtifactRetentionSweep(), {
-      skipped: true,
-      reason: "dedicated maintenance schedule owns release observations and final copies",
+      claimed: 0, completed: 0, blocked: 0, removedObjects: 0,
     });
-    assert.deepEqual(calls, []);
+    assert.deepEqual(calls, ["runArtifactRetentions:claimDue"]);
+    assert.ok(services.length === 0 || services.join(",") === "cloudflare,youtube",
+      "cached secrets or the expected Cloudflare/YouTube bootstrap are the only allowed paths");
   } finally {
-    fetchMock.mock.restore(); query.mock.restore();
+    fetchMock.mock.restore(); query.mock.restore(); mutation.mock.restore();
     if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
     else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;
     if (previousMaintenance === undefined) delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
     else process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = previousMaintenance;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   }
 });
 
@@ -134,7 +156,8 @@ test("maintenance schedule observes an empty queue without claiming cleanup or d
   });
   try {
     assert.deepEqual(await runStudioRetentionMaintenance(), { checked: 0, confirmed: 0, deferred: 0, copied: 0, held: 0 });
-    assert.deepEqual(services, ["cloudflare", "youtube"]);
+    assert.ok(services.length === 0 || services.join(",") === "cloudflare,youtube",
+      "cached secrets or the expected Cloudflare/YouTube bootstrap are the only allowed paths");
     assert.deepEqual(operations, ["runArtifactRetentions:listReleaseChecks", "runArtifactRetentions:listFinalCopyChecks"]);
   } finally {
     fetchMock.mock.restore(); query.mock.restore(); mutation.mock.restore();

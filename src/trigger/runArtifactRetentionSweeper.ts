@@ -267,7 +267,9 @@ export async function sweepDueRunArtifactRetentions(input?: {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
   const convex = convexClient();
-  await observeAndCopyReleasedFinalMasters({ ownerId, convex, now: input?.now ?? Date.now(), log });
+  if (!studioRetentionMaintenanceEnabled()) {
+    await observeAndCopyReleasedFinalMasters({ ownerId, convex, now: input?.now ?? Date.now(), log });
+  }
   let claimed = 0;
   let completed = 0;
   let blocked = 0;
@@ -363,9 +365,6 @@ export async function sweepDueRunArtifactRetentions(input?: {
 }
 
 export async function runScheduledArtifactRetentionSweep() {
-  if (studioRetentionMaintenanceEnabled()) {
-    return { skipped: true, reason: "dedicated maintenance schedule owns release observations and final copies" };
-  }
   return sweepDueRunArtifactRetentions();
 }
 

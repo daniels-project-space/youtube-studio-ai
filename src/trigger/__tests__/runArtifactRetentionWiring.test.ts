@@ -66,7 +66,7 @@ assert.match(
   /id: "run-artifact-retention-sweeper"[\s\S]*?cron: studioScheduleCron\("17 3 \* \* \*"\)/,
   "the existing cleanup sweeper remains behind the global schedule gate",
 );
-assert.match(sweeper, /run: async \(\) => runScheduledArtifactRetentionSweep\(\)/,
-  "the legacy schedule suppresses duplicate observation/copy work while dedicated maintenance owns it");
+assert.match(sweeper, /if \(!studioRetentionMaintenanceEnabled\(\)\) \{[\s\S]*?observeAndCopyReleasedFinalMasters[\s\S]*?\n  \}/,
+  "the legacy cleanup sweep delegates only its observation/copy phase to dedicated maintenance");
 
 console.log("run artifact retention wiring tests passed");
