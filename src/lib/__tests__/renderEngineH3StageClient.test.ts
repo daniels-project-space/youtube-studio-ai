@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
+import { getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -115,4 +115,56 @@ test("provisions the current profile revision and uploads only a hash-addressed 
   ]);
   assert.equal(new Headers(calls[2]?.init.headers).get("x-amz-meta-sha256"), "b".repeat(64));
   await assert.rejects(uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 5, contentType: "image/png" }, frame), /byte length/);
+});
+
+test("reads only a verified completed H3 receipt and its short-lived project output capability", async () => {
+  const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
+  const output = {
+    bucket: "youtube-studio-renders",
+    key: `projects/project-id/workflows/workflow-id/jobs/${jobId}/outputs/h3-render.mp4`,
+    bytes: 12_345,
+    sha256: "f".repeat(64),
+    contentType: "video/mp4",
+    verifiedAt: 100,
+  };
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const base = {
+    baseUrl: config.baseUrl,
+    projectName: config.projectName,
+    projectCapability: config.projectCapability,
+    fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      if (String(input).includes("/client/jobs/output?")) {
+        return jsonResponse({ ...output, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200);
+      }
+      return jsonResponse({
+        jobId, status: "completed", profileId: "minimax-h3", lane: "h3", createdAt: 1,
+        completedAt: 101, progress: "stopped", measurement: null, attempt: null,
+        output, outputRetired: false,
+      }, 200);
+    },
+  };
+  assert.deepEqual(await getH3JobStatusInRenderEngine(base, jobId), {
+    jobId, status: "completed", progress: "stopped", completedAt: 101, outputRetired: false, output,
+  });
+  assert.deepEqual(await getVerifiedH3OutputReadbackInRenderEngine(base, jobId), {
+    ...output, url: "https://r2.example/signed-get", expiresInSeconds: 3_600,
+  });
+  assert.deepEqual(calls.map((call) => new URL(call.url).pathname), ["/client/jobs", "/client/jobs/output"]);
+  assert.equal(new URL(calls[0]!.url).searchParams.get("projectName"), config.projectName);
+  assert.equal(new Headers(calls[1]?.init.headers).get("authorization"), `Bearer ${config.projectCapability}`);
+});
+
+test("rejects an unverified, retired, or cross-job output before it can be consumed", async () => {
+  const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
+  const base = { baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+    fetchImpl: async () => jsonResponse({
+      jobId, status: "completed", profileId: "minimax-h3", lane: "h3", createdAt: 1, completedAt: 2,
+      progress: null, measurement: null, attempt: null,
+      output: { bucket: "youtube-studio-renders", key: `projects/project/workflows/workflow/jobs/${jobId}/outputs/h3-render.mp4`, bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2 },
+      outputRetired: true,
+    }, 200) };
+  await assert.rejects(getH3JobStatusInRenderEngine(base, jobId), /invalid verified H3 output receipt/);
+  const crossJob = { ...base, fetchImpl: async () => jsonResponse({ bucket: "youtube-studio-renders", key: "projects/project/workflows/workflow/jobs/anotherjob1234567890123456789012/outputs/h3-render.mp4", bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200) };
+  await assert.rejects(getVerifiedH3OutputReadbackInRenderEngine(crossJob, jobId), /invalid H3 output readback receipt/);
 });

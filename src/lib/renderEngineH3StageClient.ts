@@ -22,6 +22,35 @@ export type RenderEngineH3InputQualificationReceipt = Readonly<{
   state: "awaiting-final-qualification";
 }>;
 
+/** Read-only status from the project-scoped Engine job endpoint. */
+export type RenderEngineH3JobStatus = Readonly<{
+  jobId: string;
+  status: string;
+  progress: string | null;
+  completedAt: number | null;
+  outputRetired: boolean;
+  output: Readonly<{
+    bucket: string;
+    key: string;
+    bytes: number;
+    sha256: string;
+    contentType: "video/mp4";
+    verifiedAt: number;
+  }> | null;
+}>;
+
+/** A temporary Engine-issued GET capability for an already verified H3 output. */
+export type RenderEngineH3OutputReadback = Readonly<{
+  bucket: string;
+  key: string;
+  bytes: number;
+  sha256: string;
+  contentType: "video/mp4";
+  verifiedAt: number;
+  url: string;
+  expiresInSeconds: number;
+}>;
+
 export type RenderEngineH3WorkflowReceipt = Readonly<{
   workflowId: string;
   profileRevisionSha256: string;
@@ -94,6 +123,25 @@ async function jsonRequest(config: { baseUrl: string; projectName: string; proje
     method: "POST",
     headers: { authorization: `Bearer ${config.projectCapability}`, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    throw new Error(`Render Engine ${path} returned a non-JSON response`);
+  }
+  let parsed: unknown;
+  try { parsed = await response.json(); } catch { throw new Error(`Render Engine ${path} returned malformed JSON`); }
+  return { status: response.status, body: parsed };
+}
+
+async function jsonGet(config: { baseUrl: string; projectName: string; projectCapability: string; fetchImpl?: typeof fetch }, path: string, jobId: string): Promise<unknown> {
+  validateProjectCapability(config.projectName, config.projectCapability);
+  if (!CONVEX_ID.test(jobId)) throw new Error("Render Engine H3 job ID is invalid");
+  const url = new URL(engineEndpoint(config.baseUrl, path));
+  url.searchParams.set("projectName", config.projectName);
+  url.searchParams.set("jobId", jobId);
+  const response = await (config.fetchImpl ?? fetch)(url, {
+    method: "GET",
+    headers: { authorization: `Bearer ${config.projectCapability}`, accept: "application/json" },
+    cache: "no-store", signal: AbortSignal.timeout(15_000),
   });
   if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     throw new Error(`Render Engine ${path} returned a non-JSON response`);
@@ -180,6 +228,48 @@ function parseInputUploadReceipt(value: unknown, projectName: string, input: Ren
   return { key: value.key, url: url.toString(), headers };
 }
 
+function parseH3JobStatus(value: unknown, jobId: string): RenderEngineH3JobStatus {
+  const expected = ["attempt", "completedAt", "createdAt", "jobId", "lane", "measurement", "output", "outputRetired", "profileId", "progress", "status"];
+  if (!isRecord(value) || !hasExactKeys(value, expected) || value.jobId !== jobId || value.lane !== "h3" ||
+      typeof value.status !== "string" || !/^[a-z][a-z0-9-]{1,63}$/.test(value.status) ||
+      (value.progress !== null && typeof value.progress !== "string") ||
+      (value.completedAt !== null && (typeof value.completedAt !== "number" || !Number.isSafeInteger(value.completedAt) || value.completedAt < 1)) ||
+      typeof value.outputRetired !== "boolean") {
+    throw new Error("Render Engine returned an invalid H3 job status");
+  }
+  const output = value.output;
+  if (output === null) return { jobId, status: value.status, progress: value.progress as string | null,
+    completedAt: value.completedAt as number | null, outputRetired: value.outputRetired, output: null };
+  if (!isRecord(output) || !hasExactKeys(output, ["bucket", "bytes", "contentType", "key", "sha256", "verifiedAt"]) ||
+      typeof output.bucket !== "string" || !/^[a-z0-9][a-z0-9-]{2,62}$/.test(output.bucket) ||
+      typeof output.key !== "string" || !/^projects\/[^/]+\/workflows\/[^/]+\/jobs\/[^/]+\/outputs\/[^/]+\.mp4$/.test(output.key) ||
+      typeof output.bytes !== "number" || !Number.isSafeInteger(output.bytes) || output.bytes < 1 || typeof output.sha256 !== "string" || !HEX_SHA256.test(output.sha256) ||
+      output.contentType !== "video/mp4" || typeof output.verifiedAt !== "number" || !Number.isSafeInteger(output.verifiedAt) || output.verifiedAt < 1 ||
+      value.status !== "completed" || value.outputRetired) {
+    throw new Error("Render Engine returned an invalid verified H3 output receipt");
+  }
+  return { jobId, status: "completed", progress: value.progress as string | null,
+    completedAt: value.completedAt as number | null, outputRetired: false,
+    output: { bucket: output.bucket, key: output.key, bytes: output.bytes, sha256: output.sha256,
+      contentType: "video/mp4", verifiedAt: output.verifiedAt } };
+}
+
+function parseH3OutputReadback(value: unknown, jobId: string): RenderEngineH3OutputReadback {
+  if (!isRecord(value) || !hasExactKeys(value, ["bucket", "bytes", "contentType", "expiresInSeconds", "key", "sha256", "url", "verifiedAt"]) ||
+      typeof value.bucket !== "string" || !/^[a-z0-9][a-z0-9-]{2,62}$/.test(value.bucket) ||
+      typeof value.key !== "string" || !new RegExp(`^projects/[^/]+/workflows/[^/]+/jobs/${jobId}/outputs/[^/]+\\.mp4$`).test(value.key) ||
+      typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 1 || typeof value.sha256 !== "string" || !HEX_SHA256.test(value.sha256) ||
+      value.contentType !== "video/mp4" || typeof value.verifiedAt !== "number" || !Number.isSafeInteger(value.verifiedAt) || value.verifiedAt < 1 ||
+      typeof value.expiresInSeconds !== "number" || !Number.isSafeInteger(value.expiresInSeconds) || value.expiresInSeconds < 60 || value.expiresInSeconds > 7_200 || typeof value.url !== "string") {
+    throw new Error("Render Engine returned an invalid H3 output readback receipt");
+  }
+  let url: URL;
+  try { url = new URL(value.url); } catch { throw new Error("Render Engine H3 output readback URL is invalid"); }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("Render Engine H3 output readback URL must be HTTPS");
+  return { bucket: value.bucket, key: value.key, bytes: value.bytes, sha256: value.sha256,
+    contentType: "video/mp4", verifiedAt: value.verifiedAt, url: url.toString(), expiresInSeconds: value.expiresInSeconds };
+}
+
 /** Idempotently obtains Studio's Engine-owned Final H3 workflow and current profile revision. */
 export async function provisionStudioH3WorkflowInRenderEngine(config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">): Promise<RenderEngineH3WorkflowReceipt> {
   const result = await jsonRequest(config, "/client/workflows", { projectName: config.projectName, workflowName: WORKFLOW_NAME, profileId: "minimax-h3" }) as { status: number; body: unknown };
@@ -224,4 +314,24 @@ export async function qualifyH3InputInRenderEngine(
   }) as { status: number; body: unknown };
   if (result.status !== 202) throw new Error(`Render Engine H3 input qualification returned HTTP ${result.status}`);
   return parseInputQualificationReceipt(result.body, jobId);
+}
+
+/** Polls one project-owned H3 job. A consumer must still require `output` before accepting completion. */
+export async function getH3JobStatusInRenderEngine(
+  config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
+  jobId: string,
+): Promise<RenderEngineH3JobStatus> {
+  const result = await jsonGet(config, "/client/jobs", jobId) as { status: number; body: unknown };
+  if (result.status !== 200) throw new Error(`Render Engine H3 job status returned HTTP ${result.status}`);
+  return parseH3JobStatus(result.body, jobId);
+}
+
+/** Returns a temporary GET capability only after the Engine rechecks the verified completion receipt. */
+export async function getVerifiedH3OutputReadbackInRenderEngine(
+  config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
+  jobId: string,
+): Promise<RenderEngineH3OutputReadback> {
+  const result = await jsonGet(config, "/client/jobs/output", jobId) as { status: number; body: unknown };
+  if (result.status !== 200) throw new Error(`Render Engine H3 output readback returned HTTP ${result.status}`);
+  return parseH3OutputReadback(result.body, jobId);
 }

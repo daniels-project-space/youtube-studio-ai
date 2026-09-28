@@ -75,6 +75,7 @@ loader._load = function (name, ...args) {
       return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
     },
     stageH3RequestInRenderEngine: async () => ({ jobId: `job${++stagedJobs}`, state: "awaiting-input-qualification", manifestSha256: "b".repeat(64) }),
+    qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => ({ jobId, state: "awaiting-final-qualification" }),
   };
   if (name === "@/lib/novitaRenderFarm") return {
     renderImages: async () => { providerCalls++; throw new Error("generation forbidden"); },
