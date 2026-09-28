@@ -116,6 +116,8 @@ export type VideoRow = {
   reviewedThumbnailUrl?: string;
   /** r2Key of the rendered video asset; lightbox <video> fallback. */
   videoKey: string | null;
+  /** Verified released copy for playback; null while a released copy is unavailable. */
+  playbackKey?: string | null;
   /** claude_flux thumbnail intelligence (surfaced in the lightbox). */
   thumbnailTitle?: string;
   visualRationale?: string;

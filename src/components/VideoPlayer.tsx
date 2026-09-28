@@ -20,8 +20,10 @@ export function VideoPlayer({
 }) {
   return (
     <div className={styles.frame}>
-      {video.videoKey ? (
-        <SavedMaster key={video.videoKey} assetKey={video.videoKey} title={video.title} />
+      {video.playbackKey === null ? (
+        <div className={styles.message}>Video is temporarily unavailable</div>
+      ) : (video.playbackKey ?? video.videoKey) ? (
+        <SavedMaster key={video.playbackKey ?? video.videoKey} assetKey={(video.playbackKey ?? video.videoKey)!} title={video.title} />
       ) : video.youtubeVideoId ? (
         <iframe
           src={youtubeEmbed(video.youtubeVideoId)}

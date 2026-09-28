@@ -17,6 +17,7 @@ type RenderedVideo = {
   thumbnailKey?: string | null;
   thumbnailPresentation?: "current_golden_candidate" | "lofi_rendered_frame" | "lofi_frame_pending";
   videoKey?: string | null;
+  playbackKey?: string | null;
   durationSec?: number;
   createdAt?: number;
 };
@@ -253,15 +254,15 @@ function R2VideoDialog({
         </header>
 
         <div className={styles.player}>
-          <SavedVideoPlayback
-            key={`${video.videoKey}:${openAttempt}`}
-            assetKey={video.videoKey ?? ""}
+          {video.playbackKey === null ? <div role="status">Video is temporarily unavailable</div> : <SavedVideoPlayback
+            key={`${video.playbackKey ?? video.videoKey}:${openAttempt}`}
+            assetKey={video.playbackKey ?? video.videoKey ?? ""}
             onRetry={() => {
               // Retry removes its own button; keep focus on a stable dialog control.
               closeRef.current?.focus({ preventScroll: true });
               setOpenAttempt(attempt => attempt + 1);
             }}
-          />
+          />}
         </div>
       </div>
     </div>

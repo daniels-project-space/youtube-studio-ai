@@ -39,13 +39,20 @@ try {
   assert.match(saved, /src="\/saved-master.mp4"/);
   assert.doesNotMatch(saved, /<iframe/);
   assert.deepEqual(calls, [video.videoKey, video.videoKey, video.videoKey], "only the exact saved key is signed");
+  const released = render({ ...video, playbackKey: "released-final/v2/owner/fixture/copy.mp4" });
+  assert.match(released, /data-signed-video-state="ready"/);
+  assert.equal(calls.at(-1), "released-final/v2/owner/fixture/copy.mp4");
+  const unavailable = render({ ...video, playbackKey: null });
+  assert.match(unavailable, /temporarily unavailable/);
+  assert.doesNotMatch(unavailable, /<iframe|<video/);
+  assert.equal(calls.length, 4, "a missing released copy must not request the original source");
   const youtubeOnly = render({ ...video, videoKey: null });
   assert.match(youtubeOnly, /<iframe/);
   assert.match(youtubeOnly, /tabindex="-1"/);
-  assert.equal(calls.length, 3, "YouTube-only fallback does not ask for a signed URL");
+  assert.equal(calls.length, 4, "YouTube-only fallback does not ask for a signed URL");
   const absent = render({ ...video, videoKey: null, youtubeVideoId: undefined });
   assert.match(absent, /No playable source/);
   assert.doesNotMatch(absent, /<video|<iframe|Retry video/);
-  assert.equal(calls.length, 3, "missing media does not trigger a request");
+  assert.equal(calls.length, 4, "missing media does not trigger a request");
 } finally { loader._load = originalLoad; }
 console.log("VideoPlayer actual source selection, loading/error/retry and native recovery integration passed");
