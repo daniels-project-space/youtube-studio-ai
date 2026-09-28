@@ -19,16 +19,19 @@ assert.equal(classifyLegacyR2Key(reusable), "protected");
 assert.equal(classifyLegacyR2Key("imagecraft/test/img1.png"), "protected");
 const refs = referencesInDocument({ _id: "row1", nested: { media: `https://example.test/${encodeURIComponent(generated)}` } }, "assets", [generated]);
 assert.deepEqual(refs.get(generated), [{ table: "assets", id: "row1", path: "nested.media" }]);
+const protectedRefs = referencesInDocument({ _id: "old1", thumb }, "historicalTable", [thumb]);
+assert.deepEqual(protectedRefs.get(thumb), [{ table: "historicalTable", id: "old1", path: "thumb" }]);
 const rows = planLegacyR2Retention([
   record(generated, 31), record(final, 181), record(fixedFinal, 181),
   record(thumb, 400), record(reusable, 400), record("lustig/film/clips/x.mp4", 29),
-], refs, now);
+], new Map([...refs, ...protectedRefs]), now);
 assert.equal(rows[0].decision, "preserve");
 assert.match(rows[0].reason, /referenced/u);
 assert.equal(rows[1].decision, "preserve");
 assert.match(rows[1].reason, /release timestamp/u);
 assert.equal(rows[2].decision, "preserve");
 assert.equal(rows[3].decision, "preserve");
+assert.equal(rows[3].references.length, 1);
 assert.equal(rows[4].decision, "preserve");
 assert.equal(rows[5].decision, "preserve");
 assert.equal(planLegacyR2Retention([record(generated, 31)], new Map(), now)[0].decision, "review_unreferenced");

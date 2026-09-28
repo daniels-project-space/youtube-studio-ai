@@ -2,14 +2,15 @@
  * Read-only reconciliation of a complete Convex production snapshot and exact
  * Studio R2 inventory. This script has no R2 client, copy, or delete imports.
  *
- * Capture source data with `convex export --prod --path SNAPSHOT_DIR` and an
- * R2 ListObjectsV2 inventory (key, etag, size, lastModified, bucket). Run:
+ * Capture the exact live deployment with `convex export --deployment astute-camel-689
+ * --path SNAPSHOT.zip`, extract the ZIP, and capture a Studio R2 ListObjectsV2
+ * inventory (key, etag, size, lastModified, bucket). Run:
  *   tsx scripts/plan-legacy-r2-retention.ts SNAPSHOT_DIR INVENTORY.jsonl PLAN.json
  */
 import { createReadStream, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { classifyLegacyR2Key, planLegacyR2Retention, referencesInDocument, validateLegacyInventory } from "../src/lib/legacyR2RetentionCensus";
+import { planLegacyR2Retention, referencesInDocument, validateLegacyInventory } from "../src/lib/legacyR2RetentionCensus";
 import type { ConvexReference, LegacyR2Record } from "../src/lib/legacyR2RetentionCensus";
 
 const [snapshotArg, inventoryArg, outputArg] = process.argv.slice(2);
@@ -28,7 +29,7 @@ const expectedTables = [...readFileSync(new URL("../convex/schema.ts", import.me
 if (expectedTables.length < 80) throw new Error("Studio schema table census is incomplete");
 const exportedTables = readdirSync(snapshotDir, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && statSync(join(snapshotDir, entry.name, "documents.jsonl"), { throwIfNoEntry: false })?.isFile())
-  .map((entry) => entry.name);
+  .map((entry) => entry.name).filter((table) => table !== "_tables");
 const missingTables = expectedTables.filter((table) => !exportedTables.includes(table));
 if (missingTables.length) throw new Error(`Convex snapshot is incomplete: ${missingTables.length} schema tables absent`);
 
@@ -38,8 +39,7 @@ const inventory = readFileSync(inventoryPath, "utf8").split("\n").filter(Boolean
     catch { throw new Error(`Invalid inventory JSONL at line ${index + 1}`); }
   });
 validateLegacyInventory(inventory);
-const keys = inventory.filter((row) => ["generated_media", "final_video", "possible_final"].includes(classifyLegacyR2Key(row.key)))
-  .map((row) => row.key);
+const keys = inventory.map((row) => row.key);
 async function main(): Promise<void> {
 const refs = new Map<string, ConvexReference[]>();
 const counts: Record<string, number> = {};
