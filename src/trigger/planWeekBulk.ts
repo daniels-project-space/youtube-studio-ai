@@ -80,7 +80,7 @@ export const planWeekBulkTask = task({
         }, {
           concurrencyKey: channel.channelId,
           idempotencyKey,
-        });
+        }, { retry: { maxAttempts: 1 } });
         await convex.mutation(api.planWeekBulkOrders.markChildDispatched, {
           ownerId: order.ownerId,
           fingerprint: order.fingerprint,

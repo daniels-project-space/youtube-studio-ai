@@ -12,6 +12,8 @@ assert.match(source, /tasks\.trigger\("plan-week-ahead"[\s\S]*?api\.planWeekBulk
   "each successful child Trigger handle must be persisted before the next wave outcome can abort the parent");
 assert.match(source, /idempotencyKeys\.create/);
 assert.match(source, /tasks\.trigger\("plan-week-ahead"/);
+assert.match(source, /idempotencyKey,[\s\S]*?\}, \{ retry: \{ maxAttempts: 1 \} \}\)/,
+  "uncertain child enqueue must make one SDK HTTP attempt and recover through stable idempotency");
 assert.match(source, /bulkOrderFingerprint: order\.fingerprint/);
 assert.match(source, /Promise\.all/);
 assert.match(receiptSource, /requireStudioServiceIdentity/);

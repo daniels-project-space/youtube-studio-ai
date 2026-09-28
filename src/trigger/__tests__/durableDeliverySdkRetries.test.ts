@@ -62,6 +62,11 @@ test("installed SDK makes one durable delivery attempt, preserving identity afte
           payload: { channelId: "channel", runId: "serialized", invocationSha256: "a".repeat(64) },
           channelId: "channel", runId: "serialized", retryAt: 2_000_000, attempt: 1,
         }) },
+        { file: "planWeekBulk", request: {
+          idempotencySeed: "plan-week-ahead:owner-fixture:week-fixture:channel-fixture",
+          concurrencyKey: "channel-fixture",
+          payload: { fixture: "plan-week-bulk-child" },
+        } },
       ];
       for (const { file, request } of schedules) {
         const requestOptions = actualRequestOptions(`src/trigger/${file}.ts`);
