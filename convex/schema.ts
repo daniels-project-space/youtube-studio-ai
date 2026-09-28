@@ -1438,6 +1438,13 @@ export default defineSchema({
     // Requested schedule is separate from observed public-release evidence.
     scheduledPublishAt: v.optional(v.number()),
     nextReleaseCheckAt: v.optional(v.number()),
+    nextFinalCopyCheckAt: v.optional(v.number()),
+    // Independent copy observation: completed cleanup keeps its historical
+    // release/deadline even if YouTube later publishes a new generation.
+    finalCopyReleaseAt: v.optional(v.number()),
+    finalCopyObservationAt: v.optional(v.number()),
+    finalCopyVideoId: v.optional(v.string()),
+    finalCopyYouTubeChannelId: v.optional(v.string()),
     releaseConfirmedAt: v.optional(v.number()),
     releaseObservationAt: v.optional(v.number()),
     releaseVideoId: v.optional(v.string()),
@@ -1462,7 +1469,8 @@ export default defineSchema({
   })
     .index("by_run", ["runId"])
     .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"])
-    .index("by_owner_release_check", ["ownerId", "status", "nextReleaseCheckAt"]),
+    .index("by_owner_release_check", ["ownerId", "status", "nextReleaseCheckAt"])
+    .index("by_owner_final_copy_check", ["ownerId", "status", "nextFinalCopyCheckAt"]),
 
   // An owned, content-addressed writer reserves its exact R2 key before PUT.
   r2ImmutableWrites: defineTable({
@@ -1485,6 +1493,21 @@ export default defineSchema({
     releaseAt: v.number(), retainUntil: v.number(), observedAt: v.number(),
   })
     .index("by_run_key", ["runId", "r2Key"]),
+
+  // A generation is the exact public-release observation plus the certified
+  // source bytes. This ledger never grants source deletion authority.
+  releasedFinalMasters: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    releaseAt: v.number(), certificateKey: v.string(), certificateFingerprint: v.string(),
+    sourceKey: v.string(), sourceSha256: v.string(), sourceByteLength: v.number(),
+    sourceEtag: v.string(), sourceLastModifiedAt: v.number(),
+    copyKey: v.string(), claimId: v.string(),
+    status: v.union(v.literal("active"), v.literal("finished")),
+    startedAt: v.number(), finishedAt: v.optional(v.number()),
+    copyEtag: v.optional(v.string()), copyLastModifiedAt: v.optional(v.number()),
+  })
+    .index("by_run_release", ["runId", "releaseAt"])
+    .index("by_owner_copy", ["ownerId", "copyKey"]),
 
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource
