@@ -6,6 +6,7 @@
  * to the agreed Novita fallback after the 24-hour wait window.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
+import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS,
@@ -22,6 +23,7 @@ import {
   queueMiniMaxH3WeeklyCapacityRetry,
   type MiniMaxH3WeeklyBatchArgs,
 } from "./minimaxH3WeeklyBatch";
+import { legacyWeeklyH3ProviderRouteIsRetired } from "./legacyH3WeeklyRetirement";
 
 function notFound(error: unknown): boolean {
   const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
@@ -62,6 +64,10 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
+    if (legacyWeeklyH3ProviderRouteIsRetired()) {
+      throw new AbortTaskRunError("Studio weekly H3 provider route is retired; stage the request through Render Engine.");
+    }
+
     const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) {
       throw new Error("weekly MiniMax H3 capacity retry requires the signed owner and hold start");

@@ -4,6 +4,7 @@
  * approved keyframes/prompts and records actual R2-backed render receipts.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
+import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
@@ -29,6 +30,7 @@ import { api } from "../../convex/_generated/api";
 import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
 import { saladPriorityPolicyFromEnv, SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
 import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
+import { legacyWeeklyH3ProviderRouteIsRetired } from "./legacyH3WeeklyRetirement";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
@@ -786,6 +788,10 @@ export const minimaxH3WeeklyBatchTask = task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
+    if (legacyWeeklyH3ProviderRouteIsRetired()) {
+      throw new AbortTaskRunError("Studio weekly H3 provider route is retired; stage the request through Render Engine.");
+    }
+
     const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
     await bootstrapSecrets(() => undefined, {
       services: ["cloudflare", "salad"],

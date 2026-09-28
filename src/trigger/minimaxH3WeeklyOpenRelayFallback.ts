@@ -6,6 +6,7 @@
  * this never replaces Salad's primary medium/high weekly admission behavior.
  */
 import { task } from "@trigger.dev/sdk";
+import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { ensureOpenRelayH3Ready } from "@/lib/openRelayH3";
 import {
@@ -34,6 +35,7 @@ import {
   type PersistedWeeklyReceipt,
   type MiniMaxH3WeeklyBatchArgs,
 } from "./minimaxH3WeeklyBatch";
+import { legacyWeeklyH3ProviderRouteIsRetired } from "./legacyH3WeeklyRetirement";
 
 function notFound(error: unknown): boolean {
   const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
@@ -132,6 +134,10 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
+    if (legacyWeeklyH3ProviderRouteIsRetired()) {
+      throw new AbortTaskRunError("Studio weekly H3 provider route is retired; stage the request through Render Engine.");
+    }
+
     const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) {
       throw new Error("weekly H3 OpenRelay fallback requires the signed owner and Salad hold start");

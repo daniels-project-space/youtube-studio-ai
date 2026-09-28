@@ -7,6 +7,7 @@
  * retry never pays for a completed output twice.
  */
 import { task } from "@trigger.dev/sdk";
+import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
@@ -32,6 +33,7 @@ import {
   type PersistedWeeklyReceipt,
   type MiniMaxH3WeeklyBatchArgs,
 } from "./minimaxH3WeeklyBatch";
+import { legacyWeeklyH3ProviderRouteIsRetired } from "./legacyH3WeeklyRetirement";
 
 function notFound(error: unknown): boolean {
   const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
@@ -95,6 +97,10 @@ export const minimaxH3WeeklyNovitaFallbackTask = task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
+    if (legacyWeeklyH3ProviderRouteIsRetired()) {
+      throw new AbortTaskRunError("Studio weekly H3 provider route is retired; stage the request through Render Engine.");
+    }
+
     const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
     if (!payload.ownerId || payload.capacityHoldStartedAt === undefined) throw new Error("weekly H3 Novita fallback requires the signed owner and Salad hold start");
     await bootstrapSecrets(() => undefined, { services: ["cloudflare", "novita"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN"] });
