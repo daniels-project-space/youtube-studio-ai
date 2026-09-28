@@ -4,6 +4,16 @@ export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
 export type ReleasedOrdinaryClass = "lofi-clip" | "lofi-loop-unit";
 
+/** A mutable ordinary source must still be the conditional-GET generation. */
+export function hasUnchangedOrdinarySourceHead(
+  expected: { etag: string; lastModifiedAt: number; byteLength: number },
+  head: { etag?: string; lastModified?: Date; contentLength?: number } | null,
+): boolean {
+  return Boolean(head?.etag && head.lastModified &&
+    head.etag === expected.etag && head.lastModified.getTime() === expected.lastModifiedAt &&
+    head.contentLength === expected.byteLength);
+}
+
 export function isLoFiOrdinarySource(
   kind: ReleasedOrdinaryClass, keyPrefix: string, runId: string, sourceKey: string,
 ): boolean {

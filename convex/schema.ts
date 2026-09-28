@@ -1509,6 +1509,22 @@ export default defineSchema({
     .index("by_run_release", ["runId", "releaseAt"])
     .index("by_owner_copy", ["ownerId", "copyKey"]),
 
+  // Exact source-to-copy receipts for allowlisted ordinary run media. Source
+  // asset rows and their references remain untouched by this ledger.
+  releasedOrdinaryAssets: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    assetId: v.id("assets"), releaseAt: v.number(),
+    assetClass: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+    sourceKey: v.string(), sourceEtag: v.string(), sourceLastModifiedAt: v.number(),
+    sourceSha256: v.string(), sourceByteLength: v.number(), copyKey: v.string(),
+    status: v.union(v.literal("active"), v.literal("finished")),
+    startedAt: v.number(), finishedAt: v.optional(v.number()),
+    copyEtag: v.optional(v.string()), copyLastModifiedAt: v.optional(v.number()),
+  })
+    .index("by_asset_release", ["assetId", "releaseAt"])
+    .index("by_run", ["runId"])
+    .index("by_owner_copy", ["ownerId", "copyKey"]),
+
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource
   // reference and evidence-bound compatibility metadata. Lifecycle changes
