@@ -81,6 +81,12 @@ export const planWeekBulkTask = task({
           concurrencyKey: channel.channelId,
           idempotencyKey,
         });
+        await convex.mutation(api.planWeekBulkOrders.markChildDispatched, {
+          ownerId: order.ownerId,
+          fingerprint: order.fingerprint,
+          channelId: channel.channelId as Id<"channels">,
+          triggerRunId: handle.id,
+        });
         return { channelId: channel.channelId, triggerRunId: handle.id };
       }));
       children.push(...waveChildren);

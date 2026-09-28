@@ -153,6 +153,37 @@ export const markDispatched = mutation({
   },
 });
 
+/** Persist one Trigger child handle before later siblings are admitted. */
+export const markChildDispatched = mutation({
+  args: {
+    ownerId: v.string(),
+    fingerprint: v.string(),
+    channelId: v.id("channels"),
+    triggerRunId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "plan-week bulk child dispatch receipt");
+    const order = await ctx.db.query("planWeekBulkOrders")
+      .withIndex("by_fingerprint", (q) => q.eq("ownerId", args.ownerId).eq("fingerprint", args.fingerprint))
+      .unique();
+    if (!order) throw new Error("plan-week bulk order not found");
+    const child = order.children.find((entry) => String(entry.channelId) === String(args.channelId));
+    if (!child || (child.triggerRunId && child.triggerRunId !== args.triggerRunId)) {
+      throw new Error("plan-week bulk child dispatch identity mismatch");
+    }
+    if (child.triggerRunId === args.triggerRunId) {
+      return { reused: true, status: order.status };
+    }
+    const now = Date.now();
+    const children = order.children.map((entry) => entry.channelId === args.channelId
+      ? { ...entry, status: "queued" as const, triggerRunId: args.triggerRunId }
+      : entry);
+    const status = order.status === "admitted" ? "dispatched" : order.status;
+    await ctx.db.patch(order._id, { status, children, updatedAt: now });
+    return { reused: false, status };
+  },
+});
+
 export const markChildStarted = mutation({
   args: {
     ownerId: v.string(),
