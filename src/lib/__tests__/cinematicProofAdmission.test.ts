@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   let paidRenderCalls = 0;
   await assert.rejects(
     () => renderDirectNovita(native720Cfg(() => { paidRenderCalls += 1; }), "video"),
-    /Direct LTX video execution is retired; use the attested MiniMax H3 renderer instead/,
+    /New direct image and video dispatch is retired/,
     "the retired direct video worker must reject before provider admission",
   );
   await assert.rejects(
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
       // ignore a caller-crafted receipt rather than treating it as authority.
       cinematicProofAdmission: syntheticNativeProof,
     } as unknown as NovitaRenderCfg, "video"),
-    /Direct LTX video execution is retired; use the attested MiniMax H3 renderer instead/,
+    /New direct image and video dispatch is retired/,
     "a caller-crafted receipt cannot reactivate the retired direct video worker",
   );
   assert.equal(paidRenderCalls, 0, "proof admission fails before beforeProviderSpend can run");

@@ -224,7 +224,9 @@ export const novita4090Reaper = task({
   run: async () => {
     const log = (message: string, extra?: Record<string, unknown>) =>
       console.log(`[novita-4090-reaper] ${message}`, extra ?? "");
-    await bootstrapSecrets(log, { required: ["NOVITA_API_KEY", "INTERNAL_QUERY_SECRET"] });
+    // Teardown remains available for already-rented instances after new
+    // render admission is retired.
+    await bootstrapSecrets(log, { services: ["novita"], required: ["NOVITA_API_KEY", "INTERNAL_QUERY_SECRET"] });
 
     const secret = requireInternalQuerySecret();
     const convex = convexClient();

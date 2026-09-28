@@ -393,7 +393,6 @@ export const planWeekPreparedImagesTask = task({
       ...(shot.seed === undefined ? {} : { seed: shot.seed }),
       ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
     }));
-    await bootstrapSecrets(() => undefined, { services: ["novita"] });
     await claimPreparedGeneration("images", manifest, { payload, shots, profile });
     const result = await renderImages({
       prefix: `${sidecarKey.slice(0, -".json".length)}/render`,

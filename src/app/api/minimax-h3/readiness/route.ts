@@ -39,7 +39,7 @@ function lane(provider: "salad" | "novita"): Lane {
 export async function GET(request: Request) {
   try {
     await requireStudioActor(request);
-    await bootstrapSecrets(undefined, { services: ["cloudflare", "novita", "salad"] });
+    await bootstrapSecrets(undefined, { services: ["cloudflare", "salad"] });
     const lanes = [lane("salad"), lane("novita")];
     let modelPack: { state: "verified" | "integrity_hold" | "unavailable"; reason?: string };
     try {

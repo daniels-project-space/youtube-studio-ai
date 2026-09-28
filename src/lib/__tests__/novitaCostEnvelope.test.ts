@@ -47,8 +47,8 @@ async function rawProviderBoundaryRefusesMissingSignedCeilings(): Promise<void> 
   };
   await assert.rejects(
     renderImages({ ...base, profile: toNovitaPhaseProfile(profile, "image") }),
-    /requires an explicit signed worker cost ceiling/,
-    "the raw image wrapper must fail before importing a provider controller",
+    /New direct image dispatch is retired/,
+    "the raw image wrapper must fail before provider admission",
   );
   await assert.rejects(
     renderVideo({
