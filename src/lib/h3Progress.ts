@@ -1,4 +1,4 @@
-export type H3ProgressState = "pending" | "held" | "complete" | "reconciliation_required";
+export type H3ProgressState = "pending" | "held" | "complete" | "reconciliation_required" | "repair_required";
 
 export interface H3ProgressSnapshot {
   state: H3ProgressState;
@@ -16,7 +16,7 @@ export interface H3ProgressSnapshot {
 export function h3ProgressPercent(snapshot: H3ProgressSnapshot): number {
   if (snapshot.state === "complete") return 100;
   if (snapshot.state === "held") return 8;
-  if (snapshot.state === "reconciliation_required") return 92;
+  if (snapshot.state === "reconciliation_required" || snapshot.state === "repair_required") return 92;
 
   const requestCount = snapshot.receipt?.requestCount;
   const completedCount = snapshot.receipt?.completedCount;
