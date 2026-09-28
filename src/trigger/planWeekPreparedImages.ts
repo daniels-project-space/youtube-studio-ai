@@ -6,7 +6,7 @@
  * stills.  It is deliberately create-only and replayable: a retry reuses a
  * fully verified sidecar and never submits the same image wave twice.
  */
-import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
@@ -37,6 +37,10 @@ import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
+import { provisionStudioH3WorkflowInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+
+const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
+const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
 
 export interface PlanWeekPreparedImageShot {
   id: string;
@@ -310,8 +314,10 @@ export async function dispatchPreparedFootage(
   manifest: PlanWeekPreparationManifest,
   payload: PlanWeekPreparedImagesArgs,
   prepared: PlanWeekPreparedImages,
-): Promise<string | undefined> {
+): Promise<readonly string[] | undefined> {
   if (!hasGeneratedFootageStage(manifest)) return undefined;
+  const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
+  if (!/^[a-f0-9]{64}$/.test(projectCapability)) throw new Error("weekly H3 Engine project capability is not configured");
   const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "0.4");
   const batch = buildPreparedH3Batch({
     payload,
@@ -319,41 +325,31 @@ export async function dispatchPreparedFootage(
     manifestSha256: payload.manifestSha256,
     maxCostUsd,
   });
-  // H3's weekly worker only admits canonical first-frame keys. Copying the
-  // verified still bytes into that namespace is create-only and idempotent;
-  // a changed winner fails before Salad capacity admission.
-  await forEachPreparedMedia(batch.firstFrames, async (frame) => {
+  const engine = { baseUrl: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, projectCapability };
+  const workflow = await provisionStudioH3WorkflowInRenderEngine(engine);
+  const stagedJobIds: string[] = [];
+  for (const [index, frame] of batch.firstFrames.entries()) {
     const bytes = await getObjectBytes(frame.sourceKey, undefined, { maxBytes: frame.byteLength, timeoutMs: 300_000 });
     if (bytes.byteLength !== frame.byteLength || sha256BytesHex(bytes) !== frame.sha256) {
       throw new Error(`weekly prepared H3 source frame ${frame.sourceKey} failed its image receipt check`);
     }
-    await persistMediaCreateOnly(frame.destinationKey, bytes);
-  });
-  const h3Payload = {
-    ownerId: payload.ownerId,
-    orderKey: batch.orderKey,
-    receiptKey: batch.receiptKey,
-    jobs: batch.jobs,
-    capacityHoldStartedAt: Date.now(),
-    preparedFootage: {
-      ownerId: payload.ownerId,
-      channelSlug: payload.channelSlug,
-      batchId: payload.batchId,
-      itemId: payload.itemId,
-      manifestKey: payload.manifestKey,
-      manifestSha256: payload.manifestSha256,
-      sceneIds: batch.sceneIds,
-    },
-  };
-  const idempotencyKey = await idempotencyKeys.create(
-    `plan-week-h3:${payload.ownerId}:${payload.manifestSha256}`,
-    { scope: "global" },
-  );
-  const handle = await tasks.trigger("minimax-h3-weekly-batch", h3Payload, {
-    concurrencyKey: `plan-week-h3:${manifest.ownerId}:${manifest.channelId}`,
-    idempotencyKey,
-  });
-  return handle.id;
+    const input = await uploadH3InputToRenderEngine(engine, { sha256: frame.sha256, bytes: frame.byteLength, contentType: "image/png" }, bytes);
+    const job = batch.jobs[index];
+    if (!job) throw new Error("weekly H3 Engine job/frame pairing is incomplete");
+    const receipt = await stageH3RequestInRenderEngine({ ...engine, workflowId: workflow.workflowId, request: {
+      version: 2,
+      idempotencyKey: `${batch.orderKey}:${String(index).padStart(3, "0")}`,
+      prompt: job.prompt,
+      firstFrame: { r2Key: input.key, sha256: frame.sha256 },
+      seed: job.seed,
+      durationSeconds: 5,
+      output: { width: 1280, height: 736, fps: 24, container: "mp4", videoCodec: "h264" },
+      maxCostUsd: job.maxCostUsd,
+      profileRevisionSha256: workflow.profileRevisionSha256,
+    } });
+    stagedJobIds.push(receipt.jobId);
+  }
+  return stagedJobIds;
 }
 
 export const planWeekPreparedImagesTask = task({
@@ -374,8 +370,8 @@ export const planWeekPreparedImagesTask = task({
     const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
     const prior = await verifyStoredSidecar(sidecarKey, manifest);
     if (prior) {
-      const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, prior);
-      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3TriggerRunId, costUsd: 0, manifestSha256: prior.manifestSha256 };
+      const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
+      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
@@ -446,7 +442,7 @@ export const planWeekPreparedImagesTask = task({
     assertPlanWeekPreparedImagesBinding({ prepared, manifest });
     const body = new TextEncoder().encode(canonicalJson(prepared));
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
-    const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, prepared);
-    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3TriggerRunId, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+    const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prepared);
+    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
   },
 });

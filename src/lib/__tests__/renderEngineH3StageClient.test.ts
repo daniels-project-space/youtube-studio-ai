@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stageH3RequestInRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
+import { provisionStudioH3WorkflowInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -74,4 +74,30 @@ test("rejects unsafe Engine origins and non-202 responses", async () => {
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl }), /HTTPS Convex site origin/);
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, fetchImpl }), /HTTP 200/);
   assert.equal(calls, 1);
+});
+
+test("provisions the current profile revision and uploads only a hash-addressed project frame", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const frame = new Uint8Array([1, 2, 3, 4]);
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    if (String(input).endsWith("/client/workflows")) {
+      return jsonResponse({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "e".repeat(64) }, 200);
+    }
+    if (String(input).endsWith("/client/input-uploads")) {
+      return jsonResponse({ bucket: "youtube-studio-renders", key: `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`, bytes: 4, sha256: "b".repeat(64), contentType: "image/png", url: "https://r2.example/signed-put", headers: { "Content-Type": "image/png", "Content-Length": "4", "x-amz-meta-sha256": "b".repeat(64) } }, 200);
+    }
+    return new Response(null, { status: 200 });
+  };
+  const base = { baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability, fetchImpl };
+  assert.deepEqual(await provisionStudioH3WorkflowInRenderEngine(base), { workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "e".repeat(64) });
+  assert.equal((await uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 4, contentType: "image/png" }, frame)).key,
+    `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`);
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://jovial-camel-68.convex.site/client/workflows",
+    "https://jovial-camel-68.convex.site/client/input-uploads",
+    "https://r2.example/signed-put",
+  ]);
+  assert.equal(new Headers(calls[2]?.init.headers).get("x-amz-meta-sha256"), "b".repeat(64));
+  await assert.rejects(uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 5, contentType: "image/png" }, frame), /byte length/);
 });

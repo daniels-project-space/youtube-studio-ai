@@ -40,7 +40,7 @@ let sidecar = prepared;
 let started = 0, active = 0, peak = 0, providerCalls = 0;
 let failure = false;
 const writes: string[] = [];
-let dispatches = 0;
+let inputUploads = 0, stagedJobs = 0;
 let release!: () => void;
 let gate = new Promise<void>(resolve => { release = resolve; });
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
@@ -67,10 +67,14 @@ loader._load = function (name, ...args) {
       writes.push(key);
     },
   };
-  if (name === "@trigger.dev/sdk") return {
-    task: (definition: unknown) => definition,
-    tasks: { trigger: async () => { dispatches++; return { id: "fixture-h3" }; } },
-    idempotencyKeys: { create: async () => "fixture-key" },
+  if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
+  if (name === "@/lib/renderEngineH3StageClient") return {
+    provisionStudioH3WorkflowInRenderEngine: async () => ({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "a".repeat(64) }),
+    uploadH3InputToRenderEngine: async (_config: unknown, input: { sha256: string }) => {
+      inputUploads++;
+      return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
+    },
+    stageH3RequestInRenderEngine: async () => ({ jobId: `job${++stagedJobs}`, state: "awaiting-input-qualification", manifestSha256: "b".repeat(64) }),
   };
   if (name === "@/lib/novitaRenderFarm") return {
     renderImages: async () => { providerCalls++; throw new Error("generation forbidden"); },
@@ -136,23 +140,28 @@ async function main() {
     shots: items.map(item => ({ id: item.shotId, prompt: "A detailed archive map", candidateCount: 1 })), maxCostUsd: 5,
   });
   const footageManifest = { ...manifest, execution: { ...manifest.execution, pipeline: [{ block: "gen_footage" }] } };
+  const priorToken = process.env.RENDER_ENGINE_PROJECT_TOKEN;
+  process.env.RENDER_ENGINE_PROJECT_TOKEN = "a".repeat(64);
   started = 0; peak = 0;
   gate = new Promise<void>(resolve => { release = resolve; });
   const copy = dispatchPreparedFootage(footageManifest, payload, prepared);
   for (let tick = 0; tick < 20; tick++) await Promise.resolve();
-  assert.equal(started, 4);
-  assert.equal(dispatches, 0, "H3 cannot start before every source frame is retained");
+  assert.equal(started, 1);
+  assert.equal(stagedJobs, 0, "H3 cannot stage before the first source frame is retained");
   release();
-  assert.equal(await copy, "fixture-h3");
-  assert.equal(writes.length, 12);
-  assert.equal(peak, 4);
-  assert.equal(dispatches, 1);
+  assert.deepEqual(await copy, Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.equal(writes.length, 0);
+  assert.equal(peak, 1);
+  assert.equal(inputUploads, 12);
+  assert.equal(stagedJobs, 12);
   started = 0; failure = true;
   await assert.rejects(dispatchPreparedFootage(footageManifest, payload, prepared), /fixture transfer limit/);
-  assert.equal(dispatches, 1, "a failed source-frame copy cannot dispatch H3");
+  assert.equal(stagedJobs, 12, "a failed source-frame copy cannot stage H3");
   assert.equal(active, 0);
   assert.equal(providerCalls, 0);
-  console.log("Prepared image transfer bounds: real sidecar reader, four active transfers, drain-on-failure, exact byte limits, admission and digest rejection passed");
+  if (priorToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
+  else process.env.RENDER_ENGINE_PROJECT_TOKEN = priorToken;
+  console.log("Prepared image transfer bounds: real sidecar reader, bounded Engine input transfer, staged H3 receipts, and source-byte rejection passed");
 }
 
 void main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { loader._load = originalLoad; });
