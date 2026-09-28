@@ -204,12 +204,14 @@ export const recordReleaseObservations = mutation({
         assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
         r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
         releaseAt: v.number(), expiresAt: v.number(),
+        destinationEtag: v.string(), destinationLastModifiedAt: v.number(),
       })),
       ordinaryAssets: v.optional(v.array(v.object({
         kind: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
         assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
         r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
         releaseAt: v.number(), expiresAt: v.number(),
+        destinationEtag: v.string(), destinationLastModifiedAt: v.number(),
       }))),
     })),
   },
@@ -305,6 +307,43 @@ export const recordReleaseObservations = mutation({
         if (row.releasedOrdinaryAssets && JSON.stringify(row.releasedOrdinaryAssets) !== JSON.stringify(ordinaryAssets)) {
           throw new Error("release ordinary asset copies changed after their first receipts");
         }
+        const scheduleClassedExpiration = async (
+          copy: NonNullable<typeof keyframe> | (typeof ordinaryAssets)[number],
+          assetClass: "lofi-keyframe" | ReleasedOrdinaryClass,
+        ) => {
+          if (!/^"?[a-f0-9]{32}(?:-[0-9]+)?"?$/iu.test(copy.destinationEtag) ||
+              !Number.isSafeInteger(copy.destinationLastModifiedAt) ||
+              copy.destinationLastModifiedAt + 1_000 < decision.releaseAt ||
+              copy.destinationLastModifiedAt > args.observedAt) {
+            throw new Error("classed release copy has no exact destination R2 identity");
+          }
+          const classedProof = {
+            class: assetClass, assetId: copy.assetId, sourceKey: copy.sourceKey,
+            sourceEtag: copy.sourceEtag, sha256: copy.sha256,
+            byteLength: copy.byteLength, releaseAt: copy.releaseAt,
+          };
+          const prior = await ctx.db.query("r2AssetExpirations")
+            .withIndex("by_run_key", (q) => q.eq("runId", row.runId).eq("r2Key", copy.r2Key)).unique();
+          if (prior) {
+            if (prior.ownerId !== args.ownerId || prior.channelId !== row.channelId ||
+                prior.kind !== "asset" || prior.status !== "scheduled" ||
+                prior.etag !== copy.destinationEtag ||
+                prior.lastModifiedAt !== copy.destinationLastModifiedAt ||
+                prior.expiresAt !== copy.expiresAt ||
+                JSON.stringify(prior.classedProof) !== JSON.stringify(classedProof)) {
+              throw new Error("classed release expiration ledger conflicts with its immutable receipt");
+            }
+            return;
+          }
+          await ctx.db.insert("r2AssetExpirations", {
+            ownerId: args.ownerId, channelId: row.channelId, runId: row.runId,
+            r2Key: copy.r2Key, kind: "asset", status: "scheduled",
+            etag: copy.destinationEtag, lastModifiedAt: copy.destinationLastModifiedAt,
+            preparedAt: args.observedAt, expiresAt: copy.expiresAt, classedProof,
+          });
+        };
+        if (keyframe) await scheduleClassedExpiration(keyframe, "lofi-keyframe");
+        for (const copy of ordinaryAssets) await scheduleClassedExpiration(copy, copy.kind);
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,

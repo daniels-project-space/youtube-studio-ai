@@ -43,7 +43,7 @@ export async function copyReleasedFinalVideo(input: {
   };
   if (!Number.isSafeInteger(receipt.expiresAt)) throw new Error("release copy expiry is invalid");
   const metadata = {
-    retentionWriter: "released-final/v1",
+    retentionWriter: "released-final/v2",
     retentionFinalSha256: receipt.sha256,
     retentionReleaseAt: String(receipt.releaseAt),
     retentionExpiresAt: String(receipt.expiresAt),

@@ -111,6 +111,7 @@ async function releasedPlaybackKey(ctx: QueryCtx, runId: Id<"runs">, sourceKey: 
     .withIndex("by_run", (q) => q.eq("runId", runId)).unique() : knownRetention;
   const copy = retention?.releasedFinalVideo;
   if (!copy || copy.sourceKey !== sourceKey || copy.releaseAt !== retention?.releaseAt) return sourceKey;
+  if (!Number.isSafeInteger(copy.expiresAt) || Date.now() >= copy.expiresAt) return null;
   const expiration = await ctx.db.query("r2AssetExpirations")
     .withIndex("by_run_key", (q) => q.eq("runId", runId).eq("r2Key", copy.r2Key)).unique();
   return expiration && expiration.status !== "canceled" ? null : copy.r2Key;
@@ -216,10 +217,11 @@ async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
   const retention = hasMarkedOrdinaryAsset ? await ctx.db.query("runArtifactRetentions")
     .withIndex("by_run", (q) => q.eq("runId", run._id)).unique() : undefined;
   const keyframeCopy = retention?.releasedKeyframe;
+  const now = Date.now();
   const keyframeExpiration = keyframeCopy && await ctx.db.query("r2AssetExpirations")
     .withIndex("by_run_key", (q) => q.eq("runId", run._id).eq("r2Key", keyframeCopy.r2Key)).unique();
   const keyframeAssets = projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, retention?.releaseAt,
-    Boolean(keyframeExpiration && keyframeExpiration.status !== "canceled"));
+    Boolean(keyframeExpiration && (keyframeExpiration.status === "pending" || keyframeExpiration.status === "expired")), now);
   const ordinaryCopies = retention?.releasedOrdinaryAssets ?? [];
   const ordinaryExpirations = await Promise.all(ordinaryCopies.map(async (copy) => ({
     assetId: copy.assetId,
@@ -227,9 +229,10 @@ async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
       .withIndex("by_run_key", (q) => q.eq("runId", run._id).eq("r2Key", copy.r2Key)).unique(),
   })));
   const expiredOrdinaryAssetIds = new Set(ordinaryExpirations.filter((item) =>
-    item.expiration && item.expiration.status !== "canceled").map((item) => item.assetId));
+    item.expiration && (item.expiration.status === "pending" || item.expiration.status === "expired"))
+    .map((item) => item.assetId));
   const assets = projectReleasedOrdinaryAssets(keyframeAssets, ordinaryCopies,
-    retention?.releaseAt, expiredOrdinaryAssetIds);
+    retention?.releaseAt, expiredOrdinaryAssetIds, now);
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video");
   const videoAsset = sealedMasterKey
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset

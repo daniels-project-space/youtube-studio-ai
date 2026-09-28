@@ -14,7 +14,7 @@ export async function copyReleasedKeyframe(input: {
     acceptsSource: isLoFiKeyframeSource,
     destinationKey: (keyPrefix, runId, _assetId, releaseAt, sha256) =>
       releasedKeyframeKey(keyPrefix, runId, releaseAt, sha256),
-    retentionWriter: "released-keyframe/v1",
+    retentionWriter: "released-ordinary/v2",
     digestMetadataKey: "retentionKeyframeSha256",
     contentType: "image/png", extension: "png", maxByteLength: 64 * 1024 ** 2,
   });

@@ -163,7 +163,8 @@ test("marked Lo-Fi asset requires its exact source-bound 30-day receipt; legacy 
   const keyframe = { assetId: asset._id, sourceKey, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
     r2Key: releasedKeyframeKey(keyPrefix, "run-a", actualRelease, "b".repeat(64)),
     sha256: "b".repeat(64), byteLength: 123, releaseAt: actualRelease,
-    expiresAt: actualRelease + ASSET_RETENTION_MS };
+    expiresAt: actualRelease + ASSET_RETENTION_MS,
+    destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: actualRelease + 100 };
   const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
     publishedAt: new Date(actualRelease).toISOString() };
   await assert.rejects(f.invoke(recordReleaseObservations, { ownerId, observedAt: actualRelease + 1_000,
@@ -174,6 +175,8 @@ test("marked Lo-Fi asset requires its exact source-bound 30-day receipt; legacy 
     observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
       finalVideo, keyframe, observation }] });
   assert.deepEqual(row.releasedKeyframe, keyframe);
+  assert.equal(f.db.rows("r2AssetExpirations")[0]?.status, "scheduled");
+  assert.equal(f.db.rows("r2AssetExpirations")[0]?.expiresAt, keyframe.expiresAt);
 });
 
 test("marked Lo-Fi clip and loop unit require exact classed receipts at observed release", async () => {
@@ -198,6 +201,7 @@ test("marked Lo-Fi clip and loop unit require exact classed receipts at observed
       actualRelease, String(index + 1).repeat(64)),
     sha256: String(index + 1).repeat(64), byteLength: 1234, releaseAt: actualRelease,
     expiresAt: actualRelease + ASSET_RETENTION_MS,
+    destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: actualRelease + 100,
   }));
   const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
     publishedAt: new Date(actualRelease).toISOString() };
@@ -209,6 +213,8 @@ test("marked Lo-Fi clip and loop unit require exact classed receipts at observed
   await assert.rejects(observe([{ ...receipts[0], kind: "lofi-loop-unit" }, receipts[1]]), /exact immutable ordinary asset copy receipts/);
   await observe(receipts);
   assert.deepEqual(row.releasedOrdinaryAssets, receipts);
+  assert.equal(f.db.rows("r2AssetExpirations").length, 2);
+  assert.ok(f.db.rows("r2AssetExpirations").every((entry) => entry.status === "scheduled"));
 });
 
 test("missed schedules and failed processing preserve artifacts without consuming cleanup attempts", async () => {

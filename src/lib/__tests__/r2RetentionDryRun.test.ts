@@ -13,8 +13,11 @@ const api = { r2Retention: {
   pendingExpirationsPage: Symbol("pending-expirations"),
   runScopesPage: Symbol("run-scopes"),
   protectedKeysPage: Symbol("protected-keys"),
+  scheduledClassedExpirationsPage: Symbol("scheduled-classed-expirations"),
 } };
 let head: { etag?: string; lastModified?: Date; metadata: Record<string, string> } | null = null;
+let scheduledRow: Record<string, unknown> | null = null;
+let scheduledHead: { etag?: string; lastModified?: Date; contentLength?: number; metadata: Record<string, string> } | null = null;
 let headReads = 0;
 let mutations = 0;
 let deletes = 0;
@@ -32,6 +35,9 @@ loader._load = function(id, ...args) {
     async query(reference: unknown) {
       if (reference === api.r2Retention.protectedKeysPage) return { page: [], isDone: true, continueCursor: "" };
       if (reference === api.r2Retention.runScopesPage) return { page: [scope], isDone: true, continueCursor: "" };
+      if (reference === api.r2Retention.scheduledClassedExpirationsPage) return {
+        page: scheduledRow ? [scheduledRow] : [], isDone: true, continueCursor: "",
+      };
       throw new Error("dry run must not query pending expiration intents");
     }
     async mutation() { mutations++; throw new Error("dry run must not mutate Convex"); }
@@ -39,7 +45,7 @@ loader._load = function(id, ...args) {
   if (id === "@/lib/storage") return {
     deleteObjects: async () => { deletes++; throw new Error("dry run must not delete R2 objects"); },
     getObjectBytes: async () => Buffer.from("fixture certificate"),
-    headObjectMetadata: async () => { headReads++; return head; },
+    headObjectMetadata: async (objectKey: string) => { headReads++; return objectKey === scheduledKey ? scheduledHead : head; },
     listObjectRecords: async () => [{ key, lastModified, etag }],
   };
   if (id === "@/lib/youtubeConnector") return { requireYouTubeConnector: async () => { throw new Error("dry run must not call YouTube"); } };
@@ -56,6 +62,7 @@ const scope = {
   channelLocked: false, certificateKey: `${keyPrefix}runs/${runId}/certificate.json`,
   additionalCertificateKeys: [], keepNames: [], retainedReleaseEvidence: [], assets: [],
 };
+const scheduledKey = `released-ordinary/v2/${keyPrefix}runs/${runId}/lofi-clip/asset_1/${now - 40 * 24 * 60 * 60 * 1_000}-${"b".repeat(64)}.mp4`;
 
 async function main() {
   const names = ["YOUTUBE_STUDIO_R2_ACCOUNT_ID", "R2_BUCKET", "NEXT_PUBLIC_CONVEX_URL"] as const;
@@ -88,6 +95,28 @@ async function main() {
     assert.equal(headReads, 1);
     assert.equal(mutations, 0, "all dry-run paths remain read-only in Convex");
     assert.equal(deletes, 0, "all dry-run paths remain read-only in R2");
+
+    const releaseAt = now - 40 * 24 * 60 * 60 * 1_000;
+    const modifiedAt = releaseAt + 1_000;
+    const sourceKey = `${keyPrefix}runs/${runId}/loopraw.mp4`;
+    scheduledRow = { r2Key: scheduledKey, etag: '"classed-copy"', lastModifiedAt: modifiedAt,
+      expiresAt: releaseAt + 30 * 24 * 60 * 60 * 1_000,
+      classedProof: { class: "lofi-clip", assetId: "asset_1", sourceKey,
+        sourceEtag: '"source"', sha256: "b".repeat(64), byteLength: 123, releaseAt } };
+    scheduledHead = { etag: '"classed-copy"', lastModified: new Date(modifiedAt), contentLength: 123,
+      metadata: { retentionWriter: "released-ordinary/v2", retentionAssetSha256: "b".repeat(64),
+        retentionAssetClass: "lofi-clip", retentionSourceKey: sourceKey,
+        retentionSourceEtag: '"source"', retentionAssetId: "asset_1",
+        retentionReleaseAt: String(releaseAt),
+        retentionExpiresAt: String(releaseAt + 30 * 24 * 60 * 60 * 1_000) } };
+    const due = await sweepR2AssetRetention({ now, dryRun: true });
+    assert.equal(due.dueClassedCopies, 1, "read-only inventory counts an exact overdue copy");
+    assert.equal(due.deleted, 0);
+    scheduledHead = { ...scheduledHead, etag: '"replaced"' };
+    const changed = await sweepR2AssetRetention({ now, dryRun: true });
+    assert.equal(changed.dueClassedCopies, 0, "inventory rejects changed identity");
+    assert.equal(deletes, 0, "classed report never sends an R2 delete");
+    assert.equal(mutations, 0, "classed report never creates a deletion intent");
     console.log("R2 retention dry-run integrity tests passed");
   } finally {
     for (const name of names) {

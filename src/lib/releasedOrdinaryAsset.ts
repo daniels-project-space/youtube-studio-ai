@@ -15,7 +15,7 @@ export async function copyReleasedOrdinaryAsset(input: {
     acceptsSource: (keyPrefix, runId, sourceKey) => isLoFiOrdinarySource(kind, keyPrefix, runId, sourceKey),
     destinationKey: (keyPrefix, runId, assetId, releaseAt, sha256) =>
       releasedOrdinaryAssetKey(keyPrefix, runId, kind, assetId, releaseAt, sha256),
-    retentionWriter: "released-ordinary/v1",
+    retentionWriter: "released-ordinary/v2",
     digestMetadataKey: "retentionAssetSha256",
     extraMetadata: { retentionAssetClass: kind },
     contentType: "video/mp4", extension: "mp4",

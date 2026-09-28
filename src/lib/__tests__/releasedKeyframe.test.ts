@@ -29,7 +29,7 @@ test("release copy binds full source bytes, ETag, metadata, and idempotent creat
       headObjectMetadata: async (key: string) => key === sourceKey
         ? { etag, contentLength: bytes.length, metadata: {} }
         : destination?.key === key
-          ? { etag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', contentLength: destination.bytes.length,
+          ? { etag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', lastModified: new Date(releaseAt + 1_000), contentLength: destination.bytes.length,
             metadata: destination.metadata } : null,
       getObjectToFile: async (key: string, path: string, _bucket: string, expectedEtag: string) => {
         assert.equal(key, sourceKey); assert.equal(expectedEtag, etag);
@@ -58,7 +58,7 @@ test("release copy binds full source bytes, ETag, metadata, and idempotent creat
     assert.equal(first.sha256, sha256);
     assert.equal(first.sourceEtag, etag);
     assert.equal(first.expiresAt, releaseAt + 30 * 24 * 60 * 60 * 1_000);
-    assert.equal(destination?.metadata.retentionWriter, "released-keyframe/v1");
+    assert.equal(destination?.metadata.retentionWriter, "released-ordinary/v2");
     assert.equal(destination?.metadata.retentionSourceKey, sourceKey);
     assert.equal(destination?.metadata.retentionKeyframeSha256, sha256);
     assert.deepEqual(await copyReleasedKeyframe(input), first);

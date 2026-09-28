@@ -344,8 +344,8 @@ test("run media projects only receipt-bound ordinary copies while detail retains
   const releaseAt = Date.UTC(2026, 8, 1);
   const sourceClip = `owner/${ownerId}/channel/test/runs/${sourceRunId}/loopraw.mp4`;
   const sourceUnit = `owner/${ownerId}/channel/test/runs/${sourceRunId}/loopunit_4k.mp4`;
-  const copiedClip = `owner/${ownerId}/channel/test/runs/${sourceRunId}/released-ordinary/v1/lofi-clip/clip/1-a.mp4`;
-  const copiedUnit = `owner/${ownerId}/channel/test/runs/${sourceRunId}/released-ordinary/v1/lofi-loop-unit/unit/1-b.mp4`;
+  const copiedClip = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-clip/clip/1-a.mp4`;
+  const copiedUnit = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-loop-unit/unit/1-b.mp4`;
   f.rows.assets.push(
     { _id: "clip", _creationTime: 5, ownerId, channelId, runId: sourceRunId,
       kind: "clip", r2Key: sourceClip, meta: { retentionSource: "lofi-clip/v1" } },
@@ -356,8 +356,10 @@ test("run media projects only receipt-bound ordinary copies while detail retains
   );
   f.rows.runArtifactRetentions = [{ _id: "retention", _creationTime: 8, ownerId, channelId,
     runId: sourceRunId, releaseAt, releasedOrdinaryAssets: [
-      { kind: "lofi-clip", assetId: "clip", sourceKey: sourceClip, r2Key: copiedClip, releaseAt },
-      { kind: "lofi-loop-unit", assetId: "unit", sourceKey: sourceUnit, r2Key: copiedUnit, releaseAt },
+      { kind: "lofi-clip", assetId: "clip", sourceKey: sourceClip, r2Key: copiedClip, releaseAt,
+        expiresAt: releaseAt + 30 * 86_400_000 },
+      { kind: "lofi-loop-unit", assetId: "unit", sourceKey: sourceUnit, r2Key: copiedUnit, releaseAt,
+        expiresAt: releaseAt + 30 * 86_400_000 },
     ] }];
   const media = await f.media();
   assert.deepEqual(media.assets.map((asset) => asset.r2Key).slice(-3),

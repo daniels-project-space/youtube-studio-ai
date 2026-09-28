@@ -149,7 +149,8 @@ test("a marked per-run keyframe copy is recorded alongside the final master and 
   };
   const keyframe = { ...check.keyframeSource!, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
     r2Key: releasedKeyframeKey(keyPrefix, "run-copy", releaseAt, "b".repeat(64)),
-    sha256: "b".repeat(64), byteLength: 42, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS };
+    sha256: "b".repeat(64), byteLength: 42, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS,
+    destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: releaseAt + 100 };
   const recorded: RunArtifactObservedRelease[][] = [];
   const common = {
     checks: [check], now: () => releaseAt + 1000,
@@ -200,7 +201,8 @@ test("ordinary release copies are serialized and a failed copy defers the observ
     calls.push(source.kind);
     return { ...source, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
       r2Key: releasedOrdinaryAssetKey(keyPrefix, "run-copy", source.kind, source.assetId, releaseAt, "b".repeat(64)),
-      sha256: "b".repeat(64), byteLength: 100, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS };
+      sha256: "b".repeat(64), byteLength: 100, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS,
+      destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: releaseAt + 100 };
   } });
   assert.deepEqual(calls, ["lofi-clip", "lofi-loop-unit"]);
   assert.equal(observations[0][0].ordinaryAssets?.length, 2);

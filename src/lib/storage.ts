@@ -137,7 +137,8 @@ export async function presignUpload(
   if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz finals cannot use overwriteable presigned uploads");
   if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use overwriteable presigned uploads");
   if (key.includes("/library/reusable-media/v1/")) throw new Error("permanent reusable media cannot use overwriteable presigned uploads");
-  if (key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/") || key.includes("/released-ordinary/v1/")) throw new Error("released copies cannot use presigned uploads");
+  if (key.startsWith("released-final/v2/") || key.startsWith("released-ordinary/v2/") ||
+      key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/") || key.includes("/released-ordinary/v1/")) throw new Error("released copies cannot use presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -219,9 +220,9 @@ export async function putObject(
   opts: PutOptions = {},
 ): Promise<string> {
   const reusableDigest = permanentReusableMediaDigest(key);
-  if (key.includes("/released-final/v1/")) throw new Error("released final video requires its create-only file writer");
-  if (key.includes("/released-keyframe/v1/")) throw new Error("released keyframe requires its create-only file writer");
-  if (key.includes("/released-ordinary/v1/")) throw new Error("released ordinary asset requires its create-only file writer");
+  if (key.startsWith("released-final/v2/") || key.includes("/released-final/v1/")) throw new Error("released final video requires its create-only file writer");
+  if (key.startsWith("released-ordinary/v2/") && key.includes("/lofi-keyframe/") || key.includes("/released-keyframe/v1/")) throw new Error("released keyframe requires its create-only file writer");
+  if (key.startsWith("released-ordinary/v2/") || key.includes("/released-ordinary/v1/")) throw new Error("released ordinary asset requires its create-only file writer");
   if (key.includes("/library/reusable-media/v1/") &&
       (!reusableDigest || opts.ifNoneMatch !== "*" || opts.metadata?.contentSha256 !== reusableDigest ||
         opts.metadata?.retentionWriter !== "studio-reusable-media/v1")) {
@@ -293,31 +294,33 @@ export async function putObjectFromFile(
   filePath: string,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/") ||
+      key.includes("/released-ordinary/v1/")) throw new Error("legacy release copies are read-only");
   if (key.includes("/library/reusable-media/v1/")) {
     throw new Error("permanent reusable media requires the verified byte writer");
   }
   const releasedFinal = releasedFinalVideoIdentity(key);
-  if (key.includes("/released-final/v1/") &&
+  if (key.startsWith("released-final/v2/") &&
       (!releasedFinal || opts.ifNoneMatch !== "*" ||
-        opts.metadata?.retentionWriter !== "released-final/v1" ||
+        opts.metadata?.retentionWriter !== "released-final/v2" ||
         opts.metadata?.retentionFinalSha256 !== releasedFinal.sha256 ||
         opts.metadata?.retentionReleaseAt !== String(releasedFinal.releaseAt) ||
         opts.metadata?.retentionExpiresAt !== String(releasedFinal.releaseAt + FINAL_VIDEO_RETENTION_MS))) {
     throw new Error("released final video requires a create-only digest and expiry-bound file upload");
   }
   const releasedKeyframe = releasedKeyframeIdentity(key);
-  if (key.includes("/released-keyframe/v1/") &&
+  if (key.startsWith("released-ordinary/v2/") && key.includes("/lofi-keyframe/") &&
       (!releasedKeyframe || opts.ifNoneMatch !== "*" ||
-        opts.metadata?.retentionWriter !== "released-keyframe/v1" ||
+        opts.metadata?.retentionWriter !== "released-ordinary/v2" ||
         opts.metadata?.retentionKeyframeSha256 !== releasedKeyframe.sha256 ||
         opts.metadata?.retentionReleaseAt !== String(releasedKeyframe.releaseAt) ||
         opts.metadata?.retentionExpiresAt !== String(releasedKeyframe.releaseAt + ASSET_RETENTION_MS))) {
     throw new Error("released keyframe requires a create-only digest and expiry-bound file upload");
   }
   const ordinary = releasedOrdinaryAssetIdentity(key);
-  if (key.includes("/released-ordinary/v1/") &&
+  if (key.startsWith("released-ordinary/v2/") && !key.includes("/lofi-keyframe/") &&
       (!ordinary || opts.ifNoneMatch !== "*" ||
-        opts.metadata?.retentionWriter !== "released-ordinary/v1" ||
+        opts.metadata?.retentionWriter !== "released-ordinary/v2" ||
         opts.metadata?.retentionAssetSha256 !== ordinary.sha256 ||
         opts.metadata?.retentionAssetId !== ordinary.assetId ||
         opts.metadata?.retentionAssetClass !== ordinary.kind ||

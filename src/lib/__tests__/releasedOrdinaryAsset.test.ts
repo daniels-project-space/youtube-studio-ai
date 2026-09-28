@@ -33,7 +33,7 @@ test("both marked Lo-Fi video classes use shared full-byte create-only release c
         const source = sources.find((item) => item.sourceKey === key);
         if (source) return { etag, contentLength: source.bytes.length, metadata: {} };
         const object = objects.get(key);
-        return object ? { etag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"',
+        return object ? { etag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', lastModified: new Date(releaseAt + 1_000),
           contentLength: object.bytes.length, metadata: object.metadata } : null;
       },
       getObjectToFile: async (key: string, path: string, _bucket: string, expectedEtag: string) => {

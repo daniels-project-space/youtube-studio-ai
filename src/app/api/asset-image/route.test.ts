@@ -18,6 +18,7 @@ assert.match(source, /probe[\s\S]*available: false/);
 assert.match(source, /Retry-After/);
 assert.match(source, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(source, /owner\/\$\{OWNER_ID\}/);
+assert.match(source, /classedReleaseCopyIsReadable\(key, Date\.now\(\)\)/);
 assert.match(assetUrl, /api\/asset-image\?key=/,
   "image asset URLs must use the same-origin proxy to avoid R2 ORB failures");
 assert.match(assetUrl, /api\/asset-video\?key=/,
@@ -37,6 +38,8 @@ assert.match(videoRoute, /attemptHeaders\.delete\("Range"\)/);
 assert.match(videoRoute, /new NextResponse\(upstream\.body/);
 assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
+assert.match(videoRoute, /classedReleaseCopyIsReadable\(key, Date\.now\(\)\)/);
+assert.match(assetUrl, /classedReleaseCopyIsReadable\(key, Date\.now\(\)\)/);
 assert.match(videoRoute, /status: upstream\.status/);
 assert.match(videoRoute, /probe[\s\S]*available: false/);
 assert.match(videoRoute, /PREVIEW_PROBE_RANGES/,

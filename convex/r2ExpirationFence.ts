@@ -49,7 +49,7 @@ export async function assertR2KeyMayBePromoted(ctx: FenceCtx, ownerId: string, r
   const rows = await ctx.db.query("r2AssetExpirations")
     .withIndex("by_owner_key", (q) => q.eq("ownerId", ownerId).eq("r2Key", r2Key))
     .collect();
-  if (rows.some((row) => row.status === "pending" || row.status === "expired")) {
+  if (rows.some((row) => row.status === "scheduled" || row.status === "pending" || row.status === "expired")) {
     throw new Error("R2 object is pending deletion or already expired; promote a unique copied key");
   }
   const runIdPart = /^owner\/[^/]+\/channel\/[^/]+\/runs\/([^/]+)\//u.exec(r2Key)?.[1];

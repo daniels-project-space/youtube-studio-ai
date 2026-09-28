@@ -10,7 +10,7 @@ import { getObjectIntegrity, getObjectToFile, headObjectMetadata, putObjectFromF
 export type ReleasedRunAssetSource = { assetId: Id<"assets">; sourceKey: string };
 export type ReleasedRunAssetReceipt = ReleasedRunAssetSource & {
   sourceEtag: string; r2Key: string; sha256: string; byteLength: number;
-  releaseAt: number; expiresAt: number;
+  releaseAt: number; expiresAt: number; destinationEtag: string; destinationLastModifiedAt: number;
 };
 
 /** Shared byte and lineage proof for explicitly admitted run-local release classes. */
@@ -43,7 +43,7 @@ export async function copyReleaseBoundRunAsset(input: {
     for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
     if (file.size !== sourceHead.contentLength) throw new Error("release copy source changed during copy");
     const sha256 = hash.digest("hex");
-    const receipt: ReleasedRunAssetReceipt = {
+    const receipt = {
       assetId, sourceKey, sourceEtag: sourceHead.etag,
       r2Key: input.destinationKey(input.keyPrefix, input.runId, assetId, input.releaseAt, sha256),
       sha256, byteLength: file.size, releaseAt: input.releaseAt, expiresAt,
@@ -59,7 +59,7 @@ export async function copyReleaseBoundRunAsset(input: {
     const verifyExisting = async () => {
       const head = await headObjectMetadata(receipt.r2Key, YOUTUBE_STUDIO_R2_BUCKET);
       const meta = Object.fromEntries(Object.entries(head?.metadata ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
-      if (!head || head.contentLength !== receipt.byteLength ||
+      if (!head?.etag || !head.lastModified || head.contentLength !== receipt.byteLength ||
           Object.entries(metadata).some(([key, value]) => meta[key.toLowerCase()] !== value)) {
         throw new Error("release copy key already exists without matching receipt metadata");
       }
@@ -67,6 +67,11 @@ export async function copyReleaseBoundRunAsset(input: {
       if (integrity.sha256 !== sha256 || integrity.byteLength !== receipt.byteLength) {
         throw new Error("release copy key already exists with different bytes");
       }
+      const destinationLastModifiedAt = head.lastModified.getTime();
+      if (!Number.isSafeInteger(destinationLastModifiedAt) || destinationLastModifiedAt < 0) {
+        throw new Error("release copy destination has no stable modification time");
+      }
+      return { destinationEtag: head.etag, destinationLastModifiedAt };
     };
     if (!await headObjectMetadata(receipt.r2Key, YOUTUBE_STUDIO_R2_BUCKET)) {
       try {
@@ -78,8 +83,7 @@ export async function copyReleaseBoundRunAsset(input: {
         if (status !== 409 && status !== 412) throw error;
       }
     }
-    await verifyExisting();
-    return receipt;
+    return { ...receipt, ...await verifyExisting() };
   } finally {
     await cleanupDir(tempDir);
   }

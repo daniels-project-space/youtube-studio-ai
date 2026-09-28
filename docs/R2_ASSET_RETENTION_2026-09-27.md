@@ -136,3 +136,39 @@ bindings, and dry-run against current Convex release/reference state. The
 30/180-day policy cannot be expressed as a bucket-wide lifecycle rule in this
 mixed bucket. Keep the production Trigger environment and queues paused while
 Studio is not ready. No lifecycle change or deletion was attempted.
+
+## Classed Lo-Fi release copies (PR #66)
+
+At confirmed public release, the marked Lo-Fi keyframe, `loopraw.mp4` clip,
+and `loopunit_*.mp4` loop unit each receive a create-only, SHA-256-verified
+copy. The release observation transaction binds the exact source row/key/ETag,
+destination key/ETag/LastModified, byte length, digest, class, release time,
+and 30-day deadline in `r2AssetExpirations` with status `scheduled`. Replays
+must match that receipt. The workbench and all three asset delivery routes
+stop projecting or signing these classed copies at the encoded deadline.
+Legacy rows, Nano Banana Pro thumbnails, reusable library media, and final
+video copies are outside this 30-day class.
+
+The daily worker reports scheduled copies only when the ledger, classed key,
+source lineage, destination HEAD, metadata, and both release and upload age
+match. It does not create deletion intents or delete scheduled copies. R2's
+S3 and Workers APIs have no atomic ETag-conditional `DeleteObject` for this
+path. A HEAD followed by delete cannot protect a changed object between the
+requests. The separate account-wide writer audit and legacy inventory still
+block live deletion; the account binding stays unset.
+
+A provider-managed lifecycle rule is a possible future deletion path for
+these exclusive classed copies. Cloudflare R2 lifecycle rules match a key
+prefix from the **start** of the key and delete after upload age, usually
+with delay. New keyframe, clip, and loop-unit copies now use
+`released-ordinary/v2/owner/...`; final copies use
+`released-final/v2/owner/...`. Their exact parsers and delivery ownership
+checks require these root namespaces. A single exact, slash-terminated rule
+per root prefix could eventually expire ordinary copies after 30 days and
+final copies after 180 days. R2 uses upload age, while Studio's reader uses
+the confirmed release deadline; a late upload can therefore become
+unreadable before provider deletion. Before any live rule, inventory the
+**actual** v2 prefixes and audit every credential and writer able to reach
+them. The live inventory found no v1 release copies before this change; any
+unexpected v1 object is read-expired and protected from new writes, and
+requires separate reconciliation. No lifecycle rule was changed.

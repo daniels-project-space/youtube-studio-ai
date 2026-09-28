@@ -8,6 +8,8 @@ import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   permanentReusableMediaKey, releasedFinalVideoIdentity, releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS,
   ASSET_RETENTION_MS, isLoFiKeyframeSource, releasedKeyframeIdentity, releasedKeyframeKey,
   isLoFiOrdinarySource, releasedOrdinaryAssetIdentity, releasedOrdinaryAssetKey,
+  classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable,
+  hasExactScheduledClassedProof, isOwnedReleasedCopyKey,
   selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
@@ -19,12 +21,16 @@ const prefix = "owner/daniel/channel/show/runs/run-1/";
 const releasedAt = now - 2 * day;
 const releasedKey = releasedFinalVideoKey("owner/daniel/channel/show/", "run-1", releasedAt, "f".repeat(64));
 assert.deepEqual(releasedFinalVideoIdentity(releasedKey), { releaseAt: releasedAt, sha256: "f".repeat(64) });
+assert.ok(releasedKey.startsWith("released-final/v2/owner/daniel/"));
+assert.equal(isOwnedReleasedCopyKey(releasedKey, "daniel"), true);
+assert.equal(isOwnedReleasedCopyKey(releasedKey, "other"), false);
+assert.equal(classedReleaseCopyIsReadable(releasedKey, releasedAt + FINAL_VIDEO_RETENTION_MS), false);
 assert.equal(releasedFinalVideoIdentity(`${prefix}final.mp4`), null);
 test("released finals reject overwriteable writers and mismatched expiry", async () => {
   await assert.rejects(() => presignUpload(releasedKey), /released copies cannot use presigned uploads/);
   await assert.rejects(() => putObject(releasedKey, "bytes"), /released final video requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(releasedKey, "/missing", {
-    ifNoneMatch: "*", metadata: { retentionWriter: "released-final/v1", retentionFinalSha256: "f".repeat(64),
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-final/v2", retentionFinalSha256: "f".repeat(64),
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + FINAL_VIDEO_RETENTION_MS - 1) },
   }), /expiry-bound/);
 });
@@ -39,11 +45,13 @@ test("only marked Lo-Fi run stills can be release-copy sources and destination c
     `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.jpg`,
   ]) assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", other), false);
   const key = releasedKeyframeKey(keyPrefix, "run-1", releasedAt, "a".repeat(64));
+  assert.ok(key.startsWith("released-ordinary/v2/owner/daniel/"));
+  assert.equal(isOwnedReleasedCopyKey(key, "daniel"), true);
   assert.deepEqual(releasedKeyframeIdentity(key), { releaseAt: releasedAt, sha256: "a".repeat(64) });
   await assert.rejects(() => presignUpload(key), /released copies cannot use presigned uploads/);
   await assert.rejects(() => putObject(key, "bytes"), /released keyframe requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(key, "/missing", {
-    ifNoneMatch: "*", metadata: { retentionWriter: "released-keyframe/v1", retentionKeyframeSha256: "a".repeat(64),
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-ordinary/v2", retentionKeyframeSha256: "a".repeat(64),
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
   }), /expiry-bound/);
 });
@@ -57,16 +65,68 @@ test("Lo-Fi clip and loop unit copies have exact run, row, class and expiry guar
     assert.equal(isLoFiOrdinarySource("lofi-clip", channel, "run-1", source), false);
   }
   const key = releasedOrdinaryAssetKey(channel, "run-1", "lofi-clip", "asset_1", releasedAt, "a".repeat(64));
+  assert.ok(key.startsWith("released-ordinary/v2/owner/daniel/"));
+  assert.equal(isOwnedReleasedCopyKey(key, "daniel"), true);
+  assert.equal(isOwnedReleasedCopyKey(key.replace("/owner/daniel/", "/owner/other/"), "daniel"), false);
   assert.deepEqual(releasedOrdinaryAssetIdentity(key), {
     kind: "lofi-clip", assetId: "asset_1", releaseAt: releasedAt, sha256: "a".repeat(64),
   });
+  assert.equal(classedReleaseCopyExpiresAt(key), releasedAt + ASSET_RETENTION_MS);
+  assert.equal(classedReleaseCopyIsReadable(key, releasedAt + ASSET_RETENTION_MS - 1), true);
+  assert.equal(classedReleaseCopyIsReadable(key, releasedAt + ASSET_RETENTION_MS), false);
+  assert.equal(classedReleaseCopyIsReadable(`released-ordinary/v2/${channel}runs/run-1/bad.mp4`, releasedAt), false);
+  assert.equal(classedReleaseCopyIsReadable(`${channel}runs/run-1/thumbnail.png`, releasedAt + ASSET_RETENTION_MS), true);
   await assert.rejects(() => presignUpload(key), /released copies cannot use presigned uploads/);
   await assert.rejects(() => putObject(key, "bytes"), /released ordinary asset requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(key, "/missing", {
-    ifNoneMatch: "*", metadata: { retentionWriter: "released-ordinary/v1", retentionAssetSha256: "a".repeat(64),
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-ordinary/v2", retentionAssetSha256: "a".repeat(64),
       retentionAssetClass: "lofi-clip", retentionAssetId: "asset_1",
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
   }), /expiry-bound/);
+});
+test("scheduled classed proof binds exact source, destination identity, digest and deadline", () => {
+  const channel = "owner/daniel/channel/show/";
+  const sourceKey = `${channel}runs/run-1/loopraw.mp4`;
+  const sha256 = "a".repeat(64);
+  const expiresAt = releasedAt + ASSET_RETENTION_MS;
+  const row = {
+    r2Key: releasedOrdinaryAssetKey(channel, "run-1", "lofi-clip", "asset_1", releasedAt, sha256),
+    etag: '"destination"', lastModifiedAt: releasedAt + 1_000, expiresAt,
+    classedProof: { class: "lofi-clip" as const, assetId: "asset_1", sourceKey,
+      sourceEtag: '"source"', sha256, byteLength: 123, releaseAt: releasedAt },
+  };
+  const head = { etag: row.etag, lastModified: new Date(row.lastModifiedAt), contentLength: 123,
+    metadata: { retentionWriter: "released-ordinary/v2", retentionAssetSha256: sha256,
+      retentionAssetClass: "lofi-clip", retentionSourceKey: sourceKey,
+      retentionSourceEtag: '"source"', retentionAssetId: "asset_1",
+      retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(expiresAt) } };
+  assert.equal(hasExactScheduledClassedProof(row, head, expiresAt), false,
+    "R2 upload must also age thirty days before it is a due candidate");
+  const due = row.lastModifiedAt + ASSET_RETENTION_MS;
+  assert.equal(hasExactScheduledClassedProof(row, head, due), true);
+  assert.equal(hasExactScheduledClassedProof({ ...row, etag: '"other"' }, head, due), false);
+  assert.equal(hasExactScheduledClassedProof({ ...row, classedProof: { ...row.classedProof,
+    sourceKey: `${channel}runs/run-1/thumbnail.png` } }, head, due), false);
+  assert.equal(hasExactScheduledClassedProof(row, { ...head, metadata: { ...head.metadata,
+    retentionAssetSha256: "b".repeat(64) } }, due), false);
+  assert.equal(hasExactScheduledClassedProof({ ...row, classedProof: { ...row.classedProof,
+    assetId: "bad/id" } }, head, due), false, "malformed proof is a failed report, not a crash");
+  const loopSource = `${channel}runs/run-1/loopunit_4k.mp4`;
+  const loopRow = { ...row,
+    r2Key: releasedOrdinaryAssetKey(channel, "run-1", "lofi-loop-unit", "unit_1", releasedAt, sha256),
+    classedProof: { ...row.classedProof, class: "lofi-loop-unit" as const,
+      assetId: "unit_1", sourceKey: loopSource } };
+  const loopHead = { ...head, metadata: { ...head.metadata, retentionAssetClass: "lofi-loop-unit",
+    retentionAssetId: "unit_1", retentionSourceKey: loopSource } };
+  assert.equal(hasExactScheduledClassedProof(loopRow, loopHead, due), true);
+  const stillSource = `${channel}runs/run-1/lofi-keyframe/images/one.png`;
+  const stillRow = { ...row,
+    r2Key: releasedKeyframeKey(channel, "run-1", releasedAt, sha256),
+    classedProof: { ...row.classedProof, class: "lofi-keyframe" as const,
+      sourceKey: stillSource } };
+  const stillHead = { ...head, metadata: { ...head.metadata, retentionKeyframeSha256: sha256,
+    retentionSourceKey: stillSource } };
+  assert.equal(hasExactScheduledClassedProof(stillRow, stillHead, due), true);
 });
 const scope: RunR2RetentionScope = {
   runId: "run-1", keyPrefix: "owner/daniel/channel/show/", runStatus: "ok",
