@@ -44,12 +44,15 @@ export async function assertManagedWriterAndReferences(
 
 /** Promotions after a deletion intent must copy bytes to a new unique key. */
 export async function assertR2KeyMayBePromoted(ctx: FenceCtx, ownerId: string, r2Key: string): Promise<void> {
+  if (r2Key.startsWith("released-ordinary/v2/") || r2Key.startsWith("released-final/v2/")) {
+    throw new Error("classed release copies expire; promote a verified permanent copy instead");
+  }
   const keyOwner = /^owner\/([^/]+)\//u.exec(r2Key)?.[1];
   if (keyOwner && keyOwner !== ownerId) throw new Error("R2 library resource belongs to another owner");
   const rows = await ctx.db.query("r2AssetExpirations")
     .withIndex("by_owner_key", (q) => q.eq("ownerId", ownerId).eq("r2Key", r2Key))
     .collect();
-  if (rows.some((row) => row.status === "pending" || row.status === "expired")) {
+  if (rows.some((row) => row.status === "scheduled" || row.status === "pending" || row.status === "expired")) {
     throw new Error("R2 object is pending deletion or already expired; promote a unique copied key");
   }
   const runIdPart = /^owner\/[^/]+\/channel\/[^/]+\/runs\/([^/]+)\//u.exec(r2Key)?.[1];

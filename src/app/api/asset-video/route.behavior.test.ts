@@ -6,6 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import ts from "typescript";
 import type { GET } from "./route";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey,
+  releasedOrdinaryAssetKey, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
 
 const compiled = ts.transpileModule(readFileSync("src/app/api/asset-video/route.ts", "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -20,16 +22,55 @@ function fixture(fetcher: typeof fetch, wait: typeof delay = async () => undefin
     if (name === "node:timers/promises") return { setTimeout: wait };
     if (name === "@/lib/config") return { OWNER_ID: "fixture-owner" };
     if (name === "@/lib/storage") return { presignDownload: () => { signs++; return sign(); } };
+    if (name === "@/lib/r2AssetRetention") return { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey };
     throw new Error(`Unexpected import: ${name}`);
   }, loaded, loaded.exports, fetcher);
   return {
-    get: (signal: AbortSignal, probe = false, range?: string) => loaded.exports.GET(new Request(
-      `https://fixture.invalid/api/asset-video?key=owner/fixture-owner/master.mp4${probe ? "&probe=1" : ""}`,
+    get: (signal: AbortSignal, probe = false, range?: string, key = "owner/fixture-owner/master.mp4") => loaded.exports.GET(new Request(
+      `https://fixture.invalid/api/asset-video?key=${encodeURIComponent(key)}${probe ? "&probe=1" : ""}`,
       { signal, headers: range ? { Range: range } : undefined },
     )),
     signs: () => signs,
   };
 }
+
+test("expired classed copies refuse playback before signing or storage reads", async () => {
+  const f = fixture(async () => { throw new Error("expired copy reached storage"); });
+  const key = releasedOrdinaryAssetKey("owner/fixture-owner/channel/show/", "run-1",
+    "lofi-clip", "asset1", Date.now() - 31 * 86_400_000, "a".repeat(64));
+  const response = await f.get(new AbortController().signal, false, undefined, key);
+  assert.equal(response.status, 410);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const probe = await f.get(new AbortController().signal, true, undefined, key);
+  assert.deepEqual(await probe.json(), { available: false });
+  const finalKey = releasedFinalVideoKey("owner/fixture-owner/channel/show/", "run-1",
+    Date.now() - 181 * 86_400_000, "b".repeat(64));
+  assert.equal((await f.get(new AbortController().signal, false, undefined, finalKey)).status, 410);
+  assert.equal(f.signs(), 0);
+});
+
+test("root v2 release keys are owner-scoped before playback", async () => {
+  const f = fixture(async () => { throw new Error("aborted before storage"); });
+  const key = releasedOrdinaryAssetKey("owner/fixture-owner/channel/show/", "run-1",
+    "lofi-clip", "asset1", Date.now() - 1_000, "a".repeat(64));
+  assert.equal((await f.get(AbortSignal.abort(), false, undefined, key)).status, 499);
+  assert.equal((await f.get(AbortSignal.abort(), false, undefined,
+    key.replace("/owner/fixture-owner/", "/owner/other/"))).status, 403);
+  assert.equal(f.signs(), 0);
+});
+
+test("nested v1 final receipt reaches playback until its encoded 180-day deadline", async () => {
+  const f = fixture(async () => { throw new Error("aborted before storage"); });
+  const key = (releaseAt: number) =>
+    `owner/fixture-owner/channel/show/runs/run-1/released-final/v1/${releaseAt}-${"a".repeat(64)}.mp4`;
+  assert.equal((await f.get(AbortSignal.abort(), false, undefined,
+    key(Date.now() - 179 * 86_400_000))).status, 499);
+  assert.equal((await f.get(new AbortController().signal, false, undefined,
+    key(Date.now() - 181 * 86_400_000))).status, 410);
+  assert.equal((await f.get(new AbortController().signal, false, undefined,
+    key(Date.now() - 179 * 86_400_000).replace("owner/fixture-owner/", "owner/other/"))).status, 403);
+  assert.equal(f.signs(), 0);
+});
 
 test("already abandoned previews do no signing or storage work", async () => {
   const f = fixture(async () => { throw new Error("Unexpected storage read"); });

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import ts from "typescript";
 import type { GET } from "./route";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey } from "@/lib/r2AssetRetention";
 
 const compiled = ts.transpileModule(readFileSync("src/app/api/asset-image/route.ts", "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -16,6 +17,9 @@ function fixture(read: (key: string, attempt: number) => Promise<Uint8Array>) {
   const requireFixture = (name: string) => {
     if (name === "next/server") return { NextResponse: Response };
     if (name === "@/lib/config") return { OWNER_ID: "fixture-owner" };
+    if (name === "@/lib/r2AssetRetention") return {
+      classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey,
+    };
     if (name === "@/lib/storage") return {
       ObjectSizeLimitError,
       isR2CredentialFailure: (error: unknown) => error instanceof Error && error.message === "credential failure",

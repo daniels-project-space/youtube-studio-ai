@@ -327,7 +327,7 @@ test("combined media retains the sealed master contract, including absent asset 
     const media = await f.media();
     assert.equal(media.currentThumbnail.videoKey, sealedKey, "certificate master wins even when registry video is missing");
     assert.deepEqual(media.assets, f.originalAssets());
-    assert.equal(f.reads.length, 6, "sealed media includes one exact-key expiration fence read");
+    assert.equal(f.reads.length, 7, "sealed media includes the release-copy receipt and exact-key expiration fence reads");
     assert.deepEqual(media.currentThumbnail, thumbnailFields(await f.detail()));
     assert.equal((await f.library()).find((row) => row._id === sourceRunId)?.videoKey, sealedKey);
   }
@@ -337,6 +337,40 @@ test("combined media retains the sealed master contract, including absent asset 
   assert.equal(broken.currentThumbnail.videoKey, videoKey, "a stored green status cannot bypass failed certificate validation");
   assert.deepEqual(broken.currentThumbnail, thumbnailFields(await f.detail()));
   assert.equal((await f.library()).find((row) => row._id === sourceRunId)?.videoKey, videoKey);
+});
+
+test("run media projects only receipt-bound ordinary copies while detail retains its packaging", async () => {
+  const f = fixture(true);
+  const releaseAt = Date.UTC(2026, 8, 1);
+  const sourceClip = `owner/${ownerId}/channel/test/runs/${sourceRunId}/loopraw.mp4`;
+  const sourceUnit = `owner/${ownerId}/channel/test/runs/${sourceRunId}/loopunit_4k.mp4`;
+  const copiedClip = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-clip/clip/1-a.mp4`;
+  const copiedUnit = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-loop-unit/unit/1-b.mp4`;
+  f.rows.assets.push(
+    { _id: "clip", _creationTime: 5, ownerId, channelId, runId: sourceRunId,
+      kind: "clip", r2Key: sourceClip, meta: { retentionSource: "lofi-clip/v1" } },
+    { _id: "unit", _creationTime: 6, ownerId, channelId, runId: sourceRunId,
+      kind: "loop_unit", r2Key: sourceUnit, meta: { retentionSource: "lofi-loop-unit/v1" } },
+    { _id: "legacy", _creationTime: 7, ownerId, channelId, runId: sourceRunId,
+      kind: "clip", r2Key: `owner/${ownerId}/channel/test/runs/${sourceRunId}/legacy.mp4` },
+  );
+  f.rows.runArtifactRetentions = [{ _id: "retention", _creationTime: 8, ownerId, channelId,
+    runId: sourceRunId, releaseAt, releasedOrdinaryAssets: [
+      { kind: "lofi-clip", assetId: "clip", sourceKey: sourceClip, r2Key: copiedClip, releaseAt,
+        expiresAt: releaseAt + 30 * 86_400_000 },
+      { kind: "lofi-loop-unit", assetId: "unit", sourceKey: sourceUnit, r2Key: copiedUnit, releaseAt,
+        expiresAt: releaseAt + 30 * 86_400_000 },
+    ] }];
+  const media = await f.media();
+  assert.deepEqual(media.assets.map((asset) => asset.r2Key).slice(-3),
+    [copiedClip, copiedUnit, f.rows.assets.at(-1)!.r2Key]);
+  const detail = await f.detail();
+  assert.deepEqual(thumbnailFields(detail), media.currentThumbnail);
+  assert.equal(f.rows.assets.find((asset) => asset._id === "clip")!.r2Key, sourceClip);
+  f.rows.r2AssetExpirations = [{ _id: "expiry", _creationTime: 9,
+    runId: sourceRunId, r2Key: copiedClip, status: "pending" }];
+  assert.equal((await f.media()).assets.some((asset) => asset._id === "clip"), false);
+  assert.equal((await f.media()).assets.some((asset) => asset.r2Key === copiedUnit), true);
 });
 
 test("LoFi verifies candidate frame provenance against the sealed master, never a different retained video", async () => {
@@ -365,13 +399,13 @@ test("combined viewer response removes duplicate asset reads and all script/SEO-
   f.rows.runStages.push({ _id: "script", _creationTime: 1, runId: sourceRunId, block: "motion_comic", outputs: { narrationText: narration } });
   const old = { assets: await f.oldAssets(), detail: await f.detail() };
   const oldReads = f.reads.length;
-  assert.equal(oldReads, 9, "detail reads assets once, probes metadata/story spine and three script routes");
+  assert.equal(oldReads, 10, "detail reads assets once, release receipt, metadata/story spine and three script routes");
   assert.equal((old.detail as unknown as { script: string }).script, narration, "the on-demand Lightbox retains its full response");
   assert.equal((old.detail as unknown as { shotListCount: number }).shotListCount, 0);
   assert.equal((old.detail as unknown as { subtitleSaved: boolean }).subtitleSaved, false);
   f.reads.length = 0;
   const combined = await f.media();
-  assert.equal(f.reads.length, 3);
+  assert.equal(f.reads.length, 4);
   assert.equal(f.reads.filter((read) => read.table === "assets" && read.filters.some(([key, value]) => key === "runId" && value === sourceRunId)).length, 1);
   assert.ok(f.reads.every((read) => read.table !== "runStages"), "thumbnail presentation cannot fetch metadata or narration stages");
   assert.deepEqual(Object.keys(combined).sort(), ["assets", "currentThumbnail"]);

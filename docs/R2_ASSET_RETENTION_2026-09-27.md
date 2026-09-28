@@ -135,4 +135,67 @@ the managed key families, audit user-owned tokens and Worker bucket
 bindings, and dry-run against current Convex release/reference state. The
 30/180-day policy cannot be expressed as a bucket-wide lifecycle rule in this
 mixed bucket. Keep the production Trigger environment and queues paused while
-Studio is not ready. No lifecycle change or deletion was attempted.
+Studio is not ready. No lifecycle change or deletion was attempted during
+the 27 September inspection; see the live v2 rules recorded below.
+
+## Classed Lo-Fi release copies (PR #66)
+
+At confirmed public release, the marked Lo-Fi keyframe, `loopraw.mp4` clip,
+and `loopunit_*.mp4` loop unit each receive a create-only, SHA-256-verified
+copy. The release observation transaction binds the exact source row/key/ETag,
+destination key/ETag/LastModified, byte length, digest, class, release time,
+and 30-day deadline in `r2AssetExpirations` with status `scheduled`. Replays
+must match that receipt. The workbench and all three asset delivery routes
+stop projecting or signing these classed copies at the encoded deadline.
+Legacy rows, Nano Banana Pro thumbnails, reusable library media, and final
+video copies are outside this 30-day class.
+
+The daily worker reports scheduled copies only when the ledger, classed key,
+source lineage, destination HEAD, metadata, and both release and upload age
+match. It does not create deletion intents or delete scheduled copies. R2's
+S3 and Workers APIs have no atomic ETag-conditional `DeleteObject` for this
+path. A HEAD followed by delete cannot protect a changed object between the
+requests. The separate account-wide writer audit and legacy inventory still
+block live deletion; the account binding stays unset.
+
+Cloudflare R2 lifecycle rules match a key prefix from the **start** of the
+key and delete after upload age, with no exact deletion deadline. New
+keyframe, clip, and loop-unit copies use
+`released-ordinary/v2/owner/...`; final copies use
+`released-final/v2/owner/...`. Their exact parsers and delivery ownership
+checks require these root namespaces. R2 uses upload age, while Studio's reader uses
+the confirmed release deadline; a late upload can therefore become
+unreadable before provider deletion. The live inventory found no v1 release
+copies before this change; any
+unexpected v1 object retains its exact encoded release deadline, is protected
+from new writes, and requires separate reconciliation after expiry. Neither
+root v2 namespace may be promoted directly to the permanent Studio Library
+or reusable media inventory; a verified permanent copy is required.
+
+### Live R2 lifecycle state, 28 September 2026
+
+The `youtube-studio-ai` bucket now has exactly three enabled rules. Read-only
+S3 `GetBucketLifecycleConfiguration` confirmed these exact IDs and scopes:
+
+| Rule ID | Exact prefix | Action |
+| --- | --- | --- |
+| `Default Multipart Abort Rule` | Bucket default | Abort incomplete multipart uploads after 7 days |
+| `Released Ordinary v2 Expiration 30 Days` | `released-ordinary/v2/` | Expire objects 30 days after upload |
+| `Released Final v2 Expiration 180 Days` | `released-final/v2/` | Expire objects 180 days after upload |
+
+Before applying the rules, both exact v2 prefixes were empty. A disposable
+`codex-probes/r2-lifecycle/<uuid>/sentinel.txt` test showed S3 rule readback,
+a successful object HEAD with `x-amz-expiration`, and rollback to the exact
+baseline with an empty probe prefix. The probe did **not** wait for or prove
+actual age-based deletion. The installer then verified the exact three-rule
+configuration by S3 GET. No probe object remains.
+
+The slash-terminated v2 prefixes exclude nested v1 copies, reusable library
+objects, thumbnails, and legacy keys. Account-wide R2 write tokens still
+exist and could write into these reserved namespaces outside Studio's
+create-only writer; prefix exclusivity is an operational contract, not a
+credential-enforced boundary. R2 expiration may lag eligibility by roughly
+24 hours or more, so Studio's read deadline remains the immediate access
+boundary ([Cloudflare object lifecycle documentation](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)).
+PR #66 production code remains undeployed and Trigger tasks remain paused; no Studio deploy,
+render, publish, or live media deletion was performed with this change.

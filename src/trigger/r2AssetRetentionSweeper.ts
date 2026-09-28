@@ -5,9 +5,9 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
 import { ASSET_RETENTION_MS, assertYouTubeStudioR2Bucket,
-  hasExactImmutableRetentionProof,
+  hasExactImmutableRetentionProof, hasExactScheduledClassedProof,
   selectExpiredRunObjects,
-  YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope } from "@/lib/r2AssetRetention";
+  YOUTUBE_STUDIO_R2_BUCKET, type RunR2RetentionScope, type ScheduledClassedExpiration } from "@/lib/r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "@/lib/youtubeR2Account";
 import { loadR2RetentionProtectedKeys } from "@/lib/r2RetentionProtectedKeys";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -31,14 +31,14 @@ function client(): StudioConvexHttpClient {
 /** Deletes only certificate-bound run keys. Everything outside that namespace is reported separately. */
 export async function sweepR2AssetRetention(input: {
   ownerId?: string; now?: number; dryRun?: boolean;
-} = {}): Promise<{ scannedScopes: number; expiredAssets: number; expiredFinals: number; expiredFootage: number; deleted: number; skippedScopes: number }> {
+} = {}): Promise<{ scannedScopes: number; expiredAssets: number; expiredFinals: number; expiredFootage: number; dueClassedCopies: number; deleted: number; skippedScopes: number }> {
   // This independent deployment binding is deliberately not hydrated from the
   // app vault. Until it is set after the bucket writer audit, the scheduled
   // task exits before fetching credentials, querying Convex, or touching R2.
   if (!process.env.YOUTUBE_STUDIO_R2_ACCOUNT_ID?.trim()) {
     console.log("[r2-retention] skipped: YouTube Studio R2 account binding is not configured");
     return { scannedScopes: 0, expiredAssets: 0, expiredFinals: 0,
-      expiredFootage: 0, deleted: 0, skippedScopes: 0 };
+      expiredFootage: 0, dueClassedCopies: 0, deleted: 0, skippedScopes: 0 };
   }
   await bootstrapSecrets((message) => console.log(`[r2-retention] ${message}`), {
     services: ["cloudflare", "youtube"],
@@ -68,6 +68,26 @@ export async function sweepR2AssetRetention(input: {
     return result;
   };
   const protectedKeys = await loadR2RetentionProtectedKeys(convex, ownerId);
+  // This inventory is deliberately read only. HEAD followed by DeleteObject
+  // cannot prove that R2 will delete the same object version after a race.
+  let dueClassedCopies = 0;
+  let classedCursor: string | null = null;
+  do {
+    const page: { page: Array<ScheduledClassedExpiration | {
+      r2Key: string; etag: string; lastModifiedAt: number; expiresAt?: number;
+      classedProof?: ScheduledClassedExpiration["classedProof"];
+    }>; isDone: boolean; continueCursor: string } = await convex.query(api.r2Retention.scheduledClassedExpirationsPage, {
+      ownerId, paginationOpts: { cursor: classedCursor, numItems: 50 },
+    });
+    for (const row of page.page) {
+      if (row.expiresAt === undefined || !row.classedProof || row.expiresAt > now || protectedKeys.has(row.r2Key)) continue;
+      const head = await headObjectMetadata(row.r2Key, YOUTUBE_STUDIO_R2_BUCKET);
+      if (hasExactScheduledClassedProof(row as ScheduledClassedExpiration, head, now)) dueClassedCopies++;
+    }
+    if (!page.isDone && page.continueCursor === classedCursor) throw new Error("R2 scheduled classed inventory did not advance");
+    classedCursor = page.isDone ? null : page.continueCursor;
+    if (page.isDone) break;
+  } while (classedCursor);
   if (!input.dryRun) {
     let pendingCursor: string | null = null;
     do {
@@ -141,18 +161,22 @@ export async function sweepR2AssetRetention(input: {
       }
       try {
         const evidenceKeys = new Set<string>();
+        const certifiedSourceKeys = new Set<string>();
         const finalVideoKeys = new Set<string>(scope.assets
           .filter((asset) => asset.kind === "video" || asset.kind === "derived_short")
           .map((asset) => asset.r2Key));
         for (const certificateKey of [scope.certificateKey, ...scope.additionalCertificateKeys]) {
           const certificate = parseFinalMasterReleaseCertificateBytes(await getObjectBytes(certificateKey, YOUTUBE_STUDIO_R2_BUCKET));
           finalVideoKeys.add(certificate.finalMaster.r2Key);
+          certifiedSourceKeys.add(certificate.finalMaster.r2Key);
           for (const key of retainedFinalMasterReleaseObjectKeys({
             keyPrefix: scope.keyPrefix, runId: scope.runId, certificateKey, certificate,
           })) evidenceKeys.add(key);
         }
         for (const key of scope.retainedReleaseEvidence) evidenceKeys.add(key);
-        for (const key of finalVideoKeys) evidenceKeys.delete(key);
+        // Certificates still bind their original master. A release copy does
+        // not make that source disposable while QA and provenance read it.
+        for (const key of finalVideoKeys) if (!certifiedSourceKeys.has(key)) evidenceKeys.delete(key);
         const prefix = `${scope.keyPrefix}runs/${scope.runId}/`;
         if ([...finalVideoKeys, ...evidenceKeys].some((key) => !key.startsWith(prefix))) {
           throw new Error("R2 retention protection key escaped the run namespace");
@@ -223,7 +247,7 @@ export async function sweepR2AssetRetention(input: {
     if (input.dryRun || deleted >= MAX_DELETIONS) continue;
     if (await expire(record, runId, state.channelId, state.releaseVideoId, "footage")) deleted++;
   }
-  return { scannedScopes, expiredAssets, expiredFinals, expiredFootage, deleted, skippedScopes };
+  return { scannedScopes, expiredAssets, expiredFinals, expiredFootage, dueClassedCopies, deleted, skippedScopes };
 }
 
 export const r2AssetRetentionSweeper = schedules.task({

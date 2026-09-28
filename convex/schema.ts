@@ -1442,6 +1442,23 @@ export default defineSchema({
     releaseObservationAt: v.optional(v.number()),
     releaseVideoId: v.optional(v.string()),
     releaseYouTubeChannelId: v.optional(v.string()),
+    releasedFinalVideo: v.optional(v.object({
+      sourceKey: v.string(), sourceEtag: v.string(), r2Key: v.string(), sha256: v.string(),
+      byteLength: v.number(), releaseAt: v.number(), expiresAt: v.number(),
+    })),
+    releasedKeyframe: v.optional(v.object({
+      assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+      r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
+      releaseAt: v.number(), expiresAt: v.number(),
+      destinationEtag: v.string(), destinationLastModifiedAt: v.number(),
+    })),
+    releasedOrdinaryAssets: v.optional(v.array(v.object({
+      kind: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+      assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+      r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
+      releaseAt: v.number(), expiresAt: v.number(),
+      destinationEtag: v.string(), destinationLastModifiedAt: v.number(),
+    }))),
     status: v.union(
       v.literal("awaiting_release"),
       v.literal("pending"),
@@ -1475,9 +1492,15 @@ export default defineSchema({
     r2Key: v.string(),
     kind: v.union(v.literal("asset"), v.literal("final_video"), v.literal("footage")),
     etag: v.string(),
-    status: v.union(v.literal("pending"), v.literal("expired"), v.literal("canceled")),
+    status: v.union(v.literal("scheduled"), v.literal("pending"), v.literal("expired"), v.literal("canceled")),
     lastModifiedAt: v.number(),
     preparedAt: v.number(),
+    expiresAt: v.optional(v.number()),
+    classedProof: v.optional(v.object({
+      class: v.union(v.literal("lofi-keyframe"), v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+      assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+      sha256: v.string(), byteLength: v.number(), releaseAt: v.number(),
+    })),
     expiredAt: v.optional(v.number()),
   })
     .index("by_run_key", ["runId", "r2Key"])

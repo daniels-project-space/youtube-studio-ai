@@ -24,6 +24,7 @@ import {
   matchesLibraryTitle,
   type LibraryRunScope,
 } from "../src/lib/libraryProjection";
+import { projectReleasedKeyframeAssets, projectReleasedOrdinaryAssets } from "../src/lib/runMediaWorkbench";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -100,6 +101,20 @@ async function recordedMasterKey(
   // A pending intent hides playback until its R2 outcome is reconciled. A
   // failed cross-provider confirmation must not leave a broken signed link.
   return expiration && expiration.status !== "canceled" ? null : key;
+}
+
+/** Use the release copy for playback while keeping the certificate source for QA and thumbnails. */
+async function releasedPlaybackKey(ctx: QueryCtx, runId: Id<"runs">, sourceKey: string | null | undefined,
+  knownRetention?: Doc<"runArtifactRetentions"> | null): Promise<string | null> {
+  if (!sourceKey) return null;
+  const retention = knownRetention === undefined ? await ctx.db.query("runArtifactRetentions")
+    .withIndex("by_run", (q) => q.eq("runId", runId)).unique() : knownRetention;
+  const copy = retention?.releasedFinalVideo;
+  if (!copy || copy.sourceKey !== sourceKey || copy.releaseAt !== retention?.releaseAt) return sourceKey;
+  if (!Number.isSafeInteger(copy.expiresAt) || Date.now() >= copy.expiresAt) return null;
+  const expiration = await ctx.db.query("r2AssetExpirations")
+    .withIndex("by_run_key", (q) => q.eq("runId", runId).eq("r2Key", copy.r2Key)).unique();
+  return expiration && expiration.status !== "canceled" ? null : copy.r2Key;
 }
 
 type LibraryChannelIdentity = { family?: unknown; contentLane?: unknown } | null;
@@ -188,26 +203,50 @@ export async function currentLibraryThumbnail(
  * a separate projection using the same master/provenance/Lo-Fi rules.
  */
 async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
-  const [assets, channel, sealedMasterKey] = await Promise.all([
+  const [sourceAssets, channel, sealedMasterKey] = await Promise.all([
     ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
     ctx.db.get(run.channelId),
     normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
       ? recordedMasterKey(ctx, run._id)
       : Promise.resolve(undefined),
   ]);
+  const hasMarkedOrdinaryAsset = sourceAssets.some((asset) =>
+    (asset.kind === "keyframe" && asset.meta?.retentionSource === "lofi-keyframe/v1") ||
+    (asset.kind === "clip" && asset.meta?.retentionSource === "lofi-clip/v1") ||
+    (asset.kind === "loop_unit" && asset.meta?.retentionSource === "lofi-loop-unit/v1"));
+  const retention = hasMarkedOrdinaryAsset ? await ctx.db.query("runArtifactRetentions")
+    .withIndex("by_run", (q) => q.eq("runId", run._id)).unique() : undefined;
+  const keyframeCopy = retention?.releasedKeyframe;
+  const now = Date.now();
+  const keyframeExpiration = keyframeCopy && await ctx.db.query("r2AssetExpirations")
+    .withIndex("by_run_key", (q) => q.eq("runId", run._id).eq("r2Key", keyframeCopy.r2Key)).unique();
+  const keyframeAssets = projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, retention?.releaseAt,
+    Boolean(keyframeExpiration && (keyframeExpiration.status === "pending" || keyframeExpiration.status === "expired")), now);
+  const ordinaryCopies = retention?.releasedOrdinaryAssets ?? [];
+  const ordinaryExpirations = await Promise.all(ordinaryCopies.map(async (copy) => ({
+    assetId: copy.assetId,
+    expiration: await ctx.db.query("r2AssetExpirations")
+      .withIndex("by_run_key", (q) => q.eq("runId", run._id).eq("r2Key", copy.r2Key)).unique(),
+  })));
+  const expiredOrdinaryAssetIds = new Set(ordinaryExpirations.filter((item) =>
+    item.expiration && (item.expiration.status === "pending" || item.expiration.status === "expired"))
+    .map((item) => item.assetId));
+  const assets = projectReleasedOrdinaryAssets(keyframeAssets, ordinaryCopies,
+    retention?.releaseAt, expiredOrdinaryAssetIds, now);
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video");
   const videoAsset = sealedMasterKey
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
   const thumbAsset = assets.find((asset) => asset.kind === "thumbnail");
-  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const sourceVideoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = await releasedPlaybackKey(ctx, run._id, sourceVideoKey, retention);
   const thumbnail = await currentLibraryThumbnail(ctx, {
     ownerId: run.ownerId,
     runId: run._id,
     channelId: run.channelId,
     channel,
     sourceThumbnail: thumbAsset,
-    sourceVideoKey: videoKey,
+    sourceVideoKey,
   });
   return {
     assets,
@@ -387,7 +426,8 @@ async function projectLibraryVideo(
   const videoAsset = sealedMasterKey
     ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
     : fallbackVideoAsset;
-  const videoKey = sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const videoKey = await releasedPlaybackKey(ctx, run._id,
+    sealedMasterKey === null ? null : sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null);
 
   const isFinished =
     Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");

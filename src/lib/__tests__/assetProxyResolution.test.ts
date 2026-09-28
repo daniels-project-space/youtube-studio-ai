@@ -4,6 +4,8 @@ import ts from "typescript";
 import { resolveAssetUrl, invalidateAssetUrl } from "../asset-url";
 import { OWNER_ID } from "../config";
 import type { GET } from "../../app/api/asset-url/route";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey,
+  releasedOrdinaryAssetKey, releasedFinalVideoKey } from "../r2AssetRetention";
 
 async function main() {
   let requests = 0;
@@ -15,6 +17,9 @@ async function main() {
   new Function("require", "module", "exports", compiled)((name: string) => {
     if (name === "next/server") return { NextResponse: Response };
     if (name === "@/lib/config") return { OWNER_ID };
+    if (name === "@/lib/r2AssetRetention") return {
+      classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey,
+    };
     if (name === "@/lib/storage") return { presignDownload: async (key: string) => {
       signatures++; return `https://storage.invalid/${encodeURIComponent(key)}?signature=${signatures}`;
     } };
@@ -41,6 +46,15 @@ async function main() {
     await Promise.all(cards.map(resolveAssetUrl));
     assert.equal(requests, 0, "all selected image/video URLs resolve without invoking Vercel");
     assert.equal(signatures, 0);
+
+    for (const key of [
+      releasedOrdinaryAssetKey(`owner/${OWNER_ID}/channel/show/`, "run-1", "lofi-clip", "asset1", Date.now() - 1_000, "a".repeat(64)),
+      releasedFinalVideoKey(`owner/${OWNER_ID}/channel/show/`, "run-1", Date.now() - 1_000, "b".repeat(64)),
+    ]) {
+      const url = await resolveAssetUrl(key);
+      assert.match(url, /^\/api\/asset-video\?key=/);
+      assert.equal(new URL(url, "https://studio.invalid").searchParams.get("key"), key);
+    }
 
     for (const key of [`owner/${OWNER_ID}/music.wav`, `owner/${OWNER_ID}/music.mp3`,
       `owner/${OWNER_ID}/captions.srt`, "voicebank/auditions/fixture_voice.mp3"]) {

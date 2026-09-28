@@ -7,6 +7,7 @@ import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
   RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey, releasedOrdinaryAssetKey } from "@/lib/r2AssetRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "lte"; value: unknown };
@@ -37,6 +38,7 @@ class MemoryQuery {
     if (rows.length > 1) throw new Error("ambiguous row");
     return rows[0] ?? null;
   }
+  async collect(): Promise<Row[]> { return this.take(Number.MAX_SAFE_INTEGER); }
 }
 
 class MemoryDb {
@@ -70,6 +72,15 @@ const videoId = "abcdefghijk";
 const ytChannelId = "UC-channel";
 const keyPrefix = `owner/${ownerId}/channel/a/`;
 const certificateKey = `${keyPrefix}runs/run-a/release.json`;
+const finalSha256 = "a".repeat(64);
+const actualRelease = uploadedAt + 86_400_000;
+const finalVideo = {
+  sourceKey: `${keyPrefix}runs/run-a/final.mp4`,
+  sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+  r2Key: releasedFinalVideoKey(keyPrefix, "run-a", actualRelease, finalSha256),
+  sha256: finalSha256, byteLength: 1234,
+  releaseAt: actualRelease, expiresAt: actualRelease + FINAL_VIDEO_RETENTION_MS,
+};
 
 function fixture() {
   const db = new MemoryDb();
@@ -87,11 +98,21 @@ function fixture() {
   const scheduleArgs = { ownerId, channelId: "channel-a", runId: "run-a", keyPrefix,
     certificateKey, additionalCertificateKeys: [], keepNames: ["final.mp4"],
     uploadedAt, releaseMode: "private_draft" };
-  const observe = (retentionId: string, observedAt: number, patch: Record<string, unknown> = {}) => invoke(recordReleaseObservations, {
-    ownerId, observedAt, observations: [{ retentionId, connectorId: "connector-a", connectorVersion: 4,
+  const observe = async (retentionId: string, observedAt: number, patch: Record<string, unknown> = {}) => {
+    const row = await db.get(retentionId);
+    const runId = String(row?.runId ?? "run-a");
+    const releaseAt = typeof patch.publishedAt === "string" ? Date.parse(patch.publishedAt) : actualRelease;
+    const receipt = { ...finalVideo,
+      sourceKey: `${keyPrefix}runs/${runId}/final.mp4`,
+      r2Key: releasedFinalVideoKey(keyPrefix, runId, releaseAt, finalSha256),
+      releaseAt, expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS,
+    };
+    return invoke(recordReleaseObservations, {
+    ownerId, observedAt, observations: [{ retentionId, connectorId: "connector-a", connectorVersion: 4, finalVideo: receipt,
       observation: { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
         publishedAt: new Date(uploadedAt + 86_400_000).toISOString(), ...patch } }],
   });
+  };
   const claim = (now: number) => invoke<Row | null>(claimDue, { ownerId, now, leaseToken: "a".repeat(64) });
   return { db, ctx, invoke, scheduleArgs, observe, claim };
 }
@@ -126,6 +147,74 @@ test("private→public transition waits actual release plus thirty days and rech
   await f.invoke(complete, { ownerId, retentionId: row._id, leaseToken: "a".repeat(64),
     completedAt: due, removedObjects: 1, retainedObjectCount: 1, retainedReleaseEvidence: [certificateKey] });
   assert.equal(row.status, "completed");
+});
+
+test("marked Lo-Fi asset requires its exact source-bound 30-day receipt; legacy assets stay optional", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const sourceKey = `${keyPrefix}runs/run-a/lofi-keyframe/images/keyframe-1.png`;
+  const asset = f.db.seed("assets", "asset-keyframe", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "keyframe", r2Key: sourceKey, meta: { retentionSource: "lofi-keyframe/v1" } });
+  f.db.seed("assets", "asset-thumbnail", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "thumbnail", r2Key: `${keyPrefix}runs/run-a/thumbnail.png` });
+  const checks = await f.invoke<Row[]>(listReleaseChecks, { ownerId, now: actualRelease });
+  assert.deepEqual(checks[0].keyframeSource, { assetId: asset._id, sourceKey });
+  await assert.rejects(f.observe(row._id, actualRelease + 1_000), /requires its release copy receipt/);
+  const keyframe = { assetId: asset._id, sourceKey, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    r2Key: releasedKeyframeKey(keyPrefix, "run-a", actualRelease, "b".repeat(64)),
+    sha256: "b".repeat(64), byteLength: 123, releaseAt: actualRelease,
+    expiresAt: actualRelease + ASSET_RETENTION_MS,
+    destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: actualRelease + 100 };
+  const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
+    publishedAt: new Date(actualRelease).toISOString() };
+  await assert.rejects(f.invoke(recordReleaseObservations, { ownerId, observedAt: actualRelease + 1_000,
+    observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
+      finalVideo, keyframe: { ...keyframe, sourceKey: `${keyPrefix}runs/run-a/thumbnail.png` }, observation }] }),
+  /immutable keyframe copy receipt/);
+  await f.invoke(recordReleaseObservations, { ownerId, observedAt: actualRelease + 1_000,
+    observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
+      finalVideo, keyframe, observation }] });
+  assert.deepEqual(row.releasedKeyframe, keyframe);
+  assert.equal(f.db.rows("r2AssetExpirations")[0]?.status, "scheduled");
+  assert.equal(f.db.rows("r2AssetExpirations")[0]?.expiresAt, keyframe.expiresAt);
+});
+
+test("marked Lo-Fi clip and loop unit require exact classed receipts at observed release", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const sources = [
+    { kind: "lofi-clip" as const, assetKind: "clip", id: "asset-clip", key: `${keyPrefix}runs/run-a/loopraw.mp4` },
+    { kind: "lofi-loop-unit" as const, assetKind: "loop_unit", id: "asset-loop", key: `${keyPrefix}runs/run-a/loopunit_4k.mp4` },
+  ];
+  for (const source of sources) f.db.seed("assets", source.id, { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: source.assetKind, r2Key: source.key, meta: { retentionSource: `${source.kind}/v1` } });
+  f.db.seed("assets", "legacy-clip", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "clip", r2Key: `${keyPrefix}runs/run-a/old-clip.mp4` });
+  const checks = await f.invoke<Row[]>(listReleaseChecks, { ownerId, now: actualRelease });
+  assert.deepEqual(checks[0].ordinarySources, sources.map((source) => ({
+    kind: source.kind, assetId: source.id, sourceKey: source.key,
+  })));
+  const receipts = sources.map((source, index) => ({
+    kind: source.kind, assetId: source.id, sourceKey: source.key,
+    sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    r2Key: releasedOrdinaryAssetKey(keyPrefix, "run-a", source.kind, source.id,
+      actualRelease, String(index + 1).repeat(64)),
+    sha256: String(index + 1).repeat(64), byteLength: 1234, releaseAt: actualRelease,
+    expiresAt: actualRelease + ASSET_RETENTION_MS,
+    destinationEtag: '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', destinationLastModifiedAt: actualRelease + 100,
+  }));
+  const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
+    publishedAt: new Date(actualRelease).toISOString() };
+  const observe = (ordinaryAssets: unknown) => f.invoke(recordReleaseObservations, {
+    ownerId, observedAt: actualRelease + 1000, observations: [{ retentionId: row._id,
+      connectorId: "connector-a", connectorVersion: 4, finalVideo, ordinaryAssets, observation }],
+  });
+  await assert.rejects(observe([receipts[0]]), /require exact release copy receipts/);
+  await assert.rejects(observe([{ ...receipts[0], kind: "lofi-loop-unit" }, receipts[1]]), /exact immutable ordinary asset copy receipts/);
+  await observe(receipts);
+  assert.deepEqual(row.releasedOrdinaryAssets, receipts);
+  assert.equal(f.db.rows("r2AssetExpirations").length, 2);
+  assert.ok(f.db.rows("r2AssetExpirations").every((entry) => entry.status === "scheduled"));
 });
 
 test("missed schedules and failed processing preserve artifacts without consuming cleanup attempts", async () => {

@@ -3,6 +3,8 @@ import {
   mediaFacts,
   mediaType,
   orderRunMedia,
+  projectReleasedKeyframeAssets,
+  projectReleasedOrdinaryAssets,
   selectedRunMaster,
   summarizeStageReceipts,
   visibleRunMedia,
@@ -14,6 +16,42 @@ const assets: RunMediaAsset[] = [
   { _id: "thumbnail", _creationTime: 3, kind: "thumbnail", r2Key: "runs/one/thumb.png" },
   { _id: "master", _creationTime: 2, kind: "video", r2Key: "runs/one/final.mp4" },
 ];
+
+const sourceAssets = [
+  { _id: "accepted", kind: "keyframe", r2Key: "runs/one/lofi-keyframe/images/a.png" },
+  { _id: "other", kind: "keyframe", r2Key: "runs/one/lofi-keyframe/images/b.png" },
+  { _id: "thumb", kind: "thumbnail", r2Key: "runs/one/thumb.png" },
+];
+const keyframeCopy = { assetId: "accepted", sourceKey: sourceAssets[0].r2Key,
+  r2Key: "released-ordinary/v2/owner/fixture/channel/show/runs/one/lofi-keyframe/1-abc.png", releaseAt: 1, expiresAt: 10 };
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 1, false, 2).map((asset) => asset.r2Key),
+  [keyframeCopy.r2Key, sourceAssets[1].r2Key, sourceAssets[2].r2Key]);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 1, true, 2).map((asset) => asset._id),
+  ["other", "thumb"]);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, { ...keyframeCopy, sourceKey: "wrong" }, 1, false, 2), sourceAssets);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 2, false, 2), sourceAssets);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 1, false, 10).map((asset) => asset._id),
+  ["other", "thumb"]);
+
+const ordinary = [
+  { _id: "clip", kind: "clip", r2Key: "runs/one/loopraw.mp4" },
+  { _id: "unit", kind: "loop_unit", r2Key: "runs/one/loopunit_4k.mp4" },
+  { _id: "legacy", kind: "clip", r2Key: "runs/one/old.mp4" },
+  { _id: "thumb", kind: "thumbnail", r2Key: "runs/one/thumbnail.png" },
+];
+const ordinaryCopies = [
+  { kind: "lofi-clip" as const, assetId: "clip", sourceKey: ordinary[0].r2Key,
+    r2Key: "released-ordinary/v2/owner/fixture/channel/show/runs/one/lofi-clip/clip/copy.mp4", releaseAt: 1, expiresAt: 10 },
+  { kind: "lofi-loop-unit" as const, assetId: "unit", sourceKey: ordinary[1].r2Key,
+    r2Key: "released-ordinary/v2/owner/fixture/channel/show/runs/one/lofi-loop-unit/unit/copy.mp4", releaseAt: 1, expiresAt: 10 },
+];
+assert.deepEqual(projectReleasedOrdinaryAssets(ordinary, ordinaryCopies, 1, new Set(), 2).map((asset) => asset.r2Key),
+  [ordinaryCopies[0].r2Key, ordinaryCopies[1].r2Key, ordinary[2].r2Key, ordinary[3].r2Key]);
+assert.deepEqual(projectReleasedOrdinaryAssets(ordinary, ordinaryCopies, 1, new Set(["clip"]), 2)
+  .map((asset) => asset._id), ["unit", "legacy", "thumb"]);
+assert.deepEqual(projectReleasedOrdinaryAssets(ordinary, ordinaryCopies, 2, new Set(), 2), ordinary);
+assert.deepEqual(projectReleasedOrdinaryAssets(ordinary, ordinaryCopies, 1, new Set(), 10).map((asset) => asset._id),
+  ["legacy", "thumb"]);
 
 assert.deepEqual(orderRunMedia(assets).map((asset) => asset._id), ["thumbnail", "master", "old-video"]);
 assert.equal(selectedRunMaster(assets, "master")?._id, "master");

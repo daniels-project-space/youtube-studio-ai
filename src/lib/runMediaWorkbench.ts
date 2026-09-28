@@ -11,6 +11,38 @@ export type RunMediaAsset = {
   meta?: unknown;
 };
 
+/** Project only the receipt-bound asset; other stills and thumbnails keep their exact source keys. */
+export function projectReleasedKeyframeAssets<T extends Pick<RunMediaAsset, "_id" | "kind" | "r2Key">>(
+  assets: readonly T[],
+  copy: { assetId: string; sourceKey: string; r2Key: string; releaseAt: number; expiresAt: number } | undefined,
+  releaseAt: number | undefined,
+  expired: boolean,
+  now = Date.now(),
+): T[] {
+  return assets.flatMap((asset) => {
+    if (!copy || copy.releaseAt !== releaseAt || asset.kind !== "keyframe" ||
+        copy.assetId !== asset._id || copy.sourceKey !== asset.r2Key) return [asset];
+    return expired || !Number.isSafeInteger(copy.expiresAt) || now >= copy.expiresAt
+      ? [] : [{ ...asset, r2Key: copy.r2Key }];
+  });
+}
+
+export function projectReleasedOrdinaryAssets<T extends Pick<RunMediaAsset, "_id" | "kind" | "r2Key">>(
+  assets: readonly T[],
+  copies: readonly { kind: "lofi-clip" | "lofi-loop-unit"; assetId: string; sourceKey: string; r2Key: string; releaseAt: number; expiresAt: number }[],
+  releaseAt: number | undefined,
+  expiredAssetIds: ReadonlySet<string>,
+  now = Date.now(),
+): T[] {
+  return assets.flatMap((asset) => {
+    const copy = copies.find((item) => item.assetId === asset._id && item.sourceKey === asset.r2Key &&
+      item.releaseAt === releaseAt && asset.kind === (item.kind === "lofi-clip" ? "clip" : "loop_unit"));
+    if (!copy) return [asset];
+    return expiredAssetIds.has(asset._id) || !Number.isSafeInteger(copy.expiresAt) || now >= copy.expiresAt
+      ? [] : [{ ...asset, r2Key: copy.r2Key }];
+  });
+}
+
 export type RunStageReceipt = {
   block: string;
   status: string;

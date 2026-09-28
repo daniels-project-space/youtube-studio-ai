@@ -8,6 +8,7 @@ let mode: "recover" | "outage" | "forbidden" | "frozen-provider" | "seam" = "rec
 let renders = 0, uploads = 0, encodes = 0, buffered = 0, finishes = 0;
 const expectedTakes = 2 * Math.ceil(15 / (MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps));
 const uploadPaths: string[] = [];
+const recordedAssets: Array<{ kind: string; meta: Record<string, unknown> }> = [];
 const storageFailure = () => Object.assign(new Error("storage unavailable"), { status: mode === "forbidden" ? 403 : 503 });
 async function upload(key: string, path: string) {
   uploads++; uploadPaths.push(path);
@@ -35,7 +36,10 @@ async function main() {
       execFile: (_bin: string, args: string[], _options: unknown, callback: (error: null, stdout: string, stderr: string) => void) => {
         assert.ok(args.some(arg => arg.includes("flags=lanczos"))); finishes++; callback(null, "", "");
       } };
-    if (id === "./blockContext") return { ...actual as object, recordAsset: async () => {} };
+    if (id === "./blockContext") return { ...actual as object,
+      recordAsset: async (_ctx: unknown, kind: string, _key: string, meta: Record<string, unknown>) => {
+        recordedAssets.push({ kind, meta });
+      } };
     if (id === "@/lib/ffmpeg") return { ...actual as object,
       seamlessLoopUnit: async (_input: string, output: string) => output,
       composeVideoSequenceUnit: async (value: { outPath: string }) => { encodes++; return value.outPath; },
@@ -67,6 +71,7 @@ async function main() {
         assert.equal(result.ok, true, result.error); assert.equal(uploads, 2); assert.equal(encodes, 3);
         assert.equal(new Set(uploadPaths).size, 1, "storage retries reopen the same completed render");
         assert.equal(result.store.loopSourceDurationSec, 30);
+        assert.equal(recordedAssets.find((asset) => asset.kind === "clip")?.meta.retentionSource, "lofi-clip/v1");
       } else {
         assert.equal(result.ok, false);
         assert.equal(uploads, scenario === "outage" ? 3 : scenario === "forbidden" ? 1 : 0);
@@ -81,6 +86,7 @@ async function main() {
     assert.equal(finished.ok, true, finished.error); assert.equal(finished.store.loopUnitResolution, "1080p");
     assert.equal(finishes, 1, "storage recovery must not repeat deterministic upscale encoding");
     assert.equal(uploads, 2); assert.equal(renders, 0); assert.equal(buffered, 0);
+    assert.equal(recordedAssets.find((asset) => asset.kind === "loop_unit")?.meta.retentionSource, "lofi-loop-unit/v1");
     console.log("LOOP OUTPUT PERSISTENCE PASS: actual runner recovers transient storage without repeated generation/encoding; persistent/403/seam failures retain cost; frozen provider receipts preserved. Media/storage transports synthetic.");
   } finally { loader._load = originalLoad; }
 }

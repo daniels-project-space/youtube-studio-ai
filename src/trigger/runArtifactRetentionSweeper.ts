@@ -16,6 +16,10 @@ import {
 } from "@/lib/runArtifactRetention";
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { getAccessToken } from "@/lib/youtube";
+import { evaluateRunArtifactRelease } from "@/lib/runArtifactRetention";
+import { copyReleasedFinalVideo, type ReleasedFinalVideoReceipt } from "@/lib/releasedFinalVideo";
+import { copyReleasedKeyframe, type ReleasedKeyframeReceipt, type ReleasedKeyframeSource } from "@/lib/releasedKeyframe";
+import { copyReleasedOrdinaryAsset, type ReleasedOrdinaryReceipt, type ReleasedOrdinarySource } from "@/lib/releasedOrdinaryAsset";
 import { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 export { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 import {
@@ -31,6 +35,10 @@ export interface RunArtifactReleaseCheck {
   channelId: Id<"channels">;
   runId: Id<"runs">;
   videoId?: string;
+  keyPrefix?: string;
+  certificateKey?: string;
+  keyframeSource?: ReleasedKeyframeSource;
+  ordinarySources?: ReleasedOrdinarySource[];
 }
 
 export interface RunArtifactObservedRelease {
@@ -39,6 +47,9 @@ export interface RunArtifactObservedRelease {
   connectorVersion?: number;
   error?: string;
   observation: RunArtifactReleaseObservation | null;
+  finalVideo?: ReleasedFinalVideoReceipt;
+  keyframe?: ReleasedKeyframeReceipt;
+  ordinaryAssets?: ReleasedOrdinaryReceipt[];
 }
 
 /** Shared production/test coordinator: group by connector, persist every outcome. */
@@ -47,8 +58,12 @@ export async function reconcileRunArtifactReleaseChecks(args: {
   observeChannel: (channelId: Id<"channels">, videoIds: string[]) => Promise<{
     connectorId: Id<"youtubeAuth">;
     connectorVersion: number;
+    ytChannelId?: string;
     videos: Map<string, RunArtifactReleaseObservation>;
   }>;
+  copyFinal?: (check: RunArtifactReleaseCheck, releaseAt: number) => Promise<ReleasedFinalVideoReceipt>;
+  copyKeyframe?: (check: RunArtifactReleaseCheck, releaseAt: number) => Promise<ReleasedKeyframeReceipt>;
+  copyOrdinary?: (check: RunArtifactReleaseCheck, source: ReleasedOrdinarySource, releaseAt: number) => Promise<ReleasedOrdinaryReceipt>;
   record: (observations: RunArtifactObservedRelease[], observedAt: number) => Promise<{
     confirmed: number; deferred: number;
   }>;
@@ -67,11 +82,35 @@ export async function reconcileRunArtifactReleaseChecks(args: {
     try {
       const videoIds = [...new Set(checks.flatMap((check) => check.videoId ? [check.videoId] : []))];
       const result = videoIds.length ? await args.observeChannel(channelId, videoIds) : undefined;
-      observations = checks.map((check) => ({
-        retentionId: check.retentionId,
-        ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
-        ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
-        observation: check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null,
+      observations = await Promise.all(checks.map(async (check) => {
+        const observation = check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null;
+        const base = {
+          retentionId: check.retentionId,
+          ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
+          ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
+          observation,
+        };
+        if (!args.copyFinal || !observation) return base;
+        const decision = evaluateRunArtifactRelease({
+          expectedVideoId: check.videoId ?? "", expectedChannelId: result?.ytChannelId ?? "",
+          observedAt: (args.now ?? Date.now)(), observation,
+        });
+        if (!decision.released) return base;
+        try {
+          const finalVideo = await args.copyFinal(check, decision.releaseAt);
+          const keyframe = check.keyframeSource && args.copyKeyframe
+            ? await args.copyKeyframe(check, decision.releaseAt) : undefined;
+          const ordinaryAssets: ReleasedOrdinaryReceipt[] = [];
+          for (const source of check.ordinarySources ?? []) {
+            if (!args.copyOrdinary) throw new Error("ordinary release copy writer is unavailable");
+            ordinaryAssets.push(await args.copyOrdinary(check, source, decision.releaseAt));
+          }
+          return { ...base, finalVideo, ...(keyframe ? { keyframe } : {}),
+            ...(ordinaryAssets.length ? { ordinaryAssets } : {}) };
+        } catch (error) {
+          return { ...base, observation: null,
+            error: `Release copy unavailable: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000) };
+        }
       }));
     } catch (error) {
       observations = checks.map((check) => ({
@@ -141,8 +180,23 @@ export async function sweepDueRunArtifactRetentions(input?: {
       return {
         connectorId: connector.connectorId,
         connectorVersion: connector.tokenVersion,
+        ytChannelId: connector.ytChannelId,
         videos: await fetchRunArtifactReleaseObservations({ accessToken, videoIds }),
       };
+    },
+    copyFinal: async (check, releaseAt) => {
+      if (!check.keyPrefix || !check.certificateKey) throw new Error("retention check lacks the source certificate");
+      return copyReleasedFinalVideo({ keyPrefix: check.keyPrefix, runId: String(check.runId),
+        certificateKey: check.certificateKey, releaseAt });
+    },
+    copyKeyframe: async (check, releaseAt) => {
+      if (!check.keyPrefix || !check.keyframeSource) throw new Error("retention check lacks the marked keyframe source");
+      return copyReleasedKeyframe({ keyPrefix: check.keyPrefix, runId: String(check.runId),
+        releaseAt, source: check.keyframeSource });
+    },
+    copyOrdinary: async (check, source, releaseAt) => {
+      if (!check.keyPrefix) throw new Error("retention check lacks the ordinary source prefix");
+      return copyReleasedOrdinaryAsset({ keyPrefix: check.keyPrefix, runId: String(check.runId), releaseAt, source });
     },
     record: (observations, observedAt) => convex.mutation(api.runArtifactRetentions.recordReleaseObservations, {
       ownerId, observedAt, observations,

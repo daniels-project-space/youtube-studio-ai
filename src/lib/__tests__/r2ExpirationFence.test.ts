@@ -20,6 +20,12 @@ const ctx = { db: {
 
 async function main() {
   await assertR2KeyMayBePromoted(ctx as never, "alice", key);
+  for (const releaseKey of [
+    `released-ordinary/v2/owner/alice/channel/show/runs/run-fixture/lofi-keyframe/1-${"a".repeat(64)}.png`,
+    `released-final/v2/owner/alice/channel/show/runs/run-fixture/1-${"a".repeat(64)}.mp4`,
+  ]) {
+    await assert.rejects(() => assertR2KeyMayBePromoted(ctx as never, "alice", releaseKey), /classed release copies expire/);
+  }
   expirationStatus = "pending";
   await assert.rejects(() => assertR2KeyMayBePromoted(ctx as never, "alice", key), /pending deletion/);
   await assert.rejects(() => assertNoPendingChannelExpiration(ctx as never, "channel-fixture" as never), /in-flight/);

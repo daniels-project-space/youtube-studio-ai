@@ -250,3 +250,18 @@ export const pendingExpirationsPage = query({
       etag: row.etag, lastModifiedAt: row.lastModifiedAt, preparedAt: row.preparedAt })) };
   },
 });
+
+/** Inventory only. R2 does not expose an atomic ETag-conditional delete here. */
+export const scheduledClassedExpirationsPage = query({
+  args: { ownerId: v.string(), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "R2 scheduled classed inventory");
+    const page = await ctx.db.query("r2AssetExpirations")
+      .withIndex("by_owner_status", (q) => q.eq("ownerId", args.ownerId).eq("status", "scheduled"))
+      .paginate(args.paginationOpts);
+    return { ...page, page: page.page.map((row) => ({
+      r2Key: row.r2Key, etag: row.etag, lastModifiedAt: row.lastModifiedAt,
+      expiresAt: row.expiresAt, classedProof: row.classedProof,
+    })) };
+  },
+});

@@ -17,10 +17,12 @@ test("streamed downloads expose only complete bytes and preserve previous files 
   let responseFailure: Error | undefined;
   let emptyBody = false;
   let requests = 0;
+  let expectedEtag: string | undefined;
   const send = mock.method(client, "send", async (command: { input: Record<string, unknown> }) => {
     requests++;
     assert.equal(command.input.Bucket, "fixture-private");
     assert.equal(command.input.Key, "owner/run/master.mp4");
+    assert.equal(command.input.IfMatch, expectedEtag);
     if (responseFailure) throw responseFailure;
     return { Body: emptyBody ? undefined : body, ContentLength: length };
   });
@@ -66,6 +68,11 @@ test("streamed downloads expose only complete bytes and preserve previous files 
     assert.deepEqual(await readdir(directory), [], "failed new download leaves no destination or partial file");
     body = Readable.from([Buffer.from("no-header")]); length = undefined;
     await download(); assert.equal(await readFile(target, "utf8"), "no-header"); await clean();
+    expectedEtag = '"0123456789abcdef0123456789abcdef"';
+    body = Readable.from([Buffer.from("etag-bound")]); length = 10;
+    await getObjectToFile("owner/run/master.mp4", target, "fixture-private", expectedEtag);
+    assert.equal(await readFile(target, "utf8"), "etag-bound"); await clean();
+    expectedEtag = undefined;
     body = Readable.from([]); length = 0;
     await download(); assert.equal((await readFile(target)).length, 0); await clean();
 
@@ -115,7 +122,7 @@ test("streamed downloads expose only complete bytes and preserve previous files 
     await assert.rejects(download(), /no body/);
     assert.deepEqual(await readdir(directory), []);
     await assert.rejects(getObjectToFile("owner/run/master.mp4", join(directory, "absent-parent", "master.mp4"), "fixture-private"), /ENOENT/);
-    assert.equal(requests, 17, "one GET per transfer attempt; disk setup failure starts none; no HEAD or whole-transfer retry");
+    assert.equal(requests, 18, "one GET per transfer attempt; disk setup failure starts none; no HEAD or whole-transfer retry");
   } finally {
     send.mock.restore(); client.destroy();
     for (const name of names) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name]; }
