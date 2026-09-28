@@ -4,6 +4,7 @@ import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes } from "@/lib/storage";
 import { miniMaxH3RequestKey, miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 import { assertMiniMaxH3WeeklyBatchArgs, reconcileWeeklyOrderRejections, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
+import { projectH3ReceiptState, type H3RequestPacketState } from "@/lib/h3StatusProjection";
 import {
   isMiniMaxH3CapacityHoldError,
   summarizeMiniMaxH3Receipt,
@@ -30,25 +31,16 @@ function triggerRunId(value: string): boolean {
   return value.length > 0 && value.length <= 200 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
 }
 
-type RequestPacketState = "frozen" | "missing" | "invalid" | "not-applicable";
-
-function validWeeklyRequestPacket(
-  value: unknown,
-  expected?: { orderKey: string; requestKeys: readonly string[] },
-): boolean {
+function validWeeklyRequestPacket(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const packet = value as Record<string, unknown>;
   const requestKeys = packet.requestKeys;
-  const structurallyValid = packet.schema === "minimax-h3-weekly-request/v1" &&
+  return packet.schema === "minimax-h3-weekly-request/v1" &&
     typeof packet.orderKey === "string" && packet.orderKey.length > 0 &&
     Array.isArray(requestKeys) && requestKeys.length >= 1 && requestKeys.length <= 60 &&
     requestKeys.every((key) => typeof key === "string" && key.length > 0) &&
     Array.isArray(packet.jobs) && packet.jobs.length === requestKeys.length &&
     Number.isSafeInteger(packet.createdAt) && Number(packet.createdAt) > 0;
-  if (!structurallyValid || !expected) return structurallyValid;
-  return packet.orderKey === expected.orderKey &&
-    requestKeys.length === expected.requestKeys.length &&
-    requestKeys.every((key, index) => key === expected.requestKeys[index]);
 }
 
 /**
@@ -71,41 +63,21 @@ export async function GET(request: Request) {
 
     const run = await runs.retrieve(runId);
     let receipt: MiniMaxH3ReceiptSummary | undefined;
-    let requestPacketState: RequestPacketState = "not-applicable";
-    let receiptState: "pending" | "held" | "complete" | "reconciliation_required" | "repair_required" = "pending";
-    let paidRequestStarted: boolean | undefined;
+    let receiptBody: Record<string, unknown> | undefined;
+    let requestPacketState: H3RequestPacketState = "not-applicable";
     let rejected: Awaited<ReturnType<typeof reconcileWeeklyOrderRejections>> = [];
     try {
       const bytes = await getObjectBytes(receiptKey);
-      const receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
       receipt = summarizeMiniMaxH3Receipt(receiptBody, actor.ownerId);
-      receiptState = "complete";
-      if (receipt.kind === "weekly") {
-        try {
-          const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
-          const rawReceipt = receiptBody as Record<string, unknown>;
-          const expectedOrderKey = typeof rawReceipt.orderKey === "string" ? rawReceipt.orderKey : "";
-          const rawPacketRequestKeys = Array.isArray(rawReceipt.sourceRequestKeys)
-            ? rawReceipt.sourceRequestKeys
-            : rawReceipt.requestKeys;
-          const expectedRequestKeys = Array.isArray(rawPacketRequestKeys)
-            ? rawPacketRequestKeys.filter((key): key is string => typeof key === "string")
-            : [];
-          requestPacketState = validWeeklyRequestPacket(packet, {
-            orderKey: expectedOrderKey,
-            requestKeys: expectedRequestKeys,
-          }) ? "frozen" : "invalid";
-        } catch (packetError) {
-          if (!notFound(packetError)) requestPacketState = "invalid";
-          else requestPacketState = "missing";
-        }
-      }
     } catch (error) {
       if (!notFound(error)) {
         return NextResponse.json({ ok: false, error: "H3 receipt is malformed or unavailable" }, { status: 409 });
       }
-      // A weekly request packet is intentionally visible before its receipt;
-      // an on-demand run has no sibling packet and remains not-applicable.
+    }
+    // Weekly lineage must be checked whether or not the aggregate exists:
+    // a rejected paid shot and a completed aggregate are conflicting proofs.
+    if (receipt?.kind === "weekly" || !receipt) {
       try {
         const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
         requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
@@ -115,39 +87,47 @@ export async function GET(request: Request) {
             ownerId: actor.ownerId, orderKey: frozen.orderKey, receiptKey, jobs: frozen.jobs,
           });
           const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({ ...job, provider: "salad", execution: "weekly-batch" }));
-          if (requestKeys.some((key, index) => key !== frozen.requestKeys[index])) {
+          const aggregateRequestKeys = Array.isArray(receiptBody?.sourceRequestKeys)
+            ? receiptBody.sourceRequestKeys : receiptBody?.requestKeys;
+          const aggregateOutputs = receiptBody?.outputs;
+          const aggregateMatchesPacket = !receiptBody || (
+            receiptBody.orderKey === payload.orderKey &&
+            Array.isArray(aggregateRequestKeys) &&
+            aggregateRequestKeys.length === requestKeys.length &&
+            requestKeys.every((key, index) => key === aggregateRequestKeys[index]) &&
+            Array.isArray(aggregateOutputs) && aggregateOutputs.length === payload.jobs.length &&
+            payload.jobs.every((job, index) => (aggregateOutputs[index] as { r2Key?: unknown } | undefined)?.r2Key === job.output.r2Key)
+          );
+          if (requestKeys.some((key, index) => key !== frozen.requestKeys[index]) || !aggregateMatchesPacket) {
             requestPacketState = "invalid";
           } else {
             rejected = await reconcileWeeklyOrderRejections({
               receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
             });
-            if (rejected.length > 0) receiptState = "repair_required";
           }
         }
       } catch (packetError) {
-        if (!notFound(packetError)) {
-          requestPacketState = "invalid";
-          receiptState = "reconciliation_required";
-        }
-      }
-      if (receiptState !== "repair_required" && ["COMPLETED", "FAILED", "CANCELED"].includes(String(run.status).toUpperCase())) {
-        if (requestPacketState === "frozen" && isMiniMaxH3CapacityHoldError(run.error)) {
-          receiptState = "held";
-          paidRequestStarted = false;
-        } else {
-          receiptState = "reconciliation_required";
-        }
+        requestPacketState = notFound(packetError) ? "missing" : "invalid";
       }
     }
+    const projection = projectH3ReceiptState({
+      triggerStatus: String(run.status),
+      aggregateKind: receipt?.kind ?? null,
+      packetState: requestPacketState,
+      rejectedCount: rejected.length,
+      capacityHold: isMiniMaxH3CapacityHoldError(run.error),
+    });
     return NextResponse.json({
       ok: true,
       runId,
       triggerStatus: run.status,
-      state: receiptState,
+      state: projection.state,
       requestPacketState,
       receipt: receipt ?? null,
-      ...(rejected.length > 0 ? { rejected, repairDisposition: "owner_review_new_order_required" as const } : {}),
-      ...(paidRequestStarted === undefined ? {} : { paidRequestStarted }),
+      ...(rejected.length > 0 ? { rejected } : {}),
+      ...(projection.state === "repair_required" ? { repairDisposition: "owner_review_new_order_required" as const } : {}),
+      ...(projection.lineageConflict ? { lineageConflict: "aggregate_and_rejected_shot" as const } : {}),
+      ...(projection.paidRequestStarted === undefined ? {} : { paidRequestStarted: projection.paidRequestStarted }),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) {

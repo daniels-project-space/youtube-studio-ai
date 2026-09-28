@@ -21,6 +21,7 @@ type H3Status = {
   } | null;
   paidRequestStarted?: boolean;
   repairDisposition?: "owner_review_new_order_required";
+  lineageConflict?: "aggregate_and_rejected_shot";
   rejected?: Array<{ index: number; provider: "salad" | "novita" | "openrelay"; costUsd: number; openingMotionQa: { verdict: "fail" | "unavailable"; openingFrozenHoldSec: number } }>;
 };
 
@@ -538,7 +539,8 @@ export function H3RenderConsole() {
           <div className={styles.progressTrack}><i style={{ width: `${progressPercent}%` }} /></div>
           <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}{status?.receipt?.capacityMode && <span data-capacity-mode={status.receipt.capacityMode}>Tier {status.receipt.capacityMode === "high" ? "high fallback" : status.receipt.capacityMode}</span>}{status?.requestPacketState === "frozen" && <span>Inputs frozen</span>}{status?.requestPacketState === "missing" && <span className={styles.warn}>Request packet missing</span>}{status?.requestPacketState === "invalid" && <span className={styles.warn}>Request packet invalid</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
           {status?.state === "held" && <div className={styles.holdAction}><span className={styles.holdCopy}><strong className={styles.warn}>Held before spend: Salad capacity was unavailable.</strong><small>Auto-rechecks every 15m: medium first, then high only if it unlocks this wave. Novita takes over after 24h.</small></span><button type="button" className={styles.secondaryButton} onClick={() => void retryHeld()} disabled={retryBusy}>{retryBusy ? "Rechecking capacity…" : capacity?.state === "admitted" ? capacity.capacity.fallbackUsed ? "Retry with high priority" : "Retry at medium priority" : "Check again"}</button></div>}
-          {status?.state === "reconciliation_required" && <strong className={styles.warn}>Provider run ended without a durable receipt. Reconcile before retrying.</strong>}
+          {status?.state === "pending" && !!status.rejected?.length && <strong className={styles.warn}>A paid shot was rejected. Waiting for the active render workers and their claims to settle before showing a repair decision.</strong>}
+          {status?.state === "reconciliation_required" && <strong className={styles.warn}>{status.lineageConflict ? "Conflicting H3 evidence: a rejected shot claim and completed batch receipt coexist. Reconcile the exact claims before any new order." : "Provider run ended without consistent durable receipt lineage. Reconcile before retrying."}</strong>}
           {status?.state === "repair_required" && <strong className={styles.warn}>Paid H3 shot rejected by opening-motion review. {status.rejected?.map((shot) => `Shot ${shot.index + 1} (${shot.provider}, $${shot.costUsd.toFixed(2)}, ${shot.openingMotionQa.openingFrozenHoldSec.toFixed(2)}s frozen)`).join("; ")}. Review the claim and create a new approved order for repair. This order will not retry automatically.</strong>}
           {error && <strong className={styles.error}>{error}</strong>}
         </section>
