@@ -38,12 +38,15 @@ test("released finals reject overwriteable writers and mismatched expiry", async
 test("only marked Lo-Fi run stills can be release-copy sources and destination cannot be overwritten", async () => {
   const keyPrefix = "owner/daniel/channel/show/";
   const job = `image-${"a".repeat(32)}`;
-  const source = `imagecraft/${keyPrefix}runs/run-1/lofi-keyframe/images/${job}/stills/keyframe-1-c01.png`;
+  const source = `${keyPrefix}runs/run-1/lofi-keyframe/images/image/keyframe-1-c01.png`;
+  const bridgeSource = `imagecraft/${keyPrefix}runs/run-1/lofi-keyframe/images/${job}/stills/keyframe-1-c01.png`;
   assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", source), true);
+  assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", bridgeSource), true);
   for (const other of [
     source.replace("runs/run-1/", "runs/run-2/"),
     source.replace("-c01.png", "-c02.png"),
-    source.replace(job, "image-unsafe"),
+    bridgeSource.replace(job, "image-unsafe"),
+    bridgeSource.replace("-c01.png", "-c02.png"),
     `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.png`,
     `${keyPrefix}runs/run-1/thumbnail/images/hero.png`,
     `${keyPrefix}library/lofi-keyframe/images/keyframe-1.png`,
@@ -136,7 +139,7 @@ test("scheduled classed proof binds exact source, destination identity, digest a
   const loopHead = { ...head, metadata: { ...head.metadata, retentionAssetClass: "lofi-loop-unit",
     retentionAssetId: "unit_1", retentionSourceKey: loopSource } };
   assert.equal(hasExactScheduledClassedProof(loopRow, loopHead, due), true);
-  const stillSource = `imagecraft/${channel}runs/run-1/lofi-keyframe/images/image-${"a".repeat(32)}/stills/keyframe-1-c01.png`;
+  const stillSource = `${channel}runs/run-1/lofi-keyframe/images/image/keyframe-1-c01.png`;
   const stillRow = { ...row,
     r2Key: releasedKeyframeKey(channel, "run-1", "asset_1", releasedAt, sha256),
     classedProof: { ...row.classedProof, class: "lofi-keyframe" as const,
