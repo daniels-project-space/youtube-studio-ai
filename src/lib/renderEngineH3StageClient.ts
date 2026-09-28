@@ -13,8 +13,13 @@ export type RenderEngineH3StageRequest = Readonly<{
 
 export type RenderEngineH3StageReceipt = Readonly<{
   jobId: string;
-  state: "awaiting-input-qualification";
+  state: "awaiting-input-qualification" | "awaiting-final-qualification";
   manifestSha256: string;
+}>;
+
+export type RenderEngineH3InputQualificationReceipt = Readonly<{
+  jobId: string;
+  state: "awaiting-final-qualification";
 }>;
 
 export type RenderEngineH3WorkflowReceipt = Readonly<{
@@ -103,11 +108,15 @@ function validateStageRequest(value: unknown, projectName: string): asserts valu
   const frame = value.firstFrame;
   const output = value.output;
   const projectPrefix = `projects/${projectName}/`;
+  const contentAddressedFrame = isRecord(frame) && typeof frame.r2Key === "string" && typeof frame.sha256 === "string" && [
+    `${projectPrefix}inputs/sha256/${frame.sha256}.png`,
+    `${projectPrefix}inputs/sha256/${frame.sha256}.jpg`,
+  ].includes(frame.r2Key);
   if (
     value.version !== 2 || typeof value.idempotencyKey !== "string" || !/^[A-Za-z0-9:_-]{16,200}$/.test(value.idempotencyKey) ||
     typeof value.prompt !== "string" || value.prompt.trim().length < 3 || value.prompt.length > 2_000 ||
     !isRecord(frame) || !hasExactKeys(frame, ["r2Key", "sha256"]) || typeof frame.r2Key !== "string" ||
-    !frame.r2Key.startsWith(projectPrefix) || frame.r2Key.length > 512 ||
+    !contentAddressedFrame || frame.r2Key.length > 512 ||
     frame.r2Key.split("/").some((segment) => !segment || segment === "." || segment === "..") ||
     !/^[A-Za-z0-9/_ .-]+$/.test(frame.r2Key) || typeof frame.sha256 !== "string" || !HEX_SHA256.test(frame.sha256) ||
     !Number.isSafeInteger(value.seed) || (value.seed as number) < 0 || (value.seed as number) > 0xffff_ffff ||
@@ -121,11 +130,19 @@ function validateStageRequest(value: unknown, projectName: string): asserts valu
 function parseStageReceipt(value: unknown): RenderEngineH3StageReceipt {
   if (!isRecord(value) || !hasExactKeys(value, ["jobId", "state", "manifestSha256"]) ||
       typeof value.jobId !== "string" || !CONVEX_ID.test(value.jobId) ||
-      value.state !== "awaiting-input-qualification" || typeof value.manifestSha256 !== "string" ||
+      (value.state !== "awaiting-input-qualification" && value.state !== "awaiting-final-qualification") || typeof value.manifestSha256 !== "string" ||
       !HEX_SHA256.test(value.manifestSha256)) {
     throw new Error("Render Engine returned an invalid H3 staging receipt");
   }
   return { jobId: value.jobId, state: value.state, manifestSha256: value.manifestSha256 };
+}
+
+function parseInputQualificationReceipt(value: unknown, jobId: string): RenderEngineH3InputQualificationReceipt {
+  if (!isRecord(value) || !hasExactKeys(value, ["jobId", "state"]) || value.jobId !== jobId ||
+      value.state !== "awaiting-final-qualification") {
+    throw new Error("Render Engine returned an invalid H3 input qualification receipt");
+  }
+  return { jobId, state: "awaiting-final-qualification" };
 }
 
 function parseWorkflowReceipt(value: unknown): RenderEngineH3WorkflowReceipt {
@@ -193,4 +210,18 @@ export async function stageH3RequestInRenderEngine(config: RenderEngineH3StageCo
   const result = await jsonRequest(config, "/client/h3-jobs", { projectName: config.projectName, workflowId: config.workflowId, request: config.request }) as { status: number; body: unknown };
   if (result.status !== 202) throw new Error(`Render Engine H3 staging returned HTTP ${result.status}`);
   return parseStageReceipt(result.body);
+}
+
+/** Reads back the exact Engine-owned frame before the staged job can advance. */
+export async function qualifyH3InputInRenderEngine(
+  config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
+  jobId: string,
+): Promise<RenderEngineH3InputQualificationReceipt> {
+  validateProjectCapability(config.projectName, config.projectCapability);
+  if (!CONVEX_ID.test(jobId)) throw new Error("Render Engine H3 job ID is invalid");
+  const result = await jsonRequest(config, "/client/h3-jobs/qualify-input", {
+    projectName: config.projectName, jobId,
+  }) as { status: number; body: unknown };
+  if (result.status !== 202) throw new Error(`Render Engine H3 input qualification returned HTTP ${result.status}`);
+  return parseInputQualificationReceipt(result.body, jobId);
 }

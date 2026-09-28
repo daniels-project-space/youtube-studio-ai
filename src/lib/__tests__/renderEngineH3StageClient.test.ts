@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { provisionStudioH3WorkflowInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
+import { provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -11,7 +11,7 @@ const config: RenderEngineH3StageConfig = {
     version: 2,
     idempotencyKey: "youtube-studio:run-1:shot-1",
     prompt: "A quiet morning at home",
-    firstFrame: { r2Key: "projects/youtube-studio/runs/run-1/shot-1.png", sha256: "b".repeat(64) },
+    firstFrame: { r2Key: `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`, sha256: "b".repeat(64) },
     seed: 19,
     durationSeconds: 5,
     output: { width: 1280, height: 736, fps: 24, container: "mp4", videoCodec: "h264" },
@@ -74,6 +74,21 @@ test("rejects unsafe Engine origins and non-202 responses", async () => {
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl }), /HTTPS Convex site origin/);
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, fetchImpl }), /HTTP 200/);
   assert.equal(calls, 1);
+});
+
+test("qualifies only the staged job through the non-billable Engine endpoint", async () => {
+  let captured: { url: string; init: RequestInit } | undefined;
+  const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
+  const receipt = await qualifyH3InputInRenderEngine({
+    baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+    fetchImpl: async (input, init) => {
+      captured = { url: String(input), init: init ?? {} };
+      return jsonResponse({ jobId, state: "awaiting-final-qualification" });
+    },
+  }, jobId);
+  assert.deepEqual(receipt, { jobId, state: "awaiting-final-qualification" });
+  assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/h3-jobs/qualify-input");
+  assert.deepEqual(JSON.parse(String(captured?.init.body)), { projectName: config.projectName, jobId });
 });
 
 test("provisions the current profile revision and uploads only a hash-addressed project frame", async () => {

@@ -37,7 +37,7 @@ import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
-import { provisionStudioH3WorkflowInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+import { provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
 const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
@@ -347,6 +347,9 @@ export async function dispatchPreparedFootage(
       maxCostUsd: job.maxCostUsd,
       profileRevisionSha256: workflow.profileRevisionSha256,
     } });
+    if (receipt.state === "awaiting-input-qualification") {
+      await qualifyH3InputInRenderEngine(engine, receipt.jobId);
+    }
     stagedJobIds.push(receipt.jobId);
   }
   return stagedJobIds;
