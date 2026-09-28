@@ -3,7 +3,7 @@ import { miniMaxH3RequestKey, type MiniMaxH3RenderRequest } from "@/lib/minimaxH
 import { canonicalJson } from "@/lib/canonicalJson";
 
 /** Studio will use only a project-authenticated, exact image-to-video adapter. */
-export const RENDER_ENGINE_H3_PROJECT = "youtube-studio" as const;
+export const RENDER_ENGINE_H3_PROJECT = "youtube-studio-ai" as const;
 export const RENDER_ENGINE_H3_CONTRACT = "render-engine-h3-studio-ivt/v1" as const;
 
 /** Immutable order shape for the future Render Engine batch adapter. */

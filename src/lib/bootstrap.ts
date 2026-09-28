@@ -10,7 +10,6 @@ import { hydrateEnv } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
-  "novita", // Novita render bridge + local persistent-disk Z-Image/LTX fleet
   // Studio owns its OpenRelay credentials here; the shared provider namespace
   // belongs to other projects and must never shadow the Studio key.
   "youtube", // YOUTUBE_* plus OPENRELAY_API_KEY / OPENRELAY_ORG_ID
@@ -39,7 +38,7 @@ const SERVICES = [
 
 // Provider-specific workers can request only their own vault service. Salad is
 // opt-in here so unrelated jobs never acquire its infrastructure credential.
-type BootstrapService = (typeof SERVICES)[number] | "salad";
+type BootstrapService = (typeof SERVICES)[number] | "salad" | "novita";
 const hydratedServices = new Set<BootstrapService>();
 const pendingServices = new Map<BootstrapService, Promise<string[]>>();
 
@@ -88,7 +87,7 @@ export async function bootstrapSecrets(
   const services = opts?.services ?? SERVICES;
   // Runtime callers must not bypass the sealed Gemini boundary by casting
   // arbitrary strings into the type-level allowlist. Validate before any read.
-  if (services.some((svc) => svc !== "salad" && !(SERVICES as readonly string[]).includes(svc))) {
+  if (services.some((svc) => svc !== "salad" && svc !== "novita" && !(SERVICES as readonly string[]).includes(svc))) {
     throw new Error("bootstrap: unsupported vault service");
   }
   for (const svc of new Set(services)) {

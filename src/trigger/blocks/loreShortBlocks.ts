@@ -414,8 +414,8 @@ export const loreShort: Block = {
           }),
         };
     await bootstrapSecrets(ctx.log, {
-      services: ["cloudflare", "novita"],
-      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN"],
+      services: ["cloudflare"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const h3Readiness = minimaxH3Readiness("novita");
     if (!hasLoreShort({ requiresStoryboard: approvedStoryReceipt === undefined }) || !h3Readiness.admitted) {

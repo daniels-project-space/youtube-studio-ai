@@ -510,6 +510,8 @@ export async function renderNovitaGeneratedScenes(
   );
 }
 
+function newNovitaImageDispatchRetired(): boolean { return true; }
+
 export async function renderNovitaImage(args: {
   prefix: string;
   id: string;
@@ -522,6 +524,7 @@ export async function renderNovitaImage(args: {
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
 }): Promise<NovitaRenderedImage> {
+  if (newNovitaImageDispatchRetired()) throw new Error("New direct image dispatch is retired; Render Engine Final image profile is awaiting qualification");
   const profile = generationProfile(args.profileId ?? "production");
   const envelope = novitaCostEnvelope({
     label: "novita image",

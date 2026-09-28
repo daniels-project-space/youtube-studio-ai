@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { directNovitaFleetHealth } from "@/lib/novitaDirectRender";
+import { directNovitaFleetHealth, renderDirectNovita } from "@/lib/novitaDirectRender";
 import { hasNovitaRenderBridge, getNovitaRenderStatus } from "@/lib/novitaRenderFarm";
+import { renderNovitaImage } from "@/lib/novitaMedia";
 
 async function main() {
   const originalFetch = globalThis.fetch;
@@ -18,15 +19,17 @@ async function main() {
       return Response.json({ status: "success", value: [] });
     };
     assert.equal(await hasNovitaRenderBridge(), false);
-    assert.deepEqual(services, ["cloudflare", "novita"], "readiness must not hydrate unrelated providers");
+    assert.deepEqual(services, [], "retired readiness must not hydrate any provider credentials");
     const health = await directNovitaFleetHealth();
     assert.equal(health.ready, false);
     assert.ok(health.blockers.length > 0, "missing configuration must not become readiness");
+    await assert.rejects(renderDirectNovita({} as Parameters<typeof renderDirectNovita>[0], "image"), /dispatch is retired/);
+    await assert.rejects(renderNovitaImage({ prefix: "owner/test", id: "test", prompt: "test", maxCostUsd: 1 }), /dispatch is retired/);
     process.env.NOVITA_RENDER_FARM_API = "https://retired.invalid";
     process.env.NOVITA_RENDER_FARM_TOKEN = "t".repeat(40);
     await assert.rejects(getNovitaRenderStatus(`image-${"a".repeat(32)}`), /legacy Novita bridge is disabled/);
-    assert.deepEqual(services, ["cloudflare", "novita"], "nested helpers reuse the same scoped reads without widening");
-    console.log("NOVITA SCOPED BOOTSTRAP PASS: actual readiness/helpers, two vault reads, no provider requests");
+    assert.deepEqual(services, [], "retired status helpers must not hydrate provider credentials");
+    console.log("NOVITA SCOPED BOOTSTRAP PASS: retired readiness and status made no vault or provider requests");
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of saved) {

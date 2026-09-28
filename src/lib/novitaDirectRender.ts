@@ -629,24 +629,7 @@ async function prepareControlPlane(): Promise<DirectControlPlane> {
 
 /** Read-only cloud readiness; it never creates a provider worker. */
 export async function directNovitaFleetHealth(): Promise<DirectNovitaFleetHealth> {
-  try {
-    await bootstrapSecrets(() => {}, { services: ["cloudflare", "novita"] });
-    const control = await prepareControlPlane();
-    const videoRuntime = assessNovitaVideoProfileRuntime(generationProfile("production"));
-    // Control-plane readiness is not video admission. In particular the
-    // exact model/runtime profile stays fail-closed until an operator records
-    // the real 4090 benchmark; a model label alone cannot activate spending.
-    return {
-      ready: videoRuntime.ready,
-      blockers: videoRuntime.ready ? [] : [...videoRuntime.blockers, "benchmark_and_pin_the_exact_ltx_2_5_4090_worker_before_enabling_video"],
-      gpuSku: NOVITA_REQUIRED_GPU_SKU,
-      verifiedGpuQuota: control.config.verifiedGpuQuota,
-      productId: control.product.id,
-      clusterId: control.volume.clusterId,
-    };
-  } catch (error) {
-    return { ready: false, blockers: [safeError(error)], gpuSku: NOVITA_REQUIRED_GPU_SKU };
-  }
+  return { ready: false, blockers: ["Direct Studio image and video dispatch is retired"], gpuSku: NOVITA_REQUIRED_GPU_SKU };
 }
 
 function convexClient(): StudioConvexHttpClient {
@@ -1951,12 +1934,15 @@ function directStatus(args: {
   return status as NovitaBridgeStatus;
 }
 
+function newNovitaDispatchRetired(): boolean { return true; }
+
 /**
  * Execute Z-Image keyframes directly from a Trigger cloud task. Direct LTX
  * video execution has been retired in favor of the separately attested H3
  * adapter and is rejected before any secret, worker, or provider boundary.
  */
 export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+  if (newNovitaDispatchRetired()) throw new NovitaAdmissionError("New direct image and video dispatch is retired; Render Engine Final profiles await qualification");
   const legacyVideoRequested = phase === "video";
   if (legacyVideoRequested) {
     throw new NovitaAdmissionError(

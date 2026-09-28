@@ -11,7 +11,7 @@ import { MINIMAX_H3_MANIFEST_SHA256, MINIMAX_H3_PROFILE, MINIMAX_H3_WORKER_CONTR
 
 const contract = {
   schema: RENDER_ENGINE_H3_CONTRACT,
-  projectName: "youtube-studio",
+  projectName: "youtube-studio-ai",
   workflowId: "a".repeat(32),
   profile: MINIMAX_H3_PROFILE,
   modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,

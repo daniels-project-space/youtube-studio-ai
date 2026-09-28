@@ -510,45 +510,12 @@ function renderBridgeConfig(): { baseUrl: string; token: string } {
  * fleet-readiness request still runs immediately before every paid launch.
  */
 export function hasNovitaRenderFarmConfig(): boolean {
-  // Compatibility name retained for callers. The former bridge is not a
-  // runtime dependency: a render is configured only when the direct Trigger
-  // worker lease can be constructed from its cloud-only environment.
-  try {
-    // `require` would break the ESM/Next boundary; this fast path deliberately
-    // mirrors the direct config's required names without loading provider code.
-    const required = [
-      "NOVITA_API_KEY",
-      "NOVITA_RENDER_WORKER_IMAGE",
-      "NOVITA_RENDER_4090_PRODUCT_ID",
-      "NOVITA_VERIFIED_4090_GPU_QUOTA",
-      "NOVITA_MODEL_MANIFEST_KEY",
-      "NOVITA_MODEL_MANIFEST_SHA256",
-      "NOVITA_RENDER_MAX_JOB_USD",
-      "NOVITA_RENDER_MAX_FLEET_USD",
-      "INTERNAL_QUERY_SECRET",
-    ];
-    const usesPublicRuntimeBase = process.env.NOVITA_RENDER_WORKER_IMAGE
-      === "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
-    if (usesPublicRuntimeBase) {
-      required.push("NOVITA_RUNTIME_BUNDLE_KEY", "NOVITA_RUNTIME_BUNDLE_SHA256", "NOVITA_LTX_WORKER_OVERLAY_SHA256");
-    } else if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
-      required.push("NOVITA_RENDER_IMAGE_AUTH_ID");
-    }
-    return required.every((name) => Boolean(process.env[name]?.trim()));
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /** True only when the scoped HTTPS bridge configuration passes all local checks. */
 export async function hasNovitaRenderBridge(): Promise<boolean> {
-  try {
-    await bootstrapSecrets(() => {}, { services: ["cloudflare", "novita"] });
-    const { hasDirectNovitaRenderConfig } = await import("./novitaDirectRender");
-    return hasDirectNovitaRenderConfig();
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /** Round seconds → the nearest valid 8n+1 frame count at the given fps (never below 9 frames / 1 shard). */
@@ -825,7 +792,6 @@ async function launchBridgeRender(
 export async function getNovitaRenderStatus(jobId: string): Promise<NovitaBridgeStatus> {
   const identity = /^(image|video)-[a-f0-9]{32}$/.exec(jobId);
   if (!identity) throw new Error("novitaRenderFarm: invalid bridge job id");
-  await bootstrapSecrets(() => {}, { services: ["novita"], required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const { baseUrl, token } = renderBridgeConfig();
   const statusRes = await fetch(`${baseUrl}/status?jobId=${encodeURIComponent(jobId)}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -1012,6 +978,7 @@ export function imageJobs(cfg: NovitaRenderCfg) {
 }
 
 async function startImageRender(userCfg: NovitaRenderCfg) {
+  if (newNovitaDispatchRetired()) throw new NovitaAdmissionError("New direct image dispatch is retired; Render Engine Final image profile is awaiting qualification");
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
   await bootstrapSecrets(() => {}, { services: ["novita"], required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
@@ -1027,8 +994,12 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
   return { jobs, launch };
 }
 
+/** New render admission is permanently closed while historical receipts remain readable. */
+function newNovitaDispatchRetired(): boolean { return true; }
+
 /** Launch the image phase and return immediately with a bridge job receipt. */
 export async function launchImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
+  if (newNovitaDispatchRetired()) throw new NovitaAdmissionError("New direct image dispatch is retired; Render Engine Final image profile is awaiting qualification");
   return (await startImageRender(userCfg)).launch;
 }
 
@@ -1053,6 +1024,7 @@ export async function launchVideo(_userCfg: NovitaRenderCfg): Promise<NovitaRend
  * then polls until all shards report done. Returns R2 stillKeys.
  */
 export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
+  if (newNovitaDispatchRetired()) throw new NovitaAdmissionError("New direct image dispatch is retired; Render Engine Final image profile is awaiting qualification");
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
   if (cfg.maxCostUsd === undefined) {
