@@ -22,6 +22,11 @@ type RenderedVideo = {
   createdAt?: number;
 };
 
+/** Resolve the selected ID against each reactive query result, never a saved row snapshot. */
+export function selectedRecentVideo<T extends { _id: string }>(rows: readonly T[] | undefined, runId: string | null): T | null {
+  return runId ? rows?.find((row) => row._id === runId) ?? null : null;
+}
+
 const renderDate = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   month: "short",
@@ -49,7 +54,7 @@ export function RecentVideos({
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
-  const [selected, setSelected] = useState<RenderedVideo | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [scrollable, setScrollable] = useState({ previous: false, next: false });
   const videos = useQuery(api.videos.listVideos, {
     ownerId,
@@ -60,7 +65,14 @@ export function RecentVideos({
   const renders = videos?.filter(
     (video): video is RenderedVideo & { videoKey: string } => Boolean(video.videoKey),
   );
+  const selected = selectedRecentVideo(renders, selectedRunId);
   const renderCount = renders?.length;
+
+  useEffect(() => {
+    if (!selectedRunId || videos === undefined || selected) return;
+    setSelectedRunId(null);
+    window.requestAnimationFrame(() => openerRef.current?.focus());
+  }, [selectedRunId, selected, videos]);
 
   useEffect(() => {
     const track = trackRef.current;
@@ -93,7 +105,7 @@ export function RecentVideos({
   };
 
   const closeSelected = () => {
-    setSelected(null);
+    setSelectedRunId(null);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   };
 
@@ -138,7 +150,7 @@ export function RecentVideos({
                 data-render-id={video._id}
                 onClick={(event) => {
                   openerRef.current = event.currentTarget;
-                  setSelected(video);
+                  setSelectedRunId(video._id);
                 }}
                 aria-label={`Open saved video: ${video.title}`}
               >

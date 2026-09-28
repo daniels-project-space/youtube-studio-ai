@@ -46,7 +46,7 @@ try {
   assert.match(unavailable, /temporarily unavailable/);
   assert.doesNotMatch(unavailable, /<iframe|<video/);
   assert.equal(calls.length, 4, "a missing released copy must not request the original source");
-  const youtubeOnly = render({ ...video, videoKey: null });
+  const youtubeOnly = render({ ...video, videoKey: null, playbackKey: null });
   assert.match(youtubeOnly, /<iframe/);
   assert.match(youtubeOnly, /tabindex="-1"/);
   assert.equal(calls.length, 4, "YouTube-only fallback does not ask for a signed URL");

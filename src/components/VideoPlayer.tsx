@@ -20,11 +20,7 @@ export function VideoPlayer({
 }) {
   return (
     <div className={styles.frame}>
-      {video.playbackKey === null ? (
-        <div className={styles.message}>Video is temporarily unavailable</div>
-      ) : (video.playbackKey ?? video.videoKey) ? (
-        <SavedMaster key={video.playbackKey ?? video.videoKey} assetKey={(video.playbackKey ?? video.videoKey)!} title={video.title} />
-      ) : video.youtubeVideoId ? (
+      {!video.videoKey && video.youtubeVideoId ? (
         <iframe
           src={youtubeEmbed(video.youtubeVideoId)}
           title={video.title}
@@ -33,6 +29,10 @@ export function VideoPlayer({
           allowFullScreen
           className={styles.embed}
         />
+      ) : video.playbackKey === null ? (
+        <div className={styles.message}>Video is temporarily unavailable</div>
+      ) : (video.playbackKey ?? video.videoKey) ? (
+        <SavedMaster key={video.playbackKey ?? video.videoKey} assetKey={(video.playbackKey ?? video.videoKey)!} title={video.title} />
       ) : (
         <div className={styles.message}>No playable source</div>
       )}
