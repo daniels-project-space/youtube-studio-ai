@@ -42,6 +42,7 @@ import type * as planWeekRenderReceipts from "../planWeekRenderReceipts.js";
 import type * as productionRouteQualificationState from "../productionRouteQualificationState.js";
 import type * as publishContinuationState from "../publishContinuationState.js";
 import type * as publishIntents from "../publishIntents.js";
+import type * as r2ImmutableWrites from "../r2ImmutableWrites.js";
 import type * as remoteChildCosts from "../remoteChildCosts.js";
 import type * as reviewedDataStoryRunAdmissions from "../reviewedDataStoryRunAdmissions.js";
 import type * as reviewedEvidencePacks from "../reviewedEvidencePacks.js";
@@ -117,6 +118,7 @@ declare const fullApi: ApiFromModules<{
   productionRouteQualificationState: typeof productionRouteQualificationState;
   publishContinuationState: typeof publishContinuationState;
   publishIntents: typeof publishIntents;
+  r2ImmutableWrites: typeof r2ImmutableWrites;
   remoteChildCosts: typeof remoteChildCosts;
   reviewedDataStoryRunAdmissions: typeof reviewedDataStoryRunAdmissions;
   reviewedEvidencePacks: typeof reviewedEvidencePacks;

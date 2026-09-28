@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { presignDownload } from "@/lib/storage";
 import { OWNER_ID } from "@/lib/config";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey } from "@/lib/r2AssetRetention";
 
 /**
  * GET /api/asset-url?key=<r2Key>
@@ -57,9 +58,15 @@ export async function GET(request: Request) {
   const sharedVoiceAudition = /^voicebank\/auditions\/[A-Za-z0-9_-]{8,64}\.mp3$/.test(key);
   // Reject traversal and every out-of-namespace key except the curated shared
   // audition path above.
-  if (key.includes("..") || (!key.startsWith(ownerPrefix) && !sharedVoiceAudition)) {
+  if (key.includes("..") || (!key.startsWith(ownerPrefix) && !sharedVoiceAudition &&
+      !isOwnedReleasedCopyKey(key, OWNER_ID))) {
     return NextResponse.json({ error: "forbidden key" }, { status: 403 });
   }
+  if (!classedReleaseCopyIsReadable(key, Date.now())) {
+    return NextResponse.json({ error: "retained asset expired" },
+      { status: 410, headers: { "Cache-Control": "private, no-store" } });
+  }
+  const cacheControl = classedReleaseCopyExpiresAt(key) === undefined ? "private, max-age=600" : "private, no-store";
 
   try {
     // R2's direct endpoint can return an opaque/ambiguous response for image
@@ -69,7 +76,7 @@ export async function GET(request: Request) {
     if (isInlineImage(key)) {
       return NextResponse.json(
         { url: `/api/asset-image?key=${encodeURIComponent(key)}` },
-        { headers: { "Cache-Control": "private, max-age=600" } },
+        { headers: { "Cache-Control": cacheControl } },
       );
     }
     // Keep private video playback same-origin as well. R2's signed response
@@ -81,7 +88,7 @@ export async function GET(request: Request) {
     if (isInlineVideo(key)) {
       return NextResponse.json(
         { url: `/api/asset-video?key=${encodeURIComponent(key)}` },
-        { headers: { "Cache-Control": "private, max-age=600" } },
+        { headers: { "Cache-Control": cacheControl } },
       );
     }
     const mimeType = responseContentType(key);
@@ -93,7 +100,7 @@ export async function GET(request: Request) {
       { url },
       // The signed URL itself is short-lived; allow the browser to reuse it
       // briefly but never a shared/CDN cache.
-      { headers: { "Cache-Control": "private, max-age=600" } },
+      { headers: { "Cache-Control": cacheControl } },
     );
   } catch (err) {
     return NextResponse.json(

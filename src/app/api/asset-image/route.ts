@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
 import { getObjectBytes, isR2CredentialFailure, ObjectSizeLimitError } from "@/lib/storage";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey } from "@/lib/r2AssetRetention";
 
 export const runtime = "nodejs";
 
@@ -64,7 +65,8 @@ function sniffContentType(bytes: Uint8Array): string | undefined {
 
 function isOwnedKey(key: string): boolean {
   const ownerPrefix = `owner/${OWNER_ID}/`;
-  return key.startsWith(ownerPrefix) && !key.includes("..") && !key.includes("\\") && key.length <= 1_024;
+  return (key.startsWith(ownerPrefix) || isOwnedReleasedCopyKey(key, OWNER_ID)) &&
+    !key.includes("..") && !key.includes("\\") && key.length <= 1_024;
 }
 
 /** Same-origin image response for private R2 artwork; videos keep direct signed playback. */
@@ -75,6 +77,11 @@ export async function GET(request: Request) {
   const mimeType = contentType(key);
   if (!mimeType || !isOwnedKey(key)) {
     return NextResponse.json({ error: "forbidden image key" }, { status: 403 });
+  }
+  if (!classedReleaseCopyIsReadable(key, Date.now())) {
+    return probe ? NextResponse.json({ available: false }, { headers: { "Cache-Control": "private, no-store" } })
+      : NextResponse.json({ error: "retained asset expired" },
+        { status: 410, headers: { "Cache-Control": "private, no-store" } });
   }
   try {
     // R2 deployments do not consistently expose a usable HEAD response. Read
@@ -92,7 +99,7 @@ export async function GET(request: Request) {
         // the signature so nosniff-capable browsers still render them.
         "Content-Type": sniffContentType(bytes) ?? mimeType,
         "Content-Length": String(bytes.byteLength),
-        "Cache-Control": "private, max-age=600",
+        "Cache-Control": classedReleaseCopyExpiresAt(key) === undefined ? "private, max-age=600" : "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "same-origin",
       },

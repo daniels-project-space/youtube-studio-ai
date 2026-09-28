@@ -27,6 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey, permanentReusableMediaDigest, releasedFinalVideoIdentity, releasedKeyframeIdentity, releasedOrdinaryAssetIdentity, ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -132,6 +133,12 @@ export async function presignUpload(
   key: string,
   opts: PresignOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use overwriteable presigned uploads");
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz finals cannot use overwriteable presigned uploads");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use overwriteable presigned uploads");
+  if (key.includes("/library/reusable-media/v1/")) throw new Error("permanent reusable media cannot use overwriteable presigned uploads");
+  if (key.startsWith("released-final/v2/") || key.startsWith("released-ordinary/v2/") ||
+      key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/") || key.includes("/released-ordinary/v1/")) throw new Error("released copies cannot use presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -212,6 +219,29 @@ export async function putObject(
   body: PutBody,
   opts: PutOptions = {},
 ): Promise<string> {
+  const reusableDigest = permanentReusableMediaDigest(key);
+  if (key.startsWith("released-final/v2/") || key.includes("/released-final/v1/")) throw new Error("released final video requires its create-only file writer");
+  if (key.startsWith("released-ordinary/v2/") && key.includes("/lofi-keyframe/") || key.includes("/released-keyframe/v1/")) throw new Error("released keyframe requires its create-only file writer");
+  if (key.startsWith("released-ordinary/v2/") || key.includes("/released-ordinary/v1/")) throw new Error("released ordinary asset requires its create-only file writer");
+  if (key.includes("/library/reusable-media/v1/") &&
+      (!reusableDigest || opts.ifNoneMatch !== "*" || opts.metadata?.contentSha256 !== reusableDigest ||
+        opts.metadata?.retentionWriter !== "studio-reusable-media/v1")) {
+    throw new Error("permanent reusable media requires a create-only digest-bound upload");
+  }
+  if (isImmutableAtlasCropKey(key) && (opts.ifNoneMatch !== "*" || !opts.metadata?.cropSha256 ||
+      !opts.metadata.atlasRuntime || !opts.metadata.atlasPlan)) {
+    throw new Error("immutable atlas crop requires create-only upload and provenance metadata");
+  }
+  const cropDigest = immutableAtlasCropDigest(key);
+  if (cropDigest && (opts.metadata?.cropSha256 !== cropDigest || opts.metadata?.retentionWriter !== "atlas-crop/v1")) {
+    throw new Error("managed atlas crop requires matching digest and writer metadata");
+  }
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz final requires its create-only file writer");
+  const introDigest = immutableIntroCardDigest(key);
+  if (introDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionIntroSha256 !== introDigest ||
+      opts.metadata?.retentionWriter !== "intro-card/v1")) {
+    throw new Error("immutable intro card requires create-only upload and matching digest metadata");
+  }
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -232,6 +262,7 @@ export async function headObjectMetadata(
   contentLength?: number;
   contentType?: string;
   etag?: string;
+  lastModified?: Date;
   metadata: Record<string, string>;
 } | null> {
   try {
@@ -243,6 +274,7 @@ export async function headObjectMetadata(
       ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
       ...(response.ContentType ? { contentType: response.ContentType } : {}),
       ...(response.ETag ? { etag: response.ETag } : {}),
+      ...(response.LastModified ? { lastModified: response.LastModified } : {}),
       metadata: response.Metadata ?? {},
     };
   } catch (error) {
@@ -262,6 +294,47 @@ export async function putObjectFromFile(
   filePath: string,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/") ||
+      key.includes("/released-ordinary/v1/")) throw new Error("legacy release copies are read-only");
+  if (key.includes("/library/reusable-media/v1/")) {
+    throw new Error("permanent reusable media requires the verified byte writer");
+  }
+  const releasedFinal = releasedFinalVideoIdentity(key);
+  if (key.startsWith("released-final/v2/") &&
+      (!releasedFinal || opts.ifNoneMatch !== "*" ||
+        opts.metadata?.retentionWriter !== "released-final/v2" ||
+        opts.metadata?.retentionFinalSha256 !== releasedFinal.sha256 ||
+        opts.metadata?.retentionReleaseAt !== String(releasedFinal.releaseAt) ||
+        opts.metadata?.retentionExpiresAt !== String(releasedFinal.releaseAt + FINAL_VIDEO_RETENTION_MS))) {
+    throw new Error("released final video requires a create-only digest and expiry-bound file upload");
+  }
+  const releasedKeyframe = releasedKeyframeIdentity(key);
+  if (key.startsWith("released-ordinary/v2/") && key.includes("/lofi-keyframe/") &&
+      (!releasedKeyframe || opts.ifNoneMatch !== "*" ||
+        opts.metadata?.retentionWriter !== "released-ordinary/v2" ||
+        opts.metadata?.retentionKeyframeSha256 !== releasedKeyframe.sha256 ||
+        opts.metadata?.retentionReleaseAt !== String(releasedKeyframe.releaseAt) ||
+        opts.metadata?.retentionExpiresAt !== String(releasedKeyframe.releaseAt + ASSET_RETENTION_MS))) {
+    throw new Error("released keyframe requires a create-only digest and expiry-bound file upload");
+  }
+  const ordinary = releasedOrdinaryAssetIdentity(key);
+  if (key.startsWith("released-ordinary/v2/") && !key.includes("/lofi-keyframe/") &&
+      (!ordinary || opts.ifNoneMatch !== "*" ||
+        opts.metadata?.retentionWriter !== "released-ordinary/v2" ||
+        opts.metadata?.retentionAssetSha256 !== ordinary.sha256 ||
+        opts.metadata?.retentionAssetId !== ordinary.assetId ||
+        opts.metadata?.retentionAssetClass !== ordinary.kind ||
+        opts.metadata?.retentionReleaseAt !== String(ordinary.releaseAt) ||
+        opts.metadata?.retentionExpiresAt !== String(ordinary.releaseAt + ASSET_RETENTION_MS))) {
+    throw new Error("released ordinary asset requires a create-only row, digest, and expiry-bound file upload");
+  }
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use file upload writer");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use file upload writer");
+  const finalDigest = immutableQuizFinalDigest(key);
+  if (finalDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionFinalSha256 !== finalDigest ||
+      opts.metadata?.retentionWriter !== "quiz-final/v1")) {
+    throw new Error("immutable quiz final requires create-only file upload and matching digest metadata");
+  }
   const { createReadStream } = await import("node:fs");
   const { stat } = await import("node:fs/promises");
   const file = await stat(filePath);
@@ -269,9 +342,6 @@ export async function putObjectFromFile(
   const singlePutLimit = 5 * 1024 ** 3;
   if (!file.isFile() || !Number.isSafeInteger(size) || size < 0 || size > 5 * 1024 ** 4 - singlePutLimit) {
     throw new Error("R2 upload requires a regular file within the object-size limit");
-  }
-  if (opts.ifNoneMatch && size > singlePutLimit) {
-    throw new Error("R2 multipart create-only writes are not qualified; refusing to weaken IfNoneMatch");
   }
   const Bucket = getBucket(opts.bucket);
   const client = getR2Client();
@@ -286,7 +356,7 @@ export async function putObjectFromFile(
     IfNoneMatch: opts.ifNoneMatch,
   };
   try {
-    if (size <= 64 * 1024 ** 2 || opts.ifNoneMatch) {
+    if (size <= 64 * 1024 ** 2) {
       await client.send(new PutObjectCommand(params));
     } else {
       const { Upload } = await import("@aws-sdk/lib-storage");
@@ -303,6 +373,9 @@ export async function putObjectFromFile(
           throw error;
         }
       }) as typeof client.send;
+      // lib-storage carries IfNoneMatch from params to CompleteMultipartUpload.
+      // R2 evaluates that condition when publishing the assembled object; a
+      // preceding HEAD cannot prevent a competing completion from winning.
       const upload = new Upload({
         client: uploadClient, params, queueSize: 2,
         partSize: Math.max(32 * 1024 ** 2, Math.ceil(size / 10_000)),
@@ -348,6 +421,29 @@ export async function listObjects(prefix: string, bucket?: string): Promise<stri
   return keys;
 }
 
+/** Paginated R2 inventory with server recorded age; missing timestamps fail closed. */
+export async function listObjectRecords(prefix: string, bucket?: string): Promise<Array<{
+  key: string; lastModified?: Date; etag?: string; size?: number;
+}>> {
+  const records: Array<{ key: string; lastModified?: Date; etag?: string; size?: number }> = [];
+  let ContinuationToken: string | undefined;
+  do {
+    const page = await getR2Client().send(new ListObjectsV2Command({
+      Bucket: getBucket(bucket), Prefix: prefix, ContinuationToken,
+    }));
+    for (const item of page.Contents ?? []) {
+      if (!item.Key) continue;
+      records.push({ key: item.Key, lastModified: item.LastModified,
+        etag: item.ETag, size: item.Size });
+    }
+    if (page.IsTruncated && !page.NextContinuationToken) {
+      throw new Error("R2 listing was truncated without a continuation token");
+    }
+    ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return records;
+}
+
 /** An incomplete delete may already have removed some objects; never call it preserved. */
 export class ObjectDeletionError extends Error {
   constructor(message: string, readonly confirmedDeleted: number, readonly requestedObjects: number) {
@@ -364,6 +460,9 @@ export async function deleteObjects(keys: string[], bucket?: string, options: {
   if (keys.length === 0) return 0;
   if (keys.some((key) => typeof key !== "string" || !key || Buffer.byteLength(key, "utf8") > 1024)) {
     throw new ObjectDeletionError("Object deletion requires valid exact keys", 0, keys.length);
+  }
+  if (keys.some((key) => key.includes("/library/reusable-media/v1/"))) {
+    throw new ObjectDeletionError("Permanent reusable media cannot enter ordinary R2 deletion", 0, keys.length);
   }
   const unique = [...new Set(keys)];
   const client = getR2Client();
@@ -702,10 +801,12 @@ export async function getObjectToFile(
   key: string,
   filePath: string,
   bucket?: string,
+  expectedEtag?: string,
 ): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: getBucket(bucket),
     Key: key,
+    ...(expectedEtag ? { IfMatch: expectedEtag } : {}),
   });
   const [{ createWriteStream }, { pipeline }, { Transform }, { mkdtemp, rename, rm }, { dirname, join }] = await Promise.all([
     import("node:fs"),

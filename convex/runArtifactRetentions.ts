@@ -1,5 +1,8 @@
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
+import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
+import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
+import { releaseClockUpdate, releaseReceiptReplay, releaseRetentionReceiptForWrite } from "../src/lib/r2AssetRetention";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { assertChannelWritable, isChannelLocked } from "./channelLock";
@@ -18,6 +21,7 @@ import {
 } from "../src/lib/runArtifactRetention";
 
 const MAX_CLEANUP_ATTEMPTS = 5;
+const MAX_PROTECTED_REVISIONS = 2_000;
 
 const releaseMode = v.union(
   v.literal("private_draft"),
@@ -203,6 +207,73 @@ export const recordReleaseObservations = mutation({
         observation: item.error ? null : item.observation,
       });
       if (decision.released) {
+        if (releaseClockUpdate(row.releaseAt, decision.releaseAt) === "regression") {
+          await ctx.db.patch(row._id, {
+            status: "blocked", releaseObservationAt: undefined,
+            leaseToken: undefined, leaseExpiresAt: undefined,
+            lastError: "YouTube release timestamp moved backward; review the earlier receipt and public-release history",
+            updatedAt: args.observedAt,
+          });
+          deferred++;
+          continue;
+        }
+        const [writes, library, reusable] = await Promise.all([
+          ctx.db.query("r2ImmutableWrites").withIndex("by_run", (q) => q.eq("runId", row.runId)).collect(),
+          ctx.db.query("studioAssetLibraryEntries")
+            .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).take(MAX_PROTECTED_REVISIONS + 1),
+          ctx.db.query("studioReusableMediaAssets")
+            .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).take(MAX_PROTECTED_REVISIONS + 1),
+        ]);
+        if (library.length > MAX_PROTECTED_REVISIONS || reusable.length > MAX_PROTECTED_REVISIONS) {
+          throw new Error("R2 release receipt protected revision inventory exceeds its verified bound");
+        }
+        const protectedKeys = new Set([
+          ...library.flatMap((entry) => {
+            const key = assertStudioAssetLibraryEntry(entry.entry).resource?.r2Key;
+            return key ? [key] : [];
+          }),
+          ...reusable.map((entry) => assertStudioReusableMediaEntry(entry.entry).resource.r2Key),
+        ]);
+        const staged: Array<Omit<Doc<"r2ReleaseRetentionReceipts">, "_id" | "_creationTime">> = [];
+        let conflict: string | null = null;
+        for (const write of writes) {
+          let classified: ReturnType<typeof releaseRetentionReceiptForWrite>;
+          try {
+            classified = releaseRetentionReceiptForWrite({
+              ownerId: args.ownerId, channelId: row.channelId, runId: row.runId,
+              keyPrefix: row.keyPrefix, releaseAt: decision.releaseAt,
+              observedAt: args.observedAt, protectedKeys, write,
+            });
+          } catch (error) {
+            conflict = error instanceof Error ? error.message : "managed writer proof changed";
+            break;
+          }
+          if (!classified) continue;
+          const receipt = { ownerId: args.ownerId, channelId: row.channelId,
+            runId: row.runId, ...classified };
+          const prior = await ctx.db.query("r2ReleaseRetentionReceipts")
+            .withIndex("by_run_key", (q) => q.eq("runId", row.runId).eq("r2Key", write.r2Key)).collect();
+          if (prior.some((entry) => entry.ownerId !== args.ownerId || entry.channelId !== row.channelId)) {
+            conflict = "R2 release receipt owner or channel changed";
+            break;
+          }
+          const replay = releaseReceiptReplay(prior, receipt);
+          if (replay === "conflict") {
+            conflict = "R2 release receipt identity or clock generation conflicts with its history";
+            break;
+          }
+          if (replay === "append") staged.push(receipt);
+        }
+        if (conflict) {
+          await ctx.db.patch(row._id, {
+            status: "blocked", releaseObservationAt: undefined,
+            leaseToken: undefined, leaseExpiresAt: undefined,
+            lastError: conflict.slice(0, 1_000), updatedAt: args.observedAt,
+          });
+          deferred++;
+          continue;
+        }
+        for (const receipt of staged) await ctx.db.insert("r2ReleaseRetentionReceipts", receipt);
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,
