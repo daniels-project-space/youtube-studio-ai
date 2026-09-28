@@ -9,23 +9,28 @@ copy, expire, or delete any object. It never accesses the separate
 Run from this repository with a working Convex login and Studio R2 credentials.
 The Studio app uses `astute-camel-689` for live data despite its historical
 `dev:` label; the unused default production deployment is not the live app.
-The Convex CLI currently writes a ZIP archive, so extract it before planning:
+Use a fresh private run directory for each capture. The planner extracts the
+Convex ZIP into its own fresh temporary directory; it does not reuse an old
+table directory:
 
 ```sh
-pnpm exec convex export --deployment astute-camel-689 --path /secure/studio-convex-snapshot.zip
-mkdir -p /secure/studio-convex-snapshot
-unzip -q /secure/studio-convex-snapshot.zip -d /secure/studio-convex-snapshot
-pnpm exec tsx scripts/capture-studio-r2-inventory.ts /secure/studio-r2-inventory.jsonl
+set -e
+umask 077
+install -d -m 700 /secure/studio-retention
+run_dir="$(mktemp -d /secure/studio-retention/run.XXXXXXXX)"
+test ! -e "$run_dir/snapshot.zip" && test ! -e "$run_dir/inventory.jsonl" && test ! -e "$run_dir/plan.json"
+pnpm exec convex export --deployment astute-camel-689 --path "$run_dir/snapshot.zip"
+pnpm exec tsx scripts/capture-studio-r2-inventory.ts "$run_dir/inventory.jsonl"
 pnpm exec tsx scripts/plan-legacy-r2-retention.ts \
-  /secure/studio-convex-snapshot /secure/studio-r2-inventory.jsonl \
-  /secure/studio-legacy-retention-plan.json
+  "$run_dir/snapshot.zip" "$run_dir/inventory.jsonl" "$run_dir/plan.json"
 ```
 
 Keep the snapshot and plan private: they contain production document data and
 object keys. The inventory capture uses the exact `youtube-studio-ai` bucket,
 requires complete key, ETag, size, and server timestamp data, and creates its
-output file exclusively. A failed or truncated listing does not produce a
-usable inventory. The planner requires a `documents.jsonl` file for every
+output file exclusively. The planner also creates its plan exclusively; reruns
+use a new `run_dir`. A failed or truncated listing does not produce a usable
+inventory. The planner requires a `documents.jsonl` file for every
 table in the current schema and rejects duplicate or incomplete R2 records.
 Run the export and inventory close together, then re-capture both before any
 future action that could remove bytes.

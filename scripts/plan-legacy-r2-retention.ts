@@ -3,26 +3,43 @@
  * Studio R2 inventory. This script has no R2 client, copy, or delete imports.
  *
  * Capture the exact live deployment with `convex export --deployment astute-camel-689
- * --path SNAPSHOT.zip`, extract the ZIP, and capture a Studio R2 ListObjectsV2
- * inventory (key, etag, size, lastModified, bucket). Run:
- *   tsx scripts/plan-legacy-r2-retention.ts SNAPSHOT_DIR INVENTORY.jsonl PLAN.json
+ * --path SNAPSHOT.zip` and a Studio R2 ListObjectsV2 inventory. The planner
+ * extracts the ZIP into a fresh temporary directory for each run:
+ *   tsx scripts/plan-legacy-r2-retention.ts SNAPSHOT.zip INVENTORY.jsonl PLAN.json
  */
-import { createReadStream, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createReadStream, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { planLegacyR2Retention, referencesInDocument, validateLegacyInventory } from "../src/lib/legacyR2RetentionCensus";
 import type { ConvexReference, LegacyR2Record } from "../src/lib/legacyR2RetentionCensus";
 
+async function main(): Promise<void> {
 const [snapshotArg, inventoryArg, outputArg] = process.argv.slice(2);
 if (!snapshotArg || !inventoryArg || !outputArg) {
-  throw new Error("Usage: tsx scripts/plan-legacy-r2-retention.ts SNAPSHOT_DIR INVENTORY.jsonl PLAN.json");
+  throw new Error("Usage: tsx scripts/plan-legacy-r2-retention.ts SNAPSHOT.zip INVENTORY.jsonl PLAN.json");
 }
-const snapshotDir = resolve(snapshotArg);
+const snapshotPath = resolve(snapshotArg);
 const inventoryPath = resolve(inventoryArg);
 const outputPath = resolve(outputArg);
-if (outputPath === inventoryPath || outputPath.startsWith(`${snapshotDir}/`)) {
+if (!snapshotPath.endsWith(".zip") || !statSync(snapshotPath).isFile()) {
+  throw new Error("Planner requires one complete Convex snapshot ZIP file");
+}
+if (outputPath === inventoryPath || outputPath === snapshotPath) {
   throw new Error("Plan output must be separate from source evidence");
 }
+// A fresh extraction directory prevents a later snapshot from inheriting stale
+// table files left by a previous export. ZIP paths are restricted to Convex's
+// flat table layout before extraction.
+const archiveEntries = execFileSync("unzip", ["-Z1", snapshotPath], { encoding: "utf8" }).trim().split("\n");
+if (!archiveEntries.includes("_tables/documents.jsonl") || archiveEntries.some((name) =>
+  !/^(?:README\.md|[A-Za-z_][A-Za-z0-9_]*\/(?:documents|generated_schema)\.jsonl|[A-Za-z_][A-Za-z0-9_]*\/)$/u.test(name))) {
+  throw new Error("Convex snapshot ZIP has an unexpected or incomplete layout");
+}
+const snapshotDir = mkdtempSync(join(tmpdir(), "studio-convex-snapshot-"));
+try {
+execFileSync("unzip", ["-q", snapshotPath, "-d", snapshotDir]);
 
 const expectedTables = [...readFileSync(new URL("../convex/schema.ts", import.meta.url), "utf8")
   .matchAll(/^  ([A-Za-z][A-Za-z0-9]*): defineTable\(/gmu)].map((match) => match[1]);
@@ -40,7 +57,6 @@ const inventory = readFileSync(inventoryPath, "utf8").split("\n").filter(Boolean
   });
 validateLegacyInventory(inventory);
 const keys = inventory.map((row) => row.key);
-async function main(): Promise<void> {
 const refs = new Map<string, ConvexReference[]>();
 const counts: Record<string, number> = {};
 for (const table of exportedTables) {
@@ -81,6 +97,9 @@ writeFileSync(outputPath, JSON.stringify({
   rows,
 }, null, 2), { flag: "wx", mode: 0o600 });
 console.log(JSON.stringify({ output: outputPath, deletionAuthorized: false, summary }, null, 2));
+} finally {
+  rmSync(snapshotDir, { recursive: true, force: true });
+}
 }
 main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
