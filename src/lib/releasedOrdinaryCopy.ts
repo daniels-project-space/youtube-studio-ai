@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { ASSET_RETENTION_MS, hasUnchangedOrdinarySourceHead, releasedOrdinaryAssetKey, type ReleasedOrdinaryClass } from "@/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, hasUnchangedOrdinarySourceHead, releasedKeyframeKey, releasedOrdinaryAssetKey, type ReleasedOrdinaryClass } from "@/lib/r2AssetRetention";
 import { assertStudioRetentionR2Destination } from "@/lib/youtubeR2Account";
 import { cleanupDir, makeRunTempDir } from "@/lib/files";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -64,13 +64,16 @@ export async function createVerifiedReleasedOrdinaryCopy(input: {
     throw new Error("ordinary release source lacks exact R2 head");
   const temporary = await makeRunTempDir(`released-ordinary-${String(candidate.runId)}`);
   try {
-    const local = join(temporary, "source.mp4");
+    const keyframe = candidate.assetClass === "lofi-keyframe";
+    const local = join(temporary, keyframe ? "source.png" : "source.mp4");
     await getObjectToFile(candidate.sourceKey, local, undefined, source.etag);
     const [sha256, file] = await Promise.all([hashFile(local), stat(local)]);
     if (file.size !== source.contentLength) throw new Error("ordinary release source bytes changed");
-    const assetClass = candidate.assetClass as ReleasedOrdinaryClass;
-    const copyKey = releasedOrdinaryAssetKey(candidate.keyPrefix, String(candidate.runId),
-      assetClass, String(assetId), candidate.releaseAt, sha256);
+    const assetClass = candidate.assetClass as ReleasedOrdinaryClass | "lofi-keyframe";
+    const copyKey = keyframe
+      ? releasedKeyframeKey(candidate.keyPrefix, String(candidate.runId), String(assetId), candidate.releaseAt, sha256)
+      : releasedOrdinaryAssetKey(candidate.keyPrefix, String(candidate.runId),
+          assetClass as ReleasedOrdinaryClass, String(assetId), candidate.releaseAt, sha256);
     const identity = { ownerId, assetId, releaseAt: candidate.releaseAt, assetClass,
       sourceKey: candidate.sourceKey, sourceEtag: source.etag,
       sourceLastModifiedAt: source.lastModified.getTime(), sourceSha256: sha256,
@@ -86,8 +89,9 @@ export async function createVerifiedReleasedOrdinaryCopy(input: {
         videoId: current.videoId, youtubeChannelId: current.youtubeChannelId,
         releaseAt: current.releaseAt });
       try {
-        await putObjectFromFile(copyKey, local, { contentType: "video/mp4", ifNoneMatch: "*",
-          metadata: { retentionWriter: "released-ordinary/v2", retentionAssetSha256: sha256,
+        await putObjectFromFile(copyKey, local, { contentType: keyframe ? "image/png" : "video/mp4", ifNoneMatch: "*",
+          metadata: { retentionWriter: "released-ordinary/v2", ...(keyframe
+              ? { retentionKeyframeSha256: sha256 } : { retentionAssetSha256: sha256 }),
             retentionAssetId: String(assetId), retentionAssetClass: assetClass,
             retentionSourceKey: candidate.sourceKey, retentionSourceEtag: source.etag,
             retentionReleaseAt: String(candidate.releaseAt),
@@ -102,7 +106,8 @@ export async function createVerifiedReleasedOrdinaryCopy(input: {
     if (!copy?.etag || !copy.lastModified || copy.contentLength !== file.size ||
         integrity.sha256 !== sha256 || integrity.byteLength !== file.size ||
         metadata.retentionwriter !== "released-ordinary/v2" ||
-        metadata.retentionassetsha256 !== sha256 || metadata.retentionassetid !== String(assetId) ||
+        metadata[keyframe ? "retentionkeyframesha256" : "retentionassetsha256"] !== sha256 ||
+        metadata.retentionassetid !== String(assetId) ||
         metadata.retentionassetclass !== assetClass || metadata.retentionsourcekey !== candidate.sourceKey ||
         metadata.retentionsourceetag !== source.etag ||
         metadata.retentionreleaseat !== String(candidate.releaseAt) ||

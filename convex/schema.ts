@@ -1514,7 +1514,7 @@ export default defineSchema({
   releasedOrdinaryAssets: defineTable({
     ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
     assetId: v.id("assets"), releaseAt: v.number(),
-    assetClass: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+    assetClass: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit"), v.literal("lofi-keyframe")),
     sourceKey: v.string(), sourceEtag: v.string(), sourceLastModifiedAt: v.number(),
     sourceSha256: v.string(), sourceByteLength: v.number(), copyKey: v.string(),
     status: v.union(v.literal("active"), v.literal("finished")),

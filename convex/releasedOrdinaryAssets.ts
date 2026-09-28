@@ -1,13 +1,20 @@
 import { v } from "convex/values";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
-import { ASSET_RETENTION_MS, isLoFiOrdinarySource, releasedOrdinaryAssetKey } from "../src/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, isLoFiKeyframeSource, isLoFiOrdinarySource, releasedKeyframeKey, releasedOrdinaryAssetKey } from "../src/lib/r2AssetRetention";
 import { isChannelLocked } from "./channelLock";
 import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
 import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
 
 const MAX_PROTECTED_REVISIONS = 2_000;
 
-const assetClass = v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit"));
+const assetClass = v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit"), v.literal("lofi-keyframe"));
+const sourceAllowed = (kind: "lofi-clip" | "lofi-loop-unit" | "lofi-keyframe",
+  prefix: string, runId: string, key: string) => kind === "lofi-keyframe"
+    ? isLoFiKeyframeSource(prefix, runId, key) : isLoFiOrdinarySource(kind, prefix, runId, key);
+const copyKeyFor = (kind: "lofi-clip" | "lofi-loop-unit" | "lofi-keyframe",
+  prefix: string, runId: string, assetId: string, releaseAt: number, sha: string) => kind === "lofi-keyframe"
+    ? releasedKeyframeKey(prefix, runId, assetId, releaseAt, sha)
+    : releasedOrdinaryAssetKey(prefix, runId, kind, assetId, releaseAt, sha);
 const identity = {
   ownerId: v.string(), assetId: v.id("assets"), releaseAt: v.number(),
   assetClass, sourceKey: v.string(), sourceEtag: v.string(), sourceLastModifiedAt: v.number(),
@@ -21,7 +28,7 @@ export const candidate = query({
     await requireStudioServiceIdentity(ctx, args.ownerId, "ordinary release candidate");
     const asset = await ctx.db.get(args.assetId);
     if (!asset || asset.ownerId !== args.ownerId || !asset.runId ||
-        !["clip", "loop_unit"].includes(asset.kind)) return null;
+        !["clip", "loop_unit", "keyframe"].includes(asset.kind)) return null;
     const [channel, run, retentions] = await Promise.all([
       ctx.db.get(asset.channelId),
       ctx.db.get(asset.runId),
@@ -34,13 +41,13 @@ export const candidate = query({
       r.finalCopyReleaseAt <= args.now && r.finalCopyReleaseAt + ASSET_RETENTION_MS > args.now);
     const finalCopy = row ? await ctx.db.query("releasedFinalMasters")
       .withIndex("by_run_release", q => q.eq("runId", asset.runId!).eq("releaseAt", row.finalCopyReleaseAt!)).unique() : null;
-    const kind = asset.kind === "clip" ? "lofi-clip" : "lofi-loop-unit";
+    const kind = asset.kind === "clip" ? "lofi-clip" : asset.kind === "keyframe" ? "lofi-keyframe" : "lofi-loop-unit";
     if (!row || finalCopy?.status !== "finished" || !channel || channel.ownerId !== args.ownerId || isChannelLocked(channel) ||
         !run || run.ownerId !== args.ownerId || run.channelId !== asset.channelId ||
         run.releaseEvidenceStatus !== "release_evidence_recorded" ||
         run.releaseEvidenceCertificateKey !== row.certificateKey ||
         run.youtubeVideoId !== row.finalCopyVideoId ||
-        !isLoFiOrdinarySource(kind, row.keyPrefix, String(asset.runId), asset.r2Key)) return null;
+        !sourceAllowed(kind, row.keyPrefix, String(asset.runId), asset.r2Key)) return null;
     return { assetId: asset._id, sourceKey: asset.r2Key, assetClass: kind,
       releaseAt: row.finalCopyReleaseAt!, keyPrefix: row.keyPrefix, runId: asset.runId,
       channelId: asset.channelId, videoId: row.finalCopyVideoId!,
@@ -56,7 +63,7 @@ export const begin = mutation({
     const now = Date.now();
     const asset = await ctx.db.get(args.assetId);
     if (!asset || asset.ownerId !== args.ownerId || !asset.runId || asset.r2Key !== args.sourceKey ||
-        (args.assetClass === "lofi-clip" ? asset.kind !== "clip" : asset.kind !== "loop_unit") ||
+        asset.kind !== (args.assetClass === "lofi-clip" ? "clip" : args.assetClass === "lofi-keyframe" ? "keyframe" : "loop_unit") ||
         !/^[a-f0-9]{64}$/u.test(args.sourceSha256) ||
         !/^"?[a-f0-9]{32}(?:-[0-9]+)?"?$/iu.test(args.sourceEtag) ||
         !Number.isSafeInteger(args.sourceByteLength) || args.sourceByteLength < 1 ||
@@ -92,8 +99,8 @@ export const begin = mutation({
         run.releaseEvidenceCertificateKey !== row?.certificateKey ||
         run.youtubeVideoId !== row?.finalCopyVideoId || !row || finalCopy?.status !== "finished" ||
         protectedKeys.includes(args.sourceKey) ||
-        !isLoFiOrdinarySource(args.assetClass, row.keyPrefix, String(asset.runId), args.sourceKey) ||
-        args.copyKey !== releasedOrdinaryAssetKey(row.keyPrefix, String(asset.runId), args.assetClass,
+        !sourceAllowed(args.assetClass, row.keyPrefix, String(asset.runId), args.sourceKey) ||
+        args.copyKey !== copyKeyFor(args.assetClass, row.keyPrefix, String(asset.runId),
           String(args.assetId), args.releaseAt, args.sourceSha256)) {
       throw new Error("ordinary release source is protected or copy identity mismatches");
     }

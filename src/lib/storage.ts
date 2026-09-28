@@ -313,6 +313,7 @@ export async function putObjectFromFile(
       (!releasedKeyframe || opts.ifNoneMatch !== "*" ||
         opts.metadata?.retentionWriter !== "released-ordinary/v2" ||
         opts.metadata?.retentionKeyframeSha256 !== releasedKeyframe.sha256 ||
+        opts.metadata?.retentionAssetId !== releasedKeyframe.assetId ||
         opts.metadata?.retentionReleaseAt !== String(releasedKeyframe.releaseAt) ||
         opts.metadata?.retentionExpiresAt !== String(releasedKeyframe.releaseAt + ASSET_RETENTION_MS))) {
     throw new Error("released keyframe requires a create-only digest and expiry-bound file upload");

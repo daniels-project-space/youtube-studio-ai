@@ -128,6 +128,26 @@ test("run media reader projects finished Lo-Fi clip copy without rewriting sourc
   assert.equal(f.rows.assets.find((asset) => asset.kind === "clip")?.r2Key, sourceKey);
 });
 
+test("both run readers project only a finished, live keyframe copy", async () => {
+  const f = fixture(true);
+  const sourceKey = `owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-keyframe/images/keyframe-1.png`;
+  const copyKey = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-keyframe/still-1/${Date.now() - 1_000}-${"b".repeat(64)}.png`;
+  f.rows.assets.push({ _id: "still-1", _creationTime: 5, ownerId, channelId, runId: sourceRunId,
+    kind: "keyframe", r2Key: sourceKey });
+  const receipt: Row = { _id: "still-copy", _creationTime: 6, ownerId, channelId, runId: sourceRunId,
+    assetId: "still-1", status: "active", assetClass: "lofi-keyframe", sourceKey, copyKey,
+    releaseAt: Date.now() - 1_000 };
+  f.rows.releasedOrdinaryAssets = [receipt];
+  assert.equal((await f.oldAssets()).find(a => a.kind === "keyframe")?.r2Key, sourceKey);
+  receipt.status = "finished";
+  assert.equal((await f.oldAssets()).find(a => a.kind === "keyframe")?.r2Key, copyKey);
+  assert.equal((await f.media()).assets.find(a => a.kind === "keyframe")?.r2Key, copyKey);
+  receipt.releaseAt = Date.now() - 31 * 24 * 60 * 60 * 1_000;
+  assert.equal((await f.oldAssets()).find(a => a.kind === "keyframe")?.r2Key, sourceKey);
+  assert.equal((await f.media()).assets.find(a => a.kind === "keyframe")?.r2Key, sourceKey);
+  assert.equal(f.rows.assets.find(a => a.kind === "keyframe")?.r2Key, sourceKey);
+});
+
 test("viewer-facing detail and Library handlers choose the same current candidate without rewriting historical assets", async () => {
   const f = fixture();
   const original = structuredClone(f.rows.assets);
