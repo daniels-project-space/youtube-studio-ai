@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS,
-  releaseRetentionReceiptForWrite } from "../r2AssetRetention";
+  releaseClockUpdate, releaseReceiptReplay, releaseRetentionReceiptForWrite } from "../r2AssetRetention";
+import { immutableR2ClaimId, writeReservedImmutableR2Object } from "../reservedImmutableR2Write";
+import { assertStudioRetentionR2Destination } from "../youtubeR2Account";
 
 const prefix = "owner/owner_daniel/channel/quiz/";
 const runId = "run_123";
@@ -39,4 +42,46 @@ assert.throws(() => releaseRetentionReceiptForWrite({ ...base,
   write: { ...write(quiz), status: "active" } }), /exact owned immutable write/);
 assert.throws(() => releaseRetentionReceiptForWrite({ ...base,
   write: { ...write(quiz), runId: "another_run" } }), /exact owned immutable write/);
-console.log("R2 release receipt tests passed");
+
+const first = releaseRetentionReceiptForWrite({ ...base, write: write(quiz) });
+assert.ok(first);
+assert.equal(releaseClockUpdate(undefined, releaseAt), "advance");
+assert.equal(releaseClockUpdate(releaseAt, releaseAt), "same");
+assert.equal(releaseClockUpdate(releaseAt, releaseAt + 1_000), "advance");
+assert.equal(releaseClockUpdate(releaseAt, releaseAt - 1_000), "regression");
+assert.equal(releaseReceiptReplay([first], first), "existing");
+const later = { ...first, releaseAt: releaseAt + 1_000,
+  retainUntil: first.retainUntil + 1_000, observedAt: observedAt + 1_000 };
+assert.equal(releaseReceiptReplay([first], later), "append");
+assert.equal(releaseReceiptReplay([later], first), "conflict");
+assert.equal(releaseReceiptReplay([first], { ...first, etag: `"${"c".repeat(32)}"` }), "conflict");
+
+const claim = immutableR2ClaimId({ ...base, r2Key: intro });
+assert.match(claim, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u);
+assert.equal(claim, immutableR2ClaimId({ ...base, r2Key: intro }));
+assert.notEqual(claim, immutableR2ClaimId({ ...base, r2Key: quiz }));
+
+const accountId = "a".repeat(32);
+const accountHash = createHash("sha256").update(accountId).digest("hex");
+const destination = { bucket: "youtube-studio-ai", accountId, expectedAccountId: accountId,
+  endpoint: `https://${accountId}.r2.cloudflarestorage.com` };
+assert.doesNotThrow(() => assertStudioRetentionR2Destination(destination, accountHash));
+assert.throws(() => assertStudioRetentionR2Destination({ ...destination, bucket: "another-bucket" }, accountHash), /exact YouTube Studio bucket/);
+assert.throws(() => assertStudioRetentionR2Destination({ ...destination, endpoint: "https://wrong.example" }, accountHash), /verified YouTube Studio Cloudflare account/);
+
+const savedBucket = process.env.R2_BUCKET;
+process.env.R2_BUCKET = "another-bucket";
+assertDestinationGuard().then(() => console.log("R2 release receipt tests passed"));
+
+async function assertDestinationGuard(): Promise<void> {
+  try {
+    await assert.rejects(() => writeReservedImmutableR2Object({
+  ownerId: base.ownerId, channelId: base.channelId, runId, r2Key: intro,
+  write: async () => { throw new Error("R2 side effect reached"); },
+  verifyStoredBytes: async () => { throw new Error("R2 readback reached"); },
+    }), /exact YouTube Studio bucket/);
+  } finally {
+    if (savedBucket === undefined) delete process.env.R2_BUCKET;
+    else process.env.R2_BUCKET = savedBucket;
+  }
+}

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertYouTubeStudioR2Bucket } from "@/lib/r2AssetRetention";
 
 // Derived from a read-only Cloudflare Get Bucket response for youtube-studio-ai
 // on 2026-09-27, authenticated with the app vault's independent API token.
@@ -15,4 +16,12 @@ export function assertYouTubeStudioR2Account(input: {
       (endpoint && endpoint !== `https://${accountId}.r2.cloudflarestorage.com`)) {
     throw new Error("R2 retention requires the verified YouTube Studio Cloudflare account and endpoint");
   }
+}
+
+/** Run before reserving or touching bytes for a managed retention writer. */
+export function assertStudioRetentionR2Destination(input: {
+  bucket?: string; accountId?: string; expectedAccountId?: string; endpoint?: string;
+}, expectedHash = VERIFIED_YOUTUBE_R2_ACCOUNT_SHA256): void {
+  assertYouTubeStudioR2Bucket(input.bucket);
+  assertYouTubeStudioR2Account(input, expectedHash);
 }

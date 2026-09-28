@@ -264,6 +264,33 @@ export function releaseRetentionReceiptForWrite(input: {
     releaseAt: input.releaseAt, retainUntil, observedAt: input.observedAt };
 }
 
+export function releaseClockUpdate(currentReleaseAt: number | undefined, observedReleaseAt: number):
+  "same" | "advance" | "regression" {
+  if (currentReleaseAt === undefined) return "advance";
+  if (observedReleaseAt === currentReleaseAt) return "same";
+  return observedReleaseAt > currentReleaseAt ? "advance" : "regression";
+}
+
+type ReleaseReceiptIdentity = NonNullable<ReturnType<typeof releaseRetentionReceiptForWrite>>;
+
+/** Append a later public-release generation; never shorten an existing clock. */
+export function releaseReceiptReplay(
+  prior: readonly ReleaseReceiptIdentity[], proposed: ReleaseReceiptIdentity,
+): "existing" | "append" | "conflict" {
+  let sameGeneration = 0;
+  for (const row of prior) {
+    if (row.r2Key !== proposed.r2Key || row.kind !== proposed.kind ||
+        row.writer !== proposed.writer || row.etag !== proposed.etag ||
+        row.lastModifiedAt !== proposed.lastModifiedAt || row.byteLength !== proposed.byteLength ||
+        row.releaseAt > proposed.releaseAt) return "conflict";
+    if (row.releaseAt === proposed.releaseAt) {
+      if (row.retainUntil !== proposed.retainUntil) return "conflict";
+      sameGeneration++;
+    }
+  }
+  return sameGeneration > 1 ? "conflict" : sameGeneration === 1 ? "existing" : "append";
+}
+
 export function assertYouTubeStudioR2Bucket(bucket: string | undefined): typeof YOUTUBE_STUDIO_R2_BUCKET {
   if (bucket !== YOUTUBE_STUDIO_R2_BUCKET) {
     throw new Error("R2 retention requires the exact YouTube Studio bucket");
