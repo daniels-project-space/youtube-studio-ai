@@ -146,8 +146,10 @@ export function hasExactScheduledClassedProof(
 
 /** The only eligible ordinary copy source is a marked Lo-Fi still in its own run. */
 export function isLoFiKeyframeSource(keyPrefix: string, runId: string, sourceKey: string): boolean {
-  return sourceKey.startsWith(`${keyPrefix}runs/${runId}/lofi-keyframe/images/`) &&
-    /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/lofi-keyframe\/images\/keyframe-[1-9][0-9]*\.png$/u.test(sourceKey);
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[A-Za-z0-9_-]+$/u.test(runId)) return false;
+  const prefix = `imagecraft/${keyPrefix}runs/${runId}/lofi-keyframe/images/`;
+  return sourceKey.startsWith(prefix) &&
+    /^image-[a-f0-9]{32}\/stills\/keyframe-[1-9][0-9]*-c01\.png$/u.test(sourceKey.slice(prefix.length));
 }
 
 export function releasedKeyframeKey(keyPrefix: string, runId: string, assetId: string, releaseAt: number, sha256: string): string {
