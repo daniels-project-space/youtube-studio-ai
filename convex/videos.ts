@@ -14,6 +14,7 @@ import {
 import { selectLatestCurrentGoldenThumbnail } from "../src/lib/thumbnailRefreshInventory";
 import { summarizeLibraryStates } from "../src/lib/librarySummary";
 import { createBulkUndoReceipt } from "../src/lib/automaticWorkflow";
+import { projectReleasedOrdinaryAssets } from "../src/lib/ordinaryAssetProjection";
 import {
   LIBRARY_PAGE_LIMIT,
   validatedReadLimit,
@@ -181,13 +182,15 @@ export async function currentLibraryThumbnail(
  * a separate projection using the same master/provenance/Lo-Fi rules.
  */
 async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
-  const [assets, channel, sealedMasterKey] = await Promise.all([
+  const [sourceAssets, ordinaryCopies, channel, sealedMasterKey] = await Promise.all([
     ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+    ctx.db.query("releasedOrdinaryAssets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
     ctx.db.get(run.channelId),
     normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
       ? recordedMasterKey(ctx, run._id)
       : Promise.resolve(undefined),
   ]);
+  const assets = projectReleasedOrdinaryAssets(sourceAssets, ordinaryCopies, Date.now());
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video");
   const videoAsset = sealedMasterKey
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset

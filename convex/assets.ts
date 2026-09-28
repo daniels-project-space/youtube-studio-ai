@@ -1,6 +1,7 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 import { isManagedRetentionKey } from "../src/lib/r2AssetRetention";
+import { projectReleasedOrdinaryAssets } from "../src/lib/ordinaryAssetProjection";
 
 /**
  * Media artifact registry. Bytes live in R2; rows here index them by r2Key and
@@ -50,10 +51,16 @@ export const recordAsset = mutation({
 export const listForRun = query({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const assets = await ctx.db
       .query("assets")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .collect();
+    // These two actual Lo-Fi reader families switch only after a verified
+    // source→copy receipt. The stored source rows and every other reference
+    // remain intact. Expired copies are never projected back to readers.
+    const copies = await ctx.db.query("releasedOrdinaryAssets")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
+    return projectReleasedOrdinaryAssets(assets, copies, Date.now());
   },
 });
 

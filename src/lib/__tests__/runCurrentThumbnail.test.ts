@@ -112,6 +112,21 @@ function thumbnailFields(detail: RunCurrentThumbnail) {
   };
 }
 
+test("run media reader projects finished Lo-Fi clip copy without rewriting source or thumbnail", async () => {
+  const f = fixture(true);
+  const sourceKey = `owner/${ownerId}/channel/test/runs/${sourceRunId}/loopraw.mp4`;
+  const copyKey = `released-ordinary/v2/owner/${ownerId}/channel/test/runs/${sourceRunId}/lofi-clip/clip-1/1700000000000-${"a".repeat(64)}.mp4`;
+  f.rows.assets.push({ _id: "clip-1", _creationTime: 5, ownerId, channelId, runId: sourceRunId,
+    kind: "clip", r2Key: sourceKey });
+  f.rows.releasedOrdinaryAssets = [{ _id: "copy-1", _creationTime: 6,
+    ownerId, channelId, runId: sourceRunId, assetId: "clip-1", status: "finished",
+    assetClass: "lofi-clip", sourceKey, copyKey, releaseAt: Date.now() - 1_000 }];
+  const media = await f.media();
+  assert.equal(media.assets.find((asset) => asset.kind === "clip")?.r2Key, copyKey);
+  assert.equal(media.assets.find((asset) => asset.kind === "thumbnail")?.r2Key, oldKey);
+  assert.equal(f.rows.assets.find((asset) => asset.kind === "clip")?.r2Key, sourceKey);
+});
+
 test("viewer-facing detail and Library handlers choose the same current candidate without rewriting historical assets", async () => {
   const f = fixture();
   const original = structuredClone(f.rows.assets);
@@ -326,7 +341,7 @@ test("combined media retains the sealed master contract, including absent asset 
     const media = await f.media();
     assert.equal(media.currentThumbnail.videoKey, sealedKey, "certificate master wins even when registry video is missing");
     assert.deepEqual(media.assets, f.originalAssets());
-    assert.equal(f.reads.length, 5, "sealed media adds exactly the existing QA/artifact lineage reads");
+    assert.equal(f.reads.length, 6, "sealed media includes ordinary-copy projection and QA/artifact lineage reads");
     assert.deepEqual(media.currentThumbnail, thumbnailFields(await f.detail()));
     assert.equal((await f.library()).find((row) => row._id === sourceRunId)?.videoKey, sealedKey);
   }
@@ -364,13 +379,13 @@ test("combined viewer response removes duplicate asset reads and all script/SEO-
   f.rows.runStages.push({ _id: "script", _creationTime: 1, runId: sourceRunId, block: "motion_comic", outputs: { narrationText: narration } });
   const old = { assets: await f.oldAssets(), detail: await f.detail() };
   const oldReads = f.reads.length;
-  assert.equal(oldReads, 9, "detail reads assets once, probes metadata/story spine and three script routes");
+  assert.equal(oldReads, 11, "legacy assets and detail each read ordinary-copy receipts alongside media");
   assert.equal((old.detail as unknown as { script: string }).script, narration, "the on-demand Lightbox retains its full response");
   assert.equal((old.detail as unknown as { shotListCount: number }).shotListCount, 0);
   assert.equal((old.detail as unknown as { subtitleSaved: boolean }).subtitleSaved, false);
   f.reads.length = 0;
   const combined = await f.media();
-  assert.equal(f.reads.length, 3);
+  assert.equal(f.reads.length, 4);
   assert.equal(f.reads.filter((read) => read.table === "assets" && read.filters.some(([key, value]) => key === "runId" && value === sourceRunId)).length, 1);
   assert.ok(f.reads.every((read) => read.table !== "runStages"), "thumbnail presentation cannot fetch metadata or narration stages");
   assert.deepEqual(Object.keys(combined).sort(), ["assets", "currentThumbnail"]);

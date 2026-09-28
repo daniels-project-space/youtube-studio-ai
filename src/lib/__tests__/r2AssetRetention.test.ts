@@ -8,6 +8,7 @@ import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   permanentReusableMediaKey, releasedFinalVideoIdentity, releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS,
   ASSET_RETENTION_MS, isLoFiKeyframeSource, releasedKeyframeIdentity, releasedKeyframeKey,
   isLoFiOrdinarySource, releasedOrdinaryAssetIdentity, releasedOrdinaryAssetKey,
+  hasUnchangedOrdinarySourceHead,
   classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable,
   hasExactScheduledClassedProof, isOwnedReleasedCopyKey,
   selectExpiredRunObjects,
@@ -83,6 +84,16 @@ test("Lo-Fi clip and loop unit copies have exact run, row, class and expiry guar
       retentionAssetClass: "lofi-clip", retentionAssetId: "asset_1",
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
   }), /expiry-bound/);
+});
+
+test("mutable ordinary source must keep ETag, modification time and length through ledger completion", () => {
+  const expected = { etag: '"a'.concat('b'.repeat(31), '"'), lastModifiedAt: now, byteLength: 42 };
+  const head = { etag: expected.etag, lastModified: new Date(now), contentLength: 42 };
+  assert.equal(hasUnchangedOrdinarySourceHead(expected, head), true);
+  assert.equal(hasUnchangedOrdinarySourceHead(expected, { ...head, etag: '"c'.concat('b'.repeat(31), '"') }), false);
+  assert.equal(hasUnchangedOrdinarySourceHead(expected, { ...head, lastModified: new Date(now + 1) }), false);
+  assert.equal(hasUnchangedOrdinarySourceHead(expected, { ...head, contentLength: 43 }), false);
+  assert.equal(hasUnchangedOrdinarySourceHead(expected, null), false);
 });
 test("scheduled classed proof binds exact source, destination identity, digest and deadline", () => {
   const channel = "owner/daniel/channel/show/";
