@@ -68,5 +68,7 @@ assert.match(
 );
 assert.match(sweeper, /if \(!studioRetentionMaintenanceEnabled\(\)\) \{[\s\S]*?observeAndCopyReleasedFinalMasters[\s\S]*?\n  \}/,
   "the legacy cleanup sweep delegates only its observation/copy phase to dedicated maintenance");
+assert.match(sweeper, /runRetentionMaintenanceHandoff\([\s\S]*?observe: \(\) => observeAndCopyReleasedFinalMasters[\s\S]*?cleanup: \(\) => sweepDueRunArtifactRetentions/,
+  "the dedicated controller hands fresh observation state to globally gated cleanup in order");
 
 console.log("run artifact retention wiring tests passed");

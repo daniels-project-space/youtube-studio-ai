@@ -6,6 +6,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import {
   runStudioRetentionMaintenance,
+  runRetentionMaintenanceHandoff,
   runScheduledArtifactRetentionSweep,
   reconcileRunArtifactReleaseChecks,
   sweepDueRunArtifactRetentions,
@@ -121,6 +122,41 @@ test("legacy sweeper keeps global cleanup work while delegating observation/copy
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
+  }
+});
+
+test("maintenance handoff claims and completes cleanup only after fresh observation commits", async () => {
+  const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
+  const previousMaintenance = process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+  process.env.STUDIO_SCHEDULES_ENABLED = "true";
+  process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = "true";
+  const calls: string[] = [];
+  try {
+    const result = await runRetentionMaintenanceHandoff({
+      observe: async () => {
+        calls.push("runArtifactRetentions:recordReleaseObservations");
+        return { confirmed: 1, deferred: 0 };
+      },
+      cleanup: async () => {
+        calls.push("runArtifactRetentions:claimDue");
+        calls.push("runArtifactRetentions:complete");
+        return { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 };
+      },
+    });
+    assert.deepEqual(calls, [
+      "runArtifactRetentions:recordReleaseObservations",
+      "runArtifactRetentions:claimDue",
+      "runArtifactRetentions:complete",
+    ]);
+    assert.deepEqual(result, {
+      observation: { confirmed: 1, deferred: 0 },
+      cleanup: { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 },
+    });
+  } finally {
+    if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
+    else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;
+    if (previousMaintenance === undefined) delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+    else process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = previousMaintenance;
   }
 });
 

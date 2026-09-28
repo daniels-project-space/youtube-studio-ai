@@ -2,6 +2,7 @@ import {
   studioRetentionMaintenanceCron,
   studioRetentionMaintenanceEnabled,
   studioScheduleCron,
+  studioSchedulesEnabled,
 } from "@/lib/studioScheduleControl";
 import { randomBytes } from "node:crypto";
 import { schedules } from "@trigger.dev/sdk";
@@ -239,12 +240,26 @@ export async function runStudioRetentionMaintenance() {
     services: ["cloudflare", "youtube"],
     required: ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "STUDIO_CONVEX_JWT_PRIVATE_KEY"],
   });
-  return observeAndCopyReleasedFinalMasters({
-    ownerId: process.env.STUDIO_OWNER_ID ?? "owner_daniel",
-    convex: convexClient(),
-    now: Date.now(),
-    log,
+  const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
+  const convex = convexClient();
+  const handoff = await runRetentionMaintenanceHandoff({
+    observe: () => observeAndCopyReleasedFinalMasters({ ownerId, convex, now: Date.now(), log }),
+    cleanup: () => sweepDueRunArtifactRetentions({ ownerId }),
   });
+  return handoff.cleanup === undefined
+    ? handoff.observation
+    : { ...handoff.observation, cleanup: handoff.cleanup };
+}
+
+/** Ordered handoff closes the same-minute cron race: cleanup starts only after
+ * release observations and any certified-copy work have completed. */
+export async function runRetentionMaintenanceHandoff<TObservation, TCleanup>(args: {
+  observe: () => Promise<TObservation>;
+  cleanup: () => Promise<TCleanup>;
+}): Promise<{ observation: TObservation; cleanup?: TCleanup }> {
+  const observation = await args.observe();
+  if (!studioSchedulesEnabled()) return { observation };
+  return { observation, cleanup: await args.cleanup() };
 }
 
 export async function sweepDueRunArtifactRetentions(input?: {
