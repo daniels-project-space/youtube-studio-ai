@@ -32,5 +32,7 @@ assert.doesNotMatch(images, /tasks\.trigger\("minimax-h3-weekly-batch"/);
 assert.match(images, /planWeekPreparedH3FirstFrameKey/);
 assert.match(images, /planWeekPreparedFootageClipKey/);
 assert.match(images, /PLAN_WEEK_PREPARED_H3_MAX_COST_USD/);
+assert.match(images, /\?\? "1\.25"/);
+assert.match(images, /cost cap must cover one permitted GPU hour/);
 assert.match(images, /retry: \{ maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 \}/);
 console.log("automatic weekly prepared-media dispatch wiring passed");

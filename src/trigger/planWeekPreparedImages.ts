@@ -318,7 +318,12 @@ export async function dispatchPreparedFootage(
   if (!hasGeneratedFootageStage(manifest)) return undefined;
   const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
   if (!/^[a-f0-9]{64}$/.test(projectCapability)) throw new Error("weekly H3 Engine project capability is not configured");
-  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "0.4");
+  // Engine's Final H3 admission protects a full billable GPU-hour at the
+  // agreed $1.20/hour cap. Keep a small rounding margin by default.
+  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "1.25");
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd < 1.2 || maxCostUsd > 10) {
+    throw new Error("weekly H3 Engine cost cap must cover one permitted GPU hour");
+  }
   const batch = buildPreparedH3Batch({
     payload,
     prepared,
