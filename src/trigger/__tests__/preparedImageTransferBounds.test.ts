@@ -40,6 +40,7 @@ let sidecar = prepared;
 let started = 0, active = 0, peak = 0, providerCalls = 0;
 let failure = false;
 const writes: string[] = [];
+const stagedFootageSidecars = new Map<string, Uint8Array>();
 let inputUploads = 0, stagedJobs = 0, qualificationCalls = 0;
 let stagedState = "awaiting-input-qualification";
 let release!: () => void;
@@ -53,6 +54,7 @@ loader._load = function (name, ...args) {
         assert.deepEqual(options, PREPARED_METADATA_READ);
         return new TextEncoder().encode(JSON.stringify(sidecar));
       }
+      if (stagedFootageSidecars.has(key)) return stagedFootageSidecars.get(key)!;
       assert(items.some(item => item.stillKey === key));
       assert.deepEqual(options, { maxBytes: 512, timeoutMs: 300_000 });
       started++; active++; peak = Math.max(peak, active);
@@ -64,6 +66,11 @@ loader._load = function (name, ...args) {
     },
     putObject: async (key: string, value: Uint8Array, options: { ifNoneMatch: string }) => {
       assert.equal(options.ifNoneMatch, "*");
+      if (key.endsWith(".engine-h3-staged.json")) {
+        if (stagedFootageSidecars.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
+        stagedFootageSidecars.set(key, value);
+        return;
+      }
       assert.deepEqual(value, bytes);
       writes.push(key);
     },
@@ -75,7 +82,7 @@ loader._load = function (name, ...args) {
       inputUploads++;
       return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
     },
-    stageH3RequestInRenderEngine: async () => ({ jobId: `job${++stagedJobs}`, state: stagedState, manifestSha256: "b".repeat(64) }),
+    stageH3RequestInRenderEngine: async () => ({ jobId: `job${(stagedJobs++ % 12) + 1}`, state: stagedState, manifestSha256: "b".repeat(64) }),
     qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => {
       qualificationCalls++;
       return { jobId, state: "awaiting-final-qualification" };
@@ -160,6 +167,13 @@ async function main() {
   assert.equal(inputUploads, 12);
   assert.equal(stagedJobs, 12);
   assert.equal(qualificationCalls, 12, "only fresh input-qualification jobs call the qualifier");
+  assert.equal(stagedFootageSidecars.size, 1, "staged Engine job identities persist for the later manual R2 materializer");
+  const [stageKey, stageBytes] = [...stagedFootageSidecars.entries()][0]!;
+  assert.match(stageKey, /prepared\/footage\.engine-h3-staged\.json$/);
+  const stagedFootage = JSON.parse(new TextDecoder().decode(stageBytes)) as { engine: { projectName: string }; jobs: Array<{ engineJobId: string; output: { r2Key: string } }> };
+  assert.equal(stagedFootage.engine.projectName, "youtube-studio-ai");
+  assert.deepEqual(stagedFootage.jobs.map((job) => job.engineJobId), Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.match(stagedFootage.jobs[0]!.output.r2Key, /prepared\/footage\/clip-0001\.mp4$/);
   for (const terminalState of ["completed", "failed", "cancelled"] as const) {
     stagedState = terminalState;
     qualificationCalls = 0;

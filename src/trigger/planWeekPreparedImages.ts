@@ -15,6 +15,7 @@ import {
   assertPlanWeekPreparationManifestBinding,
   normalizePlanWeekPreparationManifest,
   planWeekPreparedImageKey,
+  planWeekPreparedFootageKey,
   planWeekPreparedImagesKey,
   planWeekPreparedFootageClipKey,
   planWeekPreparedH3FirstFrameKey,
@@ -79,6 +80,30 @@ type PreparedH3Batch = {
   firstFrames: Array<{ sourceKey: string; destinationKey: string; sha256: string; byteLength: number }>;
 };
 
+/** Durable, non-billable bridge from staged Engine jobs to a later manual R2 materializer. */
+export interface RenderEngineH3StagedFootage {
+  version: "render-engine-h3-staged-footage/v1";
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  engine: { site: typeof RENDER_ENGINE_SITE; projectName: typeof RENDER_ENGINE_PROJECT_NAME; workflowId: string; profileRevisionSha256: string };
+  jobs: Array<{
+    sceneId: string;
+    engineJobId: string;
+    requestManifestSha256: string;
+    prompt: string;
+    seed: number;
+    studioFirstFrame: { r2Key: string; sha256: string };
+    engineFirstFrame: { r2Key: string; sha256: string };
+    output: { r2Key: string };
+    maxCostUsd: number;
+  }>;
+}
+
 function safePart(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
     throw new Error(`weekly prepared images ${label} is invalid`);
@@ -121,6 +146,10 @@ function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
     batchId: payload.batchId,
     itemId: payload.itemId,
   };
+}
+
+export function renderEngineH3StagedFootageKey(scope: ReturnType<typeof canonicalScope>): string {
+  return planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-staged.json");
 }
 
 export function hasGeneratedFootageStage(manifest: PlanWeekPreparationManifest): boolean {
@@ -333,6 +362,7 @@ export async function dispatchPreparedFootage(
   const engine = { baseUrl: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, projectCapability };
   const workflow = await provisionStudioH3WorkflowInRenderEngine(engine);
   const stagedJobIds: string[] = [];
+  const stagedJobs: RenderEngineH3StagedFootage["jobs"] = [];
   for (const [index, frame] of batch.firstFrames.entries()) {
     const bytes = await getObjectBytes(frame.sourceKey, undefined, { maxBytes: frame.byteLength, timeoutMs: 300_000 });
     if (bytes.byteLength !== frame.byteLength || sha256BytesHex(bytes) !== frame.sha256) {
@@ -356,7 +386,23 @@ export async function dispatchPreparedFootage(
       await qualifyH3InputInRenderEngine(engine, receipt.jobId);
     }
     stagedJobIds.push(receipt.jobId);
+    stagedJobs.push({
+      sceneId: batch.sceneIds[index]!, engineJobId: receipt.jobId, requestManifestSha256: receipt.manifestSha256,
+      prompt: job.prompt, seed: job.seed, studioFirstFrame: job.firstFrame,
+      engineFirstFrame: { r2Key: input.key, sha256: frame.sha256 }, output: job.output, maxCostUsd: job.maxCostUsd,
+    });
   }
+  const stagedFootage: RenderEngineH3StagedFootage = {
+    version: "render-engine-h3-staged-footage/v1", manifestSha256: payload.manifestSha256,
+    ownerId: payload.ownerId, channelId: payload.channelId, channelSlug: payload.channelSlug,
+    batchId: payload.batchId, itemId: payload.itemId, requestKey: manifest.requestKey,
+    engine: { site: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, workflowId: workflow.workflowId, profileRevisionSha256: workflow.profileRevisionSha256 },
+    jobs: stagedJobs,
+  };
+  const stageBody = new TextEncoder().encode(canonicalJson(stagedFootage));
+  await persistPreparedResult(renderEngineH3StagedFootageKey(canonicalScope(payload)), stageBody, "application/json", {
+    "render-engine-h3-staged-footage": stagedFootage.version,
+  });
   return stagedJobIds;
 }
 
