@@ -201,7 +201,25 @@ export async function sweepDueRunArtifactRetentions(input?: {
         ownerId, retentionId: check.retentionId, now: Date.now(),
       });
       if (candidate) {
-        const copyKey = await createVerifiedReleasedFinalCopy({ ownerId, candidate, convex });
+        const copyKey = await createVerifiedReleasedFinalCopy({ ownerId, candidate, convex,
+          observeFreshRelease: async () => {
+            const connector = await requireYouTubeConnector(convex, { ownerId, channelId: candidate.channelId });
+            if (!connector.ytChannelId) throw new Error("released final connector has no exact channel identity");
+            const videos = await fetchRunArtifactReleaseObservations({
+              accessToken: await getAccessToken(connector.refreshToken), videoIds: [candidate.videoId],
+            });
+            const observation = videos.get(candidate.videoId);
+            if (!observation) throw new Error("released final video is unavailable at the copy boundary");
+            const observedAt = Date.now();
+            await convex.mutation(api.runArtifactRetentions.recordReleaseObservations, {
+              ownerId, observedAt, observations: [{ retentionId: candidate.retentionId,
+                connectorId: connector.connectorId, connectorVersion: connector.tokenVersion,
+                observation }],
+            });
+            return { connectorId: connector.connectorId, connectorVersion: connector.tokenVersion,
+              observedAt, observation };
+          },
+        });
         log(`certified released final copy recorded for ${check.runId}`, { copyKey });
       }
     } catch (error) {

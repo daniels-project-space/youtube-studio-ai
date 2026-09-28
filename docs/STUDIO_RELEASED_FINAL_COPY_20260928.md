@@ -25,6 +25,14 @@ copy on replay must pass the same byte and metadata checks. This accepts both
 shortcut. The original master, its asset row, publish intent, certificate,
 thumbnail source identity, and all QA evidence remain unchanged.
 
+A long source download/hash cannot carry an old public observation into a PUT.
+Immediately before the conditional PUT, the worker re-reads the exact YouTube
+video and channel, persists that public/processed observation, and obtains a
+short-lived mutation authorization for the active claim. After the full copy
+readback it repeats the provider read; `finish` atomically checks that fresh
+observation, release generation, and channel lock. A private reversal or new
+publishedAt leaves the copy uncommitted and the original source intact.
+
 ## Held boundaries
 
 - The global `STUDIO_SCHEDULES_ENABLED` switch also controls unrelated work.
@@ -37,10 +45,13 @@ thumbnail source identity, and all QA evidence remain unchanged.
   original key. A future projection needs distinct source identity and
   playback key fields, with verified generation selection and expiry state.
 - A run can reach completed 14-day cleanup while a copy is still blocked;
-  that cleanup currently seals evidence and removes zero objects. Before
-  activating any expiry, the later controller must continue release checks
-  across completed runs and handle later public-release generations. It must
-  not infer a new clock from an old receipt.
+  that cleanup currently seals evidence and removes zero objects. A separate
+  indexed copy clock continues public checks across completed and blocked
+  cleanup rows, retries an unfinished copy every six hours, and observes a
+  finished generation every 24 hours so a later public release gets a new
+  copy key and deadline. This monitoring is dormant while the global Studio
+  schedule remains paused; its eventual quota and stop policy need review in
+  the separate maintenance controller.
 - The copy uses worker-local temporary storage equal to the master size and
   reads the full source and copy. Qualify available worker disk and actual
   large multipart R2 behavior before activation. No media was copied here.
@@ -51,8 +62,9 @@ thumbnail source identity, and all QA evidence remain unchanged.
 ## Verification
 
 Focused release-ledger tests exercise the real Convex observation, candidate,
-reservation and finish handlers for a `final.mp4` and quiz final source,
-including private observations and conflicting source identity. Full TypeScript
+reservation, pre-PUT authorization, and finish handlers for a `final.mp4` and
+quiz final source, including a slow transfer/privacy reversal, 14-day cleanup
+completion, same-generation retry, and later public generation. Full TypeScript
 typecheck passed in the sparse checkout with read-only links to omitted source
 directories. No production build or live R2 transfer was run because the
 workspace disk had under 50 MB free.

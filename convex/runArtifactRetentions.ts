@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
 import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
-import { releaseClockUpdate, releaseReceiptReplay, releaseRetentionReceiptForWrite } from "../src/lib/r2AssetRetention";
+import { FINAL_VIDEO_RETENTION_MS, releaseClockUpdate, releaseReceiptReplay, releaseRetentionReceiptForWrite } from "../src/lib/r2AssetRetention";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { assertChannelWritable, isChannelLocked } from "./channelLock";
@@ -170,10 +170,12 @@ export const listFinalCopyChecks = query({
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "released final copy checks");
-    const rows = await ctx.db.query("runArtifactRetentions")
+    const groups = await Promise.all((["pending", "completed", "blocked"] as const).map((status) => ctx.db
+      .query("runArtifactRetentions")
       .withIndex("by_owner_final_copy_check", (q) => q.eq("ownerId", args.ownerId)
-        .eq("status", "pending").gte("nextFinalCopyCheckAt", 0)
-        .lte("nextFinalCopyCheckAt", args.now)).take(16);
+        .eq("status", status).gte("nextFinalCopyCheckAt", 0)
+        .lte("nextFinalCopyCheckAt", args.now)).take(16)));
+    const rows = groups.flat();
     return await Promise.all(rows.map(async (row) => {
       const run = await ctx.db.get(row.runId);
       return { retentionId: row._id, channelId: row.channelId, runId: row.runId,
@@ -208,9 +210,9 @@ export const recordReleaseObservations = mutation({
     for (const item of args.observations) {
       const row = await ctx.db.get(item.retentionId);
       if (!row || row.ownerId !== args.ownerId) throw new Error("run artifact release observation owner mismatch");
-      if (row.status === "completed" || row.status === "blocked" ||
-          (row.status === "processing" && (row.leaseExpiresAt ?? 0) > args.observedAt) ||
+      if ((row.status === "processing" && (row.leaseExpiresAt ?? 0) > args.observedAt) ||
           row.updatedAt > args.observedAt) continue;
+      const copyOnly = row.status === "completed" || row.status === "blocked";
       const [run, connector] = await Promise.all([
         ctx.db.get(row.runId),
         item.connectorId ? ctx.db.get(item.connectorId) : Promise.resolve(null),
@@ -228,7 +230,8 @@ export const recordReleaseObservations = mutation({
       if (decision.released) {
         if (releaseClockUpdate(row.releaseAt, decision.releaseAt) === "regression") {
           await ctx.db.patch(row._id, {
-            status: "blocked", releaseObservationAt: undefined,
+            status: copyOnly ? row.status : "blocked", releaseObservationAt: undefined,
+            nextFinalCopyCheckAt: undefined,
             leaseToken: undefined, leaseExpiresAt: undefined,
             lastError: "YouTube release timestamp moved backward; review the earlier receipt and public-release history",
             updatedAt: args.observedAt,
@@ -285,7 +288,8 @@ export const recordReleaseObservations = mutation({
         }
         if (conflict) {
           await ctx.db.patch(row._id, {
-            status: "blocked", releaseObservationAt: undefined,
+            status: copyOnly ? row.status : "blocked", releaseObservationAt: undefined,
+            nextFinalCopyCheckAt: undefined,
             leaseToken: undefined, leaseExpiresAt: undefined,
             lastError: conflict.slice(0, 1_000), updatedAt: args.observedAt,
           });
@@ -296,30 +300,31 @@ export const recordReleaseObservations = mutation({
         const finalCopy = await ctx.db.query("releasedFinalMasters")
           .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", decision.releaseAt)).unique();
         await ctx.db.patch(row._id, {
-          status: "pending",
+          status: copyOnly ? row.status : "pending",
           releaseAt: decision.releaseAt,
           retainUntil: decision.retainUntil,
           releaseConfirmedAt: row.releaseConfirmedAt ?? args.observedAt,
           releaseObservationAt: args.observedAt,
           releaseVideoId: item.observation!.videoId,
           releaseYouTubeChannelId: item.observation!.channelId,
-          nextReleaseCheckAt: Math.max(decision.retainUntil, args.observedAt),
-          nextFinalCopyCheckAt: finalCopy?.status === "finished"
-            ? undefined : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
+          nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : Math.max(decision.retainUntil, args.observedAt),
+          nextFinalCopyCheckAt: finalCopy?.status === "finished" ||
+            decision.releaseAt + FINAL_VIDEO_RETENTION_MS <= args.observedAt
+            ? args.observedAt + 24 * 60 * 60_000 : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
-          lastError: undefined, updatedAt: args.observedAt,
+          lastError: copyOnly ? row.lastError : undefined, updatedAt: args.observedAt,
         });
         confirmed++;
       } else {
         await ctx.db.patch(row._id, {
-          status: "awaiting_release",
+          status: copyOnly ? row.status : "awaiting_release",
           // Preserve historical release timestamps for audit, but remove the
           // fresh observation which is mandatory for any cleanup claim.
           releaseObservationAt: undefined,
-          nextFinalCopyCheckAt: undefined,
-          nextReleaseCheckAt: args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
+          nextFinalCopyCheckAt: copyOnly ? args.observedAt + 24 * 60 * 60_000 : undefined,
+          nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
-          lastError: (item.error ?? decision.reason).slice(0, 1_000),
+          lastError: copyOnly ? row.lastError : (item.error ?? decision.reason).slice(0, 1_000),
           updatedAt: args.observedAt,
         });
         deferred++;

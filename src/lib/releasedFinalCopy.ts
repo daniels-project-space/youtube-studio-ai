@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import type { RunArtifactReleaseObservation } from "@/lib/runArtifactRetention";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { parseFinalMasterReleaseCertificateBytes, retainedFinalMasterReleaseObjectKeys } from "@/lib/finalMasterReleaseCertificate";
 import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
@@ -13,7 +14,9 @@ import { cleanupDir, makeRunTempDir } from "@/lib/files";
 import { getObjectBytes, getObjectIntegrity, getObjectToFile, headObjectMetadata, putObjectFromFile } from "@/lib/storage";
 
 type Candidate = { retentionId: Id<"runArtifactRetentions">; runId: Id<"runs">;
-  channelId: Id<"channels">; keyPrefix: string; certificateKey: string; releaseAt: number };
+  channelId: Id<"channels">; videoId: string; keyPrefix: string; certificateKey: string; releaseAt: number };
+type FreshObservation = { connectorId: Id<"youtubeAuth">; connectorVersion: number;
+  observedAt: number; observation: RunArtifactReleaseObservation };
 
 async function hashFile(path: string): Promise<string> {
   const hash = createHash("sha256");
@@ -24,6 +27,7 @@ async function hashFile(path: string): Promise<string> {
 /** Public release is the only trigger. This never mutates the certified source. */
 export async function createVerifiedReleasedFinalCopy(input: {
   ownerId: string; candidate: Candidate; convex: StudioConvexHttpClient;
+  observeFreshRelease: () => Promise<FreshObservation>;
 }): Promise<string> {
   assertStudioRetentionR2Destination({ bucket: process.env.R2_BUCKET,
     accountId: process.env.R2_ACCOUNT_ID,
@@ -68,6 +72,12 @@ export async function createVerifiedReleasedFinalCopy(input: {
         sourceAfter.lastModified?.getTime() !== source.lastModified.getTime() ||
         sourceAfter.contentLength !== source.contentLength) throw new Error("released final source changed during copy");
     if (reservation.status !== "finished") {
+      const beforePut = await input.observeFreshRelease();
+      const grant = await convex.mutation(api.releasedFinalMasters.authorizeWrite, {
+        ownerId, retentionId: candidate.retentionId, releaseAt: candidate.releaseAt,
+        copyKey, claimId, ...beforePut,
+      });
+      if (Date.now() >= grant.expiresAt) throw new Error("released final PUT authorization expired");
       try {
         await putObjectFromFile(copyKey, local, { contentType: "video/mp4", ifNoneMatch: "*",
           metadata: { retentionWriter: "released-final/v2", retentionFinalSha256: identity.sourceSha256,
@@ -93,8 +103,11 @@ export async function createVerifiedReleasedFinalCopy(input: {
         meta.retentionexpiresat !== String(candidate.releaseAt + FINAL_VIDEO_RETENTION_MS)) {
       throw new Error("released final copy bytes or immutable metadata disagree with certified source");
     }
-    await convex.mutation(api.releasedFinalMasters.finish, { ...identity,
-      copyEtag: copy.etag, copyLastModifiedAt: copy.lastModified.getTime(), finishedAt: Date.now() });
+    if (reservation.status !== "finished") {
+      const beforeFinish = await input.observeFreshRelease();
+      await convex.mutation(api.releasedFinalMasters.finish, { ...identity, ...beforeFinish,
+        copyEtag: copy.etag, copyLastModifiedAt: copy.lastModified.getTime(), finishedAt: Date.now() });
+    }
     return copyKey;
   } finally {
     await cleanupDir(temporary);

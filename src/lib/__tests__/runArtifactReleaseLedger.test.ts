@@ -3,7 +3,8 @@ import test, { mock } from "node:test";
 import {
   schedule, listReleaseChecks, listFinalCopyChecks, recordReleaseObservations, claimDue, authorizeDeletion, complete, fail,
 } from "../../../convex/runArtifactRetentions";
-import { candidate as finalCandidate, begin as beginFinalCopy, finish as finishFinalCopy } from "../../../convex/releasedFinalMasters";
+import { candidate as finalCandidate, begin as beginFinalCopy,
+  authorizeWrite as authorizeFinalCopyWrite, finish as finishFinalCopy } from "../../../convex/releasedFinalMasters";
 import { releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS } from "@/lib/r2AssetRetention";
 import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
@@ -135,7 +136,10 @@ test("real release observation reserves and finishes one certified final-copy ge
   await assert.rejects(f.invoke(beginFinalCopy, { ...identity, sourceEtag: `"${"d".repeat(32)}"` }), /conflicts/);
   const finishedAt = Date.now();
   const finish = { ...identity, copyEtag: `"${"e".repeat(32)}"`,
-    copyLastModifiedAt: finishedAt, finishedAt };
+    copyLastModifiedAt: finishedAt, finishedAt,
+    connectorId: "connector-a", connectorVersion: 4, observedAt: now + 1,
+    observation: { videoId, channelId: ytChannelId, privacyStatus: "public",
+      uploadStatus: "processed", publishedAt: new Date(publicAt).toISOString() } };
   assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
   assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
   assert.equal(f.db.rows("releasedFinalMasters").length, 1);
@@ -166,7 +170,89 @@ test("quiz final certificate source uses the same released-final ledger and reje
     sourceKey: `${keyPrefix}runs/run-a/quiz-year/quiz-year-other.mp4` }), /conflicts/);
   const finishedAt = Date.now();
   assert.equal((await f.invoke(finishFinalCopy, { ...identity, copyEtag: `"${"d".repeat(32)}"`,
-    copyLastModifiedAt: finishedAt, finishedAt }) as { status: string }).status, "finished");
+    copyLastModifiedAt: finishedAt, finishedAt,
+    connectorId: "connector-a", connectorVersion: 4, observedAt: now,
+    observation: { videoId, channelId: ytChannelId, privacyStatus: "public",
+      uploadStatus: "processed", publishedAt: new Date(publicAt).toISOString() } }) as { status: string }).status, "finished");
+});
+
+test("slow copy requires fresh public state before PUT and again before finishing", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const now = Date.now();
+  const publicAt = now - 60_000;
+  const sourceSha256 = "a".repeat(64);
+  await f.observe(row._id, now, { publishedAt: new Date(publicAt).toISOString() });
+  const identity = { ownerId, retentionId: row._id, releaseAt: publicAt, certificateKey,
+    certificateFingerprint: "b".repeat(64), sourceKey: `${keyPrefix}runs/run-a/final.mp4`,
+    sourceSha256, sourceByteLength: 10_000, sourceEtag: `"${"c".repeat(32)}"`,
+    sourceLastModifiedAt: now - 120_000,
+    copyKey: releasedFinalVideoKey(keyPrefix, "run-a", publicAt, sourceSha256),
+    claimId: "33333333-3333-3333-3333-333333333333" };
+  await f.invoke(beginFinalCopy, identity);
+  const later = now + 10 * 60_000;
+  let clockNow = later;
+  const clock = mock.method(Date, "now", () => clockNow);
+  try {
+    const privateObservation = { videoId, channelId: ytChannelId, privacyStatus: "private",
+      uploadStatus: "processed", publishedAt: new Date(publicAt).toISOString() };
+    await f.observe(row._id, later, privateObservation);
+    const proof = { ownerId, retentionId: row._id, releaseAt: publicAt,
+      copyKey: identity.copyKey, claimId: identity.claimId, connectorId: "connector-a",
+      connectorVersion: 4, observedAt: later, observation: privateObservation };
+    await assert.rejects(f.invoke(authorizeFinalCopyWrite, proof), /fresh exact public/);
+    const publicObservation = { ...privateObservation, privacyStatus: "public" };
+    clockNow = later + 1;
+    await f.observe(row._id, later + 1, publicObservation);
+    const authorized = await f.invoke<{ expiresAt: number }>(authorizeFinalCopyWrite, {
+      ...proof, observedAt: later + 1, observation: publicObservation });
+    assert.ok(authorized.expiresAt > later);
+    await f.db.patch("channel-a", { locked: true });
+    await assert.rejects(f.invoke(finishFinalCopy, { ...identity,
+      connectorId: "connector-a", connectorVersion: 4, observedAt: later + 1,
+      observation: publicObservation, copyEtag: `"${"d".repeat(32)}"`,
+      copyLastModifiedAt: later, finishedAt: later + 1 }), /fresh exact public/);
+    await f.db.patch("channel-a", { locked: false });
+    clockNow = later + 2;
+    await f.observe(row._id, later + 2, privateObservation);
+    await assert.rejects(f.invoke(finishFinalCopy, { ...identity,
+      connectorId: "connector-a", connectorVersion: 4, observedAt: later + 2,
+      observation: privateObservation, copyEtag: `"${"d".repeat(32)}"`,
+      copyLastModifiedAt: later, finishedAt: later + 2 }), /fresh exact public/);
+    assert.equal(f.db.rows("releasedFinalMasters")[0].status, "active");
+  } finally { clock.mock.restore(); }
+});
+
+test("copy checks survive completed cleanup and accept a later public generation", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const now = Date.now();
+  const oldPublicAt = now - 20 * 86_400_000;
+  await f.observe(row._id, now, { publishedAt: new Date(oldPublicAt).toISOString() });
+  const claimed = await f.claim(now);
+  assert.ok(claimed);
+  await f.invoke(complete, { ownerId, retentionId: row._id, leaseToken: "a".repeat(64),
+    completedAt: now, removedObjects: 0, retainedObjectCount: 1,
+    retainedReleaseEvidence: [certificateKey] });
+  assert.equal(row.status, "completed");
+  assert.ok(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now }),
+    "an unfinished copy remains eligible after fourteen-day cleanup completes");
+  const later = now + RUN_ARTIFACT_RELEASE_CHECK_MS + 1;
+  const checks = await f.invoke<Row[]>(listFinalCopyChecks, { ownerId, now: later });
+  assert.deepEqual(checks.map((check) => check.retentionId), [row._id]);
+  const newPublicAt = later - 60_000;
+  let clockNow = later;
+  const clock = mock.method(Date, "now", () => clockNow);
+  try {
+    await f.observe(row._id, later, { publishedAt: new Date(oldPublicAt).toISOString() });
+    assert.ok(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now: later }),
+      "the same release retries after cleanup completion");
+    clockNow = later + 1;
+    await f.observe(row._id, later + 1, { publishedAt: new Date(newPublicAt).toISOString() });
+    assert.equal(row.status, "completed");
+    assert.equal(row.releaseAt, newPublicAt);
+    assert.ok(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now: later + 1 }));
+  } finally { clock.mock.restore(); }
 });
 
 test("private→public transition waits actual release plus fourteen days and rechecks before deletion", async () => {
