@@ -37,6 +37,8 @@ assert.match(page, /void checkCapacity\(\);/,
   "a valid weekly slate must automatically discover medium or high fallback admission");
 assert.match(page, /Check Salad capacity/);
 assert.match(page, /status\??\.state === "held"/);
+assert.match(page, /state === "held"\) timer = window\.setTimeout\(poll, 30_000\)/,
+  "a held original run must keep observing automatic child outcome claims");
 assert.match(page, /Held before spend/);
 assert.match(page, /medium first, then high only if it unlocks this wave/,
   "a capacity hold explains the authorized medium-to-high retry policy");

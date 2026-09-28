@@ -31,6 +31,7 @@ import {
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
+import { miniMaxH3WeeklyOrderTag } from "@/trigger/minimaxH3WeeklyBatch";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
@@ -352,6 +353,7 @@ export async function dispatchPreparedFootage(
   const handle = await tasks.trigger("minimax-h3-weekly-batch", h3Payload, {
     concurrencyKey: `plan-week-h3:${manifest.ownerId}:${manifest.channelId}`,
     idempotencyKey,
+    tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: batch.receiptKey, orderKey: batch.orderKey })],
   });
   return handle.id;
 }

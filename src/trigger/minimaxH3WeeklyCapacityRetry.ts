@@ -20,6 +20,7 @@ import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
 import {
   assertMiniMaxH3WeeklyBatchArgs,
   reconcileWeeklyOrderRejections,
+  miniMaxH3WeeklyOrderTag,
   queueMiniMaxH3WeeklyCapacityRetry,
   type MiniMaxH3WeeklyBatchArgs,
 } from "./minimaxH3WeeklyBatch";
@@ -92,6 +93,7 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
       const handle = await tasks.trigger("minimax-h3-weekly-novita-fallback", payload, {
         concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
         idempotencyKey,
+        tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
       });
       return {
         state: "fallback_queued" as const,
@@ -113,6 +115,7 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
       const handle = await tasks.trigger("minimax-h3-weekly-batch", payload, {
         concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
         idempotencyKey,
+        tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
       });
       return { state: "salad_admitted" as const, provider: "salad" as const, triggerRunId: handle.id };
     } catch (error) {

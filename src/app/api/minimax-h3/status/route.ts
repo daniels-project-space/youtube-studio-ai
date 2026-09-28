@@ -3,8 +3,8 @@ import { runs } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes } from "@/lib/storage";
 import { miniMaxH3RequestKey, miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
-import { assertMiniMaxH3WeeklyBatchArgs, reconcileWeeklyOrderRejections, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
-import { projectH3ReceiptState, type H3RequestPacketState } from "@/lib/h3StatusProjection";
+import { assertMiniMaxH3WeeklyBatchArgs, miniMaxH3WeeklyOrderTag, reconcileWeeklyOrderRejections, type PersistedWeeklyRequestPacket } from "@/trigger/minimaxH3WeeklyBatch";
+import { allLinkedH3RunsSettled, projectH3ReceiptState, type H3RequestPacketState } from "@/lib/h3StatusProjection";
 import {
   isMiniMaxH3CapacityHoldError,
   summarizeMiniMaxH3Receipt,
@@ -43,6 +43,15 @@ function validWeeklyRequestPacket(value: unknown): boolean {
     Number.isSafeInteger(packet.createdAt) && Number(packet.createdAt) > 0;
 }
 
+/** Fail closed when a scheduled child is active or the tagged order cannot be enumerated. */
+async function linkedWeeklyRunsSettled(tag: string, queriedRunId: string): Promise<boolean> {
+  try {
+    return await allLinkedH3RunsSettled(queriedRunId, runs.list({ tag, limit: 100 }));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Owner-scoped progress for a queued H3 task. Trigger status is the live
  * control-plane signal; the create-only R2 receipt is the durable completion
@@ -66,6 +75,7 @@ export async function GET(request: Request) {
     let receiptBody: Record<string, unknown> | undefined;
     let requestPacketState: H3RequestPacketState = "not-applicable";
     let rejected: Awaited<ReturnType<typeof reconcileWeeklyOrderRejections>> = [];
+    let orderTag: string | undefined;
     try {
       const bytes = await getObjectBytes(receiptKey);
       receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
@@ -101,6 +111,7 @@ export async function GET(request: Request) {
           if (requestKeys.some((key, index) => key !== frozen.requestKeys[index]) || !aggregateMatchesPacket) {
             requestPacketState = "invalid";
           } else {
+            orderTag = miniMaxH3WeeklyOrderTag({ ownerId: actor.ownerId, receiptKey, orderKey: payload.orderKey });
             rejected = await reconcileWeeklyOrderRejections({
               receiptKey, orderKey: payload.orderKey, jobs: payload.jobs,
             });
@@ -110,11 +121,14 @@ export async function GET(request: Request) {
         requestPacketState = notFound(packetError) ? "missing" : "invalid";
       }
     }
+    const linkedRunsSettled = rejected.length === 0 ? true :
+      orderTag !== undefined && await linkedWeeklyRunsSettled(orderTag, runId);
     const projection = projectH3ReceiptState({
       triggerStatus: String(run.status),
       aggregateKind: receipt?.kind ?? null,
       packetState: requestPacketState,
       rejectedCount: rejected.length,
+      linkedRunsSettled,
       capacityHold: isMiniMaxH3CapacityHoldError(run.error),
     });
     return NextResponse.json({
@@ -125,6 +139,7 @@ export async function GET(request: Request) {
       requestPacketState,
       receipt: receipt ?? null,
       ...(rejected.length > 0 ? { rejected } : {}),
+      ...(rejected.length > 0 ? { linkedRunsSettled } : {}),
       ...(projection.state === "repair_required" ? { repairDisposition: "owner_review_new_order_required" as const } : {}),
       ...(projection.lineageConflict ? { lineageConflict: "aggregate_and_rejected_shot" as const } : {}),
       ...(projection.paidRequestStarted === undefined ? {} : { paidRequestStarted: projection.paidRequestStarted }),

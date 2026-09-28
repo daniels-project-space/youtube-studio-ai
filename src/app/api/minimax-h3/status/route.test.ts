@@ -22,6 +22,17 @@ assert.match(source, /reconcileWeeklyOrderRejections\(/);
 assert(source.indexOf("reconcileWeeklyOrderRejections(") < source.indexOf("projectH3ReceiptState({"),
   "weekly claims must be reconciled before the status is projected, including when an aggregate exists");
 assert.match(source, /aggregate_and_rejected_shot/);
+assert.match(source, /runs\.list\(\{ tag, limit: 100 \}\)/, "terminal rejection status must enumerate tagged child runs");
+for (const path of [
+  "src/app/api/minimax-h3/weekly/route.ts",
+  "src/app/api/minimax-h3/retry/route.ts",
+  "src/trigger/minimaxH3WeeklyBatch.ts",
+  "src/trigger/minimaxH3WeeklyCapacityRetry.ts",
+  "src/trigger/planWeekPreparedImages.ts",
+]) {
+  const dispatch = readFileSync(resolve(process.cwd(), path), "utf8");
+  assert.match(dispatch, /tags: \[miniMaxH3WeeklyOrderTag\(/, `${path} must tag its weekly H3 child runs`);
+}
 assert.match(source, /paidRequestStarted/);
 assert.doesNotMatch(source, /run\.error\s*\}\s*,/, "status must not expose raw Trigger error text");
 assert.match(source, /Cache-Control.*private, no-store/);

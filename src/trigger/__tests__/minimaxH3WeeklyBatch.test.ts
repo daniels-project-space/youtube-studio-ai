@@ -3,6 +3,7 @@ import {
   assertMiniMaxH3WeeklyBatchArgs,
   createMiniMaxH3WeeklyRequestPacket,
   miniMaxH3WeeklyJobReceiptKey,
+  miniMaxH3WeeklyOrderTag,
 } from "@/trigger/minimaxH3WeeklyBatch";
 import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 import { readFileSync } from "node:fs";
@@ -21,6 +22,11 @@ const valid = {
   }],
 };
 assert.equal(assertMiniMaxH3WeeklyBatchArgs(valid).orderKey, valid.orderKey);
+assert.equal(miniMaxH3WeeklyOrderTag({ ownerId: "a", receiptKey: valid.receiptKey, orderKey: valid.orderKey }),
+  miniMaxH3WeeklyOrderTag({ ownerId: "a", receiptKey: valid.receiptKey, orderKey: valid.orderKey }));
+assert.notEqual(miniMaxH3WeeklyOrderTag({ ownerId: "a", receiptKey: valid.receiptKey, orderKey: valid.orderKey }),
+  miniMaxH3WeeklyOrderTag({ ownerId: "a", receiptKey: valid.receiptKey, orderKey: "other-order" }));
+assert.throws(() => miniMaxH3WeeklyOrderTag({ ownerId: "other", receiptKey: valid.receiptKey, orderKey: valid.orderKey }), /owner scope/);
 assert.equal(
   miniMaxH3WeeklyRequestPacketKey(valid.receiptKey),
   "owner/a/plan-batches/week-20260913/h3/receipt.request.json",

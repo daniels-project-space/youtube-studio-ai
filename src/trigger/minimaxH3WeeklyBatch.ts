@@ -67,6 +67,15 @@ export interface MiniMaxH3WeeklyBatchArgs {
   };
 }
 
+/** Shared Trigger tag for every run that can touch one frozen weekly order. */
+export function miniMaxH3WeeklyOrderTag(args: { ownerId: string; receiptKey: string; orderKey: string }): string {
+  const ownerId = safeIdentifier(args.ownerId, "owner id");
+  const receiptKey = scopedReceiptKey(args.receiptKey);
+  const orderKey = safeIdentifier(args.orderKey, "order key");
+  if (!receiptKey.startsWith(`owner/${ownerId}/`)) throw new Error("weekly MiniMax H3 order tag is outside the owner scope");
+  return `h3-weekly-${sha256Hex(canonicalJson({ ownerId, receiptKey, orderKey }))}`;
+}
+
 function safeIdentifier(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value)) {
     throw new Error(`weekly MiniMax H3 ${label} is invalid`);
@@ -422,6 +431,7 @@ export async function queueMiniMaxH3WeeklyCapacityRetry(args: {
     delay: new Date(nextCheckAt),
     concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
     idempotencyKey,
+    tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
   });
   return { triggerRunId: handle.id, nextCheckAt, capacityHoldStartedAt };
 }
