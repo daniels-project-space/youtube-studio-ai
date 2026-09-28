@@ -141,7 +141,7 @@ export function hasExactScheduledClassedProof(
     metadata.retentionassetid === proof.assetId &&
     metadata.retentionreleaseat === String(proof.releaseAt) &&
     metadata.retentionexpiresat === String(row.expiresAt) &&
-    (proof.class === "lofi-keyframe" || metadata.retentionassetclass === proof.class);
+    metadata.retentionassetclass === proof.class;
 }
 
 /** The only eligible ordinary copy source is a marked Lo-Fi still in its own run. */

@@ -142,8 +142,10 @@ test("scheduled classed proof binds exact source, destination identity, digest a
     classedProof: { ...row.classedProof, class: "lofi-keyframe" as const,
       sourceKey: stillSource } };
   const stillHead = { ...head, metadata: { ...head.metadata, retentionKeyframeSha256: sha256,
-    retentionSourceKey: stillSource } };
+    retentionAssetClass: "lofi-keyframe", retentionSourceKey: stillSource } };
   assert.equal(hasExactScheduledClassedProof(stillRow, stillHead, due), true);
+  assert.equal(hasExactScheduledClassedProof(stillRow, { ...stillHead,
+    metadata: { ...stillHead.metadata, retentionAssetClass: "lofi-clip" } }, due), false);
 });
 test("exact nested v1 receipts remain readable until their original deadline", () => {
   const root = "owner/daniel/channel/show/runs/run-1/";
