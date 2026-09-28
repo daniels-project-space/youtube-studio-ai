@@ -3372,6 +3372,13 @@ export function createTimelineAssemblyBlock(
             }
             return { kind: "minimax-h3" as const };
           }
+          if (renderer.kind === "render-engine-h3") {
+            if (renderer.projectName !== "youtube-studio-ai" || typeof renderer.workflowId !== "string" || !/^[a-z0-9]{8,64}$/.test(renderer.workflowId) ||
+                typeof renderer.profileRevisionSha256 !== "string" || !/^[a-f0-9]{64}$/.test(renderer.profileRevisionSha256)) {
+              throw new Error("timeline_assemble: Render Engine H3 footageRenderer identity is invalid");
+            }
+            return { kind: "render-engine-h3" as const };
+          }
           if (renderer.kind === "source-proof") {
             return { kind: "source-proof" as const };
           }
@@ -3409,7 +3416,7 @@ export function createTimelineAssemblyBlock(
       typeof (generatedFootageRaw as Record<string, unknown>)["source"] === "string",
     );
     const bodyAudioMode: "off" | "available" | "required" = cinematicFootageManifest
-      ? (footageRenderer?.kind === "minimax-h3" || footageRenderer?.kind === "source-proof"
+      ? (footageRenderer?.kind === "minimax-h3" || footageRenderer?.kind === "render-engine-h3" || footageRenderer?.kind === "source-proof"
         ? "available"
         : "required")
       : generatedFootageBodyAudio
@@ -3754,7 +3761,7 @@ export function createTimelineAssemblyBlock(
         width: W,
         height: H,
         bodyAudioMode,
-        allowShortSourceRetime: footageRenderer?.kind === "minimax-h3",
+        allowShortSourceRetime: footageRenderer?.kind === "minimax-h3" || footageRenderer?.kind === "render-engine-h3",
       });
     } else if (authoredManifest) {
       const authoredPaths: string[] = [];

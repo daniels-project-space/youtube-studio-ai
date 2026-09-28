@@ -207,6 +207,12 @@ export interface PlanWeekPreparedFootage {
         runtimeId: typeof MINIMAX_H3_RUNTIME_ID | typeof MINIMAX_H3_OPENRELAY_RUNTIME_ID;
         profileId: typeof MINIMAX_H3_PROFILE.id;
         modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256;
+      }
+    | {
+        kind: "render-engine-h3";
+        projectName: "youtube-studio-ai";
+        workflowId: string;
+        profileRevisionSha256: string;
       };
   /** H3's exact first-frame/input identity for each ordered scene. */
   h3Jobs?: Array<{
@@ -220,6 +226,14 @@ export interface PlanWeekPreparedFootage {
   }>;
   /** Worker receipts bind runtime, output bytes, and actual cost per scene. */
   h3Receipts?: MiniMaxH3Receipt[];
+  /** Engine-owned receipts are deliberately distinct from legacy provider worker receipts. */
+  engineH3Jobs?: Array<{
+    sceneId: string;
+    jobId: string;
+    requestManifestSha256: string;
+    firstFrame: { r2Key: string; sha256: string };
+    output: { bucket: string; key: string; sha256: string; byteLength: number; verifiedAt: number };
+  }>;
   createdAt: number;
 }
 
@@ -985,10 +999,38 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     renderer = { kind: "ltx", styleId: ltxStyleId };
   } else {
     const rendererRecord = requiredRecord(rawRenderer, "prepared footage renderer");
-    if (rendererRecord.kind !== "minimax-h3") {
+    if (rendererRecord.kind === "render-engine-h3") {
+      const workflowId = requiredText(rendererRecord.workflowId, "prepared footage Engine workflow id");
+      const profileRevisionSha256 = requiredText(rendererRecord.profileRevisionSha256, "prepared footage Engine profile revision").toLowerCase();
+      if (rendererRecord.projectName !== "youtube-studio-ai" || !/^[a-z0-9]{8,64}$/.test(workflowId) || !/^[a-f0-9]{64}$/.test(profileRevisionSha256)) {
+        throw new Error("prepared footage Engine renderer binding is invalid");
+      }
+      renderer = { kind: "render-engine-h3", projectName: "youtube-studio-ai", workflowId, profileRevisionSha256 };
+      const engineJobs = prepared.engineH3Jobs;
+      if (!Array.isArray(engineJobs) || engineJobs.length !== clips.length || prepared.h3Jobs !== undefined || prepared.h3Receipts !== undefined) {
+        throw new Error("prepared footage Engine jobs must match the ordered clips without legacy receipts");
+      }
+      const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+      for (let index = 0; index < clips.length; index++) {
+        const clip = clips[index]!;
+        const job = requiredRecord(engineJobs[index], `prepared Engine H3 job ${index + 1}`);
+        const frame = requiredRecord(job.firstFrame, `prepared Engine H3 job ${index + 1} first frame`);
+        const output = requiredRecord(job.output, `prepared Engine H3 job ${index + 1} output`);
+        if (!generatedFootageSceneManifest.items[index] || job.sceneId !== generatedFootageSceneManifest.items[index]!.sceneId ||
+            !/^[a-z0-9]{8,64}$/.test(requiredText(job.jobId, `prepared Engine H3 job ${index + 1} id`)) ||
+            !/^[a-f0-9]{64}$/.test(requiredText(job.requestManifestSha256, `prepared Engine H3 job ${index + 1} request digest`).toLowerCase()) ||
+            requiredText(frame.r2Key, `prepared Engine H3 job ${index + 1} frame key`) !== planWeekPreparedH3FirstFrameKey({ ...scope, index }) ||
+            !/^[a-f0-9]{64}$/.test(requiredText(frame.sha256, `prepared Engine H3 job ${index + 1} frame digest`).toLowerCase()) ||
+            typeof output.bucket !== "string" || !output.bucket || typeof output.key !== "string" || !output.key ||
+            requiredText(output.sha256, `prepared Engine H3 job ${index + 1} output digest`).toLowerCase() !== clip.sha256 ||
+            Number(output.byteLength) !== clip.byteLength || !Number.isSafeInteger(Number(output.verifiedAt)) || Number(output.verifiedAt) <= 0 ||
+            Math.abs(clip.durationSec - nativeDurationSec) > 0.08) {
+          throw new Error("prepared footage Engine H3 job binding mismatch");
+        }
+      }
+    } else if (rendererRecord.kind !== "minimax-h3") {
       throw new Error("prepared footage renderer must be the explicit minimax-h3 contract");
-    }
-    if (
+    } else if (
       rendererRecord.provider !== "salad" && rendererRecord.provider !== "novita" && rendererRecord.provider !== "openrelay" ||
       rendererRecord.execution !== "weekly-batch" && rendererRecord.execution !== "on-demand" && rendererRecord.execution !== "weekly-fallback" ||
       (rendererRecord.provider === "salad" && rendererRecord.execution !== "weekly-batch") ||
@@ -1000,6 +1042,7 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     ) {
       throw new Error("prepared footage H3 renderer binding is invalid");
     }
+    if (rendererRecord.kind === "minimax-h3") {
     renderer = {
       kind: "minimax-h3",
       provider: rendererRecord.provider as MiniMaxH3Provider,
@@ -1073,6 +1116,7 @@ export function assertPlanWeekPreparedFootageBinding(args: {
         throw new Error("prepared footage H3 receipt binding mismatch");
       }
     }
+    }
   }
   const normalized: PlanWeekPreparedFootage = {
     version: PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
@@ -1089,6 +1133,7 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     ...(renderer ? { renderer } : {}),
     ...(Array.isArray(prepared.h3Jobs) ? { h3Jobs: prepared.h3Jobs as PlanWeekPreparedFootage["h3Jobs"] } : {}),
     ...(Array.isArray(prepared.h3Receipts) ? { h3Receipts: prepared.h3Receipts as MiniMaxH3Receipt[] } : {}),
+    ...(Array.isArray(prepared.engineH3Jobs) ? { engineH3Jobs: prepared.engineH3Jobs as PlanWeekPreparedFootage["engineH3Jobs"] } : {}),
     createdAt,
   };
   if (

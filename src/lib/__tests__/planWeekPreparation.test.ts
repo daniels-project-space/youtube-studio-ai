@@ -340,6 +340,43 @@ assert.equal(
   "minimax-h3",
   "prepared H3 footage binds an explicit renderer instead of masquerading as an LTX receipt",
 );
+const engineH3Prepared = {
+  ...h3Prepared,
+  renderer: {
+    kind: "render-engine-h3" as const,
+    projectName: "youtube-studio-ai" as const,
+    workflowId: "workflow123",
+    profileRevisionSha256: "4".repeat(64),
+  },
+  h3Jobs: undefined,
+  h3Receipts: undefined,
+  engineH3Jobs: [{
+    sceneId: "shot-1",
+    jobId: "enginejob123",
+    requestManifestSha256: "5".repeat(64),
+    firstFrame: h3Job.firstFrame,
+    output: {
+      bucket: "youtube-studio-output",
+      key: "projects/youtube-studio-ai/jobs/enginejob123/output.mp4",
+      sha256: "3".repeat(64),
+      byteLength: 8_192,
+      verifiedAt: Date.now() - 1,
+    },
+  }],
+};
+assert.equal(
+  assertPlanWeekPreparedFootageBinding({ prepared: engineH3Prepared, manifest }).renderer?.kind,
+  "render-engine-h3",
+  "a verified Engine H3 receipt remains distinct from legacy worker provenance",
+);
+assert.throws(
+  () => assertPlanWeekPreparedFootageBinding({
+    prepared: { ...engineH3Prepared, engineH3Jobs: [{ ...engineH3Prepared.engineH3Jobs[0], output: { ...engineH3Prepared.engineH3Jobs[0].output, sha256: "6".repeat(64) } }] },
+    manifest,
+  }),
+  /Engine H3 job binding mismatch/,
+  "an Engine completion receipt cannot name output bytes different from the Studio R2 clip",
+);
 const producerSidecar = buildPreparedFootageSidecar({
   manifest,
   binding: {
