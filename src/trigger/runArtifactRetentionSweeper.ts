@@ -100,6 +100,7 @@ export async function reconcileRunArtifactReleaseChecks(args: {
   record: (observations: RunArtifactObservedRelease[], observedAt: number) => Promise<{
     confirmed: number; deferred: number;
   }>;
+  afterRecord?: (observations: RunArtifactObservedRelease[], observedAt: number) => Promise<void>;
   now?: () => number;
 }): Promise<{ confirmed: number; deferred: number }> {
   let confirmed = 0;
@@ -131,9 +132,11 @@ export async function reconcileRunArtifactReleaseChecks(args: {
         }));
       }
       // A failed commit stops cleanup; it cannot be mistaken for no due work.
-      const result = await args.record(observations, (args.now ?? Date.now)());
+      const observedAt = (args.now ?? Date.now)();
+      const result = await args.record(observations, observedAt);
       confirmed += result.confirmed;
       deferred += result.deferred;
+      await args.afterRecord?.(observations, observedAt);
     }
   }
   return { confirmed, deferred };
@@ -189,19 +192,17 @@ async function observeAndCopyReleasedFinalMasters(args: {
     record: (observations, observedAt) => convex.mutation(api.runArtifactRetentions.recordReleaseObservations, {
       ownerId, observedAt, observations,
     }),
+    afterRecord: async () => {
+      if (args.cleanupHandoff && studioSchedulesEnabled()) await args.cleanupHandoff();
+    },
   });
   if (releaseChecks.length) log("release checks complete", releases);
-  const handoff = await runRetentionMaintenanceHandoff({
-    observe: async () => ({ releaseChecks, releases }),
-    cleanup: args.cleanupHandoff ?? (async () => undefined),
-    continueWork: async () => copyReleasedFinalMasters({ ownerId, convex, log, releaseChecks }),
-  });
+  const copies = await copyReleasedFinalMasters({ ownerId, convex, log, releaseChecks });
   return {
     checked: releaseChecks.length,
     confirmed: releases.confirmed,
     deferred: releases.deferred,
-    ...handoff.result,
-    ...(handoff.cleanup === undefined ? {} : { cleanup: handoff.cleanup }),
+    ...copies,
   };
 }
 
@@ -264,48 +265,41 @@ export async function runStudioRetentionMaintenance() {
   });
   const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const convex = convexClient();
+  const cleanupHandoff = () => sweepDueRunArtifactRetentions({ ownerId, convex, secretsBootstrapped: true });
+  if (studioSchedulesEnabled()) await cleanupHandoff();
   return observeAndCopyReleasedFinalMasters({
     ownerId,
     convex,
     now: Date.now(),
     log,
-    cleanupHandoff: () => sweepDueRunArtifactRetentions({ ownerId }),
+    cleanupHandoff,
   });
-}
-
-/** Cleanup is handed off after observation commits and before potentially slow
- * certified-copy work, preserving the release freshness window. */
-export async function runRetentionMaintenanceHandoff<TObservation, TCleanup, TResult>(args: {
-  observe: () => Promise<TObservation>;
-  cleanup: (observation: TObservation) => Promise<TCleanup>;
-  continueWork: (observation: TObservation) => Promise<TResult>;
-}): Promise<{ observation: TObservation; cleanup?: TCleanup; result: TResult }> {
-  const observation = await args.observe();
-  const cleanup = studioSchedulesEnabled() ? await args.cleanup(observation) : undefined;
-  const result = await args.continueWork(observation);
-  return { observation, ...(cleanup === undefined ? {} : { cleanup }), result };
 }
 
 export async function sweepDueRunArtifactRetentions(input?: {
   ownerId?: string;
   now?: number;
   limit?: number;
+  convex?: ConvexHttpClient;
+  secretsBootstrapped?: boolean;
 }): Promise<{ claimed: number; completed: number; blocked: number; removedObjects: number }> {
   const log = (message: string, extra?: Record<string, unknown>) =>
     console.log(`[run-artifact-retention] ${message}`, extra ?? "");
-  await bootstrapSecrets(log, {
-    services: ["cloudflare", "youtube"],
-    required: [
-      "R2_ACCOUNT_ID",
-      "R2_ACCESS_KEY_ID",
-      "R2_SECRET_ACCESS_KEY",
-      "R2_BUCKET",
-      "STUDIO_CONVEX_JWT_PRIVATE_KEY",
-    ],
-  });
+  if (!input?.secretsBootstrapped) {
+    await bootstrapSecrets(log, {
+      services: ["cloudflare", "youtube"],
+      required: [
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET",
+        "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+      ],
+    });
+  }
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
-  const convex = convexClient();
+  const convex = input?.convex ?? convexClient();
   if (!studioRetentionMaintenanceEnabled()) {
     await observeAndCopyReleasedFinalMasters({ ownerId, convex, now: input?.now ?? Date.now(), log });
   }

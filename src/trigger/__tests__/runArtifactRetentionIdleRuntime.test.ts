@@ -6,7 +6,6 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import {
   runStudioRetentionMaintenance,
-  runRetentionMaintenanceHandoff,
   runScheduledArtifactRetentionSweep,
   reconcileRunArtifactReleaseChecks,
   sweepDueRunArtifactRetentions,
@@ -125,43 +124,57 @@ test("legacy sweeper keeps global cleanup work while delegating observation/copy
   }
 });
 
-test("maintenance handoff claims and completes cleanup only after fresh observation commits", async () => {
+test("multi-channel observation commits hand off cleanup before early proofs age out", async () => {
   const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
   const previousMaintenance = process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
   process.env.STUDIO_SCHEDULES_ENABLED = "true";
   process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = "true";
-  const calls: string[] = [];
+  const channelIds = Array.from({ length: 12 }, (_, index) => `channel-${index}` as Id<"channels">);
+  const checks = channelIds.map((channelId, index) => ({
+    retentionId: `retention-${index}` as Id<"runArtifactRetentions">,
+    channelId,
+    runId: `run-${index}` as Id<"runs">,
+    videoId: `video${String(index).padStart(8, "0")}`,
+  }));
+  const calls: Array<{ kind: string; observedAt?: number }> = [];
+  let clock = 0;
   try {
-    const result = await runRetentionMaintenanceHandoff({
-      observe: async () => {
-        calls.push("runArtifactRetentions:recordReleaseObservations");
-        return { confirmed: 1, deferred: 0, observedAt: 9_000 };
+    const result = await reconcileRunArtifactReleaseChecks({
+      checks,
+      observeChannel: async (_channel, videoIds) => {
+        // Twelve sequential 31-second provider reads exceed the five-minute
+        // freshness window for the first channel by the end of this pass.
+        clock += 31_000;
+        return {
+          connectorId: "connector-fixture" as Id<"youtubeAuth">,
+          connectorVersion: 1,
+          videos: new Map(videoIds.map((videoId) => [videoId, { videoId, channelId: "UC-fixture" }])),
+        };
       },
-      cleanup: async (state) => {
-        assert.ok(10_000 - state.observedAt >= 0 && 10_000 - state.observedAt < 5 * 60_000,
-          "cleanup claim sees the just-committed release observation inside its five-minute window");
-        calls.push("runArtifactRetentions:claimDue");
-        calls.push("runArtifactRetentions:complete");
-        return { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 };
+      record: async (observations, observedAt) => {
+        calls.push({ kind: "runArtifactRetentions:recordReleaseObservations", observedAt });
+        return { confirmed: observations.length, deferred: 0 };
       },
-      continueWork: async () => {
-        // Simulate a copy that runs beyond the Convex freshness window.
-        const laterCopyAt = 10_000 + 6 * 60_000;
-        calls.push(`copy-finished:${laterCopyAt}`);
-        return { copied: 1, held: 0 };
+      afterRecord: async (_observations, observedAt) => {
+        assert.ok(clock - observedAt >= 0 && clock - observedAt < 5 * 60_000,
+          "cleanup claims each channel immediately after its fresh observation commit");
+        calls.push({ kind: "runArtifactRetentions:claimDue", observedAt });
+        calls.push({ kind: "runArtifactRetentions:complete", observedAt });
       },
+      now: () => clock,
     });
-    assert.deepEqual(calls, [
-      "runArtifactRetentions:recordReleaseObservations",
-      "runArtifactRetentions:claimDue",
-      "runArtifactRetentions:complete",
-      "copy-finished:370000",
-    ]);
-    assert.deepEqual(result, {
-      observation: { confirmed: 1, deferred: 0, observedAt: 9_000 },
-      cleanup: { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 },
-      result: { copied: 1, held: 0 },
-    });
+    assert.ok(clock > 5 * 60_000, "the total observation pass exceeds the proof freshness window");
+    assert.equal(result.confirmed, 12);
+    assert.equal(calls.length, 36);
+    for (let index = 0; index < calls.length; index += 3) {
+      assert.deepEqual(calls.slice(index, index + 3).map((call) => call.kind), [
+        "runArtifactRetentions:recordReleaseObservations",
+        "runArtifactRetentions:claimDue",
+        "runArtifactRetentions:complete",
+      ]);
+      assert.equal(calls[index].observedAt, calls[index + 1].observedAt);
+      assert.equal(calls[index + 1].observedAt, calls[index + 2].observedAt);
+    }
   } finally {
     if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
     else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;

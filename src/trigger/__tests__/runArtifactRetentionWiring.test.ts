@@ -69,8 +69,8 @@ assert.match(
 );
 assert.match(sweeper, /if \(!studioRetentionMaintenanceEnabled\(\)\) \{[\s\S]*?observeAndCopyReleasedFinalMasters[\s\S]*?\n  \}/,
   "the legacy cleanup sweep delegates only its observation/copy phase to dedicated maintenance");
-assert.match(sweeper, /runRetentionMaintenanceHandoff\([\s\S]*?observe: async \(\) => \(\{ releaseChecks, releases \}\)[\s\S]*?cleanup: args\.cleanupHandoff[\s\S]*?continueWork: async \(\) => copyReleasedFinalMasters/,
-  "the dedicated controller hands fresh observations to cleanup before final-copy work");
+assert.match(sweeper, /afterRecord: async \(\) => \{[\s\S]*?args\.cleanupHandoff\(\)[\s\S]*?\n    \},[\s\S]*?const copies = await copyReleasedFinalMasters/,
+  "the dedicated controller hands each channel's fresh observation to cleanup before final-copy work");
 assert.match(triggerConfig, /"STUDIO_SCHEDULES_ENABLED"[\s\S]*?"STUDIO_RETENTION_MAINTENANCE_ENABLED"/,
   "the worker receives the global schedule gate used by the maintenance cleanup handoff");
 
