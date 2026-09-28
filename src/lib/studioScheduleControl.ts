@@ -7,3 +7,12 @@ export function studioScheduleCron(pattern: string): string | undefined {
 export function studioSchedulesEnabled(): boolean {
   return process.env.STUDIO_SCHEDULES_ENABLED === "true";
 }
+
+/** The retention observer/copy controller runs independently of render schedules. */
+export function studioRetentionMaintenanceCron(pattern: string): string | undefined {
+  return studioRetentionMaintenanceEnabled() ? pattern : undefined;
+}
+
+export function studioRetentionMaintenanceEnabled(): boolean {
+  return process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED === "true";
+}

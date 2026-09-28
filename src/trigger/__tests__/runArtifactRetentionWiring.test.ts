@@ -49,5 +49,22 @@ assert.match(
   "the worker must reload certificates, verify evidence, reauthorize release, and only then seal the ledger",
 );
 assert.doesNotMatch(sweeper, /deleteObjects|assets\.pruneRun/, "the hourly worker cannot delete mutable R2 keys or prune live asset rows");
+assert.match(
+  sweeper,
+  /id: "studio-retention-maintenance"[\s\S]*?cron: studioRetentionMaintenanceCron\("17 3 \* \* \*"\)[\s\S]*?run: async \(\) => runStudioRetentionMaintenance\(\)/,
+  "the dedicated schedule is gated independently and calls only maintenance work",
+);
+const maintenanceOnly = sweeper.slice(
+  sweeper.indexOf("async function observeAndCopyReleasedFinalMasters"),
+  sweeper.indexOf("async function runStudioRetentionMaintenance"),
+);
+assert.match(maintenanceOnly, /listReleaseChecks[\s\S]*?listFinalCopyChecks[\s\S]*?recordReleaseObservations[\s\S]*?createVerifiedReleasedFinalCopy/);
+assert.doesNotMatch(maintenanceOnly, /claimDue|runArtifactRetentions\.complete|tasks\.trigger|run-pipeline|dispatch-publish-intent|shared-delivery-recovery|publishIntents/,
+  "maintenance observation/copy work must never claim cleanup rows or dispatch render/publish tasks");
+assert.match(
+  sweeper,
+  /id: "run-artifact-retention-sweeper"[\s\S]*?cron: studioScheduleCron\("17 3 \* \* \*"\)/,
+  "the existing cleanup sweeper remains behind the global schedule gate",
+);
 
 console.log("run artifact retention wiring tests passed");

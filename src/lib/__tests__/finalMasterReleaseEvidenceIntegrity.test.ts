@@ -409,7 +409,7 @@ async function retentionWorkerDeletionOutcomes() {
       });
       const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
         const name = getFunctionName(reference);
-        if (name === "runArtifactRetentions:listReleaseChecks") return [];
+        if (name === "runArtifactRetentions:listReleaseChecks" || name === "runArtifactRetentions:listFinalCopyChecks") return [];
         if (name === "r2Retention:protectedKeysPage") return { page: [], isDone: true, continueCursor: "" };
         assert.equal(name, "youtubeAuth:getForChannel");
         return connector;

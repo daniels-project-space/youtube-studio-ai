@@ -1,4 +1,8 @@
-import { studioScheduleCron } from "@/lib/studioScheduleControl";
+import {
+  studioRetentionMaintenanceCron,
+  studioRetentionMaintenanceEnabled,
+  studioScheduleCron,
+} from "@/lib/studioScheduleControl";
 import { randomBytes } from "node:crypto";
 import { schedules } from "@trigger.dev/sdk";
 
@@ -149,27 +153,14 @@ function convexClient(): ConvexHttpClient {
   return new ConvexHttpClient(url);
 }
 
-export async function sweepDueRunArtifactRetentions(input?: {
-  ownerId?: string;
-  now?: number;
-  limit?: number;
-}): Promise<{ claimed: number; completed: number; blocked: number; removedObjects: number }> {
-  const log = (message: string, extra?: Record<string, unknown>) =>
-    console.log(`[run-artifact-retention] ${message}`, extra ?? "");
-  await bootstrapSecrets(log, {
-    services: ["cloudflare", "youtube"],
-    required: [
-      "R2_ACCOUNT_ID",
-      "R2_ACCESS_KEY_ID",
-      "R2_SECRET_ACCESS_KEY",
-      "R2_BUCKET",
-      "STUDIO_CONVEX_JWT_PRIVATE_KEY",
-    ],
-  });
-  const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
-  const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
-  const convex = convexClient();
-  const checkNow = input?.now ?? Date.now();
+async function observeAndCopyReleasedFinalMasters(args: {
+  ownerId: string;
+  convex: ConvexHttpClient;
+  now: number;
+  log: (message: string, extra?: Record<string, unknown>) => void;
+}): Promise<{ checked: number; confirmed: number; deferred: number; copied: number; held: number }> {
+  const { ownerId, convex, now, log } = args;
+  const checkNow = now;
   const [scheduledChecks, copyChecks] = await Promise.all([
     convex.query(api.runArtifactRetentions.listReleaseChecks, { ownerId, now: checkNow }),
     convex.query(api.runArtifactRetentions.listFinalCopyChecks, { ownerId, now: checkNow }),
@@ -193,6 +184,8 @@ export async function sweepDueRunArtifactRetentions(input?: {
     }),
   });
   if (releaseChecks.length) log("release checks complete", releases);
+  let copied = 0;
+  let held = 0;
   // A failed copy leaves the certified source intact and gets another public
   // observation on the retention row's bounded retry cadence.
   for (const check of releaseChecks) {
@@ -220,14 +213,56 @@ export async function sweepDueRunArtifactRetentions(input?: {
               observedAt, observation };
           },
         });
+        copied++;
         log(`certified released final copy recorded for ${check.runId}`, { copyKey });
       }
     } catch (error) {
+      held++;
       log(`certified released final copy held for ${check.runId}`, {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
   }
+  return { checked: releaseChecks.length, confirmed: releases.confirmed, deferred: releases.deferred, copied, held };
+}
+
+export async function runStudioRetentionMaintenance() {
+  if (!studioRetentionMaintenanceEnabled()) return { skipped: true, reason: "retention maintenance is disabled" };
+  const log = (message: string, extra?: Record<string, unknown>) =>
+    console.log(`[studio-retention-maintenance] ${message}`, extra ?? "");
+  await bootstrapSecrets(log, {
+    services: ["cloudflare", "youtube"],
+    required: ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "STUDIO_CONVEX_JWT_PRIVATE_KEY"],
+  });
+  return observeAndCopyReleasedFinalMasters({
+    ownerId: process.env.STUDIO_OWNER_ID ?? "owner_daniel",
+    convex: convexClient(),
+    now: Date.now(),
+    log,
+  });
+}
+
+export async function sweepDueRunArtifactRetentions(input?: {
+  ownerId?: string;
+  now?: number;
+  limit?: number;
+}): Promise<{ claimed: number; completed: number; blocked: number; removedObjects: number }> {
+  const log = (message: string, extra?: Record<string, unknown>) =>
+    console.log(`[run-artifact-retention] ${message}`, extra ?? "");
+  await bootstrapSecrets(log, {
+    services: ["cloudflare", "youtube"],
+    required: [
+      "R2_ACCOUNT_ID",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "R2_BUCKET",
+      "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+    ],
+  });
+  const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
+  const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
+  const convex = convexClient();
+  await observeAndCopyReleasedFinalMasters({ ownerId, convex, now: input?.now ?? Date.now(), log });
   let claimed = 0;
   let completed = 0;
   let blocked = 0;
@@ -333,4 +368,15 @@ export const runArtifactRetentionSweeper = schedules.task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: async () => sweepDueRunArtifactRetentions(),
+});
+
+/** Release observation and certified-copy maintenance stays independent of the
+ * global schedule switch, and never claims or seals cleanup rows. */
+export const studioRetentionMaintenanceSchedule = schedules.task({
+  id: "studio-retention-maintenance",
+  cron: studioRetentionMaintenanceCron("17 3 * * *"),
+  maxDuration: 3_600,
+  retry: { maxAttempts: 1 },
+  queue: { concurrencyLimit: 1 },
+  run: async () => runStudioRetentionMaintenance(),
 });

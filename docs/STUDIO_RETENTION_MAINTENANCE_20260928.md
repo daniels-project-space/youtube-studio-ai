@@ -1,0 +1,11 @@
+# YouTube Studio retention maintenance controller
+
+The Trigger task `studio-retention-maintenance` runs at `17 3 * * *` UTC only when `STUDIO_RETENTION_MAINTENANCE_ENABLED` is exactly `true`. This flag is separate from `STUDIO_SCHEDULES_ENABLED`. The controller reads due release observations, records the observed release state, and attempts exact certified final-master copies. It does not claim cleanup rows, seal cleanup ledgers, dispatch render work, or dispatch publish work.
+
+The existing `run-artifact-retention-sweeper` stays behind `STUDIO_SCHEDULES_ENABLED`. Leave that global flag absent while the render and publishing schedules are paused. The maintenance flag defaults off and is forwarded to Trigger only when present in the Trigger build environment. Do not set either flag as part of a code deployment unless the corresponding schedule activation has been reviewed separately.
+
+A maintenance run can write a certified release copy to R2. It requires the exact Studio bucket/account binding, active YouTube connector, fresh public/processed observation, and verified source certificate and bytes. If any proof is unavailable, the source remains in place and the candidate is held for a later observation. This schedule does not enable R2 deletion, lifecycle rules, or playback-reader migration.
+
+## Post-deploy proof
+
+With both flags absent, Trigger must show no active Studio schedules. If the maintenance flag is later enabled by an explicitly reviewed operator, the only active schedule while the global flag remains absent should be `studio-retention-maintenance` at `17 3 * * *`. Inspect schedule state and recent runs for no `generation-scheduler`, `run-pipeline`, `dispatch-publish-intent`, `publish-intent-scheduler`, or `shared-delivery-recovery` activity. The maintenance task's run result reports observation and copy counts; source code and wiring tests ensure it does not call a render/publish dispatcher or cleanup claim/completion mutation.
