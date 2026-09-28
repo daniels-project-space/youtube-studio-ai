@@ -37,18 +37,27 @@ test("released finals reject overwriteable writers and mismatched expiry", async
 });
 test("only marked Lo-Fi run stills can be release-copy sources and destination cannot be overwritten", async () => {
   const keyPrefix = "owner/daniel/channel/show/";
-  const source = `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.png`;
+  const job = `image-${"a".repeat(32)}`;
+  const source = `${keyPrefix}runs/run-1/lofi-keyframe/images/image/keyframe-1-c01.png`;
+  const bridgeSource = `imagecraft/${keyPrefix}runs/run-1/lofi-keyframe/images/${job}/stills/keyframe-1-c01.png`;
   assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", source), true);
+  assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", bridgeSource), true);
   for (const other of [
-    `${keyPrefix}runs/run-2/lofi-keyframe/images/keyframe-1.png`,
+    source.replace("runs/run-1/", "runs/run-2/"),
+    source.replace("-c01.png", "-c02.png"),
+    bridgeSource.replace(job, "image-unsafe"),
+    bridgeSource.replace("-c01.png", "-c02.png"),
+    `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.png`,
     `${keyPrefix}runs/run-1/thumbnail/images/hero.png`,
     `${keyPrefix}library/lofi-keyframe/images/keyframe-1.png`,
-    `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.jpg`,
+    source.replace(".png", ".jpg"),
+    source.replace("keyframe-1-c01", "unrelated"),
   ]) assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", other), false);
-  const key = releasedKeyframeKey(keyPrefix, "run-1", releasedAt, "a".repeat(64));
+  const key = releasedKeyframeKey(keyPrefix, "run-1", "asset_1", releasedAt, "a".repeat(64));
   assert.ok(key.startsWith("released-ordinary/v2/owner/daniel/"));
   assert.equal(isOwnedReleasedCopyKey(key, "daniel"), true);
-  assert.deepEqual(releasedKeyframeIdentity(key), { releaseAt: releasedAt, sha256: "a".repeat(64) });
+  assert.deepEqual(releasedKeyframeIdentity(key), { assetId: "asset_1", releaseAt: releasedAt, sha256: "a".repeat(64) });
+  assert.equal(releasedKeyframeIdentity(key.replace("/asset_1/", "/other/"))?.assetId, "other");
   await assert.rejects(() => presignUpload(key), /released copies cannot use presigned uploads/);
   await assert.rejects(() => putObject(key, "bytes"), /released keyframe requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(key, "/missing", {
@@ -130,14 +139,16 @@ test("scheduled classed proof binds exact source, destination identity, digest a
   const loopHead = { ...head, metadata: { ...head.metadata, retentionAssetClass: "lofi-loop-unit",
     retentionAssetId: "unit_1", retentionSourceKey: loopSource } };
   assert.equal(hasExactScheduledClassedProof(loopRow, loopHead, due), true);
-  const stillSource = `${channel}runs/run-1/lofi-keyframe/images/one.png`;
+  const stillSource = `${channel}runs/run-1/lofi-keyframe/images/image/keyframe-1-c01.png`;
   const stillRow = { ...row,
-    r2Key: releasedKeyframeKey(channel, "run-1", releasedAt, sha256),
+    r2Key: releasedKeyframeKey(channel, "run-1", "asset_1", releasedAt, sha256),
     classedProof: { ...row.classedProof, class: "lofi-keyframe" as const,
       sourceKey: stillSource } };
   const stillHead = { ...head, metadata: { ...head.metadata, retentionKeyframeSha256: sha256,
-    retentionSourceKey: stillSource } };
+    retentionAssetClass: "lofi-keyframe", retentionSourceKey: stillSource } };
   assert.equal(hasExactScheduledClassedProof(stillRow, stillHead, due), true);
+  assert.equal(hasExactScheduledClassedProof(stillRow, { ...stillHead,
+    metadata: { ...stillHead.metadata, retentionAssetClass: "lofi-clip" } }, due), false);
 });
 test("exact nested v1 receipts remain readable until their original deadline", () => {
   const root = "owner/daniel/channel/show/runs/run-1/";

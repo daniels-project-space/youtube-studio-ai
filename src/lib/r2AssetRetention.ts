@@ -124,7 +124,7 @@ export function hasExactScheduledClassedProof(
   let expectedKey: string;
   try {
     expectedKey = proof.class === "lofi-keyframe"
-      ? releasedKeyframeKey(keyPrefix, runId, proof.releaseAt, proof.sha256)
+      ? releasedKeyframeKey(keyPrefix, runId, proof.assetId, proof.releaseAt, proof.sha256)
       : releasedOrdinaryAssetKey(keyPrefix, runId, proof.class, proof.assetId, proof.releaseAt, proof.sha256);
   } catch {
     return false;
@@ -141,28 +141,35 @@ export function hasExactScheduledClassedProof(
     metadata.retentionassetid === proof.assetId &&
     metadata.retentionreleaseat === String(proof.releaseAt) &&
     metadata.retentionexpiresat === String(row.expiresAt) &&
-    (proof.class === "lofi-keyframe" || metadata.retentionassetclass === proof.class);
+    metadata.retentionassetclass === proof.class;
 }
 
 /** The only eligible ordinary copy source is a marked Lo-Fi still in its own run. */
 export function isLoFiKeyframeSource(keyPrefix: string, runId: string, sourceKey: string): boolean {
-  return sourceKey.startsWith(`${keyPrefix}runs/${runId}/lofi-keyframe/images/`) &&
-    /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/lofi-keyframe\/images\/[^/]+\.png$/u.test(sourceKey);
-}
-
-export function releasedKeyframeKey(keyPrefix: string, runId: string, releaseAt: number, sha256: string): string {
-  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
-      !Number.isSafeInteger(releaseAt) || releaseAt < 0 || !/^[a-f0-9]{64}$/u.test(sha256)) {
-    throw new Error("released keyframe needs an owned run, release time, and SHA-256");
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[A-Za-z0-9_-]+$/u.test(runId)) return false;
+  const sourcePrefix = `${keyPrefix}runs/${runId}/lofi-keyframe/images/`;
+  if (sourceKey.startsWith(sourcePrefix)) {
+    return /^image\/keyframe-[1-9][0-9]*-c01\.png$/u.test(sourceKey.slice(sourcePrefix.length));
   }
-  return `released-ordinary/v2/${keyPrefix}runs/${runId}/lofi-keyframe/${releaseAt}-${sha256}.png`;
+  const bridgePrefix = `imagecraft/${sourcePrefix}`;
+  return sourceKey.startsWith(bridgePrefix) &&
+    /^image-[a-f0-9]{32}\/stills\/keyframe-[1-9][0-9]*-c01\.png$/u.test(sourceKey.slice(bridgePrefix.length));
 }
 
-export function releasedKeyframeIdentity(key: string): { releaseAt: number; sha256: string } | null {
-  const match = /^released-ordinary\/v2\/owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/lofi-keyframe\/([0-9]+)-([a-f0-9]{64})\.png$/u.exec(key);
+export function releasedKeyframeKey(keyPrefix: string, runId: string, assetId: string, releaseAt: number, sha256: string): string {
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
+      !/^[A-Za-z0-9_-]+$/u.test(assetId) ||
+      !Number.isSafeInteger(releaseAt) || releaseAt < 0 || !/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new Error("released keyframe needs an owned asset, release time, and SHA-256");
+  }
+  return `released-ordinary/v2/${keyPrefix}runs/${runId}/lofi-keyframe/${assetId}/${releaseAt}-${sha256}.png`;
+}
+
+export function releasedKeyframeIdentity(key: string): { assetId: string; releaseAt: number; sha256: string } | null {
+  const match = /^released-ordinary\/v2\/owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/lofi-keyframe\/([A-Za-z0-9_-]+)\/([0-9]+)-([a-f0-9]{64})\.png$/u.exec(key);
   if (!match) return null;
-  const releaseAt = Number(match[1]);
-  return Number.isSafeInteger(releaseAt) && releaseAt >= 0 ? { releaseAt, sha256: match[2] } : null;
+  const releaseAt = Number(match[2]);
+  return Number.isSafeInteger(releaseAt) && releaseAt >= 0 ? { assetId: match[1], releaseAt, sha256: match[3] } : null;
 }
 
 /** Release copies are separate from the certificate's immutable source master. */

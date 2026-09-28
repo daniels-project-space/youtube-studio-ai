@@ -16,7 +16,8 @@ export function projectReleasedOrdinaryAssets<T extends Asset>(
   }
   return assets.map(asset => {
     const copy = byAsset.get(String(asset._id));
-    const expected = asset.kind === "clip" ? "lofi-clip" : asset.kind === "loop_unit" ? "lofi-loop-unit" : null;
+    const expected = asset.kind === "clip" ? "lofi-clip" : asset.kind === "loop_unit" ? "lofi-loop-unit"
+      : asset.kind === "keyframe" ? "lofi-keyframe" : null;
     return copy && expected === copy.assetClass && copy.ownerId === asset.ownerId &&
       copy.channelId === asset.channelId && copy.sourceKey === asset.r2Key
       ? { ...asset, r2Key: copy.copyKey } : asset;
