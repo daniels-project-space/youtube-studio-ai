@@ -154,3 +154,36 @@ export async function readRenderEngineH3Contract(options: {
     return { contractMatched: false, reason: "Render Engine exact H3 contract probe failed" };
   }
 }
+
+/** Persist a frozen weekly order in the Engine's project ledger. Staging is not a render. */
+export async function stageRenderEngineH3BatchHandoff(
+  handoff: ReturnType<typeof buildRenderEngineH3BatchHandoff>,
+  options: { env?: Readonly<Record<string, string | undefined>>; fetcher?: typeof fetch } = {},
+): Promise<{ batchId: string; state: "staged-unqualified"; acceptedJobs: number; dispatchEnabled: false }> {
+  assertRenderEngineH3BatchHandoff(handoff);
+  const env = options.env ?? process.env;
+  const token = env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
+  const rawEndpoint = env.RENDER_ENGINE_CONVEX_SITE_URL?.trim() ?? "";
+  if (!/^[a-f0-9]{64}$/u.test(token)) throw new Error("Render Engine project capability is unavailable");
+  let endpoint: URL;
+  try { endpoint = new URL(rawEndpoint); } catch { throw new Error("Render Engine endpoint is unavailable"); }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") {
+    throw new Error("Render Engine endpoint must be a credential-free HTTPS origin");
+  }
+  const response = await (options.fetcher ?? fetch)(new URL("/client/studio-h3-weekly-batches", endpoint), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(handoff),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (response.status !== 202) throw new Error(`Render Engine weekly H3 staging failed (HTTP ${response.status})`);
+  const result: unknown = await response.json();
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("Render Engine weekly H3 staging response is malformed");
+  const record = result as Record<string, unknown>;
+  if (typeof record.batchId !== "string" || !record.batchId || record.state !== "staged-unqualified" ||
+      record.dispatchEnabled !== false || record.acceptedJobs !== handoff.jobs.length) {
+    throw new Error("Render Engine weekly H3 staging response does not match the frozen order");
+  }
+  return { batchId: record.batchId, state: "staged-unqualified", acceptedJobs: handoff.jobs.length, dispatchEnabled: false };
+}

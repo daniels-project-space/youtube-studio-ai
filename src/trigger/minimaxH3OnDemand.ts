@@ -1,22 +1,19 @@
 /**
- * The paid on-demand H3 data plane. Weekly preparation is intentionally kept
- * on the Salad batch task; interactive or repair renders use this Novita
- * route and the same R2-backed request/receipt contract.
+ * Legacy on-demand H3 receipt reconciliation. New paid dispatch is held until
+ * Render Engine has a qualified native profile and terminal receipt route.
  */
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   miniMaxH3RequestKey,
-  renderMiniMaxH3,
   type MiniMaxH3RenderRequest,
 } from "@/lib/minimaxH3";
 import {
   MiniMaxH3OpeningMotionQaEvidenceSchema,
   type MiniMaxH3OpeningMotionQaEvidence,
 } from "@/engine/cinematicClipReview";
-import { getObjectBytes, putObject } from "@/lib/storage";
-import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { getObjectBytes } from "@/lib/storage";
+import { sha256BytesHex } from "@/lib/sha256";
 
 export interface MiniMaxH3OnDemandArgs {
   /** Stable owner/run identity used for task idempotency and reconciliation. */
@@ -160,74 +157,22 @@ async function readPersistedReceipt(
 
 export const minimaxH3OnDemandTask = task({
   id: "minimax-h3-on-demand",
-  // A transport failure after submission is an unknown outcome. The caller
-  // reconciles the request key instead of Trigger replaying a paid render.
   maxDuration: 1_200,
   retry: { maxAttempts: 1 },
   run: async (rawPayload: MiniMaxH3OnDemandArgs) => {
     const payload = assertMiniMaxH3OnDemandArgs(rawPayload);
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "novita"],
-      required: [
-        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-        "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN",
-      ],
+      services: ["cloudflare"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
-    const request = {
-      ...payload.request,
-      provider: "novita" as const,
-      execution: "on-demand" as const,
-    };
-    const requestKey = miniMaxH3RequestKey(request);
+    const requestKey = miniMaxH3RequestKey({ ...payload.request, provider: "novita", execution: "on-demand" });
     const prior = await readPersistedReceipt(payload.receiptKey, {
       orderKey: payload.orderKey,
       requestKey,
-      outputKey: request.output.r2Key,
+      outputKey: payload.request.output.r2Key,
     });
     if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
-    const result = await renderMiniMaxH3({
-      ...request,
-    });
-    if (!result.openingMotionQa) {
-      throw new Error("on-demand MiniMax H3 shared opening-motion admission did not return evidence");
-    }
-    const receipt = {
-      schema: "minimax-h3-on-demand/v1",
-      orderKey: payload.orderKey,
-      requestKey: result.requestKey,
-      output: {
-        r2Key: result.receipt.output.r2Key,
-        contentSha256: result.receipt.output.contentSha256,
-        byteLength: result.receipt.output.byteLength,
-        costUsd: result.receipt.runtime.costUsd,
-      },
-      providerReceipt: result.receipt,
-      openingMotionQa: result.openingMotionQa,
-      createdAt: Date.now(),
-    };
-    const body = canonicalJson(receipt);
-    // This is create-only. A lost response is reconciled from the exact
-    // receipt/request key; it can never overwrite a different paid result.
-    try {
-      await putObject(payload.receiptKey, body, {
-        contentType: "application/json",
-        metadata: {
-          "h3-on-demand-receipt": "v1",
-          "h3-on-demand-sha256": sha256Hex(body),
-        },
-        ifNoneMatch: "*",
-      });
-    } catch (error) {
-      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-      if (status !== 409 && status !== 412) throw error;
-      const winner = await readPersistedReceipt(payload.receiptKey, {
-        orderKey: payload.orderKey,
-        requestKey,
-        outputKey: request.output.r2Key,
-      });
-      if (!winner) throw error;
-      return { receiptKey: payload.receiptKey, ...winner, reconciled: true as const };
-    }
-    return { receiptKey: payload.receiptKey, ...receipt };
+    // Preserve old completed receipts, while refusing any new direct provider spend.
+    throw new Error(`MiniMax H3 on-demand order ${payload.orderKey} is held for Render Engine qualification`);
   },
 });

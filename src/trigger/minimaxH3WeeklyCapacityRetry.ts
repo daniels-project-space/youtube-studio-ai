@@ -2,8 +2,8 @@
  * Durable, read-only capacity waiter for the weekly H3 Salad lane.
  *
  * This task never calls a paid worker. It either re-admits the original
- * Salad order, schedules the next bounded check, or hands the frozen packet
- * to the agreed Novita fallback after the 24-hour wait window.
+ * Salad order, schedules the next bounded check, or stages the frozen packet
+ * in Render Engine after the 24-hour wait window.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -17,6 +17,7 @@ import { getObjectBytes } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
 import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
+import { buildRenderEngineH3BatchHandoff, stageRenderEngineH3BatchHandoff } from "@/lib/renderEngineH3Contract";
 import {
   assertMiniMaxH3WeeklyBatchArgs,
   reconcileWeeklyOrderRejections,
@@ -86,20 +87,17 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
     const now = Date.now();
     const deadline = payload.capacityHoldStartedAt + MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS;
     if (now >= deadline) {
-      const idempotencyKey = await idempotencyKeys.create(
-        `minimax-h3-weekly-novita-fallback:${payload.ownerId}:${payload.orderKey}`,
-        { scope: "global" },
-      );
-      const handle = await tasks.trigger("minimax-h3-weekly-novita-fallback", payload, {
-        concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
-        idempotencyKey,
-        tags: [miniMaxH3WeeklyOrderTag({ ownerId: payload.ownerId, receiptKey: payload.receiptKey, orderKey: payload.orderKey })],
+      const handoff = buildRenderEngineH3BatchHandoff({
+        ownerId: payload.ownerId, orderKey: payload.orderKey,
+        receiptKey: payload.receiptKey, jobs: payload.jobs,
       });
+      const staged = await stageRenderEngineH3BatchHandoff(handoff);
       return {
-        state: "fallback_queued" as const,
-        provider: "novita" as const,
+        state: "engine_staged_unqualified" as const,
+        provider: "render-engine" as const,
         waitedMs: now - payload.capacityHoldStartedAt,
-        triggerRunId: handle.id,
+        batchId: staged.batchId,
+        receiptKey: payload.receiptKey,
       };
     }
     try {

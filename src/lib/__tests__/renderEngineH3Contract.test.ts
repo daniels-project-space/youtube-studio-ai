@@ -5,6 +5,7 @@ import {
   buildRenderEngineH3BatchHandoff,
   exactRenderEngineH3Contract,
   readRenderEngineH3Contract,
+  stageRenderEngineH3BatchHandoff,
 } from "@/lib/renderEngineH3Contract";
 import { MINIMAX_H3_MANIFEST_SHA256, MINIMAX_H3_PROFILE, MINIMAX_H3_WORKER_CONTRACT } from "@/lib/minimaxH3Admission";
 
@@ -78,6 +79,19 @@ async function main() {
   assert.deepEqual(missing, { contractMatched: false, reason: "Render Engine exact H3 contract unavailable (HTTP 404)" });
   const weaker = await readRenderEngineH3Contract({ env, fetcher: async () => Response.json({ ...contract, profile: { ...contract.profile, width: 864 } }) });
   assert.equal(weaker.contractMatched, false);
+  const staged = await stageRenderEngineH3BatchHandoff(handoff, {
+    env,
+    fetcher: async (url, init) => {
+      assert.equal(new URL(String(url)).pathname, "/client/studio-h3-weekly-batches");
+      assert.equal(init?.method, "POST");
+      assert.deepEqual(JSON.parse(String(init?.body)), handoff);
+      return Response.json({ batchId: "batch1", state: "staged-unqualified", acceptedJobs: 1, dispatchEnabled: false }, { status: 202 });
+    },
+  });
+  assert.deepEqual(staged, { batchId: "batch1", state: "staged-unqualified", acceptedJobs: 1, dispatchEnabled: false });
+  await assert.rejects(stageRenderEngineH3BatchHandoff(handoff, { env, fetcher: async () => Response.json({
+    batchId: "batch1", state: "complete", acceptedJobs: 1, dispatchEnabled: true,
+  }, { status: 202 }) }), /does not match the frozen order/);
 }
 
 void main();
