@@ -164,7 +164,8 @@ async function observeAndCopyReleasedFinalMasters(args: {
   convex: ConvexHttpClient;
   now: number;
   log: (message: string, extra?: Record<string, unknown>) => void;
-}): Promise<{ checked: number; confirmed: number; deferred: number; copied: number; held: number }> {
+  cleanupHandoff?: () => Promise<unknown>;
+}): Promise<{ checked: number; confirmed: number; deferred: number; copied: number; held: number; cleanup?: unknown }> {
   const { ownerId, convex, now, log } = args;
   const checkNow = now;
   const [scheduledChecks, copyChecks] = await Promise.all([
@@ -190,6 +191,27 @@ async function observeAndCopyReleasedFinalMasters(args: {
     }),
   });
   if (releaseChecks.length) log("release checks complete", releases);
+  const handoff = await runRetentionMaintenanceHandoff({
+    observe: async () => ({ releaseChecks, releases }),
+    cleanup: args.cleanupHandoff ?? (async () => undefined),
+    continueWork: async () => copyReleasedFinalMasters({ ownerId, convex, log, releaseChecks }),
+  });
+  return {
+    checked: releaseChecks.length,
+    confirmed: releases.confirmed,
+    deferred: releases.deferred,
+    ...handoff.result,
+    ...(handoff.cleanup === undefined ? {} : { cleanup: handoff.cleanup }),
+  };
+}
+
+async function copyReleasedFinalMasters(args: {
+  ownerId: string;
+  convex: ConvexHttpClient;
+  log: (message: string, extra?: Record<string, unknown>) => void;
+  releaseChecks: RunArtifactReleaseCheck[];
+}): Promise<{ copied: number; held: number }> {
+  const { ownerId, convex, log, releaseChecks } = args;
   let copied = 0;
   let held = 0;
   // A failed copy leaves the certified source intact and gets another public
@@ -229,7 +251,7 @@ async function observeAndCopyReleasedFinalMasters(args: {
       });
     }
   }
-  return { checked: releaseChecks.length, confirmed: releases.confirmed, deferred: releases.deferred, copied, held };
+  return { copied, held };
 }
 
 export async function runStudioRetentionMaintenance() {
@@ -242,24 +264,26 @@ export async function runStudioRetentionMaintenance() {
   });
   const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const convex = convexClient();
-  const handoff = await runRetentionMaintenanceHandoff({
-    observe: () => observeAndCopyReleasedFinalMasters({ ownerId, convex, now: Date.now(), log }),
-    cleanup: () => sweepDueRunArtifactRetentions({ ownerId }),
+  return observeAndCopyReleasedFinalMasters({
+    ownerId,
+    convex,
+    now: Date.now(),
+    log,
+    cleanupHandoff: () => sweepDueRunArtifactRetentions({ ownerId }),
   });
-  return handoff.cleanup === undefined
-    ? handoff.observation
-    : { ...handoff.observation, cleanup: handoff.cleanup };
 }
 
-/** Ordered handoff closes the same-minute cron race: cleanup starts only after
- * release observations and any certified-copy work have completed. */
-export async function runRetentionMaintenanceHandoff<TObservation, TCleanup>(args: {
+/** Cleanup is handed off after observation commits and before potentially slow
+ * certified-copy work, preserving the release freshness window. */
+export async function runRetentionMaintenanceHandoff<TObservation, TCleanup, TResult>(args: {
   observe: () => Promise<TObservation>;
-  cleanup: () => Promise<TCleanup>;
-}): Promise<{ observation: TObservation; cleanup?: TCleanup }> {
+  cleanup: (observation: TObservation) => Promise<TCleanup>;
+  continueWork: (observation: TObservation) => Promise<TResult>;
+}): Promise<{ observation: TObservation; cleanup?: TCleanup; result: TResult }> {
   const observation = await args.observe();
-  if (!studioSchedulesEnabled()) return { observation };
-  return { observation, cleanup: await args.cleanup() };
+  const cleanup = studioSchedulesEnabled() ? await args.cleanup(observation) : undefined;
+  const result = await args.continueWork(observation);
+  return { observation, ...(cleanup === undefined ? {} : { cleanup }), result };
 }
 
 export async function sweepDueRunArtifactRetentions(input?: {

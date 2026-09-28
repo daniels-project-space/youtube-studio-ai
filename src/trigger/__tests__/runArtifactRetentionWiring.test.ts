@@ -7,6 +7,7 @@ const schema = source("convex/schema.ts");
 const ledger = source("convex/runArtifactRetentions.ts");
 const upload = source("src/trigger/blocks/lofiBlocks.ts");
 const sweeper = source("src/trigger/runArtifactRetentionSweeper.ts");
+const triggerConfig = source("trigger.config.ts");
 
 assert.match(
   schema,
@@ -68,7 +69,9 @@ assert.match(
 );
 assert.match(sweeper, /if \(!studioRetentionMaintenanceEnabled\(\)\) \{[\s\S]*?observeAndCopyReleasedFinalMasters[\s\S]*?\n  \}/,
   "the legacy cleanup sweep delegates only its observation/copy phase to dedicated maintenance");
-assert.match(sweeper, /runRetentionMaintenanceHandoff\([\s\S]*?observe: \(\) => observeAndCopyReleasedFinalMasters[\s\S]*?cleanup: \(\) => sweepDueRunArtifactRetentions/,
-  "the dedicated controller hands fresh observation state to globally gated cleanup in order");
+assert.match(sweeper, /runRetentionMaintenanceHandoff\([\s\S]*?observe: async \(\) => \(\{ releaseChecks, releases \}\)[\s\S]*?cleanup: args\.cleanupHandoff[\s\S]*?continueWork: async \(\) => copyReleasedFinalMasters/,
+  "the dedicated controller hands fresh observations to cleanup before final-copy work");
+assert.match(triggerConfig, /"STUDIO_SCHEDULES_ENABLED"[\s\S]*?"STUDIO_RETENTION_MAINTENANCE_ENABLED"/,
+  "the worker receives the global schedule gate used by the maintenance cleanup handoff");
 
 console.log("run artifact retention wiring tests passed");

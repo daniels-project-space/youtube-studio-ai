@@ -135,22 +135,32 @@ test("maintenance handoff claims and completes cleanup only after fresh observat
     const result = await runRetentionMaintenanceHandoff({
       observe: async () => {
         calls.push("runArtifactRetentions:recordReleaseObservations");
-        return { confirmed: 1, deferred: 0 };
+        return { confirmed: 1, deferred: 0, observedAt: 9_000 };
       },
-      cleanup: async () => {
+      cleanup: async (state) => {
+        assert.ok(10_000 - state.observedAt >= 0 && 10_000 - state.observedAt < 5 * 60_000,
+          "cleanup claim sees the just-committed release observation inside its five-minute window");
         calls.push("runArtifactRetentions:claimDue");
         calls.push("runArtifactRetentions:complete");
         return { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 };
+      },
+      continueWork: async () => {
+        // Simulate a copy that runs beyond the Convex freshness window.
+        const laterCopyAt = 10_000 + 6 * 60_000;
+        calls.push(`copy-finished:${laterCopyAt}`);
+        return { copied: 1, held: 0 };
       },
     });
     assert.deepEqual(calls, [
       "runArtifactRetentions:recordReleaseObservations",
       "runArtifactRetentions:claimDue",
       "runArtifactRetentions:complete",
+      "copy-finished:370000",
     ]);
     assert.deepEqual(result, {
-      observation: { confirmed: 1, deferred: 0 },
+      observation: { confirmed: 1, deferred: 0, observedAt: 9_000 },
       cleanup: { claimed: 1, completed: 1, blocked: 0, removedObjects: 0 },
+      result: { copied: 1, held: 0 },
     });
   } finally {
     if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
