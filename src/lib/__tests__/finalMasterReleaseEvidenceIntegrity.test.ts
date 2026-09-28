@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { mock } from "node:test";
-import { GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getFunctionName } from "convex/server";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ import {
   createPackageToOpeningReceipt,
 } from "@/engine/packageToOpening";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
-import { ObjectDeletionError, getR2Client } from "@/lib/storage";
+import { getR2Client } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { sweepDueRunArtifactRetentions } from "@/trigger/runArtifactRetentionSweeper";
 import { encryptSecret } from "@/lib/secretEnvelope";
@@ -294,14 +294,12 @@ async function pruneFixture(
   additionalFixtures: Array<ReturnType<typeof buildFixture>> = [],
   overrides: {
     list?: (keys: string[]) => string[];
-    delete?: (keys: string[], objects: Map<string, Buffer>) => Promise<number>;
   } = {},
 ) {
   const objects = new Map(fixture.objects);
   for (const additional of additionalFixtures) {
     for (const [key, bytes] of additional.objects) objects.set(key, bytes);
   }
-  const deleteCalls: string[][] = [];
   const result = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
     keyPrefix,
     runId,
@@ -322,14 +320,8 @@ async function pruneFixture(
       const keys = [...objects.keys()].filter((key) => key.startsWith(prefix));
       return overrides.list ? overrides.list(keys) : keys;
     },
-    deleteObjects: async (keys) => {
-      deleteCalls.push([...keys]);
-      if (overrides.delete) return overrides.delete(keys, objects);
-      for (const key of keys) objects.delete(key);
-      return keys.length;
-    },
   });
-  return { result, deleteCalls, objects };
+  return { result, objects };
 }
 
 /** Runs the actual sweeper → certificate checks → storage SDK wrapper boundary. */
@@ -347,12 +339,11 @@ async function retentionWorkerDeletionOutcomes() {
   const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
   Object.assign(process.env, env);
   try {
-    for (const mode of ["partial", "complete", "asset-row-failure", "locked-during-verification",
+    for (const mode of ["complete", "locked-during-verification",
       "expired-during-verification", "private-at-deletion", "connector-changed", "run-changed", "provider-unavailable",
       "empty-retry", "empty-retry-locked"] as const) {
       const empty = mode.startsWith("empty-retry");
       const completed = mode === "complete" || mode === "empty-retry";
-      const denied = !["partial", "complete", "asset-row-failure", "empty-retry"].includes(mode);
       const f = buildFixture();
       f.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("second intermediate"));
       if (empty) for (const key of f.objects.keys()) {
@@ -360,7 +351,7 @@ async function retentionWorkerDeletionOutcomes() {
       }
       const operations: string[] = [];
       const events: string[] = [];
-      const publishedAt = new Date(Date.now() - 15 * 86_400_000).toISOString();
+      const publishedAt = new Date(Date.now() - 31 * 86_400_000).toISOString();
       const retention: Record<string, unknown> = {
         _id: "retention-fixture", ownerId: "alice", channelId: "channel-fixture", runId,
         keyPrefix, certificateKey: f.certificateKey, additionalCertificateKeys: [], keepNames: ["final.mp4"],
@@ -414,22 +405,12 @@ async function retentionWorkerDeletionOutcomes() {
           if (mode === "expired-during-verification") retention.leaseExpiresAt = Date.now() - 1;
           return { Contents: [...f.objects.keys()].map((Key) => ({ Key })), IsTruncated: false };
         }
-        assert.ok(command instanceof DeleteObjectsCommand);
-        assert.equal(empty, false, "a retry with only retained evidence must not send an empty deletion request");
-        assert.equal(events.at(-1), "authorized", "storage must follow the real authority handler");
-        events.push("deleted");
-        assert.equal(command.input.Delete?.Quiet, false);
-        const rows = command.input.Delete!.Objects!;
-        assert.equal(rows.length, 2);
-        assert.ok(rows.every((row) => row.Key?.includes("/intermediates/")));
-        const deleted = mode === "partial" ? rows.slice(0, 1) : rows;
-        for (const row of deleted) f.objects.delete(row.Key!);
-        return { $metadata: { httpStatusCode: 200 }, Deleted: deleted,
-          Errors: mode === "partial" ? [{ ...rows[1], Code: "AccessDenied" }] : [] };
+        assert.fail(`hourly evidence sealer must not delete R2 objects: ${String(command)}`);
       });
       const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
         const name = getFunctionName(reference);
         if (name === "runArtifactRetentions:listReleaseChecks") return [];
+        if (name === "r2Retention:protectedKeysPage") return { page: [], isDone: true, continueCursor: "" };
         assert.equal(name, "youtubeAuth:getForChannel");
         return connector;
       });
@@ -447,13 +428,9 @@ async function retentionWorkerDeletionOutcomes() {
           events.push("authorized");
           return grant;
         }
-        if (name === "assets:pruneRun") {
-          if (mode === "asset-row-failure") throw new Error("controlled asset-row write failure");
-          return null;
-        }
         if (name === "runArtifactRetentions:complete") {
-          assert.equal(args.removedObjects, empty ? 0 : 2);
-          assert.equal(args.retainedObjectCount, 7);
+          assert.equal(args.removedObjects, 0);
+          assert.equal(args.retainedObjectCount, empty ? 7 : 9);
           return { status: "completed" };
         }
         assert.equal(name, "runArtifactRetentions:fail");
@@ -462,12 +439,11 @@ async function retentionWorkerDeletionOutcomes() {
       try {
         const result = await sweepDueRunArtifactRetentions({ limit: 1 });
         assert.deepEqual(result, { claimed: 1, completed: completed ? 1 : 0,
-          blocked: 0, removedObjects: denied || empty ? 0 : mode === "partial" ? 1 : 2 });
+          blocked: 0, removedObjects: 0 });
         assert.deepEqual(operations, ["runArtifactRetentions:claimDue",
           ...(mode === "provider-unavailable" ? [] : ["runArtifactRetentions:authorizeDeletion"]),
-          ...(mode === "partial" || denied ? [] : ["assets:pruneRun"]),
           completed ? "runArtifactRetentions:complete" : "runArtifactRetentions:fail"]);
-        assert.equal(f.objects.size, empty ? 7 : denied ? 9 : mode === "partial" ? 8 : 7);
+        assert.equal(f.objects.size, empty ? 7 : 9);
         assert.ok(f.objects.has(f.certificate.finalMaster.r2Key));
         assert.ok(f.objects.has(f.certificateKey));
       } finally { storage.mock.restore(); query.mock.restore(); mutation.mock.restore(); fetchMock.mock.restore(); }
@@ -604,49 +580,26 @@ async function main() {
   );
 
   const validCleanup = await pruneFixture(buildFixture());
-  assert.equal(validCleanup.result.cleaned, true, "cleanup may proceed only after all evidence bytes revalidate");
-  assert.deepEqual(
-    validCleanup.deleteCalls,
-    [[`${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`]],
-    "cleanup must retain the certificate, receipt, manifest, frames, and final master",
-  );
-  assert.equal(validCleanup.objects.size, 7);
-  assert.equal(validCleanup.result.retainedObjectCount, 7);
+  assert.equal(validCleanup.result.cleaned, true, "release evidence must revalidate before sealing");
+  assert.equal(validCleanup.result.removedObjects, 0, "hourly release sealing cannot delete fixed-name objects");
+  assert.equal(validCleanup.objects.size, 8);
+  assert.equal(validCleanup.result.retainedObjectCount, 8);
   for (const key of validCleanup.result.retainedReleaseEvidence) assert.ok(validCleanup.objects.has(key));
 
   for (const badKey of ["owner/bob/channel/other/runs/other/final.mp4", `${keyPrefix}runs/${runId}-other/a`, `${keyPrefix}runs/${runId}/`]) {
     const badListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, badKey] });
     assert.equal(badListing.result.cleaned, false);
     assert.equal(badListing.result.removedObjects, 0);
-    assert.equal(badListing.deleteCalls.length, 0, "listing must be scoped before any destructive request");
   }
   const duplicateListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, keys[0]] });
   assert.equal(duplicateListing.result.cleaned, false);
-  assert.equal(duplicateListing.deleteCalls.length, 0);
-
-  for (const deleted of [0, -1, 2, NaN, 0.5]) {
-    const shortDelete = await pruneFixture(buildFixture(), [], { delete: async () => deleted });
-    assert.equal(shortDelete.result.cleaned, false, "only an exact acknowledgement count may complete cleanup");
-    assert.equal(shortDelete.result.removedObjects, 0);
-    assert.equal(shortDelete.result.retainedObjectCount, 7);
-  }
-
-  const partialFixture = buildFixture();
-  partialFixture.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("another intermediate"));
-  const partial = await pruneFixture(partialFixture, [], {
-    delete: async (keys, objects) => {
-      objects.delete(keys[0]);
-      throw new ObjectDeletionError("Object deletion is incomplete", 1, keys.length);
-    },
-  });
-  assert.equal(partial.result.cleaned, false);
-  assert.equal(partial.result.removedObjects, 1);
-  assert.equal(partial.result.retainedObjectCount, 7);
-  for (const key of partial.result.retainedReleaseEvidence) assert.ok(partial.objects.has(key));
-  const retry = await pruneFixture({ ...partialFixture, objects: partial.objects });
-  assert.equal(retry.result.cleaned, true);
-  assert.equal(retry.result.removedObjects, 1, "a retry must target only the intermediate still present");
-  assert.equal(retry.objects.size, 7);
+  const withMoreIntermediates = buildFixture();
+  withMoreIntermediates.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("another intermediate"));
+  const retained = await pruneFixture(withMoreIntermediates);
+  assert.equal(retained.result.cleaned, true);
+  assert.equal(retained.result.removedObjects, 0);
+  assert.equal(retained.result.retainedObjectCount, 9);
+  assert.equal(retained.objects.size, 9);
 
   const parentForDerivativeCleanup = buildFixture();
   const shortForDerivativeCleanup = buildFixture("short");
@@ -659,14 +612,7 @@ async function main() {
     true,
     "cleanup may proceed when parent and independently certified derivative evidence both revalidate",
   );
-  assert.deepEqual(
-    derivativeCleanup.deleteCalls,
-    [[
-      `${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`,
-      `${keyPrefix}runs/${runId}/intermediates/short-scene-01.mp4`,
-    ]],
-    "cleanup must retain the derivative master and every one of its evidence objects",
-  );
+  assert.equal(derivativeCleanup.result.removedObjects, 0);
   assert(
     derivativeCleanup.result.retainedReleaseEvidence.includes(shortForDerivativeCleanup.certificate.finalMaster.r2Key),
     "the certified derivative master itself must survive cleanup",
@@ -685,18 +631,12 @@ async function main() {
     "a missing derivative evidence frame must stop cleanup before any object is deleted",
   );
   assert.equal(brokenDerivativeCleanup.result.removedObjects, 0);
-  assert.deepEqual(
-    brokenDerivativeCleanup.deleteCalls,
-    [],
-    "cleanup must preserve the whole run namespace when derivative proof is incomplete",
-  );
 
   const missingCleanupFixture = buildFixture();
   missingCleanupFixture.objects.delete(missingCleanupFixture.frameArtifacts[0].r2Key);
   const missingCleanup = await pruneFixture(missingCleanupFixture);
   assert.equal(missingCleanup.result.cleaned, false, "cleanup must fail closed when a frame disappeared");
   assert.equal(missingCleanup.result.removedObjects, 0);
-  assert.deepEqual(missingCleanup.deleteCalls, [], "cleanup must delete nothing when evidence is missing");
 
   const overwrittenCleanupFixture = buildFixture();
   overwrittenCleanupFixture.objects.set(
@@ -706,7 +646,6 @@ async function main() {
   const overwrittenCleanup = await pruneFixture(overwrittenCleanupFixture);
   assert.equal(overwrittenCleanup.result.cleaned, false, "cleanup must fail closed when a frame was overwritten");
   assert.equal(overwrittenCleanup.result.removedObjects, 0);
-  assert.deepEqual(overwrittenCleanup.deleteCalls, [], "cleanup must preserve every object on a byte-validation gap");
 
   const replacedMasterCleanupFixture = buildFixture();
   replacedMasterCleanupFixture.objects.set(
@@ -720,11 +659,6 @@ async function main() {
     "cleanup must fail closed when the stored final master was replaced",
   );
   assert.equal(replacedMasterCleanup.result.removedObjects, 0);
-  assert.deepEqual(
-    replacedMasterCleanup.deleteCalls,
-    [],
-    "cleanup must not delete anything when final-master bytes diverge",
-  );
   await retentionWorkerDeletionOutcomes();
 }
 

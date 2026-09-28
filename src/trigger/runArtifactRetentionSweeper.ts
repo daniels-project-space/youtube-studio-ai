@@ -16,7 +16,6 @@ import {
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { getAccessToken } from "@/lib/youtube";
 import {
-  deleteObjects,
   getObjectBytes,
   getObjectIntegrity,
   listObjects,
@@ -247,20 +246,14 @@ export async function sweepDueRunArtifactRetentions(input?: {
         getObjectBytes,
         getObjectIntegrity,
         listObjects,
-        deleteObjects: async (keys) => {
-          // Even an empty R2 list must not permit stale asset-row pruning.
-          if (!keys.length) await authorizeNextBatch();
-          return deleteObjects(keys, undefined, { beforeBatch: authorizeNextBatch });
-        },
       });
       removedObjects += pruning.removedObjects;
       if (!pruning.cleaned) {
         throw new Error(`${pruning.removedObjects} deletion(s) confirmed; ${pruning.error ?? "release evidence could not be revalidated"}`);
       }
-      await convex.mutation(api.assets.pruneRun, {
-        runId: retention.runId,
-        keepKinds: ["video", "thumbnail", "derived_short"],
-      });
+      // The existing cleanup task may still be invoked manually. Seal its
+      // evidence ledger, but preserve every R2 object and asset row.
+      await authorizeNextBatch();
       await convex.mutation(api.runArtifactRetentions.complete, {
         ownerId,
         retentionId: retention._id,
@@ -271,7 +264,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
         retainedReleaseEvidence: pruning.retainedReleaseEvidence,
       });
       completed++;
-      log(`completed ${retention.runId}: removed ${pruning.removedObjects} intermediate object(s)`);
+      log(`sealed ${retention.runId}: retained ${pruning.retainedObjectCount} object(s)`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failed = await convex.mutation(api.runArtifactRetentions.fail, {

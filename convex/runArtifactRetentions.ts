@@ -1,5 +1,8 @@
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
+import { assertStudioAssetLibraryEntry } from "../src/engine/studioAssetLibrary";
+import { assertStudioReusableMediaEntry } from "../src/engine/studioReusableMedia";
+import { releaseRetentionReceiptForWrite } from "../src/lib/r2AssetRetention";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { assertChannelWritable, isChannelLocked } from "./channelLock";
@@ -18,6 +21,7 @@ import {
 } from "../src/lib/runArtifactRetention";
 
 const MAX_CLEANUP_ATTEMPTS = 5;
+const MAX_PROTECTED_REVISIONS = 2_000;
 
 const releaseMode = v.union(
   v.literal("private_draft"),
@@ -203,6 +207,41 @@ export const recordReleaseObservations = mutation({
         observation: item.error ? null : item.observation,
       });
       if (decision.released) {
+        const [writes, library, reusable] = await Promise.all([
+          ctx.db.query("r2ImmutableWrites").withIndex("by_run", (q) => q.eq("runId", row.runId)).collect(),
+          ctx.db.query("studioAssetLibraryEntries")
+            .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).take(MAX_PROTECTED_REVISIONS + 1),
+          ctx.db.query("studioReusableMediaAssets")
+            .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).take(MAX_PROTECTED_REVISIONS + 1),
+        ]);
+        if (library.length > MAX_PROTECTED_REVISIONS || reusable.length > MAX_PROTECTED_REVISIONS) {
+          throw new Error("R2 release receipt protected revision inventory exceeds its verified bound");
+        }
+        const protectedKeys = new Set([
+          ...library.flatMap((entry) => {
+            const key = assertStudioAssetLibraryEntry(entry.entry).resource?.r2Key;
+            return key ? [key] : [];
+          }),
+          ...reusable.map((entry) => assertStudioReusableMediaEntry(entry.entry).resource.r2Key),
+        ]);
+        for (const write of writes) {
+          const classified = releaseRetentionReceiptForWrite({
+            ownerId: args.ownerId, channelId: row.channelId, runId: row.runId,
+            keyPrefix: row.keyPrefix, releaseAt: decision.releaseAt,
+            observedAt: args.observedAt, protectedKeys, write,
+          });
+          if (!classified) continue;
+          const receipt = { ownerId: args.ownerId, channelId: row.channelId,
+            runId: row.runId, ...classified };
+          const prior = await ctx.db.query("r2ReleaseRetentionReceipts")
+            .withIndex("by_run_key", (q) => q.eq("runId", row.runId).eq("r2Key", write.r2Key)).unique();
+          if (prior) {
+            if (Object.entries(receipt).some(([key, value]) =>
+              key !== "observedAt" && prior[key as keyof typeof prior] !== value)) {
+              throw new Error("R2 release receipt conflicts with its first immutable observation");
+            }
+          } else await ctx.db.insert("r2ReleaseRetentionReceipts", receipt);
+        }
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,

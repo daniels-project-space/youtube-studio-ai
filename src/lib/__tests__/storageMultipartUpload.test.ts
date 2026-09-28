@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, mock } from "node:test";
@@ -16,13 +16,13 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
   globalThis.fetch = async () => { throw new Error("multipart fixture forbids networking"); };
   const calls: string[] = [];
   const parts = new Map<number, { length: number; hash: string }>();
-  let active = 0, maxActive = 0, singleBytes = 0;
+  let active = 0, maxActive = 0, singleBytes = 0, conditional = false;
   let releaseFirstPart!: () => void;
   let secondPartReached = new Promise<void>(resolve => { releaseFirstPart = resolve; });
-  let mode: "success" | "part" | "complete" | "abort" | "lost-completion" | "missing-etag" | "create" = "success";
+  let mode: "success" | "part" | "complete" | "abort" | "lost-completion" | "missing-etag" | "create" | "precondition" = "success";
   const failure = new Error("fixture transfer failure"), cleanupFailure = new Error("fixture cleanup failure");
   const bodyBytes = Buffer.alloc(65 * 1024 ** 2, 0x57);
-  const path = join(directory, "large.mp4"), small = join(directory, "small.json"), huge = join(directory, "huge.mp4");
+  const path = join(directory, "large.mp4"), small = join(directory, "small.json");
   const client = getR2Client();
   const send = mock.method(client, "send", async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
     const name = command.constructor.name, input = command.input;
@@ -36,7 +36,7 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
     }
     if (name === "CreateMultipartUploadCommand") {
       assert.equal(input.ContentType, "video/mp4"); assert.deepEqual(input.Metadata, { source: "fixture" });
-      assert.equal(input.IfNoneMatch, undefined);
+      assert.equal(input.IfNoneMatch, conditional ? "*" : undefined);
       if (mode === "create") throw failure;
       return { UploadId: "exact-attempt" };
     }
@@ -57,14 +57,17 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
     }
     if (name === "CompleteMultipartUploadCommand") {
       assert.equal(active, 0);
+      assert.equal(input.IfNoneMatch, conditional ? "*" : undefined,
+        "create-only condition must be present on atomic multipart completion");
       assert.deepEqual(input.MultipartUpload, { Parts: [1, 2, 3].map(PartNumber => ({ PartNumber, ETag: `part-${PartNumber}` })) });
       if (mode === "complete" || mode === "lost-completion") throw failure;
+      if (mode === "precondition") throw Object.assign(new Error("existing key"), { $metadata: { httpStatusCode: 412 } });
       return { ETag: "completed" };
     }
     if (name === "AbortMultipartUploadCommand") {
       assert.equal(active, 0, "all part workers settle before temporary parts are aborted");
       if (mode === "abort") throw cleanupFailure;
-      if (mode === "lost-completion") throw Object.assign(new Error("gone"), { name: "NoSuchUpload" });
+      if (mode === "lost-completion" || mode === "precondition") throw Object.assign(new Error("gone"), { name: "NoSuchUpload" });
       return {};
     }
     throw new Error(`unexpected storage command ${name}`);
@@ -105,13 +108,18 @@ test("real SDK multipart upload preserves bytes, metadata, bounded parts and cle
     await putObjectFromFile("owner/fixture/master", small, { ...options, ifNoneMatch: "*" });
     assert.deepEqual(calls, ["PutObjectCommand"]); assert.equal(singleBytes, 10);
     assert.equal((send.mock.calls.at(-1)!.arguments[0] as unknown as { input: { IfNoneMatch: string } }).input.IfNoneMatch, "*");
-    reset();
+    reset(); conditional = true;
     await putObjectFromFile("owner/fixture/master", path, { ...options, ifNoneMatch: "*" });
-    assert.deepEqual(calls, ["PutObjectCommand"]); assert.equal(singleBytes, bodyBytes.length);
-    const handle = await open(huge, "w");
-    await handle.truncate(5 * 1024 ** 3 + 1); await handle.close();
-    reset();
-    await assert.rejects(putObjectFromFile("owner/fixture/master", huge, { ...options, ifNoneMatch: "*" }), /refusing to weaken IfNoneMatch/);
+    assert.equal(calls[0], "CreateMultipartUploadCommand");
+    assert.equal(calls.at(-1), "CompleteMultipartUploadCommand");
+    mode = "precondition"; reset();
+    await assert.rejects(putObjectFromFile("owner/fixture/master", path, { ...options, ifNoneMatch: "*" }),
+      (error: unknown) => (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 412);
+    assert.equal(calls.filter(name => name === "CreateMultipartUploadCommand").length, 1);
+    assert.equal(calls.filter(name => name === "AbortMultipartUploadCommand").length, 1);
+    assert.equal(calls.some(name => name.startsWith("Delete")), false);
+    mode = "success";
+    reset(); conditional = false;
     await assert.rejects(putObjectFromFile("owner/fixture/master", directory, options), /regular file/);
     assert.deepEqual(calls, [], "inadmissible sources refuse before storage dispatch");
   } finally {

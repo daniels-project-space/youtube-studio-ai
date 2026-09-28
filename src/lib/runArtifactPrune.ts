@@ -3,12 +3,9 @@ import {
   verifyFinalMasterReleaseEvidenceObjects,
   type FinalMasterReleaseCertificate,
 } from "@/lib/finalMasterReleaseCertificate";
-import { ObjectDeletionError } from "@/lib/storage";
-
 /**
- * Delete a run's intermediates only after every retained release certificate
- * and every object it references has been re-read and byte-verified. Any gap
- * returns a fail-closed result and leaves the entire run namespace untouched.
+ * Seal release evidence and inventory a run. Deletion happens later through
+ * the immutable-key retention worker, after this ledger is completed.
  */
 export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
   keyPrefix: string;
@@ -20,10 +17,11 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
     certificate: FinalMasterReleaseCertificate;
   }[];
   keepNames: readonly string[];
+  /** Exact reusable-library keys, including superseded revisions. */
+  keepKeys?: readonly string[];
   getObjectBytes: (key: string) => Promise<Uint8Array>;
   getObjectIntegrity: (key: string) => Promise<{ sha256: string; byteLength: number }>;
   listObjects: (prefix: string) => Promise<string[]>;
-  deleteObjects: (keys: string[]) => Promise<number>;
 }): Promise<{
   cleaned: boolean;
   removedObjects: number;
@@ -33,7 +31,6 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
 }> {
   let retainedReleaseEvidence: string[] = [];
   let retainedObjectCount = 0;
-  let removedObjects = 0;
   try {
     const certificates = [
       { certificateKey: args.certificateKey, certificate: args.certificate },
@@ -57,30 +54,28 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
     );
     retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
     const prefix = `${args.keyPrefix}runs/${args.runId}/`;
-    const keep = new Set([
-      ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
-      ...retainedReleaseEvidence,
-    ]);
+    if (args.keepKeys?.some((key) => !key.startsWith(prefix))) {
+      throw new Error("reusable library key escapes the scoped run namespace");
+    }
+    if (args.keepNames.some((name) => name.includes("..") || name.startsWith("/"))) {
+      throw new Error("run keep name escapes its scoped namespace");
+    }
     const all = await args.listObjects(prefix);
     if (all.some((key) => typeof key !== "string" || !key.startsWith(prefix) || key === prefix) ||
         new Set(all).size !== all.length) {
       throw new Error("cleanup listing contains duplicate or out-of-run objects");
     }
-    const deletable = all.filter((key) => !keep.has(key));
-    retainedObjectCount = all.length - deletable.length;
-    const deleted = await args.deleteObjects(deletable);
-    if (Number.isSafeInteger(deleted) && deleted >= 0 && deleted <= deletable.length) removedObjects = deleted;
-    if (deleted !== deletable.length) throw new Error("cleanup deletion acknowledgement is incomplete");
+    retainedObjectCount = all.length;
     return {
       cleaned: true,
-      removedObjects: deleted,
+      removedObjects: 0,
       retainedReleaseEvidence,
       retainedObjectCount,
     };
   } catch (error) {
     return {
       cleaned: false,
-      removedObjects: error instanceof ObjectDeletionError ? error.confirmedDeleted : removedObjects,
+      removedObjects: 0,
       retainedReleaseEvidence,
       retainedObjectCount,
       error: error instanceof Error ? error.message : String(error),

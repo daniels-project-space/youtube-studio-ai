@@ -352,9 +352,10 @@ assert.match(
 );
 assert.match(
   retentionPrune,
-  /pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?retainedFinalMasterReleaseObjectKeys\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\([\s\S]*?deleteObjects\(deletable\)/,
-  "the retention worker must re-read the certificate's manifest, receipt, and frame bytes before deleting intermediates",
+  /pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?retainedFinalMasterReleaseObjectKeys\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\(/,
+  "the hourly release sealer must re-read the certificate's manifest, receipt, and frame bytes",
 );
+assert.doesNotMatch(retentionPrune, /deleteObjects/, "the evidence sealer cannot delete mutable R2 objects");
 assert.match(
   lofi,
   /runArtifactRetentions\.schedule[\s\S]*?release \+ 14 days/,
@@ -362,8 +363,9 @@ assert.match(
 );
 assert.match(
   retentionSweeper,
-  /claimDue[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?assets\.pruneRun[\s\S]*?runArtifactRetentions\.complete/,
-  "the leased sweeper must prune verified R2 objects and matching asset rows before completing its durable ledger",
+  /claimDue[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?await authorizeNextBatch\(\)[\s\S]*?runArtifactRetentions\.complete/,
+  "the leased sweeper must verify evidence and fresh release authority before sealing its durable ledger",
 );
+assert.doesNotMatch(retentionSweeper, /deleteObjects|assets\.pruneRun/, "hourly sealing cannot delete R2 objects or asset rows");
 
 console.log("final-master release evidence wiring test passed");

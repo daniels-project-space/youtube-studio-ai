@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { setTimeout as delay } from "node:timers/promises";
 import { OWNER_ID } from "@/lib/config";
 import { presignDownload } from "@/lib/storage";
+import { classedReleaseCopyExpiresAt, classedReleaseCopyIsReadable, isOwnedReleasedCopyKey } from "@/lib/r2AssetRetention";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ function contentType(key: string): string | undefined {
 }
 
 function isOwnedVideoKey(key: string): boolean {
-  return key.startsWith(`owner/${OWNER_ID}/`)
+  return (key.startsWith(`owner/${OWNER_ID}/`) || isOwnedReleasedCopyKey(key, OWNER_ID))
     && key.length <= 1_024
     && !key.includes("..")
     && !key.includes("\\");
@@ -97,6 +98,11 @@ export async function GET(request: Request) {
   const mimeType = contentType(key);
   if (!mimeType || !isOwnedVideoKey(key)) {
     return NextResponse.json({ error: "forbidden video key" }, { status: 403 });
+  }
+  if (!classedReleaseCopyIsReadable(key, Date.now())) {
+    return probe ? NextResponse.json({ available: false }, { headers: { "Cache-Control": "private, no-store" } })
+      : NextResponse.json({ error: "retained asset expired" },
+        { status: 410, headers: { "Cache-Control": "private, no-store" } });
   }
 
   try {
@@ -175,7 +181,7 @@ export async function GET(request: Request) {
     responseHeaders.set("Content-Type", upstream.headers.get("content-type") ?? mimeType);
     responseHeaders.set("Cross-Origin-Resource-Policy", "same-origin");
     responseHeaders.set("X-Content-Type-Options", "nosniff");
-    responseHeaders.set("Cache-Control", "private, max-age=600");
+    responseHeaders.set("Cache-Control", classedReleaseCopyExpiresAt(key) === undefined ? "private, max-age=600" : "private, no-store");
     if (!upstream.ok && upstream.status !== 206) {
       await upstream.body?.cancel().catch(() => {});
       if (probe) {

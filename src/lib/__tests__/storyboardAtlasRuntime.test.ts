@@ -131,12 +131,18 @@ const runtime: StoryboardAtlasMaterializeRuntime = {
     return key;
   },
 };
+const writeCrop = async (key: string, bytes: Uint8Array, metadata: Record<string, string>) => {
+  assert.equal(metadata.cropSha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.ok(key.endsWith(`-${metadata.cropSha256}.png`));
+  await runtime.putImmutable(key, bytes, "image/png", metadata);
+};
 
 async function assertMaterialization(): Promise<void> {
   const items = await materializeStoryboardAtlasCrops({
     plan,
     result,
     keyPrefix: "owner/demo/run/novita",
+    writeCrop,
     runtime,
   });
   assert.equal(items.length, 7);
@@ -161,6 +167,7 @@ async function assertMaterialization(): Promise<void> {
       plan,
       result: { ...result, candidates: resultCandidates.slice(1) } as NovitaRenderResult,
       keyPrefix: "owner/demo/run/novita",
+      writeCrop,
       runtime,
     }),
     /incomplete exact sheet mapping/u,

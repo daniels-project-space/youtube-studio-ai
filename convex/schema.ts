@@ -1411,7 +1411,8 @@ export default defineSchema({
     // Library projections only need the retained video/thumbnail rows. Keep
     // intermediate keyframes, clips, music, and captions out of card reads.
     .index("by_run_kind", ["runId", "kind"])
-    .index("by_run", ["runId"]),
+    .index("by_run", ["runId"])
+    .index("by_r2_key", ["r2Key"]),
 
   // Release-aware deletion ledger for per-run media. A successful upload
   // schedules this row; it never deletes bytes itself. The Trigger sweeper
@@ -1462,6 +1463,28 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"])
     .index("by_owner_release_check", ["ownerId", "status", "nextReleaseCheckAt"]),
+
+  // An owned, content-addressed writer reserves its exact R2 key before PUT.
+  r2ImmutableWrites: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    r2Key: v.string(), claimId: v.string(),
+    status: v.union(v.literal("active"), v.literal("finished")),
+    startedAt: v.number(), finishedAt: v.optional(v.number()),
+    etag: v.optional(v.string()), lastModifiedAt: v.optional(v.number()),
+    byteLength: v.optional(v.number()),
+  })
+    .index("by_owner_key", ["ownerId", "r2Key"])
+    .index("by_run", ["runId"]),
+
+  // Release-clock evidence only. This table grants no R2 deletion authority.
+  r2ReleaseRetentionReceipts: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"),
+    r2Key: v.string(), kind: v.union(v.literal("ordinary"), v.literal("final")),
+    writer: v.union(v.literal("intro-card/v1"), v.literal("atlas-crop/v1"), v.literal("quiz-final/v1")),
+    etag: v.string(), lastModifiedAt: v.number(), byteLength: v.number(),
+    releaseAt: v.number(), retainUntil: v.number(), observedAt: v.number(),
+  })
+    .index("by_run_key", ["runId", "r2Key"]),
 
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource

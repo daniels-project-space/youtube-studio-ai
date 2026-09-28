@@ -226,7 +226,9 @@ import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, getObjectToFile } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, getObjectToFile, headObjectMetadata } from "@/lib/storage";
+import { permanentReusableMediaKey } from "@/lib/r2AssetRetention";
+import { writeReservedImmutableR2Object } from "@/lib/reservedImmutableR2Write";
 import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
@@ -2447,8 +2449,22 @@ async function persistPassingStudioReusableMedia(input: {
     if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
       throw new Error(`qa_visual: reusable-media candidate ${index} has no measurable video stream`);
     }
-    const durableKey = `${input.ctx.keyPrefix}studio-media/${candidate.contentSha256}.mp4`;
-    await putObject(durableKey, bytes, { contentType: candidate.contentType });
+    const durableKey = permanentReusableMediaKey(input.ctx.keyPrefix, candidate.contentSha256);
+    try {
+      await putObject(durableKey, bytes, {
+        contentType: candidate.contentType,
+        metadata: { contentSha256: candidate.contentSha256, retentionWriter: "studio-reusable-media/v1" },
+        ifNoneMatch: "*",
+      });
+    } catch (error) {
+      // A retry may see the prior successful create. Verify its full bytes before
+      // publishing a pointer; a changed object cannot enter the library.
+      if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 412) throw error;
+      const existing = await getObjectBytes(durableKey);
+      if (createHash("sha256").update(existing).digest("hex") !== candidate.contentSha256) {
+        throw new Error("qa_visual: permanent reusable-media key contains different bytes");
+      }
+    }
     const entry = createStudioReusableMediaEntry({
       version: STUDIO_REUSABLE_MEDIA_VERSION,
       logicalId: `media_${candidate.contentSha256.slice(0, 24)}`,
@@ -2871,8 +2887,26 @@ export const introCard: Block = {
       ctx.log(`intro_card: title card rendered (${introSec}s @ ${W}x${H}, "${cardTitle.slice(0, 50)}")`);
       // R2-back the card so the render child (P1→P2 split) can rehydrate
       // introCardPath from introCardKey on its own worker (also fixes resume).
-      const introCardKey = `${ctx.keyPrefix}runs/${ctx.runId}/introcard.mp4`;
-      await putObject(introCardKey, await readBytes(out), { contentType: "video/mp4" });
+      const introBytes = await readBytes(out);
+      const introSha256 = createHash("sha256").update(introBytes).digest("hex");
+      const introCardKey = `${ctx.keyPrefix}runs/${ctx.runId}/introcard-${introSha256}.mp4`;
+      await writeReservedImmutableR2Object({
+        ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId, r2Key: introCardKey,
+        write: async () => {
+          await putObject(introCardKey, introBytes, {
+            contentType: "video/mp4", ifNoneMatch: "*",
+            metadata: { retentionWriter: "intro-card/v1", retentionIntroSha256: introSha256 },
+          });
+        },
+        verifyStoredBytes: async () => {
+          const [stored, head] = await Promise.all([getObjectIntegrity(introCardKey), headObjectMetadata(introCardKey)]);
+          const metadata = Object.fromEntries(Object.entries(head?.metadata ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
+          if (stored.sha256 !== introSha256 || stored.byteLength !== introBytes.byteLength ||
+              metadata.retentionintrosha256 !== introSha256 || metadata.retentionwriter !== "intro-card/v1") {
+            throw new Error("immutable intro card upload conflict has different stored bytes");
+          }
+        },
+      });
       return {
         introCardPath: out,
         introCardKey,
