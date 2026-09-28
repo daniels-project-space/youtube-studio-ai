@@ -164,6 +164,25 @@ export const listReleaseChecks = query({
   },
 });
 
+/** Copy retries use their own indexed clock; cleanup timing is untouched. */
+export const listFinalCopyChecks = query({
+  args: { ownerId: v.string(), now: v.number() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "released final copy checks");
+    const rows = await ctx.db.query("runArtifactRetentions")
+      .withIndex("by_owner_final_copy_check", (q) => q.eq("ownerId", args.ownerId)
+        .eq("status", "pending").gte("nextFinalCopyCheckAt", 0)
+        .lte("nextFinalCopyCheckAt", args.now)).take(16);
+    return await Promise.all(rows.map(async (row) => {
+      const run = await ctx.db.get(row.runId);
+      return { retentionId: row._id, channelId: row.channelId, runId: row.runId,
+        videoId: run?.ownerId === args.ownerId && run.channelId === row.channelId
+          ? run.youtubeVideoId : undefined };
+    }));
+  },
+});
+
 /** Only the service may attest reads; browser users cannot create release evidence. */
 export const recordReleaseObservations = mutation({
   args: {
@@ -274,6 +293,8 @@ export const recordReleaseObservations = mutation({
           continue;
         }
         for (const receipt of staged) await ctx.db.insert("r2ReleaseRetentionReceipts", receipt);
+        const finalCopy = await ctx.db.query("releasedFinalMasters")
+          .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", decision.releaseAt)).unique();
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,
@@ -283,6 +304,8 @@ export const recordReleaseObservations = mutation({
           releaseVideoId: item.observation!.videoId,
           releaseYouTubeChannelId: item.observation!.channelId,
           nextReleaseCheckAt: Math.max(decision.retainUntil, args.observedAt),
+          nextFinalCopyCheckAt: finalCopy?.status === "finished"
+            ? undefined : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: undefined, updatedAt: args.observedAt,
         });
@@ -293,6 +316,7 @@ export const recordReleaseObservations = mutation({
           // Preserve historical release timestamps for audit, but remove the
           // fresh observation which is mandatory for any cleanup claim.
           releaseObservationAt: undefined,
+          nextFinalCopyCheckAt: undefined,
           nextReleaseCheckAt: args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: (item.error ?? decision.reason).slice(0, 1_000),

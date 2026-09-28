@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import {
-  schedule, listReleaseChecks, recordReleaseObservations, claimDue, authorizeDeletion, complete, fail,
+  schedule, listReleaseChecks, listFinalCopyChecks, recordReleaseObservations, claimDue, authorizeDeletion, complete, fail,
 } from "../../../convex/runArtifactRetentions";
+import { candidate as finalCandidate, begin as beginFinalCopy, finish as finishFinalCopy } from "../../../convex/releasedFinalMasters";
+import { releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS } from "@/lib/r2AssetRetention";
 import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
   RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
-type Filter = { field: string; op: "eq" | "lte"; value: unknown };
+type Filter = { field: string; op: "eq" | "lte" | "gte"; value: unknown };
 
 class MemoryQuery {
   filters: Filter[] = [];
@@ -17,21 +19,26 @@ class MemoryQuery {
   withIndex(_name: string, build: (range: {
     eq: (field: string, value: unknown) => unknown;
     lte: (field: string, value: unknown) => unknown;
+    gte: (field: string, value: unknown) => unknown;
   }) => unknown): this {
     const range = {
       eq: (field: string, value: unknown) => { this.filters.push({ field, op: "eq", value }); return range; },
       lte: (field: string, value: unknown) => { this.filters.push({ field, op: "lte", value }); return range; },
+      gte: (field: string, value: unknown) => { this.filters.push({ field, op: "gte", value }); return range; },
     };
     build(range);
     return this;
   }
   async take(limit: number): Promise<Row[]> {
     return this.db.rows(this.table).filter((row) => this.filters.every(({ field, op, value }) =>
-      op === "eq" ? row[field] === value : row[field] === undefined ||
-        (typeof row[field] === "number" && typeof value === "number" && row[field] <= value),
+      op === "eq" ? row[field] === value : op === "lte"
+        ? row[field] === undefined ||
+          (typeof row[field] === "number" && typeof value === "number" && row[field] <= value)
+        : typeof row[field] === "number" && typeof value === "number" && row[field] >= value,
     )).sort((a, b) => Number(a.nextReleaseCheckAt ?? 0) - Number(b.nextReleaseCheckAt ?? 0) ||
       a._creationTime - b._creationTime).slice(0, limit);
   }
+  async collect(): Promise<Row[]> { return this.take(Number.MAX_SAFE_INTEGER); }
   async unique(): Promise<Row | null> {
     const rows = await this.take(2);
     if (rows.length > 1) throw new Error("ambiguous row");
@@ -103,6 +110,64 @@ function deletionArgs(row: Row, observedAt: number) {
     observation: { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
       publishedAt: new Date(uploadedAt + 86_400_000).toISOString() } };
 }
+
+test("real release observation reserves and finishes one certified final-copy generation", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const now = Date.now();
+  const publicAt = now - 60_000;
+  const sourceSha256 = "a".repeat(64);
+  const sourceKey = `${keyPrefix}runs/run-a/final.mp4`;
+  const copyKey = releasedFinalVideoKey(keyPrefix, "run-a", publicAt, sourceSha256);
+  const identity = { ownerId, retentionId: row._id, releaseAt: publicAt,
+    certificateKey, certificateFingerprint: "b".repeat(64), sourceKey, sourceSha256,
+    sourceByteLength: 10_000, sourceEtag: `"${"c".repeat(32)}"`,
+    sourceLastModifiedAt: now - 120_000, copyKey,
+    claimId: "11111111-1111-1111-1111-111111111111" };
+  assert.equal(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now }), null);
+  await f.observe(row._id, now, { publishedAt: new Date(publicAt).toISOString(), privacyStatus: "private" });
+  assert.equal(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now }), null);
+  await f.observe(row._id, now + 1, { publishedAt: new Date(publicAt).toISOString() });
+  assert.ok(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now: now + 1 }));
+  assert.equal((await f.invoke<Row[]>(listFinalCopyChecks, {
+    ownerId, now: now + RUN_ARTIFACT_RELEASE_CHECK_MS + 1 })).length, 1);
+  assert.equal((await f.invoke(beginFinalCopy, identity) as { status: string }).status, "active");
+  await assert.rejects(f.invoke(beginFinalCopy, { ...identity, sourceEtag: `"${"d".repeat(32)}"` }), /conflicts/);
+  const finishedAt = Date.now();
+  const finish = { ...identity, copyEtag: `"${"e".repeat(32)}"`,
+    copyLastModifiedAt: finishedAt, finishedAt };
+  assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
+  assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
+  assert.equal(f.db.rows("releasedFinalMasters").length, 1);
+  assert.equal(row.nextReleaseCheckAt, publicAt + 14 * 86_400_000);
+  assert.equal(Number(f.db.rows("releasedFinalMasters")[0].releaseAt) + FINAL_VIDEO_RETENTION_MS,
+    publicAt + FINAL_VIDEO_RETENTION_MS);
+  assert.equal(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now: now + 2 }), null);
+  assert.equal((await f.invoke<Row[]>(listFinalCopyChecks, {
+    ownerId, now: now + RUN_ARTIFACT_RELEASE_CHECK_MS + 1 })).length, 0);
+});
+
+test("quiz final certificate source uses the same released-final ledger and rejects a changed source", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const now = Date.now();
+  const publicAt = now - 30_000;
+  await f.observe(row._id, now, { publishedAt: new Date(publicAt).toISOString() });
+  const sourceSha256 = "f".repeat(64);
+  const sourceKey = `${keyPrefix}runs/run-a/quiz-year/quiz-year-${sourceSha256}.mp4`;
+  const identity = { ownerId, retentionId: row._id, releaseAt: publicAt, certificateKey,
+    certificateFingerprint: "b".repeat(64), sourceKey, sourceSha256,
+    sourceByteLength: 12_000, sourceEtag: `"${"c".repeat(32)}"`,
+    sourceLastModifiedAt: now - 100_000,
+    copyKey: releasedFinalVideoKey(keyPrefix, "run-a", publicAt, sourceSha256),
+    claimId: "22222222-2222-2222-2222-222222222222" };
+  assert.equal((await f.invoke(beginFinalCopy, identity) as { status: string }).status, "active");
+  await assert.rejects(f.invoke(beginFinalCopy, { ...identity,
+    sourceKey: `${keyPrefix}runs/run-a/quiz-year/quiz-year-other.mp4` }), /conflicts/);
+  const finishedAt = Date.now();
+  assert.equal((await f.invoke(finishFinalCopy, { ...identity, copyEtag: `"${"d".repeat(32)}"`,
+    copyLastModifiedAt: finishedAt, finishedAt }) as { status: string }).status, "finished");
+});
 
 test("private→public transition waits actual release plus fourteen days and rechecks before deletion", async () => {
   const f = fixture();

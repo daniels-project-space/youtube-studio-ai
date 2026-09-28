@@ -14,6 +14,7 @@ import {
   runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
+import { createVerifiedReleasedFinalCopy } from "@/lib/releasedFinalCopy";
 import { getAccessToken } from "@/lib/youtube";
 import {
   getObjectBytes,
@@ -168,9 +169,13 @@ export async function sweepDueRunArtifactRetentions(input?: {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const limit = Math.max(1, Math.min(CLEANUP_BATCH_LIMIT, Math.floor(input?.limit ?? CLEANUP_BATCH_LIMIT)));
   const convex = convexClient();
-  const releaseChecks = await convex.query(api.runArtifactRetentions.listReleaseChecks, {
-    ownerId, now: input?.now ?? Date.now(),
-  }) as RunArtifactReleaseCheck[];
+  const checkNow = input?.now ?? Date.now();
+  const [scheduledChecks, copyChecks] = await Promise.all([
+    convex.query(api.runArtifactRetentions.listReleaseChecks, { ownerId, now: checkNow }),
+    convex.query(api.runArtifactRetentions.listFinalCopyChecks, { ownerId, now: checkNow }),
+  ]) as [RunArtifactReleaseCheck[], RunArtifactReleaseCheck[]];
+  const releaseChecks = [...new Map([...scheduledChecks, ...copyChecks]
+    .map((check) => [String(check.retentionId), check])).values()];
   const releases = await reconcileRunArtifactReleaseChecks({
     checks: releaseChecks,
     observeChannel: async (channelId, videoIds) => {
@@ -188,6 +193,23 @@ export async function sweepDueRunArtifactRetentions(input?: {
     }),
   });
   if (releaseChecks.length) log("release checks complete", releases);
+  // A failed copy leaves the certified source intact and gets another public
+  // observation on the retention row's bounded retry cadence.
+  for (const check of releaseChecks) {
+    try {
+      const candidate = await convex.query(api.releasedFinalMasters.candidate, {
+        ownerId, retentionId: check.retentionId, now: Date.now(),
+      });
+      if (candidate) {
+        const copyKey = await createVerifiedReleasedFinalCopy({ ownerId, candidate, convex });
+        log(`certified released final copy recorded for ${check.runId}`, { copyKey });
+      }
+    } catch (error) {
+      log(`certified released final copy held for ${check.runId}`, {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   let claimed = 0;
   let completed = 0;
   let blocked = 0;
