@@ -60,11 +60,10 @@ export interface MiniMaxH3Readiness {
 }
 
 export function miniMaxH3RouteEnvironment(provider: MiniMaxH3Provider): { url: string; token: string } {
+  if (provider === "novita") throw new Error("MiniMax H3 Novita dispatch is retired; use Render Engine");
   const prefix = provider === "salad"
     ? "MINIMAX_H3_SALAD"
-    : provider === "novita"
-      ? "MINIMAX_H3_NOVITA"
-      : "MINIMAX_H3_OPENRELAY";
+    : "MINIMAX_H3_OPENRELAY";
   const rawUrl = process.env[`${prefix}_WORKER_URL`]?.trim() ?? "";
   const token = process.env[`${prefix}_WORKER_TOKEN`]?.trim() ?? "";
   let url: URL;
@@ -85,15 +84,16 @@ export function minimaxH3Readiness(
   provider: MiniMaxH3Provider,
   options: { saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY } = {},
 ): MiniMaxH3Readiness {
+  if (provider === "novita") {
+    return { configured: false, admitted: false, blockers: ["MiniMax H3 Novita dispatch is retired; use Render Engine"] };
+  }
   const blockers: string[] = [];
   try { miniMaxH3RouteEnvironment(provider); } catch (error) {
     blockers.push(error instanceof Error ? error.message : String(error));
   }
   const prefix = provider === "salad"
     ? "MINIMAX_H3_SALAD"
-    : provider === "novita"
-      ? "MINIMAX_H3_NOVITA"
-      : "MINIMAX_H3_OPENRELAY";
+    : "MINIMAX_H3_OPENRELAY";
   if (process.env[`${prefix}_QUALIFIED`] !== "1") blockers.push(`${prefix}_QUALIFIED is not enabled`);
   const receipt = process.env[`${prefix}_QUALIFICATION_RECEIPT_SHA256`]?.trim().toLowerCase() ?? "";
   if (!SHA256.test(receipt)) blockers.push(`${prefix}_QUALIFICATION_RECEIPT_SHA256 is missing or invalid`);

@@ -368,23 +368,11 @@ async function test() {
   assert.equal(seen?.capacity_mode, MINIMAX_H3_OPENRELAY_CAPACITY_MODE);
 
   const novitaFallback = request("novita", "weekly-fallback", "owner/o/channel/c/novita-fallback.mp4");
-  const novitaRendered = await renderMiniMaxH3(novitaFallback, {
-    presignRead: async () => "https://r2.example/read",
-    presignWrite: async () => "https://r2.example/write",
-    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
-    assertModelManifest: async () => {},
-    verifyOpeningMotion: passingOpeningMotion,
-    fetch: async (_url, init) => {
-      seen = JSON.parse(String(init?.body));
-      const reply = responseFor(novitaFallback);
-      const body = await reply.json() as { receipt: Record<string, unknown> };
-      body.receipt.requestKey = String(seen?.request_key);
-      body.receipt.promptSha256 = sha256Hex(novitaFallback.prompt);
-      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-    },
-  });
-  assert.equal(novitaRendered.receipt.runtime.provider, "novita", "the terminal weekly route must honour the Novita fallback");
-  assert.equal(seen?.capacity_mode, "spot");
+  let retiredRouteCalls = 0;
+  await assert.rejects(renderMiniMaxH3(novitaFallback, {
+    fetch: async () => { retiredRouteCalls += 1; throw new Error("retired route called"); },
+  }), /dispatch is retired/);
+  assert.equal(retiredRouteCalls, 0, "retired H3 route must stop before a provider request");
 
   let reconciliationPolls = 0;
   const reconciledOpenRelay = await renderMiniMaxH3(openRelayFallback, {
@@ -565,7 +553,7 @@ async function test() {
   assert.equal(batched.length, 4);
   assert.equal(peak, 3, "weekly Salad work must use the bounded three-GPU wave");
   assert.equal(batchModelManifestChecks, 1, "weekly H3 jobs must share one immutable model-manifest verification");
-  assert.equal(sharedOpeningMotionChecks, 9, "the shared gate must inspect every default H3 result, including both terminal fallback routes");
+  assert.equal(sharedOpeningMotionChecks, 8, "the shared gate must inspect every admitted H3 result");
   assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
 
   let failedBatchModelManifestChecks = 0;

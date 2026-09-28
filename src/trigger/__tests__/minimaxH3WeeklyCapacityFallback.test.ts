@@ -15,12 +15,11 @@ const weeklySource = readFileSync(join(root, "minimaxH3WeeklyBatch.ts"), "utf8")
 assert.match(retrySource, /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length/);
 assert.match(retrySource, /MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS/);
 assert.match(retrySource, /queueMiniMaxH3WeeklyCapacityRetry\(\{ payload, now \}\)/);
-assert.match(retrySource, /minimax-h3-weekly-novita-fallback/);
-assert.match(retrySource, /state: "fallback_queued"/);
-assert.match(fallbackSource, /provider: "novita"/);
-assert.match(fallbackSource, /execution: "weekly-fallback"/);
-assert.match(fallbackSource, /ifNoneMatch: "\*"/);
-assert.match(fallbackSource, /h3-fallback-provider.*novita/);
+assert.match(retrySource, /stageRenderEngineH3BatchHandoff\(handoff\)/);
+assert.match(retrySource, /state: "engine_staged_unqualified"/);
+assert.doesNotMatch(retrySource, /tasks\.trigger\("minimax-h3-weekly-novita-fallback"/);
+assert.match(fallbackSource, /requires Render Engine reconciliation/);
+assert.doesNotMatch(fallbackSource, /bootstrapSecrets|renderMiniMaxH3WeeklyBatch/);
 assert.match(weeklySource, /automatic weekly capacity retry could not be scheduled/);
 assert.match(weeklySource, /capacityHoldStartedAt: payload\.capacityHoldStartedAt/);
 
