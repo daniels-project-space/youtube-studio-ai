@@ -49,7 +49,9 @@ publishedAt leaves the copy uncommitted and the original source intact.
   indexed copy clock continues public checks across completed and blocked
   cleanup rows, retries an unfinished copy every six hours, and observes a
   finished generation every 24 hours so a later public release gets a new
-  copy key and deadline. This monitoring is dormant while the global Studio
+  copy key and deadline. Copy observation fields are separate from the
+  completed cleanup release/deadline, preserving that historical audit. This
+  monitoring is dormant while the global Studio
   schedule remains paused; its eventual quota and stop policy need review in
   the separate maintenance controller.
 - The copy uses worker-local temporary storage equal to the master size and

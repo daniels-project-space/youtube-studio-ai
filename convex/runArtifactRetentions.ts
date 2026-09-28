@@ -228,9 +228,11 @@ export const recordReleaseObservations = mutation({
         observation: item.error ? null : item.observation,
       });
       if (decision.released) {
-        if (releaseClockUpdate(row.releaseAt, decision.releaseAt) === "regression") {
+        if (releaseClockUpdate(row.finalCopyReleaseAt ?? row.releaseAt, decision.releaseAt) === "regression") {
           await ctx.db.patch(row._id, {
-            status: copyOnly ? row.status : "blocked", releaseObservationAt: undefined,
+            status: copyOnly ? row.status : "blocked",
+            releaseObservationAt: copyOnly ? row.releaseObservationAt : undefined,
+            finalCopyObservationAt: undefined,
             nextFinalCopyCheckAt: undefined,
             leaseToken: undefined, leaseExpiresAt: undefined,
             lastError: "YouTube release timestamp moved backward; review the earlier receipt and public-release history",
@@ -288,7 +290,9 @@ export const recordReleaseObservations = mutation({
         }
         if (conflict) {
           await ctx.db.patch(row._id, {
-            status: copyOnly ? row.status : "blocked", releaseObservationAt: undefined,
+            status: copyOnly ? row.status : "blocked",
+            releaseObservationAt: copyOnly ? row.releaseObservationAt : undefined,
+            finalCopyObservationAt: undefined,
             nextFinalCopyCheckAt: undefined,
             leaseToken: undefined, leaseExpiresAt: undefined,
             lastError: conflict.slice(0, 1_000), updatedAt: args.observedAt,
@@ -301,12 +305,16 @@ export const recordReleaseObservations = mutation({
           .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", decision.releaseAt)).unique();
         await ctx.db.patch(row._id, {
           status: copyOnly ? row.status : "pending",
-          releaseAt: decision.releaseAt,
-          retainUntil: decision.retainUntil,
+          releaseAt: copyOnly ? row.releaseAt : decision.releaseAt,
+          retainUntil: copyOnly ? row.retainUntil : decision.retainUntil,
           releaseConfirmedAt: row.releaseConfirmedAt ?? args.observedAt,
-          releaseObservationAt: args.observedAt,
-          releaseVideoId: item.observation!.videoId,
-          releaseYouTubeChannelId: item.observation!.channelId,
+          releaseObservationAt: copyOnly ? row.releaseObservationAt : args.observedAt,
+          releaseVideoId: copyOnly ? row.releaseVideoId : item.observation!.videoId,
+          releaseYouTubeChannelId: copyOnly ? row.releaseYouTubeChannelId : item.observation!.channelId,
+          finalCopyReleaseAt: decision.releaseAt,
+          finalCopyObservationAt: args.observedAt,
+          finalCopyVideoId: item.observation!.videoId,
+          finalCopyYouTubeChannelId: item.observation!.channelId,
           nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : Math.max(decision.retainUntil, args.observedAt),
           nextFinalCopyCheckAt: finalCopy?.status === "finished" ||
             decision.releaseAt + FINAL_VIDEO_RETENTION_MS <= args.observedAt
@@ -320,7 +328,8 @@ export const recordReleaseObservations = mutation({
           status: copyOnly ? row.status : "awaiting_release",
           // Preserve historical release timestamps for audit, but remove the
           // fresh observation which is mandatory for any cleanup claim.
-          releaseObservationAt: undefined,
+          releaseObservationAt: copyOnly ? row.releaseObservationAt : undefined,
+          finalCopyObservationAt: undefined,
           nextFinalCopyCheckAt: copyOnly ? args.observedAt + 24 * 60 * 60_000 : undefined,
           nextReleaseCheckAt: copyOnly ? row.nextReleaseCheckAt : args.observedAt + RUN_ARTIFACT_RELEASE_CHECK_MS,
           leaseToken: undefined, leaseExpiresAt: undefined,

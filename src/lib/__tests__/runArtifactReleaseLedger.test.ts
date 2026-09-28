@@ -250,7 +250,9 @@ test("copy checks survive completed cleanup and accept a later public generation
     clockNow = later + 1;
     await f.observe(row._id, later + 1, { publishedAt: new Date(newPublicAt).toISOString() });
     assert.equal(row.status, "completed");
-    assert.equal(row.releaseAt, newPublicAt);
+    assert.equal(row.releaseAt, oldPublicAt, "completed cleanup keeps its original release clock");
+    assert.equal(row.retainUntil, oldPublicAt + RUN_ARTIFACT_RETENTION_MS);
+    assert.equal(row.finalCopyReleaseAt, newPublicAt);
     assert.ok(await f.invoke(finalCandidate, { ownerId, retentionId: row._id, now: later + 1 }));
   } finally { clock.mock.restore(); }
 });

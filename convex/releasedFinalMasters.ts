@@ -49,10 +49,10 @@ async function assertFreshPublicCopyBoundary(ctx: MutationCtx, args: {
       !Number.isSafeInteger(now) || args.observedAt > now ||
       args.observedAt < now - RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS ||
       !decision.released || decision.releaseAt !== args.releaseAt ||
-      row.releaseAt !== args.releaseAt ||
-      row.releaseVideoId !== args.observation.videoId ||
-      row.releaseYouTubeChannelId !== args.observation.channelId ||
-      row.releaseObservationAt !== args.observedAt) {
+      row.finalCopyReleaseAt !== args.releaseAt ||
+      row.finalCopyVideoId !== args.observation.videoId ||
+      row.finalCopyYouTubeChannelId !== args.observation.channelId ||
+      row.finalCopyObservationAt !== args.observedAt) {
     throw new Error("released final boundary lacks fresh exact public and processed generation");
   }
   return row;
@@ -66,24 +66,24 @@ export const candidate = query({
     const row = await ctx.db.get(args.retentionId);
     if (!row || row.ownerId !== args.ownerId ||
         !["pending", "completed", "blocked"].includes(row.status) ||
-        !Number.isSafeInteger(row.releaseAt) || !Number.isSafeInteger(row.releaseObservationAt) ||
-        row.releaseObservationAt! > args.now || row.releaseObservationAt! < args.now - 5 * 60_000 ||
-        row.releaseAt! + FINAL_VIDEO_RETENTION_MS <= args.now) return null;
+        !Number.isSafeInteger(row.finalCopyReleaseAt) || !Number.isSafeInteger(row.finalCopyObservationAt) ||
+        row.finalCopyObservationAt! > args.now || row.finalCopyObservationAt! < args.now - 5 * 60_000 ||
+        row.finalCopyReleaseAt! + FINAL_VIDEO_RETENTION_MS <= args.now) return null;
     const [run, channel, prior] = await Promise.all([
       ctx.db.get(row.runId),
       ctx.db.get(row.channelId),
       ctx.db.query("releasedFinalMasters")
-        .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", row.releaseAt!)).unique(),
+        .withIndex("by_run_release", (q) => q.eq("runId", row.runId).eq("releaseAt", row.finalCopyReleaseAt!)).unique(),
     ]);
     if (!run || !channel || channel.ownerId !== args.ownerId || isChannelLocked(channel) ||
         run.ownerId !== args.ownerId || run.channelId !== row.channelId ||
         run.releaseEvidenceStatus !== "release_evidence_recorded" ||
         run.releaseEvidenceCertificateKey !== row.certificateKey ||
-        !run.youtubeVideoId || run.youtubeVideoId !== row.releaseVideoId ||
+        !run.youtubeVideoId || run.youtubeVideoId !== row.finalCopyVideoId ||
         prior?.status === "finished") return null;
     return { retentionId: row._id, runId: row.runId, channelId: row.channelId,
       videoId: run.youtubeVideoId, keyPrefix: row.keyPrefix,
-      certificateKey: row.certificateKey, releaseAt: row.releaseAt! };
+      certificateKey: row.certificateKey, releaseAt: row.finalCopyReleaseAt! };
   },
 });
 
@@ -100,10 +100,10 @@ export const begin = mutation({
         run.ownerId !== args.ownerId || run.channelId !== row.channelId ||
         run.releaseEvidenceStatus !== "release_evidence_recorded" ||
         run.releaseEvidenceCertificateKey !== args.certificateKey ||
-        run.youtubeVideoId !== row.releaseVideoId ||
-        row.certificateKey !== args.certificateKey || row.releaseAt !== args.releaseAt ||
-        !Number.isSafeInteger(row.releaseObservationAt) ||
-        row.releaseObservationAt! < now - 5 * 60_000 || row.releaseObservationAt! > now ||
+        run.youtubeVideoId !== row.finalCopyVideoId ||
+        row.certificateKey !== args.certificateKey || row.finalCopyReleaseAt !== args.releaseAt ||
+        !Number.isSafeInteger(row.finalCopyObservationAt) ||
+        row.finalCopyObservationAt! < now - 5 * 60_000 || row.finalCopyObservationAt! > now ||
         args.releaseAt + FINAL_VIDEO_RETENTION_MS <= now ||
         !args.sourceKey.startsWith(`${row.keyPrefix}runs/${row.runId}/`) ||
         args.copyKey !== releasedFinalVideoKey(row.keyPrefix, String(row.runId), args.releaseAt, args.sourceSha256) ||

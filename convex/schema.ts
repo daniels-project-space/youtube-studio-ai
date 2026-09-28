@@ -1439,6 +1439,12 @@ export default defineSchema({
     scheduledPublishAt: v.optional(v.number()),
     nextReleaseCheckAt: v.optional(v.number()),
     nextFinalCopyCheckAt: v.optional(v.number()),
+    // Independent copy observation: completed cleanup keeps its historical
+    // release/deadline even if YouTube later publishes a new generation.
+    finalCopyReleaseAt: v.optional(v.number()),
+    finalCopyObservationAt: v.optional(v.number()),
+    finalCopyVideoId: v.optional(v.string()),
+    finalCopyYouTubeChannelId: v.optional(v.string()),
     releaseConfirmedAt: v.optional(v.number()),
     releaseObservationAt: v.optional(v.number()),
     releaseVideoId: v.optional(v.string()),
