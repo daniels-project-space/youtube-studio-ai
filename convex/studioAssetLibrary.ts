@@ -44,6 +44,13 @@ export const recordEntry = mutation({
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "Studio Asset Library entry promotion");
     const entry = assertStudioAssetLibraryEntry(args.entry);
+    if (entry.resource?.r2Key) {
+      const retention = await ctx.db.query("studioR2AssetRetentions")
+        .withIndex("by_owner_key", (q) => q.eq("ownerId", args.ownerId).eq("r2Key", entry.resource!.r2Key)).first();
+      if (retention?.status === "processing" || retention?.status === "deleted") {
+        throw new Error("studioAssetLibrary: resource key is under retention cleanup");
+      }
+    }
     if (entry.channelId) {
       const channel = await ctx.db.get(entry.channelId as Id<"channels">);
       if (!channel || channel.ownerId !== args.ownerId) {

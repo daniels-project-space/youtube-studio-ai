@@ -1411,7 +1411,31 @@ export default defineSchema({
     // Library projections only need the retained video/thumbnail rows. Keep
     // intermediate keyframes, clips, music, and captions out of card reads.
     .index("by_run_kind", ["runId", "kind"])
+    .index("by_r2_key", ["r2Key"])
     .index("by_run", ["runId"]),
+
+  // An exact, writer-created inventory. Historical and unindexed R2 objects
+  // have no row and cannot enter automatic deletion by a bucket scan.
+  studioR2AssetRetentions: defineTable({
+    version: v.literal("studio-r2-asset-retention/v1"),
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    assetId: v.id("assets"),
+    r2Key: v.string(),
+    classification: v.union(v.literal("ordinary"), v.literal("final_video")),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    nextCheckAt: v.number(),
+    status: v.union(v.literal("pending"), v.literal("processing"), v.literal("deleted")),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    deletedAt: v.optional(v.number()),
+    attempts: v.number(),
+  })
+    .index("by_asset", ["assetId"])
+    .index("by_owner_key", ["ownerId", "r2Key"])
+    .index("by_owner_status_next_check", ["ownerId", "status", "nextCheckAt"]),
 
   // Release-aware deletion ledger for per-run media. A successful upload
   // schedules this row; it never deletes bytes itself. The Trigger sweeper

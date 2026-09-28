@@ -64,6 +64,7 @@ import type * as studioAssetPromotions from "../studioAssetPromotions.js";
 import type * as studioEpisodeAssetFolders from "../studioEpisodeAssetFolders.js";
 import type * as studioFunctions from "../studioFunctions.js";
 import type * as studioReusableMedia from "../studioReusableMedia.js";
+import type * as studioR2AssetRetentions from "../studioR2AssetRetentions.js";
 import type * as thumbnailRefresh from "../thumbnailRefresh.js";
 import type * as topicMemory from "../topicMemory.js";
 import type * as videoReleaseProvenance from "../videoReleaseProvenance.js";
@@ -139,6 +140,7 @@ declare const fullApi: ApiFromModules<{
   studioEpisodeAssetFolders: typeof studioEpisodeAssetFolders;
   studioFunctions: typeof studioFunctions;
   studioReusableMedia: typeof studioReusableMedia;
+  studioR2AssetRetentions: typeof studioR2AssetRetentions;
   thumbnailRefresh: typeof thumbnailRefresh;
   topicMemory: typeof topicMemory;
   videoReleaseProvenance: typeof videoReleaseProvenance;
