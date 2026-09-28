@@ -2,6 +2,40 @@ export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
+export type ReleasedOrdinaryClass = "lofi-clip" | "lofi-loop-unit";
+
+export function isLoFiOrdinarySource(
+  kind: ReleasedOrdinaryClass, keyPrefix: string, runId: string, sourceKey: string,
+): boolean {
+  const prefix = `${keyPrefix}runs/${runId}/`;
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
+      !sourceKey.startsWith(prefix)) return false;
+  const name = sourceKey.slice(prefix.length);
+  return kind === "lofi-clip" ? name === "loopraw.mp4" : /^loopunit_(?:2k|4k|1080p)\.mp4$/u.test(name);
+}
+
+export function releasedOrdinaryAssetKey(
+  keyPrefix: string, runId: string, kind: ReleasedOrdinaryClass,
+  assetId: string, releaseAt: number, sha256: string,
+): string {
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
+      !/^[A-Za-z0-9_-]+$/u.test(assetId) || !Number.isSafeInteger(releaseAt) || releaseAt < 0 ||
+      !/^[a-f0-9]{64}$/u.test(sha256) || !["lofi-clip", "lofi-loop-unit"].includes(kind)) {
+    throw new Error("released ordinary asset needs an owned row, class, release time, and SHA-256");
+  }
+  return `${keyPrefix}runs/${runId}/released-ordinary/v1/${kind}/${assetId}/${releaseAt}-${sha256}.mp4`;
+}
+
+export function releasedOrdinaryAssetIdentity(key: string): {
+  kind: ReleasedOrdinaryClass; assetId: string; releaseAt: number; sha256: string;
+} | null {
+  const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-ordinary\/v1\/(lofi-clip|lofi-loop-unit)\/([A-Za-z0-9_-]+)\/([0-9]+)-([a-f0-9]{64})\.mp4$/u.exec(key);
+  if (!match) return null;
+  const releaseAt = Number(match[3]);
+  return Number.isSafeInteger(releaseAt) && releaseAt >= 0
+    ? { kind: match[1] as ReleasedOrdinaryClass, assetId: match[2], releaseAt, sha256: match[4] } : null;
+}
+
 /** The only eligible ordinary copy source is a marked Lo-Fi still in its own run. */
 export function isLoFiKeyframeSource(keyPrefix: string, runId: string, sourceKey: string): boolean {
   return sourceKey.startsWith(`${keyPrefix}runs/${runId}/lofi-keyframe/images/`) &&

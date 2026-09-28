@@ -16,9 +16,22 @@ import {
   validateRunArtifactKeepNames,
   validateRunArtifactRetentionObjectKeys,
 } from "../src/lib/runArtifactRetention";
-import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, isLoFiKeyframeSource, releasedFinalVideoKey, releasedKeyframeKey } from "../src/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, isLoFiKeyframeSource, isLoFiOrdinarySource, releasedFinalVideoKey, releasedKeyframeKey, releasedOrdinaryAssetKey, type ReleasedOrdinaryClass } from "../src/lib/r2AssetRetention";
 
 const MAX_CLEANUP_ATTEMPTS = 5;
+
+const ordinaryKinds = ["lofi-clip", "lofi-loop-unit"] as const;
+function selectedMarkedOrdinaryAssets(row: Doc<"runArtifactRetentions">, ownerId: string, assets: Doc<"assets">[]) {
+  return ordinaryKinds.flatMap((kind) => {
+    const assetKind = kind === "lofi-clip" ? "clip" : "loop_unit";
+    const source = assets.filter((asset) => asset.ownerId === ownerId && asset.channelId === row.channelId &&
+      asset.runId === row.runId && asset.kind === assetKind &&
+      asset.meta?.retentionSource === `${kind}/v1` &&
+      isLoFiOrdinarySource(kind, row.keyPrefix, String(row.runId), asset.r2Key))
+      .sort((a, b) => b._creationTime - a._creationTime)[0];
+    return source ? [{ kind, assetId: source._id, sourceKey: source.r2Key }] : [];
+  });
+}
 
 const releaseMode = v.union(
   v.literal("private_draft"),
@@ -149,11 +162,11 @@ export const listReleaseChecks = query({
       row.status !== "processing" || (row.leaseExpiresAt ?? 0) <= args.now,
     );
     return await Promise.all(rows.map(async (row) => {
-      const [run, keyframes] = await Promise.all([
+      const [run, assets] = await Promise.all([
         ctx.db.get(row.runId),
-        ctx.db.query("assets").withIndex("by_run_kind", (q) => q.eq("runId", row.runId).eq("kind", "keyframe")).collect(),
+        ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", row.runId)).collect(),
       ]);
-      const source = keyframes.filter((asset) => asset.ownerId === args.ownerId &&
+      const source = assets.filter((asset) => asset.kind === "keyframe" && asset.ownerId === args.ownerId &&
         asset.channelId === row.channelId && asset.meta?.retentionSource === "lofi-keyframe/v1" &&
         isLoFiKeyframeSource(row.keyPrefix, String(row.runId), asset.r2Key))
         .sort((a, b) => b._creationTime - a._creationTime)[0];
@@ -164,6 +177,7 @@ export const listReleaseChecks = query({
         keyPrefix: row.keyPrefix,
         certificateKey: row.certificateKey,
         ...(source ? { keyframeSource: { assetId: source._id, sourceKey: source.r2Key } } : {}),
+        ordinarySources: selectedMarkedOrdinaryAssets(row, args.ownerId, assets),
         videoId: run?.ownerId === args.ownerId && run.channelId === row.channelId
           ? run.youtubeVideoId : undefined,
       };
@@ -191,6 +205,12 @@ export const recordReleaseObservations = mutation({
         r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
         releaseAt: v.number(), expiresAt: v.number(),
       })),
+      ordinaryAssets: v.optional(v.array(v.object({
+        kind: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+        assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+        r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
+        releaseAt: v.number(), expiresAt: v.number(),
+      }))),
     })),
   },
   returns: v.any(),
@@ -225,8 +245,9 @@ export const recordReleaseObservations = mutation({
       if (decision.released) {
         const finalVideo = item.finalVideo;
         const keyframe = item.keyframe;
-        const markedKeyframes = await ctx.db.query("assets")
-          .withIndex("by_run_kind", (q) => q.eq("runId", row.runId).eq("kind", "keyframe")).collect();
+        const assets = await ctx.db.query("assets")
+          .withIndex("by_run", (q) => q.eq("runId", row.runId)).collect();
+        const markedKeyframes = assets.filter((asset) => asset.kind === "keyframe");
         const eligibleKeyframes = markedKeyframes.filter((asset) => asset.ownerId === args.ownerId &&
           asset.channelId === row.channelId && asset.meta?.retentionSource === "lofi-keyframe/v1" &&
           isLoFiKeyframeSource(row.keyPrefix, String(row.runId), asset.r2Key));
@@ -263,6 +284,27 @@ export const recordReleaseObservations = mutation({
         if (row.releasedKeyframe && JSON.stringify(row.releasedKeyframe) !== JSON.stringify(keyframe)) {
           throw new Error("release keyframe copy changed after its first receipt");
         }
+        const selectedOrdinary = selectedMarkedOrdinaryAssets(row, args.ownerId, assets);
+        const ordinaryAssets = item.ordinaryAssets ?? [];
+        if (ordinaryAssets.length !== selectedOrdinary.length || ordinaryAssets.length > ordinaryKinds.length) {
+          throw new Error("marked ordinary assets require exact release copy receipts");
+        }
+        for (let index = 0; index < selectedOrdinary.length; index++) {
+          const selected = selectedOrdinary[index];
+          const copy = ordinaryAssets[index];
+          if (!copy || !selected || copy.kind !== selected.kind || copy.assetId !== selected.assetId ||
+              copy.sourceKey !== selected.sourceKey ||
+              copy.releaseAt !== decision.releaseAt || copy.expiresAt !== decision.releaseAt + ASSET_RETENTION_MS ||
+              !Number.isSafeInteger(copy.byteLength) || copy.byteLength < 1 ||
+              !/^"?[a-f0-9]{32}(?:-[0-9]+)?"?$/iu.test(copy.sourceEtag) ||
+              copy.r2Key !== releasedOrdinaryAssetKey(row.keyPrefix, String(row.runId),
+                copy.kind as ReleasedOrdinaryClass, String(copy.assetId), decision.releaseAt, copy.sha256)) {
+            throw new Error("release observation requires exact immutable ordinary asset copy receipts");
+          }
+        }
+        if (row.releasedOrdinaryAssets && JSON.stringify(row.releasedOrdinaryAssets) !== JSON.stringify(ordinaryAssets)) {
+          throw new Error("release ordinary asset copies changed after their first receipts");
+        }
         await ctx.db.patch(row._id, {
           status: "pending",
           releaseAt: decision.releaseAt,
@@ -273,6 +315,7 @@ export const recordReleaseObservations = mutation({
           releaseYouTubeChannelId: item.observation!.channelId,
           releasedFinalVideo: finalVideo,
           ...(keyframe ? { releasedKeyframe: keyframe } : {}),
+          ...(ordinaryAssets.length ? { releasedOrdinaryAssets: ordinaryAssets } : {}),
           nextReleaseCheckAt: Math.max(decision.retainUntil, args.observedAt),
           leaseToken: undefined, leaseExpiresAt: undefined,
           lastError: undefined, updatedAt: args.observedAt,

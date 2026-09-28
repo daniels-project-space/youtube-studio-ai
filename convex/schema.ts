@@ -1451,6 +1451,12 @@ export default defineSchema({
       r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
       releaseAt: v.number(), expiresAt: v.number(),
     })),
+    releasedOrdinaryAssets: v.optional(v.array(v.object({
+      kind: v.union(v.literal("lofi-clip"), v.literal("lofi-loop-unit")),
+      assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+      r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
+      releaseAt: v.number(), expiresAt: v.number(),
+    }))),
     status: v.union(
       v.literal("awaiting_release"),
       v.literal("pending"),

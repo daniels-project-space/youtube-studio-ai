@@ -7,7 +7,7 @@ import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
   RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
-import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey } from "@/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey, releasedOrdinaryAssetKey } from "@/lib/r2AssetRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "lte"; value: unknown };
@@ -174,6 +174,41 @@ test("marked Lo-Fi asset requires its exact source-bound 30-day receipt; legacy 
     observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
       finalVideo, keyframe, observation }] });
   assert.deepEqual(row.releasedKeyframe, keyframe);
+});
+
+test("marked Lo-Fi clip and loop unit require exact classed receipts at observed release", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const sources = [
+    { kind: "lofi-clip" as const, assetKind: "clip", id: "asset-clip", key: `${keyPrefix}runs/run-a/loopraw.mp4` },
+    { kind: "lofi-loop-unit" as const, assetKind: "loop_unit", id: "asset-loop", key: `${keyPrefix}runs/run-a/loopunit_4k.mp4` },
+  ];
+  for (const source of sources) f.db.seed("assets", source.id, { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: source.assetKind, r2Key: source.key, meta: { retentionSource: `${source.kind}/v1` } });
+  f.db.seed("assets", "legacy-clip", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "clip", r2Key: `${keyPrefix}runs/run-a/old-clip.mp4` });
+  const checks = await f.invoke<Row[]>(listReleaseChecks, { ownerId, now: actualRelease });
+  assert.deepEqual(checks[0].ordinarySources, sources.map((source) => ({
+    kind: source.kind, assetId: source.id, sourceKey: source.key,
+  })));
+  const receipts = sources.map((source, index) => ({
+    kind: source.kind, assetId: source.id, sourceKey: source.key,
+    sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    r2Key: releasedOrdinaryAssetKey(keyPrefix, "run-a", source.kind, source.id,
+      actualRelease, String(index + 1).repeat(64)),
+    sha256: String(index + 1).repeat(64), byteLength: 1234, releaseAt: actualRelease,
+    expiresAt: actualRelease + ASSET_RETENTION_MS,
+  }));
+  const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
+    publishedAt: new Date(actualRelease).toISOString() };
+  const observe = (ordinaryAssets: unknown) => f.invoke(recordReleaseObservations, {
+    ownerId, observedAt: actualRelease + 1000, observations: [{ retentionId: row._id,
+      connectorId: "connector-a", connectorVersion: 4, finalVideo, ordinaryAssets, observation }],
+  });
+  await assert.rejects(observe([receipts[0]]), /require exact release copy receipts/);
+  await assert.rejects(observe([{ ...receipts[0], kind: "lofi-loop-unit" }, receipts[1]]), /exact immutable ordinary asset copy receipts/);
+  await observe(receipts);
+  assert.deepEqual(row.releasedOrdinaryAssets, receipts);
 });
 
 test("missed schedules and failed processing preserve artifacts without consuming cleanup attempts", async () => {

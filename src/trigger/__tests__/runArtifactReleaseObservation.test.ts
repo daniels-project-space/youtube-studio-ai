@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey } from "@/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey, releasedOrdinaryAssetKey } from "@/lib/r2AssetRetention";
 import {
   fetchRunArtifactReleaseObservations,
   reconcileRunArtifactReleaseChecks,
@@ -167,4 +167,47 @@ test("a marked per-run keyframe copy is recorded alongside the final master and 
   await reconcileRunArtifactReleaseChecks({ ...common, copyKeyframe: async () => { throw new Error("keyframe unavailable"); } });
   assert.equal(recorded[1][0].observation, null);
   assert.match(recorded[1][0].error!, /keyframe unavailable/);
+});
+
+test("ordinary release copies are serialized and a failed copy defers the observation", async () => {
+  const releaseAt = Date.parse(publicVideo.publishedAt);
+  const keyPrefix = "owner/o/channel/c/";
+  const sources = [
+    { kind: "lofi-clip" as const, assetId: "asset-clip" as Id<"assets">,
+      sourceKey: `${keyPrefix}runs/run-copy/loopraw.mp4` },
+    { kind: "lofi-loop-unit" as const, assetId: "asset-loop" as Id<"assets">,
+      sourceKey: `${keyPrefix}runs/run-copy/loopunit_4k.mp4` },
+  ];
+  const check: RunArtifactReleaseCheck = {
+    retentionId: "ret-ordinary" as Id<"runArtifactRetentions">,
+    runId: "run-copy" as Id<"runs">, channelId, videoId, keyPrefix, ordinarySources: sources,
+  };
+  const calls: string[] = [];
+  const observations: RunArtifactObservedRelease[][] = [];
+  const common = {
+    checks: [check], now: () => releaseAt + 1000,
+    observeChannel: async () => ({ connectorId, connectorVersion: 1, ytChannelId: "UC-test",
+      videos: new Map([[videoId, publicVideo]]) }),
+    copyFinal: async () => ({ sourceKey: `${keyPrefix}runs/run-copy/final.mp4`, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+      r2Key: releasedFinalVideoKey(keyPrefix, "run-copy", releaseAt, "a".repeat(64)), sha256: "a".repeat(64),
+      byteLength: 42, releaseAt, expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS }),
+    record: async (rows: RunArtifactObservedRelease[]) => {
+      observations.push(rows); return { confirmed: rows[0].observation ? 1 : 0,
+        deferred: rows[0].observation ? 0 : 1 };
+    },
+  };
+  await reconcileRunArtifactReleaseChecks({ ...common, copyOrdinary: async (_check, source) => {
+    calls.push(source.kind);
+    return { ...source, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+      r2Key: releasedOrdinaryAssetKey(keyPrefix, "run-copy", source.kind, source.assetId, releaseAt, "b".repeat(64)),
+      sha256: "b".repeat(64), byteLength: 100, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS };
+  } });
+  assert.deepEqual(calls, ["lofi-clip", "lofi-loop-unit"]);
+  assert.equal(observations[0][0].ordinaryAssets?.length, 2);
+  await reconcileRunArtifactReleaseChecks({ ...common, copyOrdinary: async (_check, source) => {
+    if (source.kind === "lofi-loop-unit") throw new Error("loop unit R2 unavailable");
+    return observations[0][0].ordinaryAssets![0];
+  } });
+  assert.equal(observations[1][0].observation, null);
+  assert.match(observations[1][0].error!, /loop unit R2 unavailable/);
 });

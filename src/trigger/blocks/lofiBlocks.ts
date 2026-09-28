@@ -1658,6 +1658,7 @@ export function createLoopClipsBlock(
       const loopRawKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopraw.mp4`;
       await persistRenderedFile(loopRawKey, loopRaw, { contentType: "video/mp4" }, { beforeAttempt: admittedMusic?.assertCurrent });
       await recordAsset(ctx, "clip", loopRawKey, {
+        retentionSource: "lofi-clip/v1",
         jobIds: clips.map((clip) => clip.receipt.jobId),
         models: clips.map((clip) => clip.receipt.runtime.runtimeId),
         provider: "minimax-h3-novita-on-demand",
@@ -1750,6 +1751,7 @@ export const upscale: Block = {
       contentType: "video/mp4",
     });
     await recordAsset(ctx, "loop_unit", loopUnitKey, {
+      retentionSource: "lofi-loop-unit/v1",
       upscaled,
       resolution,
       targetFps,

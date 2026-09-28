@@ -25,6 +25,20 @@ export function projectReleasedKeyframeAssets<T extends Pick<RunMediaAsset, "_id
   });
 }
 
+export function projectReleasedOrdinaryAssets<T extends Pick<RunMediaAsset, "_id" | "kind" | "r2Key">>(
+  assets: readonly T[],
+  copies: readonly { kind: "lofi-clip" | "lofi-loop-unit"; assetId: string; sourceKey: string; r2Key: string; releaseAt: number }[],
+  releaseAt: number | undefined,
+  expiredAssetIds: ReadonlySet<string>,
+): T[] {
+  return assets.flatMap((asset) => {
+    const copy = copies.find((item) => item.assetId === asset._id && item.sourceKey === asset.r2Key &&
+      item.releaseAt === releaseAt && asset.kind === (item.kind === "lofi-clip" ? "clip" : "loop_unit"));
+    if (!copy) return [asset];
+    return expiredAssetIds.has(asset._id) ? [] : [{ ...asset, r2Key: copy.r2Key }];
+  });
+}
+
 export type RunStageReceipt = {
   block: string;
   status: string;

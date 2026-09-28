@@ -19,6 +19,7 @@ import { getAccessToken } from "@/lib/youtube";
 import { evaluateRunArtifactRelease } from "@/lib/runArtifactRetention";
 import { copyReleasedFinalVideo, type ReleasedFinalVideoReceipt } from "@/lib/releasedFinalVideo";
 import { copyReleasedKeyframe, type ReleasedKeyframeReceipt, type ReleasedKeyframeSource } from "@/lib/releasedKeyframe";
+import { copyReleasedOrdinaryAsset, type ReleasedOrdinaryReceipt, type ReleasedOrdinarySource } from "@/lib/releasedOrdinaryAsset";
 import { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 export { fetchRunArtifactReleaseObservations } from "@/lib/youtubeReleaseObservation";
 import {
@@ -37,6 +38,7 @@ export interface RunArtifactReleaseCheck {
   keyPrefix?: string;
   certificateKey?: string;
   keyframeSource?: ReleasedKeyframeSource;
+  ordinarySources?: ReleasedOrdinarySource[];
 }
 
 export interface RunArtifactObservedRelease {
@@ -47,6 +49,7 @@ export interface RunArtifactObservedRelease {
   observation: RunArtifactReleaseObservation | null;
   finalVideo?: ReleasedFinalVideoReceipt;
   keyframe?: ReleasedKeyframeReceipt;
+  ordinaryAssets?: ReleasedOrdinaryReceipt[];
 }
 
 /** Shared production/test coordinator: group by connector, persist every outcome. */
@@ -60,6 +63,7 @@ export async function reconcileRunArtifactReleaseChecks(args: {
   }>;
   copyFinal?: (check: RunArtifactReleaseCheck, releaseAt: number) => Promise<ReleasedFinalVideoReceipt>;
   copyKeyframe?: (check: RunArtifactReleaseCheck, releaseAt: number) => Promise<ReleasedKeyframeReceipt>;
+  copyOrdinary?: (check: RunArtifactReleaseCheck, source: ReleasedOrdinarySource, releaseAt: number) => Promise<ReleasedOrdinaryReceipt>;
   record: (observations: RunArtifactObservedRelease[], observedAt: number) => Promise<{
     confirmed: number; deferred: number;
   }>;
@@ -96,7 +100,13 @@ export async function reconcileRunArtifactReleaseChecks(args: {
           const finalVideo = await args.copyFinal(check, decision.releaseAt);
           const keyframe = check.keyframeSource && args.copyKeyframe
             ? await args.copyKeyframe(check, decision.releaseAt) : undefined;
-          return { ...base, finalVideo, ...(keyframe ? { keyframe } : {}) };
+          const ordinaryAssets: ReleasedOrdinaryReceipt[] = [];
+          for (const source of check.ordinarySources ?? []) {
+            if (!args.copyOrdinary) throw new Error("ordinary release copy writer is unavailable");
+            ordinaryAssets.push(await args.copyOrdinary(check, source, decision.releaseAt));
+          }
+          return { ...base, finalVideo, ...(keyframe ? { keyframe } : {}),
+            ...(ordinaryAssets.length ? { ordinaryAssets } : {}) };
         } catch (error) {
           return { ...base, observation: null,
             error: `Release copy unavailable: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000) };
@@ -183,6 +193,10 @@ export async function sweepDueRunArtifactRetentions(input?: {
       if (!check.keyPrefix || !check.keyframeSource) throw new Error("retention check lacks the marked keyframe source");
       return copyReleasedKeyframe({ keyPrefix: check.keyPrefix, runId: String(check.runId),
         releaseAt, source: check.keyframeSource });
+    },
+    copyOrdinary: async (check, source, releaseAt) => {
+      if (!check.keyPrefix) throw new Error("retention check lacks the ordinary source prefix");
+      return copyReleasedOrdinaryAsset({ keyPrefix: check.keyPrefix, runId: String(check.runId), releaseAt, source });
     },
     record: (observations, observedAt) => convex.mutation(api.runArtifactRetentions.recordReleaseObservations, {
       ownerId, observedAt, observations,

@@ -7,6 +7,7 @@ import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, permanentReusableMediaDigest,
   permanentReusableMediaKey, releasedFinalVideoIdentity, releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS,
   ASSET_RETENTION_MS, isLoFiKeyframeSource, releasedKeyframeIdentity, releasedKeyframeKey,
+  isLoFiOrdinarySource, releasedOrdinaryAssetIdentity, releasedOrdinaryAssetKey,
   selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
@@ -43,6 +44,27 @@ test("only marked Lo-Fi run stills can be release-copy sources and destination c
   await assert.rejects(() => putObject(key, "bytes"), /released keyframe requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(key, "/missing", {
     ifNoneMatch: "*", metadata: { retentionWriter: "released-keyframe/v1", retentionKeyframeSha256: "a".repeat(64),
+      retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
+  }), /expiry-bound/);
+});
+test("Lo-Fi clip and loop unit copies have exact run, row, class and expiry guards", async () => {
+  const channel = "owner/daniel/channel/show/";
+  const run = `${channel}runs/run-1/`;
+  assert.equal(isLoFiOrdinarySource("lofi-clip", channel, "run-1", `${run}loopraw.mp4`), true);
+  assert.equal(isLoFiOrdinarySource("lofi-loop-unit", channel, "run-1", `${run}loopunit_4k.mp4`), true);
+  for (const source of [`${run}thumbnail.mp4`, `${channel}runs/run-2/loopraw.mp4`,
+    `${channel}library/loopraw.mp4`]) {
+    assert.equal(isLoFiOrdinarySource("lofi-clip", channel, "run-1", source), false);
+  }
+  const key = releasedOrdinaryAssetKey(channel, "run-1", "lofi-clip", "asset_1", releasedAt, "a".repeat(64));
+  assert.deepEqual(releasedOrdinaryAssetIdentity(key), {
+    kind: "lofi-clip", assetId: "asset_1", releaseAt: releasedAt, sha256: "a".repeat(64),
+  });
+  await assert.rejects(() => presignUpload(key), /released copies cannot use presigned uploads/);
+  await assert.rejects(() => putObject(key, "bytes"), /released ordinary asset requires its create-only file writer/);
+  await assert.rejects(() => putObjectFromFile(key, "/missing", {
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-ordinary/v1", retentionAssetSha256: "a".repeat(64),
+      retentionAssetClass: "lofi-clip", retentionAssetId: "asset_1",
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
   }), /expiry-bound/);
 });

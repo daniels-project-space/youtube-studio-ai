@@ -49,12 +49,25 @@ New Lo-Fi runs mark the accepted per-run Novita keyframe asset as
 marked asset, binds its source ETag to a download, computes the full SHA-256,
 and writes a create-only `runs/<run>/released-keyframe/v1/<releaseAt>-<sha256>.png`.
 R2 metadata and the Convex receipt record the source asset/key/ETag, digest,
-release time, and 30-day deadline. The run workbench and Library media detail
-project the copy for that exact asset ID; the original asset row and key remain
+release time, and 30-day deadline. The run media workbench projects the copy
+for that exact asset ID; the original asset row and key remain
 for rendering and provenance. A marked asset with an unsuccessful copy defers
 release recording. Older unmarked keyframes, thumbnails (including Nano Banana
 Pro), and reusable library media are outside this path. This is a retention
 receipt only: the 30-day keyframe copy has no enabled deletion path.
+
+The same verified byte copier now covers two more explicit Lo-Fi run assets:
+the `clip` row for `loopraw.mp4` and the `loop_unit` row for
+`loopunit_{2k,4k,1080p}.mp4`. Their writers mark the rows, and the release
+observer copies only the latest marked row of each class to an immutable
+`released-ordinary/v1/<class>/<assetId>/<releaseAt>-<sha256>.mp4` key. Each
+copy has source key/ETag, full digest, row ID, class, and 30-day expiry in
+metadata and a Convex receipt. The run media workbench projection uses a copy
+only when its row ID, kind, original key, and release time all
+match; an expiration intent hides that copy. A failed copy defers release
+recording. There is no live writer of the schema's old `upscaled` kind, so
+those legacy rows remain untouched. Other clips and loop units, thumbnails,
+reusable music, and final videos remain outside this ordinary class.
 
 The deletion path remains disabled by the independent
 `YOUTUBE_STUDIO_R2_ACCOUNT_ID` binding. Do not enable the sweeper or R2
