@@ -170,5 +170,8 @@ the confirmed release deadline; a late upload can therefore become
 unreadable before provider deletion. Before any live rule, inventory the
 **actual** v2 prefixes and audit every credential and writer able to reach
 them. The live inventory found no v1 release copies before this change; any
-unexpected v1 object is read-expired and protected from new writes, and
-requires separate reconciliation. No lifecycle rule was changed.
+unexpected v1 object retains its exact encoded release deadline, is protected
+from new writes, and requires separate reconciliation after expiry. Neither
+root v2 namespace may be promoted directly to the permanent Studio Library
+or reusable media inventory; a verified permanent copy is required. No
+lifecycle rule was changed.

@@ -50,8 +50,23 @@ export function classedReleaseCopyExpiresAt(key: string): number | undefined {
     const identity = releasedFinalVideoIdentity(key);
     return identity ? identity.releaseAt + FINAL_VIDEO_RETENTION_MS : 0;
   }
-  if (key.includes("/released-keyframe/v1/") || key.includes("/released-ordinary/v1/") ||
-      key.includes("/released-final/v1/")) return 0;
+  // Preserve the deadline of exact pre-v2 receipts. These nested keys never
+  // participate in the root-prefix lifecycle rule or any new writer.
+  if (key.includes("/released-keyframe/v1/")) {
+    const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-keyframe\/v1\/([0-9]+)-[a-f0-9]{64}\.png$/u.exec(key);
+    const releaseAt = Number(match?.[1]);
+    return match && Number.isSafeInteger(releaseAt) ? releaseAt + ASSET_RETENTION_MS : 0;
+  }
+  if (key.includes("/released-ordinary/v1/")) {
+    const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-ordinary\/v1\/(?:lofi-clip|lofi-loop-unit)\/[A-Za-z0-9_-]+\/([0-9]+)-[a-f0-9]{64}\.mp4$/u.exec(key);
+    const releaseAt = Number(match?.[1]);
+    return match && Number.isSafeInteger(releaseAt) ? releaseAt + ASSET_RETENTION_MS : 0;
+  }
+  if (key.includes("/released-final/v1/")) {
+    const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-final\/v1\/([0-9]+)-[a-f0-9]{64}\.mp4$/u.exec(key);
+    const releaseAt = Number(match?.[1]);
+    return match && Number.isSafeInteger(releaseAt) ? releaseAt + FINAL_VIDEO_RETENTION_MS : 0;
+  }
   return undefined;
 }
 

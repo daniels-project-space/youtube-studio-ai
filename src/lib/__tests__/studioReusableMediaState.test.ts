@@ -14,6 +14,7 @@ import {
 } from "@/engine/studioReusableMedia";
 import { approvedThirdPartyStockSource } from "@/lib/thirdPartyStockEvidence";
 import { sha256Hex } from "@/lib/sha256";
+import { releasedFinalVideoKey, releasedOrdinaryAssetKey } from "@/lib/r2AssetRetention";
 
 type Stored = Record<string, unknown> & { readonly _id: string };
 const OWNER = "owner-media";
@@ -187,6 +188,20 @@ async function main() {
   );
   const entryId = await invoke<string>(recordEntry, service, { ownerId: OWNER, entry });
   assert.equal(await invoke<string>(recordEntry, service, { ownerId: OWNER, entry }), entryId);
+  const { fingerprint: _fingerprint, ...releasePromotionCore } = entry;
+  void _fingerprint;
+  for (const [kind, releaseKey] of [
+    ["ordinary", releasedOrdinaryAssetKey(`owner/${OWNER}/channel/show/`, RUN_SOURCE,
+      "lofi-clip", "asset_1", 1, "a".repeat(64))],
+    ["final", releasedFinalVideoKey(`owner/${OWNER}/channel/show/`, RUN_SOURCE, 1, "b".repeat(64))],
+  ]) {
+    const expiring = createStudioReusableMediaEntry({ ...releasePromotionCore,
+      logicalId: `expiring_${kind}`, resource: { ...entry.resource, r2Key: releaseKey } });
+    await assert.rejects(() => invoke(recordEntry, service, { ownerId: OWNER, entry: expiring }),
+      /classed release copies expire/);
+  }
+  assert.equal(state.rows("studioReusableMediaAssets").length, 1,
+    "reusable media cannot record an expiring release-copy key");
 
   const first = await invoke<StudioReusableMediaPlan>(claimEpisodeAndResolve, service, {
     ownerId: OWNER,

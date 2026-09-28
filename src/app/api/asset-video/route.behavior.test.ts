@@ -59,6 +59,19 @@ test("root v2 release keys are owner-scoped before playback", async () => {
   assert.equal(f.signs(), 0);
 });
 
+test("nested v1 final receipt reaches playback until its encoded 180-day deadline", async () => {
+  const f = fixture(async () => { throw new Error("aborted before storage"); });
+  const key = (releaseAt: number) =>
+    `owner/fixture-owner/channel/show/runs/run-1/released-final/v1/${releaseAt}-${"a".repeat(64)}.mp4`;
+  assert.equal((await f.get(AbortSignal.abort(), false, undefined,
+    key(Date.now() - 179 * 86_400_000))).status, 499);
+  assert.equal((await f.get(new AbortController().signal, false, undefined,
+    key(Date.now() - 181 * 86_400_000))).status, 410);
+  assert.equal((await f.get(new AbortController().signal, false, undefined,
+    key(Date.now() - 179 * 86_400_000).replace("owner/fixture-owner/", "owner/other/"))).status, 403);
+  assert.equal(f.signs(), 0);
+});
+
 test("already abandoned previews do no signing or storage work", async () => {
   const f = fixture(async () => { throw new Error("Unexpected storage read"); });
   for (const probe of [false, true]) {

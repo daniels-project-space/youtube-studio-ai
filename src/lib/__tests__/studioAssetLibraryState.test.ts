@@ -15,6 +15,7 @@ import {
   type StudioAssetLibraryEntryCore,
 } from "@/engine/studioAssetLibrary";
 import { sha256Hex } from "@/lib/sha256";
+import { releasedFinalVideoKey, releasedKeyframeKey } from "@/lib/r2AssetRetention";
 
 type Stored = Record<string, unknown> & { readonly _id: string };
 const OWNER = "owner-library";
@@ -140,6 +141,19 @@ async function main() {
 
   const id = await invoke<string>(recordEntry, service, { ownerId: OWNER, entry: approved });
   assert.equal(await invoke<string>(recordEntry, service, { ownerId: OWNER, entry: approved }), id, "same immutable entry is idempotent");
+  for (const [kind, releaseKey] of [
+    ["ordinary", releasedKeyframeKey(`owner/${OWNER}/channel/show/`, RUN, 1, "a".repeat(64))],
+    ["final", releasedFinalVideoKey(`owner/${OWNER}/channel/show/`, RUN, 1, "b".repeat(64))],
+  ]) {
+    const expiring = createStudioAssetLibraryEntry(core({
+      logicalId: `expiring-${kind}`,
+      resource: { r2Key: releaseKey, contentSha256: digest(kind), contentType: "video/mp4", byteLength: 100 },
+    }));
+    await expectRejected(() => invoke(recordEntry, service, { ownerId: OWNER, entry: expiring }),
+      /classed release copies expire/);
+  }
+  assert.equal(state.rows("studioAssetLibraryEntries").length, 1,
+    "permanent library cannot record an expiring release-copy key");
 
   await expectRejected(
     () => invoke(listInventory, owner, { ownerId: OWNER }),

@@ -128,6 +128,25 @@ test("scheduled classed proof binds exact source, destination identity, digest a
     retentionSourceKey: stillSource } };
   assert.equal(hasExactScheduledClassedProof(stillRow, stillHead, due), true);
 });
+test("exact nested v1 receipts remain readable until their original deadline", () => {
+  const root = "owner/daniel/channel/show/runs/run-1/";
+  const sha = "a".repeat(64);
+  for (const key of [
+    `${root}released-keyframe/v1/${releasedAt}-${sha}.png`,
+    `${root}released-ordinary/v1/lofi-clip/asset_1/${releasedAt}-${sha}.mp4`,
+    `${root}released-ordinary/v1/lofi-loop-unit/asset_2/${releasedAt}-${sha}.mp4`,
+  ]) {
+    assert.equal(classedReleaseCopyExpiresAt(key), releasedAt + ASSET_RETENTION_MS);
+    assert.equal(classedReleaseCopyIsReadable(key, releasedAt + ASSET_RETENTION_MS - 1), true);
+    assert.equal(classedReleaseCopyIsReadable(key, releasedAt + ASSET_RETENTION_MS), false);
+  }
+  const final = `${root}released-final/v1/${releasedAt}-${sha}.mp4`;
+  assert.equal(classedReleaseCopyExpiresAt(final), releasedAt + FINAL_VIDEO_RETENTION_MS);
+  assert.equal(classedReleaseCopyIsReadable(final, releasedAt + FINAL_VIDEO_RETENTION_MS - 1), true);
+  assert.equal(classedReleaseCopyIsReadable(final, releasedAt + FINAL_VIDEO_RETENTION_MS), false);
+  assert.equal(classedReleaseCopyIsReadable(`${root}released-keyframe/v1/bad.png`, releasedAt), false);
+  assert.equal(classedReleaseCopyIsReadable(`${root}released-final/v1/${releasedAt}-${sha}.png`, releasedAt), false);
+});
 const scope: RunR2RetentionScope = {
   runId: "run-1", keyPrefix: "owner/daniel/channel/show/", runStatus: "ok",
   retentionStatus: "completed", releaseAt: now - 200 * day, retainUntil: now - 170 * day,
