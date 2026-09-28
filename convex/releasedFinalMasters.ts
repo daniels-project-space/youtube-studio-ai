@@ -169,7 +169,7 @@ export const finish = mutation({
       }
     } else await ctx.db.patch(prior._id, { status: "finished", finishedAt: args.finishedAt,
       copyEtag: args.copyEtag, copyLastModifiedAt: args.copyLastModifiedAt });
-    await ctx.db.patch(row._id, { nextFinalCopyCheckAt: now + 24 * 60 * 60_000 });
+    await ctx.db.patch(row._id, { nextFinalCopyCheckAt: undefined });
     return { status: "finished" as const };
   },
 });

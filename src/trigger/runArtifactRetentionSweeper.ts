@@ -43,6 +43,8 @@ export interface RunArtifactObservedRelease {
   observation: RunArtifactReleaseObservation | null;
 }
 
+const RELEASE_OBSERVATION_BATCH_SIZE = 50;
+
 /** One bounded read for this channel, with no provider writes or public API key. */
 export async function fetchRunArtifactReleaseObservations(args: {
   accessToken: string;
@@ -99,36 +101,39 @@ export async function reconcileRunArtifactReleaseChecks(args: {
   }>;
   now?: () => number;
 }): Promise<{ confirmed: number; deferred: number }> {
-  const groups = new Map<Id<"channels">, RunArtifactReleaseCheck[]>();
-  for (const check of args.checks) {
-    const rows = groups.get(check.channelId) ?? [];
-    rows.push(check);
-    groups.set(check.channelId, rows);
-  }
   let confirmed = 0;
   let deferred = 0;
-  for (const [channelId, checks] of groups) {
-    let observations: RunArtifactObservedRelease[];
-    try {
-      const videoIds = [...new Set(checks.flatMap((check) => check.videoId ? [check.videoId] : []))];
-      const result = videoIds.length ? await args.observeChannel(channelId, videoIds) : undefined;
-      observations = checks.map((check) => ({
-        retentionId: check.retentionId,
-        ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
-        ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
-        observation: check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null,
-      }));
-    } catch (error) {
-      observations = checks.map((check) => ({
-        retentionId: check.retentionId,
-        error: `Release check unavailable: ${error instanceof Error ? error.message : "provider lookup failed"}`.slice(0, 1_000),
-        observation: null,
-      }));
+  for (let offset = 0; offset < args.checks.length; offset += RELEASE_OBSERVATION_BATCH_SIZE) {
+    const batch = args.checks.slice(offset, offset + RELEASE_OBSERVATION_BATCH_SIZE);
+    const groups = new Map<Id<"channels">, RunArtifactReleaseCheck[]>();
+    for (const check of batch) {
+      const rows = groups.get(check.channelId) ?? [];
+      rows.push(check);
+      groups.set(check.channelId, rows);
     }
-    // A failed commit stops cleanup; it cannot be mistaken for no due work.
-    const result = await args.record(observations, (args.now ?? Date.now)());
-    confirmed += result.confirmed;
-    deferred += result.deferred;
+    for (const [channelId, checks] of groups) {
+      let observations: RunArtifactObservedRelease[];
+      try {
+        const videoIds = [...new Set(checks.flatMap((check) => check.videoId ? [check.videoId] : []))];
+        const result = videoIds.length ? await args.observeChannel(channelId, videoIds) : undefined;
+        observations = checks.map((check) => ({
+          retentionId: check.retentionId,
+          ...(result ? { connectorId: result.connectorId, connectorVersion: result.connectorVersion } : {}),
+          ...(!check.videoId ? { error: "The saved run has no YouTube video ID" } : {}),
+          observation: check.videoId && result ? (result.videos.get(check.videoId) ?? null) : null,
+        }));
+      } catch (error) {
+        observations = checks.map((check) => ({
+          retentionId: check.retentionId,
+          error: `Release check unavailable: ${error instanceof Error ? error.message : "provider lookup failed"}`.slice(0, 1_000),
+          observation: null,
+        }));
+      }
+      // A failed commit stops cleanup; it cannot be mistaken for no due work.
+      const result = await args.record(observations, (args.now ?? Date.now)());
+      confirmed += result.confirmed;
+      deferred += result.deferred;
+    }
   }
   return { confirmed, deferred };
 }
@@ -357,6 +362,13 @@ export async function sweepDueRunArtifactRetentions(input?: {
   return { claimed, completed, blocked, removedObjects };
 }
 
+export async function runScheduledArtifactRetentionSweep() {
+  if (studioRetentionMaintenanceEnabled()) {
+    return { skipped: true, reason: "dedicated maintenance schedule owns release observations and final copies" };
+  }
+  return sweepDueRunArtifactRetentions();
+}
+
 /**
  * Retention cleanup is maintenance for already-authorized releases, so it is
  * intentionally independent of the content-generation automation gate.
@@ -367,7 +379,7 @@ export const runArtifactRetentionSweeper = schedules.task({
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
-  run: async () => sweepDueRunArtifactRetentions(),
+  run: async () => runScheduledArtifactRetentionSweep(),
 });
 
 /** Release observation and certified-copy maintenance stays independent of the

@@ -142,6 +142,7 @@ test("real release observation reserves and finishes one certified final-copy ge
       uploadStatus: "processed", publishedAt: new Date(publicAt).toISOString() } };
   assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
   assert.equal((await f.invoke(finishFinalCopy, finish) as { status: string }).status, "finished");
+  assert.equal(row.nextFinalCopyCheckAt, undefined, "finishing a copy stops scheduled provider checks");
   assert.equal(f.db.rows("releasedFinalMasters").length, 1);
   assert.equal(row.nextReleaseCheckAt, publicAt + 14 * 86_400_000);
   assert.equal(Number(f.db.rows("releasedFinalMasters")[0].releaseAt) + FINAL_VIDEO_RETENTION_MS,

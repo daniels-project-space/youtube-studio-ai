@@ -2,11 +2,46 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { mock, test } from "node:test";
 import { getFunctionName } from "convex/server";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import {
   runStudioRetentionMaintenance,
+  runScheduledArtifactRetentionSweep,
+  reconcileRunArtifactReleaseChecks,
   sweepDueRunArtifactRetentions,
 } from "../runArtifactRetentionSweeper";
+
+test("release observation commits are split at the Convex 50-row batch limit", async () => {
+  const channelId = "channel-fixture" as Id<"channels">;
+  const checks = Array.from({ length: 51 }, (_, index) => ({
+    retentionId: `retention-${index}` as Id<"runArtifactRetentions">,
+    channelId,
+    runId: `run-${index}` as Id<"runs">,
+    videoId: `video${String(index).padStart(8, "0")}`,
+  }));
+  const observedSizes: number[] = [];
+  const recordedSizes: number[] = [];
+  const result = await reconcileRunArtifactReleaseChecks({
+    checks,
+    observeChannel: async (_channel, videoIds) => {
+      observedSizes.push(videoIds.length);
+      return {
+        connectorId: "connector-fixture" as Id<"youtubeAuth">,
+        connectorVersion: 1,
+        videos: new Map(videoIds.map((videoId) => [videoId, { videoId, channelId: "UC-fixture" }])),
+      };
+    },
+    record: async (observations) => {
+      recordedSizes.push(observations.length);
+      assert.ok(observations.length <= 50);
+      return { confirmed: observations.length, deferred: 0 };
+    },
+    now: () => 1,
+  });
+  assert.deepEqual(observedSizes, [50, 1]);
+  assert.deepEqual(recordedSizes, [50, 1]);
+  assert.deepEqual(result, { confirmed: 51, deferred: 0 });
+});
 
 test("maintenance controller does nothing when its own opt-in is absent", async () => {
   const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
@@ -31,6 +66,35 @@ test("maintenance controller does nothing when its own opt-in is absent", async 
     assert.deepEqual(calls, []);
   } finally {
     fetchMock.mock.restore(); query.mock.restore(); mutation.mock.restore();
+    if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
+    else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;
+    if (previousMaintenance === undefined) delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+    else process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = previousMaintenance;
+  }
+});
+
+test("legacy sweeper skips duplicate observation/copy work while the dedicated gate is enabled", async () => {
+  const previousGlobal = process.env.STUDIO_SCHEDULES_ENABLED;
+  const previousMaintenance = process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
+  process.env.STUDIO_SCHEDULES_ENABLED = "true";
+  process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED = "true";
+  const calls: string[] = [];
+  const fetchMock = mock.method(globalThis, "fetch", async () => {
+    calls.push("fetch");
+    throw new Error("the delegated sweeper must not bootstrap");
+  });
+  const query = mock.method(StudioConvexHttpClient.prototype, "query", async () => {
+    calls.push("query");
+    throw new Error("the delegated sweeper must not observe");
+  });
+  try {
+    assert.deepEqual(await runScheduledArtifactRetentionSweep(), {
+      skipped: true,
+      reason: "dedicated maintenance schedule owns release observations and final copies",
+    });
+    assert.deepEqual(calls, []);
+  } finally {
+    fetchMock.mock.restore(); query.mock.restore();
     if (previousGlobal === undefined) delete process.env.STUDIO_SCHEDULES_ENABLED;
     else process.env.STUDIO_SCHEDULES_ENABLED = previousGlobal;
     if (previousMaintenance === undefined) delete process.env.STUDIO_RETENTION_MAINTENANCE_ENABLED;
