@@ -2,8 +2,8 @@
  * Durable, read-only capacity waiter for the weekly H3 Salad lane.
  *
  * This task never calls a paid worker. It either re-admits the original
- * Salad order, schedules the next bounded check, or hands the frozen packet
- * to the agreed Novita fallback after the 24-hour wait window.
+ * Salad order, schedules the next bounded check, or stops for Render Engine
+ * reconciliation after the 24-hour hold window. It never starts Novita.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -80,19 +80,11 @@ export const minimaxH3WeeklyCapacityRetryTask = task({
     const now = Date.now();
     const deadline = payload.capacityHoldStartedAt + MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS;
     if (now >= deadline) {
-      const idempotencyKey = await idempotencyKeys.create(
-        `minimax-h3-weekly-novita-fallback:${payload.ownerId}:${payload.orderKey}`,
-        { scope: "global" },
-      );
-      const handle = await tasks.trigger("minimax-h3-weekly-novita-fallback", payload, {
-        concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
-        idempotencyKey,
-      });
       return {
-        state: "fallback_queued" as const,
-        provider: "novita" as const,
+        state: "render_engine_handoff_required" as const,
+        provider: "render-engine" as const,
         waitedMs: now - payload.capacityHoldStartedAt,
-        triggerRunId: handle.id,
+        receiptKey: payload.receiptKey,
       };
     }
     try {
