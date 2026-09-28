@@ -19,6 +19,7 @@ import {
   finalMasterReleaseCertificateKey,
   visualReviewReleaseReceiptKey,
 } from "../finalMasterReleaseCertificate";
+import { releasedFinalVideoKey } from "../r2AssetRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 const ownerId = "owner-test";
@@ -93,7 +94,7 @@ function fixture(music = false) {
   const detail = () => invoke<RunCurrentThumbnail>(getVideoDetail, { runId: sourceRunId });
   const media = () => invoke<RunMediaPresentation>(getRunMediaPresentation, { runId: sourceRunId });
   const oldAssets = () => invoke<RunMediaAsset[]>(listForRun, { runId: sourceRunId });
-  const library = () => invoke<Array<RunCurrentThumbnail & { _id: string }>>(listVideos, { ownerId, limit: 10 });
+  const library = () => invoke<Array<RunCurrentThumbnail & { _id: string; playbackKey?: string | null }>>(listVideos, { ownerId, limit: 10 });
   const titleHistory = (excludePlanItemId?: string) => invoke<string[]>(listRecentChannelTitles, {
     ownerId,
     channelId,
@@ -351,6 +352,31 @@ test("combined media retains the sealed master contract, including absent asset 
   assert.equal(broken.currentThumbnail.videoKey, videoKey, "a stored green status cannot bypass failed certificate validation");
   assert.deepEqual(broken.currentThumbnail, thumbnailFields(await f.detail()));
   assert.equal((await f.library()).find((row) => row._id === sourceRunId)?.videoKey, videoKey);
+});
+
+test("Library playback uses only the finished released copy while thumbnail provenance keeps the certified source", async () => {
+  const f = fixture();
+  const { sealedKey, qa } = sealMaster(f);
+  const certificateKey = String((qa.outputs as Record<string, unknown>).finalMasterReleaseCertificateKey);
+  f.rows.runs[0]!.releaseEvidenceCertificateKey = certificateKey;
+  const releaseAt = Date.now() - 1_000;
+  const prefix = `owner/${ownerId}/channel/test/`;
+  const copyKey = releasedFinalVideoKey(prefix, sourceRunId, releaseAt, "a".repeat(64));
+  f.rows.runArtifactRetentions = [{ _id: "retention", _creationTime: 1, ownerId, channelId,
+    runId: sourceRunId, certificateKey, keyPrefix: prefix, finalCopyReleaseAt: releaseAt }];
+  const row = { _id: "copy", _creationTime: 1, ownerId, channelId, runId: sourceRunId,
+    releaseAt, certificateKey, certificateFingerprint: "b".repeat(64), sourceKey: sealedKey,
+    sourceSha256: "a".repeat(64), sourceByteLength: 2048, copyKey, status: "active",
+    finishedAt: releaseAt + 100, copyEtag: "c".repeat(32), copyLastModifiedAt: releaseAt + 100 };
+  f.rows.releasedFinalMasters = [row];
+  assert.equal((await f.library()).find((video) => video._id === sourceRunId)?.playbackKey, null);
+  row.status = "finished";
+  const video = (await f.library()).find((candidate) => candidate._id === sourceRunId)!;
+  assert.equal(video.playbackKey, copyKey);
+  assert.equal(video.videoKey, sealedKey);
+  assert.equal((await f.media()).currentThumbnail.videoKey, sealedKey);
+  row.copyKey = "another-copy.mp4";
+  assert.equal((await f.library()).find((candidate) => candidate._id === sourceRunId)?.playbackKey, null);
 });
 
 test("LoFi verifies candidate frame provenance against the sealed master, never a different retained video", async () => {

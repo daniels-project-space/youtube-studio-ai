@@ -22,7 +22,17 @@ loader._load = function (...args: unknown[]) {
 };
 const failures: string[] = [];
 try {
-  const { RecentVideos } = require("./RecentVideos") as typeof import("./RecentVideos");
+  const { RecentVideos, selectedRecentVideo } = require("./RecentVideos") as typeof import("./RecentVideos");
+  const source = { _id: "run-1", videoKey: "owner/test/final.mp4", playbackKey: "owner/test/final.mp4" };
+  const pending = { ...source, playbackKey: null };
+  const released = { ...source, playbackKey: "released-final/v2/owner/test/copy.mp4" };
+  assert.equal(selectedRecentVideo([source], source._id), source);
+  assert.equal(selectedRecentVideo([pending], source._id), pending,
+    "an open dialog must see the pending-copy state from the latest query result");
+  assert.equal(selectedRecentVideo([released], source._id), released,
+    "an open dialog must see the finished copy without reopening");
+  assert.equal(selectedRecentVideo([], source._id), null,
+    "an absent selected row closes the dialog");
   const render = () => renderToStaticMarkup(createElement(RecentVideos, { ownerId: "fixture-owner", limit: 8 }));
   rows = [];
   assert.equal(render(), "", "no empty rendered-master panel");

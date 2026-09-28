@@ -13,6 +13,7 @@ import {
 } from "../src/lib/lofiLibraryThumbnail";
 import { selectLatestCurrentGoldenThumbnail } from "../src/lib/thumbnailRefreshInventory";
 import { summarizeLibraryStates } from "../src/lib/librarySummary";
+import { releasedFinalPlaybackKey } from "../src/lib/releasedFinalPlayback";
 import { createBulkUndoReceipt } from "../src/lib/automaticWorkflow";
 import { projectReleasedOrdinaryAssets } from "../src/lib/ordinaryAssetProjection";
 import {
@@ -93,6 +94,27 @@ async function recordedMasterKey(
     runId,
     qaStage: qaStage ? { status: qaStage.status, outputs: qaStage.outputs } : null,
     artifacts,
+  });
+}
+
+async function playbackKeyForRun(ctx: QueryCtx, run: Doc<"runs">, sourceKey: string | null, certifiedSourceKey?: string): Promise<string | null> {
+  if (!sourceKey) return null;
+  const [rows, retention] = await Promise.all([
+    ctx.db.query("releasedFinalMasters")
+      .withIndex("by_run_release", (q) => q.eq("runId", run._id)).collect(),
+    ctx.db.query("runArtifactRetentions")
+      .withIndex("by_run", (q) => q.eq("runId", run._id)).first(),
+  ]);
+  const ownedRetention = retention?.ownerId === run.ownerId && retention.channelId === run.channelId &&
+    retention.certificateKey === run.releaseEvidenceCertificateKey ? retention : undefined;
+  return releasedFinalPlaybackKey({
+    ownerId: run.ownerId, channelId: String(run.channelId), runId: String(run._id),
+    certificateKey: run.releaseEvidenceStatus === "release_evidence_recorded"
+      ? run.releaseEvidenceCertificateKey : undefined,
+    sourceKey, certifiedSourceKey, rows, keyPrefix: ownedRetention?.keyPrefix,
+    publicReleaseObserved: retention?.finalCopyReleaseAt !== undefined,
+    releaseAt: ownedRetention?.finalCopyReleaseAt,
+    now: Date.now(),
   });
 }
 
@@ -388,6 +410,7 @@ async function projectLibraryVideo(
   const isFinished =
     Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
   if (!isFinished) return null;
+  const playbackKey = await playbackKeyForRun(ctx, run, videoKey, sealedMasterKey);
 
   const [channel, mOut] = await Promise.all([
     getChannel(run.channelId),
@@ -460,6 +483,7 @@ async function projectLibraryVideo(
     thumbnailKey: thumbnail.key,
     ...(thumbnail.presentation ? { thumbnailPresentation: thumbnail.presentation } : {}),
     videoKey,
+    playbackKey,
     thumbnailTitle:
       typeof tMeta.thumbnailTitle === "string" ? tMeta.thumbnailTitle : undefined,
     visualRationale:
