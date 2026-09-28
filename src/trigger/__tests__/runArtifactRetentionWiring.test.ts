@@ -40,13 +40,14 @@ assert.doesNotMatch(
 );
 assert.match(
   sweeper,
-  /cron: "17 \* \* \* \*"[\s\S]*?concurrencyLimit: 1/,
-  "deferred cleanup must run serially on a bounded hourly cadence",
+  /id: "run-artifact-retention-sweeper"[\s\S]*?concurrencyLimit: 1/,
+  "deferred cleanup must remain serial while its production cadence is frozen",
 );
 assert.match(
   sweeper,
-  /parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?assets\.pruneRun[\s\S]*?runArtifactRetentions\.complete/,
-  "the worker must reload release certificates, verify/prune R2, prune asset rows, and only then complete the ledger",
+  /parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?await authorizeNextBatch\(\)[\s\S]*?runArtifactRetentions\.complete/,
+  "the worker must reload certificates, verify evidence, reauthorize release, and only then seal the ledger",
 );
+assert.doesNotMatch(sweeper, /deleteObjects|assets\.pruneRun/, "the hourly worker cannot delete mutable R2 keys or prune live asset rows");
 
 console.log("run artifact retention wiring tests passed");

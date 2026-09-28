@@ -33,7 +33,7 @@ function isPinnedQwenVm(vm: {
 
 export const openRelayQwenIdleReaper = schedules.task({
   id: "openrelay-qwen-idle-reaper",
-  // The caller arms this minute check only while the VM is in use.
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },

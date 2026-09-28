@@ -6,14 +6,9 @@ const onDemand = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/on-
 const weekly = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/weekly/route.ts"), "utf8");
 const retry = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/retry/route.ts"), "utf8");
 
-assert.match(onDemand, /assertMiniMaxH3OnDemandArgs/);
-assert.match(onDemand, /provider:\s*"novita"/);
-assert.match(onDemand, /execution:\s*"on-demand"/);
-assert.match(onDemand, /runtimeId: MINIMAX_H3_RUNTIME_ID/);
-assert.match(onDemand, /profile: MINIMAX_H3_PROFILE/);
-assert.match(onDemand, /tasks\.trigger\("minimax-h3-on-demand"/);
-assert.match(onDemand, /all H3 paths must be inside the signed-in owner namespace/);
-assert.doesNotMatch(onDemand, /bootstrapSecrets|MINIMAX_H3_NOVITA_WORKER_TOKEN|fetch\s*\(/);
+assert.match(onDemand, /qualified Render Engine workflow/);
+assert.match(onDemand, /status: 410/);
+assert.doesNotMatch(onDemand, /tasks\.trigger|novita|bootstrapSecrets|fetch\s*\(/);
 
 assert.match(weekly, /assertMiniMaxH3WeeklyBatchArgs/);
 assert.match(weekly, /provider:\s*"salad"/);

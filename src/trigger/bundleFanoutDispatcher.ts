@@ -104,7 +104,7 @@ export const bundleFanoutDispatcher = schedules.task({
   id: "bundle-fanout-dispatcher",
   // Recovery happens well inside the bounded outbox deadline. Empty ticks are
   // one indexed read and never admit a fresh render.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   run: async () => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };

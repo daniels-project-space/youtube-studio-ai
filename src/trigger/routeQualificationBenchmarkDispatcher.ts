@@ -301,7 +301,7 @@ export async function dispatchPendingRouteQualificationBenchmarks(input?: {
 
 export const routeQualificationBenchmarkDispatcher = schedules.task({
   id: "route-qualification-benchmark-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: studioScheduleCron("* * * * *") } : {}),
+  // Production cadence is frozen; see docs/trigger-schedule-freeze-20260927.md.
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async () => {

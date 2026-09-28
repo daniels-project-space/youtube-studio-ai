@@ -80,7 +80,6 @@ async function dispatchWeeklyPlanAhead(mode: WeeklyPlanDispatchMode, now = Date.
 /** Automatically freeze the next weekly slate before cadence runs need it. */
 export const weeklyPlanAheadSchedule = schedules.task({
   id: "weekly-plan-ahead",
-  cron: studioScheduleCron("0 5 * * 1"),
   // A transient Trigger/Convex enqueue failure should not strand the weekly
   // slate until the six-hour recovery tick. The owner/week request key and
   // child receipts make this replay idempotent.
@@ -96,7 +95,6 @@ export const weeklyPlanAheadSchedule = schedules.task({
  */
 export const weeklyPlanAheadRecoverySchedule = schedules.task({
   id: "weekly-plan-ahead-recovery",
-  cron: studioScheduleCron("0 */6 * * *"),
   // Recovery itself is storage/dispatch-only and can safely retry once when
   // the control plane is briefly unavailable.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },

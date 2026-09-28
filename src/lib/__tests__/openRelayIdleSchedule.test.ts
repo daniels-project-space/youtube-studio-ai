@@ -14,7 +14,7 @@ function load(enabled: boolean) {
   const code = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
-  const module = { exports: {} as Partial<IdleModule> };
+  const loaded = { exports: {} as Partial<IdleModule> };
   const requireFixture = (name: string): unknown => {
     if (name === "@/lib/studioScheduleControl") return { studioSchedulesEnabled: () => enabled };
     if (name === "@trigger.dev/sdk") return { schedules: {
@@ -24,8 +24,8 @@ function load(enabled: boolean) {
     } };
     throw new Error(`unexpected dependency ${name}`);
   };
-  new Function("require", "module", "exports", code)(requireFixture, module, module.exports);
-  return { calls, module: module.exports as IdleModule };
+  new Function("require", "module", "exports", code)(requireFixture, loaded, loaded.exports);
+  return { calls, module: loaded.exports as IdleModule };
 }
 
 test("a paused fleet cannot arm a GPU idle schedule", async () => {

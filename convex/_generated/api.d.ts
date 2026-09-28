@@ -17,6 +17,7 @@ import type * as automaticProviderHealth from "../automaticProviderHealth.js";
 import type * as casefileEpisodes from "../casefileEpisodes.js";
 import type * as casefileResearchAttempts from "../casefileResearchAttempts.js";
 import type * as channelArchives from "../channelArchives.js";
+import type * as channelDirectoryProjection from "../channelDirectoryProjection.js";
 import type * as channelLock from "../channelLock.js";
 import type * as channelLockAudit from "../channelLockAudit.js";
 import type * as channelPublishPolicies from "../channelPublishPolicies.js";
@@ -37,11 +38,15 @@ import type * as narrativeSeriesState from "../narrativeSeriesState.js";
 import type * as novitaWorkerLeases from "../novitaWorkerLeases.js";
 import type * as outlierBank from "../outlierBank.js";
 import type * as ownerModuleLocks from "../ownerModuleLocks.js";
+import type * as pipelineWorkerDeploymentTransport from "../pipelineWorkerDeploymentTransport.js";
 import type * as planWeekBulkOrders from "../planWeekBulkOrders.js";
 import type * as planWeekRenderReceipts from "../planWeekRenderReceipts.js";
 import type * as productionRouteQualificationState from "../productionRouteQualificationState.js";
 import type * as publishContinuationState from "../publishContinuationState.js";
 import type * as publishIntents from "../publishIntents.js";
+import type * as r2ExpirationFence from "../r2ExpirationFence.js";
+import type * as r2ImmutableWrites from "../r2ImmutableWrites.js";
+import type * as r2Retention from "../r2Retention.js";
 import type * as remoteChildCosts from "../remoteChildCosts.js";
 import type * as reviewedDataStoryRunAdmissions from "../reviewedDataStoryRunAdmissions.js";
 import type * as reviewedEvidencePacks from "../reviewedEvidencePacks.js";
@@ -51,7 +56,9 @@ import type * as runArtifactRetentions from "../runArtifactRetentions.js";
 import type * as runArtifacts from "../runArtifacts.js";
 import type * as runCostAccounting from "../runCostAccounting.js";
 import type * as runExecutionAdmission from "../runExecutionAdmission.js";
+import type * as runLogChunks from "../runLogChunks.js";
 import type * as runLogs from "../runLogs.js";
+import type * as runStageProgressProjection from "../runStageProgressProjection.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
 import type * as saladFleetReservations from "../saladFleetReservations.js";
@@ -75,6 +82,9 @@ import type * as youtubeCreationClaims from "../youtubeCreationClaims.js";
 import type * as youtubeThumbnailReplacements from "../youtubeThumbnailReplacements.js";
 import type * as youtubeUploads from "../youtubeUploads.js";
 import type * as youtubeVideoRetirements from "../youtubeVideoRetirements.js";
+import type * as yue2ApprovalIdentity from "../yue2ApprovalIdentity.js";
+import type * as yue2Auditions from "../yue2Auditions.js";
+import type * as yue2Continuations from "../yue2Continuations.js";
 
 import type {
   ApiFromModules,
@@ -92,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   casefileEpisodes: typeof casefileEpisodes;
   casefileResearchAttempts: typeof casefileResearchAttempts;
   channelArchives: typeof channelArchives;
+  channelDirectoryProjection: typeof channelDirectoryProjection;
   channelLock: typeof channelLock;
   channelLockAudit: typeof channelLockAudit;
   channelPublishPolicies: typeof channelPublishPolicies;
@@ -112,11 +123,15 @@ declare const fullApi: ApiFromModules<{
   novitaWorkerLeases: typeof novitaWorkerLeases;
   outlierBank: typeof outlierBank;
   ownerModuleLocks: typeof ownerModuleLocks;
+  pipelineWorkerDeploymentTransport: typeof pipelineWorkerDeploymentTransport;
   planWeekBulkOrders: typeof planWeekBulkOrders;
   planWeekRenderReceipts: typeof planWeekRenderReceipts;
   productionRouteQualificationState: typeof productionRouteQualificationState;
   publishContinuationState: typeof publishContinuationState;
   publishIntents: typeof publishIntents;
+  r2ExpirationFence: typeof r2ExpirationFence;
+  r2ImmutableWrites: typeof r2ImmutableWrites;
+  r2Retention: typeof r2Retention;
   remoteChildCosts: typeof remoteChildCosts;
   reviewedDataStoryRunAdmissions: typeof reviewedDataStoryRunAdmissions;
   reviewedEvidencePacks: typeof reviewedEvidencePacks;
@@ -126,7 +141,9 @@ declare const fullApi: ApiFromModules<{
   runArtifacts: typeof runArtifacts;
   runCostAccounting: typeof runCostAccounting;
   runExecutionAdmission: typeof runExecutionAdmission;
+  runLogChunks: typeof runLogChunks;
   runLogs: typeof runLogs;
+  runStageProgressProjection: typeof runStageProgressProjection;
   runStages: typeof runStages;
   runs: typeof runs;
   saladFleetReservations: typeof saladFleetReservations;
@@ -150,6 +167,9 @@ declare const fullApi: ApiFromModules<{
   youtubeThumbnailReplacements: typeof youtubeThumbnailReplacements;
   youtubeUploads: typeof youtubeUploads;
   youtubeVideoRetirements: typeof youtubeVideoRetirements;
+  yue2ApprovalIdentity: typeof yue2ApprovalIdentity;
+  yue2Auditions: typeof yue2Auditions;
+  yue2Continuations: typeof yue2Continuations;
 }>;
 
 /**

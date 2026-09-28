@@ -47,13 +47,15 @@
 import { join } from "node:path";
 import { boundedNumber } from "@/engine/boundedNumber";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat, writeFile } from "node:fs/promises";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { makeRunTempDir } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata } from "@/lib/storage";
+import { writeReservedImmutableR2Object } from "@/lib/reservedImmutableR2Write";
 import {
   channelCritiqueBrief,
   produceAndCritique,
@@ -1115,8 +1117,30 @@ export const quizYear: Block = {
     );
 
     const prefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/${isPortraitSupervisedShort ? "quiz-short" : "quiz-year"}`;
-    const videoKey = `${prefix}/${isPortraitSupervisedShort ? "quiz-short" : "quiz-year"}.mp4`;
-    await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
+    const finalHash = createHash("sha256");
+    for await (const chunk of createReadStream(finalPath)) finalHash.update(chunk as Buffer);
+    const finalSha256 = finalHash.digest("hex");
+    const videoKey = `${prefix}/${isPortraitSupervisedShort ? "quiz-short" : "quiz-year"}-${finalSha256}.mp4`;
+    await writeReservedImmutableR2Object({
+      ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId, r2Key: videoKey,
+      write: async () => {
+        await putObjectFromFile(videoKey, finalPath, {
+          contentType: "video/mp4", ifNoneMatch: "*",
+          metadata: { retentionWriter: "quiz-final/v1", retentionFinalSha256: finalSha256 },
+        });
+      },
+      verifyStoredBytes: async () => {
+        const [head, integrity, local] = await Promise.all([
+          headObjectMetadata(videoKey), getObjectIntegrity(videoKey), stat(finalPath),
+        ]);
+        const metadata = Object.fromEntries(Object.entries(head?.metadata ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
+        if (!head || head.contentLength !== local.size || integrity.sha256 !== finalSha256 ||
+            metadata.retentionfinalsha256 !== finalSha256 ||
+            metadata.retentionwriter !== "quiz-final/v1") {
+          throw new Error("quiz final immutable upload conflict has different stored bytes");
+        }
+      },
+    });
 
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,

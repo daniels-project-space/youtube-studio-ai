@@ -27,6 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -132,6 +133,9 @@ export async function presignUpload(
   key: string,
   opts: PresignOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use overwriteable presigned uploads");
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz finals cannot use overwriteable presigned uploads");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use overwriteable presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -212,6 +216,20 @@ export async function putObject(
   body: PutBody,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key) && (opts.ifNoneMatch !== "*" || !opts.metadata?.cropSha256 ||
+      !opts.metadata.atlasRuntime || !opts.metadata.atlasPlan)) {
+    throw new Error("immutable atlas crop requires create-only upload and provenance metadata");
+  }
+  const cropDigest = immutableAtlasCropDigest(key);
+  if (cropDigest && (opts.metadata?.cropSha256 !== cropDigest || opts.metadata?.retentionWriter !== "atlas-crop/v1")) {
+    throw new Error("managed atlas crop requires matching digest and writer metadata");
+  }
+  if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz final requires its create-only file writer");
+  const introDigest = immutableIntroCardDigest(key);
+  if (introDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionIntroSha256 !== introDigest ||
+      opts.metadata?.retentionWriter !== "intro-card/v1")) {
+    throw new Error("immutable intro card requires create-only upload and matching digest metadata");
+  }
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -232,6 +250,7 @@ export async function headObjectMetadata(
   contentLength?: number;
   contentType?: string;
   etag?: string;
+  lastModified?: Date;
   metadata: Record<string, string>;
 } | null> {
   try {
@@ -243,6 +262,7 @@ export async function headObjectMetadata(
       ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
       ...(response.ContentType ? { contentType: response.ContentType } : {}),
       ...(response.ETag ? { etag: response.ETag } : {}),
+      ...(response.LastModified ? { lastModified: response.LastModified } : {}),
       metadata: response.Metadata ?? {},
     };
   } catch (error) {
@@ -262,6 +282,13 @@ export async function putObjectFromFile(
   filePath: string,
   opts: PutOptions = {},
 ): Promise<string> {
+  if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use file upload writer");
+  if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use file upload writer");
+  const finalDigest = immutableQuizFinalDigest(key);
+  if (finalDigest && (opts.ifNoneMatch !== "*" || opts.metadata?.retentionFinalSha256 !== finalDigest ||
+      opts.metadata?.retentionWriter !== "quiz-final/v1")) {
+    throw new Error("immutable quiz final requires create-only file upload and matching digest metadata");
+  }
   const { createReadStream } = await import("node:fs");
   const { stat } = await import("node:fs/promises");
   const file = await stat(filePath);
@@ -346,6 +373,29 @@ export async function listObjects(prefix: string, bucket?: string): Promise<stri
     ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
   } while (ContinuationToken);
   return keys;
+}
+
+/** Paginated R2 inventory with server recorded age; missing timestamps fail closed. */
+export async function listObjectRecords(prefix: string, bucket?: string): Promise<Array<{
+  key: string; lastModified?: Date; etag?: string; size?: number;
+}>> {
+  const records: Array<{ key: string; lastModified?: Date; etag?: string; size?: number }> = [];
+  let ContinuationToken: string | undefined;
+  do {
+    const page = await getR2Client().send(new ListObjectsV2Command({
+      Bucket: getBucket(bucket), Prefix: prefix, ContinuationToken,
+    }));
+    for (const item of page.Contents ?? []) {
+      if (!item.Key) continue;
+      records.push({ key: item.Key, lastModified: item.LastModified,
+        etag: item.ETag, size: item.Size });
+    }
+    if (page.IsTruncated && !page.NextContinuationToken) {
+      throw new Error("R2 listing was truncated without a continuation token");
+    }
+    ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return records;
 }
 
 /** An incomplete delete may already have removed some objects; never call it preserved. */

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { ensureOpenRelayQwenReady } from "@/lib/openRelayQwen";
-import { armOpenRelayIdleSchedule } from "@/lib/openRelayIdleSchedule";
 import { studioSchedulesEnabled } from "@/lib/studioScheduleControl";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
@@ -820,6 +819,7 @@ export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   const managedOpenRelay = runtimeProfile.provider === "openrelay" && Boolean(process.env.OPENRELAY_QWEN_VM_ID?.trim());
   if (managedOpenRelay) {
     if (!studioSchedulesEnabled()) throw new Error("Studio channel runs are paused");
+    const { armOpenRelayIdleSchedule } = await import("@/lib/openRelayIdleSchedule");
     await armOpenRelayIdleSchedule("openrelay-qwen-idle-reaper", process.env.OPENRELAY_QWEN_VM_ID!.trim());
     await ensureOpenRelayQwenReady();
   }
