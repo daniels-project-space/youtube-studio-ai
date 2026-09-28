@@ -62,9 +62,10 @@ export async function materializeRenderEngineH3PreparedFootage(args: RenderEngin
   const token = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
   if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Engine H3 materializer project capability is unavailable");
   const engine = { baseUrl: stage.engine.site, projectName: stage.engine.projectName, projectCapability: token };
-  const clips: PlanWeekPreparedFootage["clips"] = [];
-  const engineH3Jobs: NonNullable<PlanWeekPreparedFootage["engineH3Jobs"]> = [];
-  for (const [index, staged] of stage.jobs.entries()) {
+  // Do not copy the first completed scene while a later scene is still
+  // running. The final footage sidecar is an all-scenes receipt, so every
+  // Engine completion must be current before Studio mutates any clip key.
+  const verified = await Promise.all(stage.jobs.map(async (staged, index) => {
     const expectedClipKey = planWeekPreparedFootageClipKey({ ...input, index });
     const expectedFirstFrameKey = planWeekPreparedH3FirstFrameKey({ ...input, index });
     if (staged.output.r2Key !== expectedClipKey || staged.studioFirstFrame.r2Key !== expectedFirstFrameKey ||
@@ -80,6 +81,11 @@ export async function materializeRenderEngineH3PreparedFootage(args: RenderEngin
         status.output.contentType !== output.contentType || status.output.verifiedAt !== output.verifiedAt || output.contentType !== "video/mp4") {
       throw new Error("Engine H3 job is not a current verified completion");
     }
+    return { staged, output };
+  }));
+  const clips: PlanWeekPreparedFootage["clips"] = [];
+  const engineH3Jobs: NonNullable<PlanWeekPreparedFootage["engineH3Jobs"]> = [];
+  for (const { staged, output } of verified) {
     const video = await fetchExactVideo(output.url, output.bytes, output.sha256);
     await persistPreparedResult(staged.output.r2Key, video, "video/mp4", { "render-engine-h3-job": staged.engineJobId, "render-engine-h3-sha256": output.sha256 });
     const retained = await getObjectBytes(staged.output.r2Key, undefined, { maxBytes: output.bytes, timeoutMs: 300_000 });

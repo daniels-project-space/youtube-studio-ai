@@ -62,6 +62,7 @@ const objects = new Map<string, Uint8Array>([
 let statusReads = 0;
 let signedReads = 0;
 let videoFetches = 0;
+let pendingJobId: string | null = null;
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (name, ...args) {
@@ -80,14 +81,15 @@ loader._load = function (name, ...args) {
     },
   };
   if (name === "@/lib/renderEngineH3StageClient") return {
-    getH3JobStatusInRenderEngine: async () => {
+    getH3JobStatusInRenderEngine: async (_engine: unknown, jobId: string) => {
       statusReads++;
-      return { jobId: "enginejob123", status: "completed", progress: "report-ready", completedAt: 2_000, outputRetired: false,
-        output: { bucket: "render-engine-output", key: "projects/youtube-studio-ai/jobs/enginejob123/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
+      if (jobId === pendingJobId) return { jobId, status: "running", progress: "rendering", completedAt: null, outputRetired: false, output: null };
+      return { jobId, status: "completed", progress: "report-ready", completedAt: 2_000, outputRetired: false,
+        output: { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
     },
-    getVerifiedH3OutputReadbackInRenderEngine: async () => {
+    getVerifiedH3OutputReadbackInRenderEngine: async (_engine: unknown, jobId: string) => {
       signedReads++;
-      return { bucket: "render-engine-output", key: "projects/youtube-studio-ai/jobs/enginejob123/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: "https://example.test/output.mp4", expiresInSeconds: 3_600 };
+      return { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
     },
   };
   return originalLoad.call(this, name, ...args);
@@ -99,7 +101,7 @@ async function main() {
   process.env.RENDER_ENGINE_PROJECT_TOKEN = "d".repeat(64);
   globalThis.fetch = async (url) => {
     videoFetches++;
-    assert.equal(String(url), "https://example.test/output.mp4");
+    assert.match(String(url), /^https:\/\/example\.test\/enginejob\d+\.mp4$/);
     return new Response(outputBytes, { headers: { "content-type": "video/mp4", "content-length": String(outputBytes.byteLength) } });
   };
   try {
@@ -112,6 +114,21 @@ async function main() {
     assert.equal(statusReads, 1);
     assert.equal(signedReads, 1);
     assert.equal(videoFetches, 1);
+    const incomplete = structuredClone(decodePreparedMetadata(objects.get(stageKey)!) as { jobs: Array<Record<string, unknown>> });
+    const secondClipKey = planWeekPreparedFootageClipKey({ ...scope, index: 1 });
+    const secondFrameKey = planWeekPreparedH3FirstFrameKey({ ...scope, index: 1 });
+    incomplete.jobs.push({ ...incomplete.jobs[0], sceneId: "shot-2", engineJobId: "enginejob456",
+      studioFirstFrame: { r2Key: secondFrameKey, sha256: "c".repeat(64) },
+      output: { r2Key: secondClipKey } });
+    objects.delete(clipKey);
+    objects.delete(sidecarKey);
+    objects.set(stageKey, new TextEncoder().encode(canonicalJson(incomplete)));
+    pendingJobId = "enginejob456";
+    videoFetches = 0;
+    await assert.rejects(materializeRenderEngineH3PreparedFootage(scope), /current verified completion/);
+    assert.equal(videoFetches, 0, "no completed scene is copied while another staged scene is not complete");
+    assert.equal(objects.has(clipKey), false);
+    assert.equal(objects.has(secondClipKey), false);
   } finally {
     globalThis.fetch = originalFetch;
     if (previousToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
