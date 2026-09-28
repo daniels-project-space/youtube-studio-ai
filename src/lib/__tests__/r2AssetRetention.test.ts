@@ -6,6 +6,7 @@ import { assertYouTubeStudioR2Bucket, classifyUnboundR2Key,
   hasImmutableAtlasCropProof, hasImmutableIntroCardProof, hasImmutableQuizFinalProof,
   immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, permanentReusableMediaDigest,
   permanentReusableMediaKey, releasedFinalVideoIdentity, releasedFinalVideoKey, FINAL_VIDEO_RETENTION_MS,
+  ASSET_RETENTION_MS, isLoFiKeyframeSource, releasedKeyframeIdentity, releasedKeyframeKey,
   selectExpiredRunObjects,
   type RunR2RetentionScope } from "../r2AssetRetention";
 import { assertYouTubeStudioR2Account } from "../youtubeR2Account";
@@ -19,11 +20,30 @@ const releasedKey = releasedFinalVideoKey("owner/daniel/channel/show/", "run-1",
 assert.deepEqual(releasedFinalVideoIdentity(releasedKey), { releaseAt: releasedAt, sha256: "f".repeat(64) });
 assert.equal(releasedFinalVideoIdentity(`${prefix}final.mp4`), null);
 test("released finals reject overwriteable writers and mismatched expiry", async () => {
-  await assert.rejects(() => presignUpload(releasedKey), /released final videos cannot use presigned uploads/);
+  await assert.rejects(() => presignUpload(releasedKey), /released copies cannot use presigned uploads/);
   await assert.rejects(() => putObject(releasedKey, "bytes"), /released final video requires its create-only file writer/);
   await assert.rejects(() => putObjectFromFile(releasedKey, "/missing", {
     ifNoneMatch: "*", metadata: { retentionWriter: "released-final/v1", retentionFinalSha256: "f".repeat(64),
       retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + FINAL_VIDEO_RETENTION_MS - 1) },
+  }), /expiry-bound/);
+});
+test("only marked Lo-Fi run stills can be release-copy sources and destination cannot be overwritten", async () => {
+  const keyPrefix = "owner/daniel/channel/show/";
+  const source = `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.png`;
+  assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", source), true);
+  for (const other of [
+    `${keyPrefix}runs/run-2/lofi-keyframe/images/keyframe-1.png`,
+    `${keyPrefix}runs/run-1/thumbnail/images/hero.png`,
+    `${keyPrefix}library/lofi-keyframe/images/keyframe-1.png`,
+    `${keyPrefix}runs/run-1/lofi-keyframe/images/keyframe-1.jpg`,
+  ]) assert.equal(isLoFiKeyframeSource(keyPrefix, "run-1", other), false);
+  const key = releasedKeyframeKey(keyPrefix, "run-1", releasedAt, "a".repeat(64));
+  assert.deepEqual(releasedKeyframeIdentity(key), { releaseAt: releasedAt, sha256: "a".repeat(64) });
+  await assert.rejects(() => presignUpload(key), /released copies cannot use presigned uploads/);
+  await assert.rejects(() => putObject(key, "bytes"), /released keyframe requires its create-only file writer/);
+  await assert.rejects(() => putObjectFromFile(key, "/missing", {
+    ifNoneMatch: "*", metadata: { retentionWriter: "released-keyframe/v1", retentionKeyframeSha256: "a".repeat(64),
+      retentionReleaseAt: String(releasedAt), retentionExpiresAt: String(releasedAt + ASSET_RETENTION_MS - 1) },
   }), /expiry-bound/);
 });
 const scope: RunR2RetentionScope = {

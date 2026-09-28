@@ -27,7 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey, permanentReusableMediaDigest, releasedFinalVideoIdentity, FINAL_VIDEO_RETENTION_MS } from "@/lib/r2AssetRetention";
+import { immutableAtlasCropDigest, immutableIntroCardDigest, immutableQuizFinalDigest, isImmutableAtlasCropKey, permanentReusableMediaDigest, releasedFinalVideoIdentity, releasedKeyframeIdentity, ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS } from "@/lib/r2AssetRetention";
 
 const R2_REGION = "auto";
 
@@ -137,7 +137,7 @@ export async function presignUpload(
   if (immutableQuizFinalDigest(key)) throw new Error("immutable quiz finals cannot use overwriteable presigned uploads");
   if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use overwriteable presigned uploads");
   if (key.includes("/library/reusable-media/v1/")) throw new Error("permanent reusable media cannot use overwriteable presigned uploads");
-  if (key.includes("/released-final/v1/")) throw new Error("released final videos cannot use presigned uploads");
+  if (key.includes("/released-final/v1/") || key.includes("/released-keyframe/v1/")) throw new Error("released copies cannot use presigned uploads");
   const command = new PutObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
@@ -220,6 +220,7 @@ export async function putObject(
 ): Promise<string> {
   const reusableDigest = permanentReusableMediaDigest(key);
   if (key.includes("/released-final/v1/")) throw new Error("released final video requires its create-only file writer");
+  if (key.includes("/released-keyframe/v1/")) throw new Error("released keyframe requires its create-only file writer");
   if (key.includes("/library/reusable-media/v1/") &&
       (!reusableDigest || opts.ifNoneMatch !== "*" || opts.metadata?.contentSha256 !== reusableDigest ||
         opts.metadata?.retentionWriter !== "studio-reusable-media/v1")) {
@@ -302,6 +303,15 @@ export async function putObjectFromFile(
         opts.metadata?.retentionReleaseAt !== String(releasedFinal.releaseAt) ||
         opts.metadata?.retentionExpiresAt !== String(releasedFinal.releaseAt + FINAL_VIDEO_RETENTION_MS))) {
     throw new Error("released final video requires a create-only digest and expiry-bound file upload");
+  }
+  const releasedKeyframe = releasedKeyframeIdentity(key);
+  if (key.includes("/released-keyframe/v1/") &&
+      (!releasedKeyframe || opts.ifNoneMatch !== "*" ||
+        opts.metadata?.retentionWriter !== "released-keyframe/v1" ||
+        opts.metadata?.retentionKeyframeSha256 !== releasedKeyframe.sha256 ||
+        opts.metadata?.retentionReleaseAt !== String(releasedKeyframe.releaseAt) ||
+        opts.metadata?.retentionExpiresAt !== String(releasedKeyframe.releaseAt + ASSET_RETENTION_MS))) {
+    throw new Error("released keyframe requires a create-only digest and expiry-bound file upload");
   }
   if (isImmutableAtlasCropKey(key)) throw new Error("immutable atlas crops cannot use file upload writer");
   if (immutableIntroCardDigest(key)) throw new Error("immutable intro cards cannot use file upload writer");

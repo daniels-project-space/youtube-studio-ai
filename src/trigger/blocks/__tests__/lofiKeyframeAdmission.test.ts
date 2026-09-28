@@ -7,6 +7,7 @@ import { classifyExecutionError } from "@/engine/executionErrors";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 let renders = 0, reviews = 0, motions = 0, assets = 0;
+let recordedMeta: Record<string, unknown> | undefined;
 let replies: unknown[] = [];
 const prompts: string[] = [];
 const ctx = {
@@ -30,7 +31,9 @@ async function main() {
     } };
     if (id === "@/lib/files") return { ...actual as object,
       makeRunTempDir: async () => "/tmp/keyframe-fixture", downloadTo: async (_url: string, path: string) => path };
-    if (id === "./blockContext") return { ...actual as object, recordAsset: async () => { assets++; } };
+    if (id === "./blockContext") return { ...actual as object, recordAsset: async (_ctx: unknown, kind: string, _key: string, meta: Record<string, unknown>) => {
+      assert.equal(kind, "keyframe"); assets++; recordedMeta = meta;
+    } };
     if (id === "@/lib/vision") return { ...actual as object, hasNonGoogleVisionKey: () => true,
       visionLocal: async (args: { prompt: string }) => {
         if (args.prompt.includes("art director")) {
@@ -82,6 +85,7 @@ async function main() {
       assert.equal(patch.f1Key, `still-${count}`);
       assert.equal(patch.__costUsd, count * 0.01);
       assert.equal(motions, 1); assert.equal(assets, 1); assert.equal(renders, count);
+      assert.equal(recordedMeta?.retentionSource, "lofi-keyframe/v1");
     }
     reset([{ score: 0.6, issues: ["Missing sea"] }, { score: 0.7, issues: ["Missing sea"] }]);
     assert.equal((await block.run({ ...ctx, params: { qaProfile: "draft" } })).f1Key, "still-2");

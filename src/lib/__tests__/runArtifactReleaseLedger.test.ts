@@ -7,7 +7,7 @@ import {
   RUN_ARTIFACT_RETENTION_MS, RUN_ARTIFACT_RELEASE_CHECK_MS,
   RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS, runArtifactCleanupBinding,
 } from "@/lib/runArtifactRetention";
-import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey } from "@/lib/r2AssetRetention";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "lte"; value: unknown };
@@ -38,6 +38,7 @@ class MemoryQuery {
     if (rows.length > 1) throw new Error("ambiguous row");
     return rows[0] ?? null;
   }
+  async collect(): Promise<Row[]> { return this.take(Number.MAX_SAFE_INTEGER); }
 }
 
 class MemoryDb {
@@ -146,6 +147,33 @@ test("private→public transition waits actual release plus thirty days and rech
   await f.invoke(complete, { ownerId, retentionId: row._id, leaseToken: "a".repeat(64),
     completedAt: due, removedObjects: 1, retainedObjectCount: 1, retainedReleaseEvidence: [certificateKey] });
   assert.equal(row.status, "completed");
+});
+
+test("marked Lo-Fi asset requires its exact source-bound 30-day receipt; legacy assets stay optional", async () => {
+  const f = fixture();
+  const row = await f.invoke(schedule, f.scheduleArgs);
+  const sourceKey = `${keyPrefix}runs/run-a/lofi-keyframe/images/keyframe-1.png`;
+  const asset = f.db.seed("assets", "asset-keyframe", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "keyframe", r2Key: sourceKey, meta: { retentionSource: "lofi-keyframe/v1" } });
+  f.db.seed("assets", "asset-thumbnail", { ownerId, channelId: "channel-a", runId: "run-a",
+    kind: "thumbnail", r2Key: `${keyPrefix}runs/run-a/thumbnail.png` });
+  const checks = await f.invoke<Row[]>(listReleaseChecks, { ownerId, now: actualRelease });
+  assert.deepEqual(checks[0].keyframeSource, { assetId: asset._id, sourceKey });
+  await assert.rejects(f.observe(row._id, actualRelease + 1_000), /requires its release copy receipt/);
+  const keyframe = { assetId: asset._id, sourceKey, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    r2Key: releasedKeyframeKey(keyPrefix, "run-a", actualRelease, "b".repeat(64)),
+    sha256: "b".repeat(64), byteLength: 123, releaseAt: actualRelease,
+    expiresAt: actualRelease + ASSET_RETENTION_MS };
+  const observation = { videoId, channelId: ytChannelId, privacyStatus: "public", uploadStatus: "processed",
+    publishedAt: new Date(actualRelease).toISOString() };
+  await assert.rejects(f.invoke(recordReleaseObservations, { ownerId, observedAt: actualRelease + 1_000,
+    observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
+      finalVideo, keyframe: { ...keyframe, sourceKey: `${keyPrefix}runs/run-a/thumbnail.png` }, observation }] }),
+  /immutable keyframe copy receipt/);
+  await f.invoke(recordReleaseObservations, { ownerId, observedAt: actualRelease + 1_000,
+    observations: [{ retentionId: row._id, connectorId: "connector-a", connectorVersion: 4,
+      finalVideo, keyframe, observation }] });
+  assert.deepEqual(row.releasedKeyframe, keyframe);
 });
 
 test("missed schedules and failed processing preserve artifacts without consuming cleanup attempts", async () => {

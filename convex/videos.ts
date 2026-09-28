@@ -24,6 +24,7 @@ import {
   matchesLibraryTitle,
   type LibraryRunScope,
 } from "../src/lib/libraryProjection";
+import { projectReleasedKeyframeAssets } from "../src/lib/runMediaWorkbench";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -200,13 +201,19 @@ export async function currentLibraryThumbnail(
  * a separate projection using the same master/provenance/Lo-Fi rules.
  */
 async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
-  const [assets, channel, sealedMasterKey] = await Promise.all([
+  const [sourceAssets, channel, sealedMasterKey, retention] = await Promise.all([
     ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
     ctx.db.get(run.channelId),
     normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
       ? recordedMasterKey(ctx, run._id)
       : Promise.resolve(undefined),
+    ctx.db.query("runArtifactRetentions").withIndex("by_run", (q) => q.eq("runId", run._id)).unique(),
   ]);
+  const keyframeCopy = retention?.releasedKeyframe;
+  const keyframeExpiration = keyframeCopy && await ctx.db.query("r2AssetExpirations")
+    .withIndex("by_run_key", (q) => q.eq("runId", run._id).eq("r2Key", keyframeCopy.r2Key)).unique();
+  const assets = projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, retention?.releaseAt,
+    Boolean(keyframeExpiration && keyframeExpiration.status !== "canceled"));
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video");
   const videoAsset = sealedMasterKey
     ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset

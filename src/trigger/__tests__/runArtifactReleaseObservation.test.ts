@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey } from "@/lib/r2AssetRetention";
+import { ASSET_RETENTION_MS, FINAL_VIDEO_RETENTION_MS, releasedFinalVideoKey, releasedKeyframeKey } from "@/lib/r2AssetRetention";
 import {
   fetchRunArtifactReleaseObservations,
   reconcileRunArtifactReleaseChecks,
@@ -136,4 +136,35 @@ test("a confirmed release records the exact final copy; copy failure defers rele
   await reconcileRunArtifactReleaseChecks({ ...common, copyFinal: async () => { throw new Error("R2 unavailable"); } });
   assert.equal(recorded[1][0].observation, null);
   assert.match(recorded[1][0].error!, /R2 unavailable/);
+});
+
+test("a marked per-run keyframe copy is recorded alongside the final master and failure defers release", async () => {
+  const releaseAt = Date.parse(publicVideo.publishedAt);
+  const keyPrefix = "owner/o/channel/c/";
+  const sourceKey = `${keyPrefix}runs/run-copy/lofi-keyframe/images/keyframe-1.png`;
+  const check: RunArtifactReleaseCheck = {
+    retentionId: "ret-keyframe" as Id<"runArtifactRetentions">,
+    runId: "run-copy" as Id<"runs">, channelId, videoId, keyPrefix,
+    keyframeSource: { assetId: "asset-keyframe" as Id<"assets">, sourceKey },
+  };
+  const keyframe = { ...check.keyframeSource!, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    r2Key: releasedKeyframeKey(keyPrefix, "run-copy", releaseAt, "b".repeat(64)),
+    sha256: "b".repeat(64), byteLength: 42, releaseAt, expiresAt: releaseAt + ASSET_RETENTION_MS };
+  const recorded: RunArtifactObservedRelease[][] = [];
+  const common = {
+    checks: [check], now: () => releaseAt + 1000,
+    observeChannel: async () => ({ connectorId, connectorVersion: 1, ytChannelId: "UC-test",
+      videos: new Map([[videoId, publicVideo]]) }),
+    copyFinal: async () => ({ sourceKey: `${keyPrefix}runs/run-copy/final.mp4`, sourceEtag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+      r2Key: releasedFinalVideoKey(keyPrefix, "run-copy", releaseAt, "a".repeat(64)), sha256: "a".repeat(64),
+      byteLength: 42, releaseAt, expiresAt: releaseAt + FINAL_VIDEO_RETENTION_MS }),
+    record: async (rows: RunArtifactObservedRelease[]) => {
+      recorded.push(rows); return { confirmed: rows[0].observation ? 1 : 0, deferred: rows[0].observation ? 0 : 1 };
+    },
+  };
+  await reconcileRunArtifactReleaseChecks({ ...common, copyKeyframe: async () => keyframe });
+  assert.deepEqual(recorded[0][0].keyframe, keyframe);
+  await reconcileRunArtifactReleaseChecks({ ...common, copyKeyframe: async () => { throw new Error("keyframe unavailable"); } });
+  assert.equal(recorded[1][0].observation, null);
+  assert.match(recorded[1][0].error!, /keyframe unavailable/);
 });

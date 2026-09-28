@@ -1446,6 +1446,11 @@ export default defineSchema({
       sourceKey: v.string(), sourceEtag: v.string(), r2Key: v.string(), sha256: v.string(),
       byteLength: v.number(), releaseAt: v.number(), expiresAt: v.number(),
     })),
+    releasedKeyframe: v.optional(v.object({
+      assetId: v.id("assets"), sourceKey: v.string(), sourceEtag: v.string(),
+      r2Key: v.string(), sha256: v.string(), byteLength: v.number(),
+      releaseAt: v.number(), expiresAt: v.number(),
+    })),
     status: v.union(
       v.literal("awaiting_release"),
       v.literal("pending"),

@@ -44,6 +44,18 @@ copy has no enabled expiration path yet, and original certificate sources stay
 protected. Historical keys and other release readers still need a full
 reference migration before any final media can be deleted safely.
 
+New Lo-Fi runs mark the accepted per-run Novita keyframe asset as
+`lofi-keyframe/v1`. At confirmed release, the observer selects that exact
+marked asset, binds its source ETag to a download, computes the full SHA-256,
+and writes a create-only `runs/<run>/released-keyframe/v1/<releaseAt>-<sha256>.png`.
+R2 metadata and the Convex receipt record the source asset/key/ETag, digest,
+release time, and 30-day deadline. The run workbench and Library media detail
+project the copy for that exact asset ID; the original asset row and key remain
+for rendering and provenance. A marked asset with an unsuccessful copy defers
+release recording. Older unmarked keyframes, thumbnails (including Nano Banana
+Pro), and reusable library media are outside this path. This is a retention
+receipt only: the 30-day keyframe copy has no enabled deletion path.
+
 The deletion path remains disabled by the independent
 `YOUTUBE_STUDIO_R2_ACCOUNT_ID` binding. Do not enable the sweeper or R2
 lifecycle rules yet. Remaining gates:
@@ -53,7 +65,7 @@ lifecycle rules yet. Remaining gates:
    2,427 objects outside future class prefixes.
 2. Remove or scope the four known account-wide R2 write tokens, audit unknown
    user tokens, and prove no writer can overwrite an expiry-managed key.
-3. Move ordinary generated asset writers to a 30-day class; finish final-video
+3. Move remaining ordinary generated asset writers to a 30-day class; finish final-video
    reader/certificate reference migration and exercise a real large-master
    release replay before enabling any 180-day final expiration.
 4. Audit promotions from every other library writer. Copy and verify bytes

@@ -3,6 +3,7 @@ import {
   mediaFacts,
   mediaType,
   orderRunMedia,
+  projectReleasedKeyframeAssets,
   selectedRunMaster,
   summarizeStageReceipts,
   visibleRunMedia,
@@ -14,6 +15,20 @@ const assets: RunMediaAsset[] = [
   { _id: "thumbnail", _creationTime: 3, kind: "thumbnail", r2Key: "runs/one/thumb.png" },
   { _id: "master", _creationTime: 2, kind: "video", r2Key: "runs/one/final.mp4" },
 ];
+
+const sourceAssets = [
+  { _id: "accepted", kind: "keyframe", r2Key: "runs/one/lofi-keyframe/images/a.png" },
+  { _id: "other", kind: "keyframe", r2Key: "runs/one/lofi-keyframe/images/b.png" },
+  { _id: "thumb", kind: "thumbnail", r2Key: "runs/one/thumb.png" },
+];
+const keyframeCopy = { assetId: "accepted", sourceKey: sourceAssets[0].r2Key,
+  r2Key: "runs/one/released-keyframe/v1/1-abc.png", releaseAt: 1 };
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 1, false).map((asset) => asset.r2Key),
+  [keyframeCopy.r2Key, sourceAssets[1].r2Key, sourceAssets[2].r2Key]);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 1, true).map((asset) => asset._id),
+  ["other", "thumb"]);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, { ...keyframeCopy, sourceKey: "wrong" }, 1, false), sourceAssets);
+assert.deepEqual(projectReleasedKeyframeAssets(sourceAssets, keyframeCopy, 2, false), sourceAssets);
 
 assert.deepEqual(orderRunMedia(assets).map((asset) => asset._id), ["thumbnail", "master", "old-video"]);
 assert.equal(selectedRunMaster(assets, "master")?._id, "master");

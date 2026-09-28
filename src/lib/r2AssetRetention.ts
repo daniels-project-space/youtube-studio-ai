@@ -2,6 +2,27 @@ export const ASSET_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const FINAL_VIDEO_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 export const YOUTUBE_STUDIO_R2_BUCKET = "youtube-studio-ai";
 
+/** The only eligible ordinary copy source is a marked Lo-Fi still in its own run. */
+export function isLoFiKeyframeSource(keyPrefix: string, runId: string, sourceKey: string): boolean {
+  return sourceKey.startsWith(`${keyPrefix}runs/${runId}/lofi-keyframe/images/`) &&
+    /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/lofi-keyframe\/images\/[^/]+\.png$/u.test(sourceKey);
+}
+
+export function releasedKeyframeKey(keyPrefix: string, runId: string, releaseAt: number, sha256: string): string {
+  if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||
+      !Number.isSafeInteger(releaseAt) || releaseAt < 0 || !/^[a-f0-9]{64}$/u.test(sha256)) {
+    throw new Error("released keyframe needs an owned run, release time, and SHA-256");
+  }
+  return `${keyPrefix}runs/${runId}/released-keyframe/v1/${releaseAt}-${sha256}.png`;
+}
+
+export function releasedKeyframeIdentity(key: string): { releaseAt: number; sha256: string } | null {
+  const match = /^owner\/[^/]+\/channel\/[^/]+\/runs\/[^/]+\/released-keyframe\/v1\/([0-9]+)-([a-f0-9]{64})\.png$/u.exec(key);
+  if (!match) return null;
+  const releaseAt = Number(match[1]);
+  return Number.isSafeInteger(releaseAt) && releaseAt >= 0 ? { releaseAt, sha256: match[2] } : null;
+}
+
 /** Release copies are separate from the certificate's immutable source master. */
 export function releasedFinalVideoKey(keyPrefix: string, runId: string, releaseAt: number, sha256: string): string {
   if (!/^owner\/[^/]+\/channel\/[^/]+\/$/u.test(keyPrefix) || !/^[^/]+$/u.test(runId) ||

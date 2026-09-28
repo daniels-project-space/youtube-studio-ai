@@ -1418,6 +1418,7 @@ export function createKeyframesBlock(
 
     const f1Key = loop.value.key;
     await recordAsset(ctx, "keyframe", f1Key, {
+      retentionSource: "lofi-keyframe/v1",
       provider: "novita-z-image-turbo-local",
       jobId: loop.value.jobId,
       model: loop.value.model,

@@ -11,6 +11,20 @@ export type RunMediaAsset = {
   meta?: unknown;
 };
 
+/** Project only the receipt-bound asset; other stills and thumbnails keep their exact source keys. */
+export function projectReleasedKeyframeAssets<T extends Pick<RunMediaAsset, "_id" | "kind" | "r2Key">>(
+  assets: readonly T[],
+  copy: { assetId: string; sourceKey: string; r2Key: string; releaseAt: number } | undefined,
+  releaseAt: number | undefined,
+  expired: boolean,
+): T[] {
+  return assets.flatMap((asset) => {
+    if (!copy || copy.releaseAt !== releaseAt || asset.kind !== "keyframe" ||
+        copy.assetId !== asset._id || copy.sourceKey !== asset.r2Key) return [asset];
+    return expired ? [] : [{ ...asset, r2Key: copy.r2Key }];
+  });
+}
+
 export type RunStageReceipt = {
   block: string;
   status: string;
