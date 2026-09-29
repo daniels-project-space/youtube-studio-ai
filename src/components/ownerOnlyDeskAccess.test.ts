@@ -39,14 +39,11 @@ assert.match(
 assert.doesNotMatch(library, /<OwnerOnlyNotice/,
   "thumbnail evidence, candidate refresh and automatic sync status stay visible without an owner-login wall");
 
-const novitaDesk = read("../app/(app)/novita-render/page.tsx");
-assert.match(novitaDesk, /<H3RenderConsole \/>/,
-  "the render desk must have one authoritative H3 control plane");
-const h3Desk = read("../app/(app)/novita-render/H3RenderConsole.tsx");
-assert.match(h3Desk, /const access = useOperationsAccess\(\)/);
-assert.match(h3Desk, /if \(access !== "owner"\) return <LockedConsole access=\{access\} onRequestOwner=\{requestOwner\} \/>/,
-  "paid H3 lanes must remain behind the shared owner gate");
-assert.match(h3Desk, /Owner access is required to submit a paid Salad or Novita job/);
+const renderEngineDesk = read("../app/(app)/render-engine/page.tsx");
+assert.match(renderEngineDesk, /https:\/\/render-engine-sable\.vercel\.app\//,
+  "Studio sends render operations to the shared Render Engine");
+assert.doesNotMatch(renderEngineDesk, /Novita|Salad/i,
+  "Studio does not present a retired provider desk");
 
 const casefile = read("../app/(app)/casefile/page.tsx");
 assert.match(casefile, /const operationsAccess = useOperationsAccess\(\)/);

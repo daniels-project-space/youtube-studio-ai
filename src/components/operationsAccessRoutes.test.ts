@@ -3,7 +3,6 @@ import { shouldShowOperationsTrigger } from "./operationsAccessRoutes";
 
 for (const pathname of [
   "/settings",
-  "/novita-render",
   "/casefile",
   "/editorial-evidence",
 ]) {
@@ -21,6 +20,7 @@ for (const pathname of [
   "/schedule",
   "/library",
   "/analytics",
+  "/render-engine",
   "/seo",
   "/tools",
   "/channels",

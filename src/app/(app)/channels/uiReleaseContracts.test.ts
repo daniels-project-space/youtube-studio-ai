@@ -245,7 +245,7 @@ assert.match(sidebar, /href:\s*["']\/runs["']/);
 assert.doesNotMatch(sidebar, /href:\s*["']\/golden["']/);
 assert.match(sidebar, /const PRIMARY_NAV_ITEMS[\s\S]*href:\s*["']\/runs["']/);
 assert.doesNotMatch(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/golden["']/);
-for (const route of ["seo", "editorial-evidence", "casefile", "studio-assets", "novita-render", "lofi", "loreshort"]) {
+for (const route of ["seo", "editorial-evidence", "casefile", "studio-assets", "render-engine", "lofi", "loreshort"]) {
   assert.doesNotMatch(sidebar, new RegExp(`href:\\s*[\"']/${route}[\"']`));
   assert.match(golden, new RegExp(`href: \\"/${route}\\"`));
 }

@@ -110,7 +110,7 @@ for (const route of ["/runs", "/schedule", "/library", "/analytics"]) {
 }
 assert.doesNotMatch(sidebar, /href: \\"\/golden\\"/);
 assert.match(overview, /href="\/golden"/, "Golden modules remain reachable from the Studio overview");
-for (const route of ["/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/novita-render", "/lofi", "/loreshort"]) {
+for (const route of ["/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/render-engine", "/lofi", "/loreshort"]) {
   assert.doesNotMatch(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
   assert.match(golden, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
 }

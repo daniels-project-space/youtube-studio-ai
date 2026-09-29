@@ -26,7 +26,7 @@ try {
   assert.match(html, /aria-label="Studio navigation"/);
   assert.match(html, /aria-expanded="false" aria-controls="studio-mobile-more-menu"/);
   assert.doesNotMatch(html, /id="studio-mobile-more-menu"/, "closed overflow menu is not mounted");
-  for (const href of ["/novita-render", "/lofi", "/loreshort", "/seo", "/casefile"]) {
+  for (const href of ["/render-engine", "/lofi", "/loreshort", "/seo", "/casefile"]) {
     assert.ok(!html.includes(`href="${href}"`), "specialist links remain inside their modules");
   }
 
