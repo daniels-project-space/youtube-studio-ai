@@ -36,6 +36,7 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 import { provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
@@ -427,6 +428,7 @@ export const planWeekPreparedImagesTask = task({
       const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
       return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
+    rejectNewNovitaGeneration();
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
     const shots: Shot[] = payload.shots.map((shot) => ({
@@ -441,7 +443,6 @@ export const planWeekPreparedImagesTask = task({
       ...(shot.seed === undefined ? {} : { seed: shot.seed }),
       ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
     }));
-    await bootstrapSecrets(() => undefined, { services: ["novita"] });
     await claimPreparedGeneration("images", manifest, { payload, shots, profile });
     const result = await renderImages({
       prefix: `${sidecarKey.slice(0, -".json".length)}/render`,

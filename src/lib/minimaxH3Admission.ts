@@ -3,6 +3,7 @@ import {
   SALAD_HIGH_FALLBACK_PRIORITY,
   saladPriorityPolicyFromEnv,
 } from "@/lib/saladCloud";
+import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 
 /**
  * The pure admission half of the MiniMax H3 contract.
@@ -86,6 +87,7 @@ export function minimaxH3Readiness(
   options: { saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY } = {},
 ): MiniMaxH3Readiness {
   const blockers: string[] = [];
+  if (provider === "novita") blockers.push(NOVITA_GENERATION_RETIRED);
   try { miniMaxH3RouteEnvironment(provider); } catch (error) {
     blockers.push(error instanceof Error ? error.message : String(error));
   }
@@ -109,5 +111,5 @@ export function minimaxH3Readiness(
       blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is disabled");
     }
   }
-  return { configured: blockers.every((item) => !item.includes("WORKER_")), admitted: blockers.length === 0, blockers };
+  return { configured: provider !== "novita" && blockers.every((item) => !item.includes("WORKER_")), admitted: blockers.length === 0, blockers };
 }

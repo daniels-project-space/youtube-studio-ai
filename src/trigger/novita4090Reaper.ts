@@ -224,7 +224,7 @@ export const novita4090Reaper = schedules.task({
   run: async () => {
     const log = (message: string, extra?: Record<string, unknown>) =>
       console.log(`[novita-4090-reaper] ${message}`, extra ?? "");
-    await bootstrapSecrets(log, { required: ["NOVITA_API_KEY", "INTERNAL_QUERY_SECRET"] });
+    await bootstrapSecrets(log, { services: ["novita", "youtube"], required: ["NOVITA_API_KEY", "INTERNAL_QUERY_SECRET"] });
 
     const secret = requireInternalQuerySecret();
     const convex = convexClient();

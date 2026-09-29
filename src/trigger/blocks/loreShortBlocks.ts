@@ -27,6 +27,7 @@
  */
 import { fallbackVoiceKey } from "@/lib/tts";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -413,8 +414,9 @@ export const loreShort: Block = {
             topic,
           }),
         };
+    rejectNewNovitaGeneration();
     await bootstrapSecrets(ctx.log, {
-      services: ["cloudflare", "novita"],
+      services: ["cloudflare"],
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN"],
     });
     const h3Readiness = minimaxH3Readiness("novita");

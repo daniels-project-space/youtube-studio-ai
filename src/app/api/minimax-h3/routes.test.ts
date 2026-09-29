@@ -6,9 +6,10 @@ const onDemand = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/on-
 const weekly = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/weekly/route.ts"), "utf8");
 const retry = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/retry/route.ts"), "utf8");
 
-assert.match(onDemand, /assertMiniMaxH3OnDemandArgs/);
-assert.match(onDemand, /tasks\.trigger\("minimax-h3-on-demand"/);
-assert.match(onDemand, /all H3 paths must be inside the signed-in owner namespace/);
+assert.match(onDemand, /requireStudioActor/);
+assert.match(onDemand, /status:\s*410/);
+assert.match(onDemand, /NOVITA_GENERATION_RETIRED/);
+assert.doesNotMatch(onDemand, /tasks\.trigger|idempotencyKeys|assertMiniMaxH3OnDemandArgs/);
 assert.doesNotMatch(onDemand, /bootstrapSecrets|MINIMAX_H3_NOVITA_WORKER_TOKEN|fetch\s*\(/);
 
 for (const [name, route] of [["weekly", weekly], ["retry", retry]] as const) {

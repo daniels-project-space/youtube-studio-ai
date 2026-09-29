@@ -18,6 +18,7 @@ import {
   type NovitaRenderPollWait,
 } from "@/lib/novitaPollWait";
 import { bootstrapSecrets } from "./bootstrap";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { z } from "zod";
 
 /** One of the 10 canonical camera moves a shot can use (static = no camera motion). */
@@ -1012,6 +1013,7 @@ export function imageJobs(cfg: NovitaRenderCfg) {
 }
 
 async function startImageRender(userCfg: NovitaRenderCfg) {
+  rejectNewNovitaGeneration();
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
   await bootstrapSecrets(() => {}, { services: ["novita"], required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
@@ -1053,6 +1055,7 @@ export async function launchVideo(_userCfg: NovitaRenderCfg): Promise<NovitaRend
  * then polls until all shards report done. Returns R2 stillKeys.
  */
 export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
+  rejectNewNovitaGeneration();
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
   if (cfg.maxCostUsd === undefined) {

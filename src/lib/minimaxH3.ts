@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, presignDownload, presignUpload } from "@/lib/storage";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import {
   saladCloudClientFromVault,
   SALAD_BULK_MAX_GPUS,
@@ -829,6 +830,7 @@ export async function renderMiniMaxH3(
   } = {},
 ): Promise<MiniMaxH3RenderedVideo> {
   const request = normaliseRequest(input);
+  if (request.provider === "novita") rejectNewNovitaGeneration();
   const readiness = minimaxH3Readiness(request.provider, {
     ...(request.provider === "salad" && options.saladCapacityMode
       ? { saladCapacityMode: options.saladCapacityMode }

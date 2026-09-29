@@ -485,7 +485,7 @@ export async function executeRenderBlock(
       const scopedNovita = manifest.version === "1.0.0" &&
         (manifest.id === "novita_render_images" || manifest.id === "novita_render_video");
       await bootstrapSecrets((m, x) => console.log(`[${taskLabel}] ${m}`, x ?? ""), scopedNovita
-        ? { services: ["cloudflare", "novita", "openrouter", "langfuse"], required: [] }
+        ? { services: ["cloudflare", "openrouter", "langfuse"], required: [] }
         : { required: [] });
     }
     const costIdentity = {
