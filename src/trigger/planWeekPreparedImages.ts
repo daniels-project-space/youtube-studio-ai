@@ -373,7 +373,8 @@ export async function dispatchPreparedFootage(
     const input = await uploadH3InputToRenderEngine(engine, { sha256: frame.sha256, bytes: frame.byteLength, contentType: "image/png" }, bytes);
     const job = batch.jobs[index];
     if (!job) throw new Error("weekly H3 Engine job/frame pairing is incomplete");
-    const receipt = await stageH3RequestInRenderEngine({ ...engine, workflowId: workflow.workflowId, request: {
+    const receipt = await stageH3RequestInRenderEngine({ ...engine, workflowId: workflow.workflowId,
+      studioBatch: { ownerId: payload.ownerId, batchId: payload.batchId, itemId: payload.itemId }, request: {
       version: 2,
       idempotencyKey: `${batch.orderKey}:${String(index).padStart(3, "0")}`,
       prompt: job.prompt,

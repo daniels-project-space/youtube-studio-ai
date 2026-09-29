@@ -98,6 +98,7 @@ export type RenderEngineH3StageConfig = Readonly<{
   workflowId: string;
   projectCapability: string;
   request: RenderEngineH3StageRequest;
+  studioBatch?: Readonly<{ ownerId: string; batchId: string; itemId: string }>;
   fetchImpl?: typeof fetch;
 }>;
 
@@ -351,7 +352,10 @@ export async function stageH3RequestInRenderEngine(config: RenderEngineH3StageCo
   validateProjectCapability(config.projectName, config.projectCapability);
   if (!CONVEX_ID.test(config.workflowId)) throw new Error("Render Engine workflow ID is invalid");
   validateStageRequest(config.request, config.projectName);
-  const result = await jsonRequest(config, "/client/h3-jobs", { projectName: config.projectName, workflowId: config.workflowId, request: config.request }) as { status: number; body: unknown };
+  if (config.studioBatch && ![config.studioBatch.ownerId, config.studioBatch.batchId, config.studioBatch.itemId]
+    .every((value) => /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value))) throw new Error("Studio batch identity is invalid");
+  const result = await jsonRequest(config, "/client/h3-jobs", { projectName: config.projectName, workflowId: config.workflowId, request: config.request,
+    ...(config.studioBatch ? { studioBatch: config.studioBatch } : {}) }) as { status: number; body: unknown };
   if (result.status !== 202) throw new Error(`Render Engine H3 staging returned HTTP ${result.status}`);
   return parseStageReceipt(result.body);
 }
