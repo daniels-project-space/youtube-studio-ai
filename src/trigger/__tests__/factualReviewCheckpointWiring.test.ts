@@ -76,9 +76,10 @@ assert.match(
 );
 assert.match(
   dispatcher,
-  /id: "factual-review-continuation-dispatcher"[\s\S]*cron: "\* \* \* \* \*"/,
-  "owner approval reaches a provider-free minute dispatcher rather than a daily diagnostics sweep",
+  /task\(\{[\s\S]*id: "factual-review-continuation-dispatcher"/,
+  "paused owner approval retains a provider-free manual dispatcher",
 );
+assert.doesNotMatch(dispatcher, /^\s*cron:/m);
 assert.doesNotMatch(
   dispatcher, /bootstrapSecrets|anthropic|browserbase|openai/i, "continuation dispatch must not call a provider");
 assert.match(

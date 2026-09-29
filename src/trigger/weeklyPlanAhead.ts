@@ -1,4 +1,4 @@
-import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
@@ -76,10 +76,9 @@ async function dispatchWeeklyPlanAhead(mode: WeeklyPlanDispatchMode, now = Date.
     return { ok: true, weekStart, count, eligibleChannels: eligible.length, children };
 }
 
-/** Automatically freeze the next weekly slate before cadence runs need it. */
-export const weeklyPlanAheadSchedule = schedules.task({
+/** Paused Studio operator task; the automatic weekly cron is intentionally absent. */
+export const weeklyPlanAheadSchedule = task({
   id: "weekly-plan-ahead",
-  cron: "0 5 * * 1",
   // A transient Trigger/Convex enqueue failure should not strand the weekly
   // slate until the six-hour recovery tick. The owner/week request key and
   // child receipts make this replay idempotent.
@@ -88,14 +87,11 @@ export const weeklyPlanAheadSchedule = schedules.task({
 });
 
 /**
- * Bounded unattended recovery for a missed Monday or failed parent/child
- * handoff. It runs every six hours, reuses the exact owner/week order, and
- * therefore remains storage/idempotency work until the original order needs
- * a retry. It never widens the channel allow-list or the weekly reservation.
+ * Paused Studio operator recovery. It reuses the exact owner/week order and
+ * never widens the channel allow-list or the weekly reservation.
  */
-export const weeklyPlanAheadRecoverySchedule = schedules.task({
+export const weeklyPlanAheadRecoverySchedule = task({
   id: "weekly-plan-ahead-recovery",
-  cron: "0 */6 * * *",
   // Recovery itself is storage/dispatch-only and can safely retry once when
   // the control plane is briefly unavailable.
   retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },

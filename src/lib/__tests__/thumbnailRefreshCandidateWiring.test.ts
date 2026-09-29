@@ -104,7 +104,7 @@ assert.match(task, /queueAutomaticThumbnailReplacement/);
 assert.match(route, /requeuePreflightFailedCandidate/, "zero-cost QA preflight failures can be recovered without allocating a second candidate");
 assert.doesNotMatch(task, /upload_draft/i);
 assert.match(automaticTask, /id: "automatic-thumbnail-replacement-dispatcher"/);
-assert.match(automaticTask, /cron: "\* \* \* \* \*"/);
+assert.doesNotMatch(automaticTask, /^\s*cron:/m);
 assert.match(automaticCore, /createPlanShell/);
 assert.match(automaticCore, /AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX/);
 assert.match(automaticCore, /youtubeThumbnailReplacementTriggerRequest/);

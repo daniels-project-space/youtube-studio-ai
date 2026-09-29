@@ -5,7 +5,7 @@
  * resume only that frozen batch; it cannot restart a full upload-history scan
  * or issue a second request after an ambiguous YouTube API delivery.
  */
-import { task, schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -867,9 +867,8 @@ export const statsRefreshTask = task({
   },
 });
 
-export const statsRefreshSchedule = schedules.task({
+export const statsRefreshSchedule = task({
   id: "stats-refresh-6h",
-  cron: "0 */6 * * *",
   maxDuration: 1800,
   retry: { maxAttempts: 1 },
   run: async () => {

@@ -1,4 +1,4 @@
-import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
@@ -140,11 +140,10 @@ export async function dispatchPendingFactualReviewContinuations(input?: {
   return { pending: pending.length, triggered };
 }
 
-export const factualReviewContinuationDispatcher = schedules.task({
+export const factualReviewContinuationDispatcher = task({
   id: "factual-review-continuation-dispatcher",
   // Empty ticks are one bounded owner-scoped recovery transaction. This does not admit
   // fresh work and does not call a model/browser/render provider.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async (_payload, options) => {

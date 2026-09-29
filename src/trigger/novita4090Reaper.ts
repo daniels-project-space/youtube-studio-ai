@@ -7,7 +7,7 @@
  * provider responses, expired boot windows, and managed instances that have
  * no durable lease at all.
  */
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -201,7 +201,7 @@ async function reapUnleasedProviderWorker(args: {
   });
 }
 
-export const novita4090Reaper = schedules.task({
+export const novita4090Reaper = task({
   id: "novita-4090-reaper",
   // Cost note (2026-08-17): every tick did an unconditional Convex query PLUS
   // a live Novita listManagedInstances() provider call, even when idle. A
@@ -214,7 +214,6 @@ export const novita4090Reaper = schedules.task({
   // Widened the cadence instead: 5 minutes still bounds an undetected GPU
   // leak to well under an hour, at 1/5th the invocation (and provider-call)
   // volume of the previous 1-minute cron.
-  cron: "*/5 * * * *",
   maxDuration: 1_800,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000, factor: 2 },
   // A provider delete can take several polls. Serializing this task prevents

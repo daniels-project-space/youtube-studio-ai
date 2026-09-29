@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -292,9 +292,8 @@ export async function sweepDueRunArtifactRetentions(input?: {
  * Retention cleanup is maintenance for already-authorized releases, so it is
  * intentionally independent of the content-generation automation gate.
  */
-export const runArtifactRetentionSweeper = schedules.task({
+export const runArtifactRetentionSweeper = task({
   id: "run-artifact-retention-sweeper",
-  cron: "17 * * * *",
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },

@@ -140,9 +140,10 @@ function main(): void {
 
   assert.match(
     dispatcher,
-    /schedules\.task\(\{[\s\S]*id: "bundle-fanout-dispatcher"[\s\S]*cron: "\* \* \* \* \*"/,
-    "lost enqueue receipts must have a minute dispatcher independent of normal generation",
+    /task\(\{[\s\S]*id: "bundle-fanout-dispatcher"/,
+    "the paused outbox dispatcher remains manually recoverable",
   );
+  assert.doesNotMatch(dispatcher, /^\s*cron:/m);
   assert.match(dispatcher, /api\.runs\.listDueBundleFanoutDispatches/);
   assert.match(dispatcher, /api\.runs\.claimBundleFanoutDispatch/);
   assert.match(dispatcher, /api\.runs\.deferBundleFanoutDispatch/);

@@ -11,7 +11,7 @@
  * the control). Uploads are PRIVATE-first via the upload_draft `publishMode` param
  * (draft|scheduled|public) — this scheduler only kicks off GENERATION.
  */
-import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -103,13 +103,11 @@ function channelLaneKey(ch: ChannelRow): string {
     return "unresolved";
   }
 }
-export const generationScheduler = schedules.task({
+// Studio is deliberately paused until its Render Engine routes have Final
+// evidence. Keep the idempotent control task for an explicit future operator
+// run, but do not declare a Trigger cron that can accumulate unattended work.
+export const generationScheduler = task({
   id: "generation-scheduler",
-  // Hourly dispatch keeps pinned releases and cadence runs inside their lead
-  // window without making the scheduler itself a spend path. The Convex claim
-  // is idempotent per channel/run, so an extra tick only observes busy/not-due
-  // state and never duplicates a video.
-  cron: "0 * * * *",
   // If the control-plane enqueue is briefly unavailable, replay the same
   // claimed run instead of waiting for the next hourly tick. Convex run
   // fences and Trigger idempotency keys prevent duplicate video work.

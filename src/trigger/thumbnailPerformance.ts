@@ -18,7 +18,7 @@
  * of this task failing completely is that the CTR advisory stays empty, which
  * is already its normal state until a channel has real volume.
  */
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 
 import { fetchVideoAnalytics, getAnalyticsAccessToken } from "@/lib/youtubeAnalytics";
 import { analyseThumbnailCtr } from "@/lib/thumbnailCtrFeedback";
@@ -120,9 +120,8 @@ export async function pullThumbnailPerformance(args: ThumbnailPerformanceInput):
  * Polling harder would not produce evidence any faster — it would only re-read
  * the same videos and burn Analytics quota that `learn.ts` needs.
  */
-export const thumbnailPerformanceSchedule = schedules.task({
+export const thumbnailPerformanceSchedule = task({
   id: "thumbnail-performance-pull",
-  cron: "0 4 * * 1",
   run: async () => {
     // The channel roster and its run -> youtubeVideoId join live in Convex and
     // are supplied by the caller in production; this schedule is the seam that

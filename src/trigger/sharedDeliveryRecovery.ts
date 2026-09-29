@@ -1,4 +1,4 @@
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 import { dispatchDueBundleFanouts } from "./bundleFanoutDispatcher";
 import { dispatchPendingFactualReviewContinuations } from "./factualReviewContinuationDispatcher";
@@ -7,9 +7,8 @@ import { dispatchPendingReviewedDataStoryInitialRuns } from "./reviewedDataStory
 import { dispatchPendingRouteQualificationBenchmarks } from "./routeQualificationBenchmarkDispatcher";
 import { dispatchDueSerializedProgramEpisodeRetries } from "./serializedProgramEpisodeRetryDispatcher";
 
-export const sharedDeliveryRecovery = schedules.task({
+export const sharedDeliveryRecovery = task({
   id: "shared-delivery-recovery",
-  ...(deliveryRecoveryMode() === "shared" ? { cron: "* * * * *" } : {}),
   // Inherit the project ceiling, as serialized recovery did before consolidation.
   // A shorter aggregate deadline could terminate still-valid delivery batches.
   retry: { maxAttempts: 1 },
