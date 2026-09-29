@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
+import { admitStudioBatchInRenderEngine, getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -94,6 +94,20 @@ test("qualifies only the staged job through the non-billable Engine endpoint", a
   assert.deepEqual(receipt, { jobId, state: "awaiting-final-qualification" });
   assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/h3-jobs/qualify-input");
   assert.deepEqual(JSON.parse(String(captured?.init.body)), { projectName: config.projectName, jobId });
+});
+
+test("admits the frozen Studio batch before any scene is staged", async () => {
+  let captured: { url: string; init: RequestInit } | undefined;
+  const receipt = await admitStudioBatchInRenderEngine({
+    baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+    fetchImpl: async (input, init) => {
+      captured = { url: String(input), init: init ?? {} };
+      return jsonResponse({ batchId: "batch-1", handoffSha256: "a".repeat(64), state: "awaiting-scene-artifacts", itemCount: 1, admittedAt: 1, reused: false });
+    },
+  }, { ownerId: "owner-1", batchId: "batch-1" });
+  assert.equal(receipt.batchId, "batch-1");
+  assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/studio-batch-admission");
+  assert.deepEqual(JSON.parse(String(captured?.init.body)), { projectName: config.projectName, ownerId: "owner-1", batchId: "batch-1" });
 });
 
 test("provisions the current profile revision and uploads only a hash-addressed project frame", async () => {

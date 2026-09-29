@@ -70,6 +70,16 @@ export type RenderEngineH3WorkflowReceipt = Readonly<{
   profileRevisionSha256: string;
 }>;
 
+/** Immutable Studio batch identity accepted by the Engine before scene staging. */
+export type RenderEngineStudioBatchAdmissionReceipt = Readonly<{
+  batchId: string;
+  handoffSha256: string;
+  state: "awaiting-scene-artifacts";
+  itemCount: number;
+  admittedAt: number;
+  reused: boolean;
+}>;
+
 export type RenderEngineInputUpload = Readonly<{
   sha256: string;
   bytes: number;
@@ -220,6 +230,17 @@ function parseWorkflowReceipt(value: unknown): RenderEngineH3WorkflowReceipt {
   return { workflowId: value.workflowId, profileRevisionSha256: value.profileRevisionSha256 };
 }
 
+function parseStudioBatchAdmissionReceipt(value: unknown, batchId: string): RenderEngineStudioBatchAdmissionReceipt {
+  if (!isRecord(value) || !hasExactKeys(value, ["batchId", "handoffSha256", "state", "itemCount", "admittedAt", "reused"]) ||
+      value.batchId !== batchId || typeof value.handoffSha256 !== "string" || !HEX_SHA256.test(value.handoffSha256) ||
+      value.state !== "awaiting-scene-artifacts" || typeof value.itemCount !== "number" || !Number.isSafeInteger(value.itemCount) || value.itemCount < 1 ||
+      typeof value.admittedAt !== "number" || !Number.isSafeInteger(value.admittedAt) || value.admittedAt < 1 || typeof value.reused !== "boolean") {
+    throw new Error("Render Engine returned an invalid Studio batch admission receipt");
+  }
+  return { batchId, handoffSha256: value.handoffSha256, state: "awaiting-scene-artifacts", itemCount: value.itemCount,
+    admittedAt: value.admittedAt, reused: value.reused };
+}
+
 function parseInputUploadReceipt(value: unknown, projectName: string, input: RenderEngineInputUpload): RenderEngineInputUploadReceipt {
   if (!isRecord(value) || !hasExactKeys(value, ["bucket", "key", "bytes", "sha256", "contentType", "url", "headers"]) ||
       typeof value.key !== "string" || typeof value.url !== "string" || !isRecord(value.headers) ||
@@ -293,6 +314,21 @@ export async function provisionStudioH3WorkflowInRenderEngine(config: Omit<Rende
   const result = await jsonRequest(config, "/client/workflows", { projectName: config.projectName, workflowName: WORKFLOW_NAME, profileId: "minimax-h3" }) as { status: number; body: unknown };
   if (result.status !== 200) throw new Error(`Render Engine H3 workflow provisioning returned HTTP ${result.status}`);
   return parseWorkflowReceipt(result.body);
+}
+
+/** Verifies Studio's frozen batch through the Engine broker. This cannot stage or dispatch a GPU job. */
+export async function admitStudioBatchInRenderEngine(
+  config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
+  batch: Readonly<{ ownerId: string; batchId: string }>,
+): Promise<RenderEngineStudioBatchAdmissionReceipt> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(batch.ownerId) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(batch.batchId)) {
+    throw new Error("Studio batch identity is invalid");
+  }
+  const result = await jsonRequest(config, "/client/studio-batch-admission", {
+    projectName: config.projectName, ownerId: batch.ownerId, batchId: batch.batchId,
+  }) as { status: number; body: unknown };
+  if (result.status !== 202) throw new Error(`Render Engine Studio batch admission returned HTTP ${result.status}`);
+  return parseStudioBatchAdmissionReceipt(result.body, batch.batchId);
 }
 
 /** Uploads already hash-verified Studio image bytes through an Engine project-only signed PUT. */

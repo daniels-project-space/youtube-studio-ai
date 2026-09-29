@@ -39,7 +39,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
-import { provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+import { admitStudioBatchInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
 const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
@@ -361,6 +361,7 @@ export async function dispatchPreparedFootage(
     maxCostUsd,
   });
   const engine = { baseUrl: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, projectCapability };
+  await admitStudioBatchInRenderEngine(engine, { ownerId: payload.ownerId, batchId: payload.batchId });
   const workflow = await provisionStudioH3WorkflowInRenderEngine(engine);
   const stagedJobIds: string[] = [];
   const stagedJobs: RenderEngineH3StagedFootage["jobs"] = [];
