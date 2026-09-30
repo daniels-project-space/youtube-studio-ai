@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { generationProfile } from "@/engine/generationProfiles";
-import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
+import { buildStudioZImageStageRequests } from "@/trigger/planWeekPreparedImages";
+import type { PlanWeekPreparedImagesArgs } from "@/trigger/planWeekPreparedImages";
 
-// The current Engine ERNIE batch API accepts 896x1200 page art. Studio's
-// approved landscape stills have a different immutable model and canvas.
-// Until Engine admits this exact Studio profile, fresh weekly visuals must
-// stop before a paid provider call. A retained verified still sidecar may
-// still be staged through the existing Engine H3 path.
+// Held Engine requests preserve Studio's exact Final landscape contract.
+// They do not turn into prepared images until the candidate bytes and QA pass.
 for (const [name, width, height, candidates] of [
   ["production", 1920, 1088, 1],
   ["hero", 2048, 1152, 2],
@@ -22,13 +20,33 @@ for (const [name, width, height, candidates] of [
   assert.notDeepEqual([width, height], [896, 1200], "page-art output cannot stand in for a Studio landscape still");
 }
 
-assert.throws(rejectNewNovitaGeneration, /Direct Novita generation is retired/);
+const payload: PlanWeekPreparedImagesArgs = {
+  ownerId: "owner1", channelId: "channel1", channelSlug: "history", batchId: "week-1", itemId: "item-1",
+  manifestKey: "owner/owner1/weekly/history/week-1/item-1/preparation.json", manifestSha256: "a".repeat(64),
+  shots: [{ id: "shot-1", prompt: "An archival map lit by dawn", negative: "No labels", seed: 42 }],
+  style: "Warm natural light", director: "Measured camera direction", negative: "No watermarks", maxCostUsd: 2,
+};
+const [staged] = buildStudioZImageStageRequests(payload, generationProfile("production"));
+assert.ok(staged);
+assert.equal(staged.request.candidates[0]?.prompt, "An archival map lit by dawn. Warm natural light. Measured camera direction");
+assert.equal(staged.request.candidates[0]?.negativePrompt, "No watermarks, No labels");
+assert.equal(staged.request.candidates[0]?.seed, 42);
+assert.equal(staged.request.maxCostUsd, 2);
+assert.equal(staged.request.candidates[0]?.width, 1920);
+assert.equal(staged.request.candidates[0]?.height, 1088);
+assert.throws(() => buildStudioZImageStageRequests({ ...payload, shots: [{ ...payload.shots[0]!, candidateCount: 2 }] }, generationProfile("production")), /candidate count differs/);
+const [hero] = buildStudioZImageStageRequests(payload, generationProfile("hero"));
+assert.equal(hero?.request.candidates.length, 2);
+assert.equal(hero?.request.candidates[1]?.seed, 10_042);
+assert.equal(hero?.request.candidates[1]?.negativePrompt, "No watermarks, No labels");
 
 const producer = readFileSync(fileURLToPath(new URL("../planWeekPreparedImages.ts", import.meta.url)), "utf8");
-const freshPathStart = producer.indexOf("const prior = await verifyStoredSidecar(sidecarKey, manifest)");
-const providerCall = producer.indexOf("const result = await renderImages(", freshPathStart);
-const retirementGate = producer.indexOf("rejectNewNovitaGeneration();", freshPathStart);
-assert.ok(freshPathStart >= 0 && retirementGate > freshPathStart && providerCall > retirementGate,
-  "a fresh weekly still wave must fail closed before the retired image provider is called");
+const activeTask = producer.slice(producer.indexOf("export const planWeekPreparedImagesTask = task({"));
+assert.match(activeTask, /const staged = await stagePreparedImagesInRenderEngine\(manifest, payload\)/);
+assert.doesNotMatch(activeTask, /\brenderImages\(|\brejectNewNovitaGeneration\(/);
+const retiredBackup = producer.slice(producer.indexOf("export async function retiredLegacyPreparedImageGeneration("), producer.indexOf("export const planWeekPreparedImagesTask = task({"));
+assert.ok(retiredBackup.indexOf("rejectNewNovitaGeneration();") >= 0 &&
+  retiredBackup.indexOf("rejectNewNovitaGeneration();") < retiredBackup.indexOf("const result = await renderImages("),
+  "retained legacy code must always throw before a direct provider call");
 
-console.log("weekly fresh-still Engine boundary remains fail-closed for the exact Studio Final profile");
+console.log("weekly fresh stills submit only held Engine Final requests with exact prompt and geometry");

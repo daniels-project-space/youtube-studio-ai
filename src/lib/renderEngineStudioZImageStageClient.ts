@@ -16,7 +16,7 @@ export type RenderEngineStudioZImageRequest = Readonly<{
   idempotencyKey: string;
   sourceId: string;
   profile: RenderEngineStudioZImageProfile;
-  candidates: readonly Readonly<{ id: string; prompt: string; seed: number; width: 1920 | 2048; height: 1088 | 1152 }>[];
+  candidates: readonly Readonly<{ id: string; prompt: string; negativePrompt: string; seed: number; width: 1920 | 2048; height: 1088 | 1152 }>[];
   output: Readonly<{ contentType: "image/png" }>;
   maxCostUsd: number;
   profileRevisionSha256: typeof STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256;
@@ -49,6 +49,7 @@ const dimensions = {
   production: { width: 1920, height: 1088, candidates: 1 },
   hero: { width: 2048, height: 1152, candidates: 2 },
 } as const;
+const WORKFLOW_NAME = "studio-zimage-final";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -56,13 +57,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
-function engineEndpoint(baseUrl: string): string {
+function engineEndpoint(baseUrl: string, path: string): string {
   let url: URL;
   try { url = new URL(baseUrl); } catch { throw new Error("Render Engine URL is invalid"); }
   if (url.protocol !== "https:" || !url.hostname.endsWith(".convex.site") || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
     throw new Error("Render Engine URL must be the HTTPS Convex site origin");
   }
-  url.pathname = "/client/studio-zimage-batches";
+  url.pathname = path;
   return url.toString();
 }
 function validateConfig(config: RenderEngineStudioZImageStageConfig): void {
@@ -85,15 +86,43 @@ function validateRequest(value: unknown): asserts value is RenderEngineStudioZIm
   const seen = new Set<string>();
   for (const candidate of value.candidates) {
     const seed = isRecord(candidate) ? candidate.seed : undefined;
-    if (!isRecord(candidate) || !exactKeys(candidate, ["id", "prompt", "seed", "width", "height"]) ||
+    if (!isRecord(candidate) || !exactKeys(candidate, ["id", "prompt", "negativePrompt", "seed", "width", "height"]) ||
         typeof candidate.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(candidate.id) || seen.has(candidate.id) ||
         typeof candidate.prompt !== "string" || candidate.prompt.trim().length < 3 || candidate.prompt.length > 20_000 ||
+        typeof candidate.negativePrompt !== "string" || candidate.negativePrompt.length > 20_000 ||
         typeof seed !== "number" || !Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff ||
         candidate.width !== expected.width || candidate.height !== expected.height) {
       throw new Error("Studio Z-Image candidate is outside the Final contract");
     }
     seen.add(candidate.id);
   }
+}
+
+/** Obtains the project-owned held Final still workflow and exact profile digest. */
+export async function provisionStudioZImageWorkflowInRenderEngine(
+  config: Omit<RenderEngineStudioZImageStageConfig, "workflowId" | "request">,
+): Promise<Readonly<{ workflowId: string; profileRevisionSha256: typeof STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256 }>> {
+  if (!PROJECT_NAME.test(config.projectName) || !HEX_SHA256.test(config.projectCapability)) {
+    throw new Error("Render Engine Studio Z-Image connection is invalid");
+  }
+  const response = await (config.fetchImpl ?? fetch)(engineEndpoint(config.baseUrl, "/client/workflows"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${config.projectCapability}`, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ projectName: config.projectName, workflowName: WORKFLOW_NAME, profileId: STUDIO_ZIMAGE_TURBO_PROFILE.id }),
+    cache: "no-store", signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    throw new Error("Render Engine Studio Z-Image workflow returned a non-JSON response");
+  }
+  let payload: unknown;
+  try { payload = await response.json(); } catch { throw new Error("Render Engine Studio Z-Image workflow returned malformed JSON"); }
+  if (response.status !== 200) throw new Error(`Render Engine Studio Z-Image workflow returned HTTP ${response.status}`);
+  if (!isRecord(payload) || !exactKeys(payload, ["workflowId", "profileRevisionSha256"]) ||
+      typeof payload.workflowId !== "string" || !CONVEX_ID.test(payload.workflowId) ||
+      payload.profileRevisionSha256 !== STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256) {
+    throw new Error("Render Engine Studio Z-Image workflow revision does not match the Final contract");
+  }
+  return { workflowId: payload.workflowId, profileRevisionSha256: STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256 };
 }
 function parseReceipt(value: unknown): RenderEngineStudioZImageStageReceipt {
   const states: readonly RenderEngineStudioZImageStageState[] = [
@@ -111,7 +140,7 @@ function parseReceipt(value: unknown): RenderEngineStudioZImageStageReceipt {
 export async function stageStudioZImageRequestInRenderEngine(config: RenderEngineStudioZImageStageConfig): Promise<RenderEngineStudioZImageStageReceipt> {
   validateConfig(config);
   validateRequest(config.request);
-  const response = await (config.fetchImpl ?? fetch)(engineEndpoint(config.baseUrl), {
+  const response = await (config.fetchImpl ?? fetch)(engineEndpoint(config.baseUrl, "/client/studio-zimage-batches"), {
     method: "POST",
     headers: { authorization: `Bearer ${config.projectCapability}`, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ projectName: config.projectName, workflowId: config.workflowId, request: config.request }),
