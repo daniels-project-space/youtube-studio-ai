@@ -40,6 +40,7 @@ import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 import { admitStudioBatchInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+import { STUDIO_ZIMAGE_TURBO_PROFILE, provisionStudioZImageWorkflowInRenderEngine, stageStudioZImageRequestInRenderEngine, type RenderEngineStudioZImageRequest } from "@/lib/renderEngineStudioZImageStageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
 const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
@@ -105,6 +106,35 @@ export interface RenderEngineH3StagedFootage {
   }>;
 }
 
+/** Held Final still requests. No candidate is called a prepared image until its exact R2 bytes and QA are verified. */
+export interface RenderEngineStudioZImageStagedImages {
+  version: "render-engine-studio-zimage-staged-images/v1";
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  engine: { site: typeof RENDER_ENGINE_SITE; projectName: typeof RENDER_ENGINE_PROJECT_NAME; workflowId: string; profileRevisionSha256: typeof STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256 };
+  jobs: Array<{ shotId: string; engineJobId: string; requestManifestSha256: string; candidates: Array<{ candidateIndex: number; candidateId: string; prompt: string; negativePrompt: string; seed: number; width: number; height: number; studioOutputKey: string }> }>;
+}
+
+function generationIdentity(profile: GenerationProfile): StillRenderManifest["generation"] {
+  return {
+    contractVersion: profile.contractVersion,
+    profileId: profile.id,
+    model: profile.image.model,
+    revision: profile.image.revision,
+    checkpoint: profile.image.checkpoint,
+    precision: profile.image.precision,
+    width: profile.image.width,
+    height: profile.image.height,
+    steps: profile.image.steps,
+    allowFallback: false,
+  };
+}
+
 function safePart(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
     throw new Error(`weekly prepared images ${label} is invalid`);
@@ -125,21 +155,6 @@ const CAMERA_MOVES = new Set<Shot["cameraMove"]>([
 ]);
 const SHOT_SCALES = new Set<Shot["shotScale"]>(["wide", "medium", "close", "extreme_close", "establishing"]);
 
-function generationIdentity(profile: GenerationProfile): StillRenderManifest["generation"] {
-  return {
-    contractVersion: profile.contractVersion,
-    profileId: profile.id,
-    model: profile.image.model,
-    revision: profile.image.revision,
-    checkpoint: profile.image.checkpoint,
-    precision: profile.image.precision,
-    width: profile.image.width,
-    height: profile.image.height,
-    steps: profile.image.steps,
-    allowFallback: false,
-  };
-}
-
 function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
   return {
     ownerId: payload.ownerId,
@@ -151,6 +166,10 @@ function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
 
 export function renderEngineH3StagedFootageKey(scope: ReturnType<typeof canonicalScope>): string {
   return planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-staged.json");
+}
+
+export function renderEngineStudioZImageStagedImagesKey(scope: ReturnType<typeof canonicalScope>): string {
+  return planWeekPreparedImagesKey(scope).replace(/\.json$/u, ".engine-zimage-staged.json");
 }
 
 export function hasGeneratedFootageStage(manifest: PlanWeekPreparationManifest): boolean {
@@ -409,27 +428,92 @@ export async function dispatchPreparedFootage(
   return stagedJobIds;
 }
 
-export const planWeekPreparedImagesTask = task({
-  id: "plan-week-prepared-images",
-  maxDuration: 3_600,
-  // Completed waves/handoffs can recover; an incomplete claimed generation
-  // requires reconciliation instead of buying another image wave.
-  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
-  queue: { concurrencyLimit: 1 },
-  run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
-    const payload = assertPlanWeekPreparedImagesArgs(rawPayload);
-    await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare"],
-      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
-    });
-    const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-images");
-    const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
-    const prior = await verifyStoredSidecar(sidecarKey, manifest);
-    if (prior) {
-      const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
-      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
+/** One held Engine request per shot; candidate zero remains the later H3 conditioning frame. */
+export function buildStudioZImageStageRequests(payload: PlanWeekPreparedImagesArgs, profile: GenerationProfile): Array<{
+  shotId: string;
+  request: RenderEngineStudioZImageRequest;
+  studioOutputKeys: string[];
+}> {
+  const image = profile.image;
+  if (!isProductionQualityGenerationProfile(profile.id) ||
+      image.model !== STUDIO_ZIMAGE_TURBO_PROFILE.model || image.revision !== STUDIO_ZIMAGE_TURBO_PROFILE.revision ||
+      image.checkpoint !== STUDIO_ZIMAGE_TURBO_PROFILE.checkpoint || image.steps !== STUDIO_ZIMAGE_TURBO_PROFILE.steps ||
+      image.guidanceScale !== STUDIO_ZIMAGE_TURBO_PROFILE.guidanceScale || image.precision !== STUDIO_ZIMAGE_TURBO_PROFILE.precision ||
+      (profile.id === "production" && (image.width !== 1920 || image.height !== 1088 || image.candidates !== 1)) ||
+      (profile.id === "hero" && (image.width !== 2048 || image.height !== 1152 || image.candidates !== 2))) {
+    throw new Error("weekly prepared stills do not match the Render Engine Final Z-Image profile");
+  }
+  const maxCostUsd = Math.min(10, payload.maxCostUsd / payload.shots.length);
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) throw new Error("weekly prepared stills Engine cost ceiling is invalid");
+  let outputIndex = 0;
+  return payload.shots.map((shot, shotIndex) => {
+    if ((shot.candidateCount ?? image.candidates) !== image.candidates) {
+      throw new Error(`weekly prepared still ${shot.id} candidate count differs from the Final profile`);
     }
+    const prompt = [shot.prompt, payload.style, payload.director].filter((part) => part && part.trim()).join(". ");
+    const negativePrompt = [payload.negative, shot.negative].filter((part) => part && part.trim()).join(", ");
+    const candidates = Array.from({ length: image.candidates }, (_, candidateIndex) => ({
+      id: `scene-${String(shotIndex + 1).padStart(3, "0")}-c${String(candidateIndex + 1).padStart(2, "0")}`,
+      prompt, negativePrompt, seed: (shot.seed ?? 0) + candidateIndex * 10_000,
+      width: image.width as 1920 | 2048, height: image.height as 1088 | 1152,
+    }));
+    if (candidates.some((candidate) => !Number.isSafeInteger(candidate.seed) || candidate.seed < 0 || candidate.seed > 0xffff_ffff)) {
+      throw new Error(`weekly prepared still ${shot.id} seed is outside the Final Engine contract`);
+    }
+    const studioOutputKeys = candidates.map(() => planWeekPreparedImageKey({ ...canonicalScope(payload), index: outputIndex++ }));
+    return { shotId: shot.id, request: {
+      version: 1, idempotencyKey: `studio-zimage:${payload.manifestSha256}:${String(shotIndex).padStart(3, "0")}`,
+      sourceId: `studio-${payload.manifestSha256.slice(0, 48)}-${String(shotIndex).padStart(3, "0")}`,
+      profile: profile.id as "production" | "hero", candidates, output: { contentType: "image/png" },
+      maxCostUsd, profileRevisionSha256: STUDIO_ZIMAGE_TURBO_PROFILE.profileRevisionSha256,
+    }, studioOutputKeys };
+  });
+}
+
+/** Persist only a held receipt; a later qualified worker must prove actual still bytes and QA. */
+export async function stagePreparedImagesInRenderEngine(
+  manifest: PlanWeekPreparationManifest,
+  payload: PlanWeekPreparedImagesArgs,
+): Promise<{ stageKey: string; jobIds: string[] }> {
+  const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
+  if (!/^[a-f0-9]{64}$/.test(projectCapability)) throw new Error("weekly still Engine project capability is not configured");
+  const profile = generationProfile(payload.generationProfile);
+  const requests = buildStudioZImageStageRequests(payload, profile);
+  const engine = { baseUrl: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, projectCapability };
+  await admitStudioBatchInRenderEngine(engine, { ownerId: payload.ownerId, batchId: payload.batchId });
+  const workflow = await provisionStudioZImageWorkflowInRenderEngine(engine);
+  const jobs: RenderEngineStudioZImageStagedImages["jobs"] = [];
+  for (const { shotId, request, studioOutputKeys } of requests) {
+    const receipt = await stageStudioZImageRequestInRenderEngine({ ...engine, workflowId: workflow.workflowId, request });
+    if (receipt.state !== "awaiting-final-qualification") {
+      throw new Error("weekly still Engine request is no longer held for Final qualification");
+    }
+    jobs.push({ shotId, engineJobId: receipt.jobId, requestManifestSha256: receipt.manifestSha256,
+      candidates: request.candidates.map((candidate, candidateIndex) => ({
+        candidateIndex, candidateId: candidate.id, prompt: candidate.prompt, negativePrompt: candidate.negativePrompt,
+        seed: candidate.seed, width: candidate.width, height: candidate.height, studioOutputKey: studioOutputKeys[candidateIndex]!,
+      })) });
+  }
+  const staged: RenderEngineStudioZImageStagedImages = {
+    version: "render-engine-studio-zimage-staged-images/v1", manifestSha256: payload.manifestSha256,
+    ownerId: payload.ownerId, channelId: payload.channelId, channelSlug: payload.channelSlug,
+    batchId: payload.batchId, itemId: payload.itemId, requestKey: manifest.requestKey,
+    engine: { site: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, workflowId: workflow.workflowId,
+      profileRevisionSha256: workflow.profileRevisionSha256 }, jobs,
+  };
+  const stageKey = renderEngineStudioZImageStagedImagesKey(canonicalScope(payload));
+  await persistPreparedResult(stageKey, new TextEncoder().encode(canonicalJson(staged)), "application/json", {
+    "render-engine-studio-zimage-staged-images": staged.version,
+  });
+  return { stageKey, jobIds: jobs.map((job) => job.engineJobId) };
+}
+
+/** Retained for historical reconciliation; the first statement always rejects direct Novita generation. */
+export async function retiredLegacyPreparedImageGeneration(
+  manifest: PlanWeekPreparationManifest,
+  payload: PlanWeekPreparedImagesArgs,
+  sidecarKey: string,
+) {
     rejectNewNovitaGeneration();
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
@@ -501,5 +585,31 @@ export const planWeekPreparedImagesTask = task({
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
     const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prepared);
     return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+}
+
+export const planWeekPreparedImagesTask = task({
+  id: "plan-week-prepared-images",
+  maxDuration: 3_600,
+  // Completed waves/handoffs can recover; an incomplete claimed generation
+  // requires reconciliation instead of buying another image wave.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
+  queue: { concurrencyLimit: 1 },
+  run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
+    const payload = assertPlanWeekPreparedImagesArgs(rawPayload);
+    await bootstrapSecrets(() => undefined, {
+      services: ["cloudflare"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+    });
+    const manifest = await readPreparationManifest(payload);
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-images");
+    const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
+    const prior = await verifyStoredSidecar(sidecarKey, manifest);
+    if (prior) {
+      const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
+      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
+    }
+    const staged = await stagePreparedImagesInRenderEngine(manifest, payload);
+    return { ok: true, held: true, stageKey: staged.stageKey, engineJobIds: staged.jobIds,
+      outputs: 0, costUsd: 0, manifestSha256: payload.manifestSha256 };
   },
 });
