@@ -13,6 +13,9 @@ export const ERNIE_DYNAMIC_GEOMETRY_SOURCE = {
     revision: "e20d433a4966dcc88fa5abbae6ace824cb78b263",
     latentNodeSha256: "71c9d804a9acfb7a828fecb8fcc4b93e28f4417f0c4259a68910f4027059741f",
     nodesSha256: "918a322c43665f24513856a5bec6c564ede01a29b6081b83fd67d27a49571e0c",
+    transformerSha256: "187a359779f0408f49e68e68157fd767f44ef6bd8e94fedefd3bc0e850995e10",
+    transformerUrl: "https://github.com/Comfy-Org/ComfyUI/blob/e20d433a4966dcc88fa5abbae6ace824cb78b263/comfy/ldm/ernie/model.py",
+    spatialPositionRule: "dynamic patch grid and rotary positions derived from input tensor shape; no preset-size whitelist",
     url: "https://github.com/Comfy-Org/ComfyUI/blob/e20d433a4966dcc88fa5abbae6ace824cb78b263/comfy_extras/nodes_flux.py",
     dimensionStep: 16, maximumDimension: 16_384,
     archiveRelationship: "upstream equivalent recorded in Engine ERNIE v2 source audit; latent node archive member not independently attested",
@@ -30,7 +33,7 @@ export function buildStudioErniePreservedPixelProposal(args: {
   maxCostUsd: number;
 }) {
   const { width, height } = generationProfile(args.profileId).image;
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width % 16 || height % 16 ||
+  if (!["production", "hero"].includes(args.profileId) || !Number.isInteger(width) || !Number.isInteger(height) || width % 16 || height % 16 ||
       width > ERNIE_DYNAMIC_GEOMETRY_SOURCE.comfy.maximumDimension || height > ERNIE_DYNAMIC_GEOMETRY_SOURCE.comfy.maximumDimension ||
       !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(args.candidate.id) || args.candidate.prompt.trim().length < 3 ||
       args.candidate.prompt.length > 20_000 || !Number.isSafeInteger(args.candidate.seed) || args.candidate.seed < 0 || args.candidate.seed > 0xffffffff ||
