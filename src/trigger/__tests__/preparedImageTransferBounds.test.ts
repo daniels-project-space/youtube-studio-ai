@@ -76,7 +76,7 @@ loader._load = function (name, ...args) {
         scenePackets.set(key, value);
         return;
       }
-      if (key.endsWith(".engine-h3-staged.json")) {
+      if (key.endsWith(".engine-h3-shared-staged.json")) {
         if (stagedFootageSidecars.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
         stagedFootageSidecars.set(key, value);
         return;
@@ -97,6 +97,14 @@ loader._load = function (name, ...args) {
     qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => {
       qualificationCalls++;
       return { jobId, state: "awaiting-final-qualification" };
+    },
+  };
+  if (name === "@/lib/renderEngineH3SceneBatchClient") return {
+    stageH3SceneBatchInRenderEngine: async (_config: unknown, args: { request: { scenes: Array<{ ordinal: number; sceneId: string }> } }) => {
+      assert.equal(inputUploads % 12, 0, "the whole first-frame set is retained before one batch stages");
+      assert.deepEqual(args.request.scenes.map(scene => scene.ordinal), Array.from({ length: 12 }, (_, index) => index));
+      stagedJobs++;
+      return { jobId: "enginebatchjob123", state: stagedState, manifestSha256: "b".repeat(64) };
     },
   };
   if (name === "@/lib/novitaRenderFarm") return {
@@ -172,24 +180,24 @@ async function main() {
   assert.equal(started, 1);
   assert.equal(stagedJobs, 0, "H3 cannot stage before the first source frame is retained");
   release();
-  assert.deepEqual(await copy, Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.deepEqual(await copy, ["enginebatchjob123"]);
   assert.equal(writes.length, 0);
   assert.equal(peak, 1);
   assert.equal(inputUploads, 12);
-  assert.equal(stagedJobs, 12);
-  assert.equal(qualificationCalls, 12, "only fresh input-qualification jobs call the qualifier");
+  assert.equal(stagedJobs, 1, "one shared allocation is staged for the complete ordered scene set");
+  assert.equal(qualificationCalls, 0, "shared staging owns complete input qualification in Engine");
   assert.equal(stagedFootageSidecars.size, 1, "staged Engine job identities persist for the later manual R2 materializer");
   const [stageKey, stageBytes] = [...stagedFootageSidecars.entries()][0]!;
-  assert.match(stageKey, /prepared\/footage\.engine-h3-staged\.json$/);
+  assert.match(stageKey, /prepared\/footage\.engine-h3-shared-staged\.json$/);
   const stagedFootage = JSON.parse(new TextDecoder().decode(stageBytes)) as { engine: { projectName: string }; jobs: Array<{ engineJobId: string; output: { r2Key: string } }> };
   assert.equal(stagedFootage.engine.projectName, "youtube-studio-ai");
-  assert.deepEqual(stagedFootage.jobs.map((job) => job.engineJobId), Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.deepEqual(stagedFootage.jobs.map((job) => job.engineJobId), Array.from({ length: 12 }, () => "enginebatchjob123"));
   assert.match(stagedFootage.jobs[0]!.output.r2Key, /prepared\/footage\/clip-0001\.mp4$/);
   for (const terminalState of ["completed", "failed", "cancelled"] as const) {
     stagedState = terminalState;
     qualificationCalls = 0;
     const replayIds = await dispatchPreparedFootage(footageManifest, payload, prepared);
-    assert.equal(replayIds?.length, 12);
+    assert.deepEqual(replayIds, ["enginebatchjob123"]);
     assert.equal(qualificationCalls, 0, `${terminalState} replays must not requalify the original input`);
   }
   stagedState = "awaiting-final-qualification";
