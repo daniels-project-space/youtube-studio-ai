@@ -49,7 +49,7 @@ function fixture() {
   } as unknown as PlanWeekPreparationManifest;
   return { payload, prepared, manifest, frames };
 }
-test("real multi-scene submitter freezes intent before admission and replays every deterministic job after lost stage response", async () => {
+test("real multi-scene submitter freezes intent before admission and replays one deterministic shared GPU job after lost stage response", async () => {
   const f = fixture();
   const previous = process.env.RENDER_ENGINE_PROJECT_TOKEN;
   process.env.RENDER_ENGINE_PROJECT_TOKEN = "a".repeat(64);
@@ -87,18 +87,17 @@ test("real multi-scene submitter freezes intent before admission and replays eve
         headers: {},
       };
     },
-    stage: async (config) => {
-      assert.ok(config.studioBatch?.sceneId);
+    stage: async (engine, config) => {
+      assert.equal(engine.projectName,"youtube-studio-ai");
+      assert.equal(config.request.scenes.length,2);
       assert.ok(events.includes("bind"));
       const key = config.request.idempotencyKey;
       keys.push(key);
       const jobId = jobs.get(key) ?? `job${jobs.size + 1}`;
       jobs.set(key, jobId);
-      assert.equal(
-        config.studioBatch.ordinal,
-        Number(config.studioBatch.sceneId.split("-")[1]) - 1,
-      );
-      if (uncertain && jobs.size === 2) {
+      assert.deepEqual(config.request.scenes.map(scene=>scene.ordinal),[0,1]);
+      assert.deepEqual(config.request.scenes.map(scene=>scene.sceneId),["shot-1","shot-2"]);
+      if (uncertain && jobs.size === 1) {
         uncertain = false;
         throw new Error("lost accepted stage response");
       }
@@ -117,13 +116,13 @@ test("real multi-scene submitter freezes intent before admission and replays eve
       dispatchPreparedFootage(f.manifest, f.payload, f.prepared, deps),
       /lost/,
     );
-    assert.equal(jobs.size, 2);
+    assert.equal(jobs.size, 1);
     assert.deepEqual(
       await dispatchPreparedFootage(f.manifest, f.payload, f.prepared, deps),
-      ["job1", "job2"],
+      ["job1"],
     );
-    assert.deepEqual(keys.slice(0, 2), keys.slice(2));
-    assert.equal(jobs.size, 2);
+    assert.deepEqual(keys.slice(0, 1), keys.slice(1));
+    assert.equal(jobs.size, 1);
     const packet = JSON.parse(
       [...saved.entries()].find(([key]) => key.endsWith("h3-scenes.json"))![1],
     ) as ReturnType<typeof buildStudioSceneManifest>;
@@ -151,7 +150,7 @@ test("real multi-scene submitter freezes intent before admission and replays eve
       dispatchPreparedFootage(f.manifest, changed, f.prepared, deps),
       /create-only/,
     );
-    assert.equal(keys.length, 4);
+    assert.equal(keys.length, 2);
   } finally {
     if (previous === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
     else process.env.RENDER_ENGINE_PROJECT_TOKEN = previous;
