@@ -1,20 +1,19 @@
 /**
- * Paid weekly image producer.
+ * Durable weekly Engine image preparation.
  *
  * The planner freezes editorial inputs; this task is the explicit visual data
  * plane that turns an approved shot packet into receipt-backed, canonical R2
  * stills.  It is deliberately create-only and replayable: a retry reuses a
- * fully verified sidecar and never submits the same image wave twice.
+ * fully verified sidecar or replays the same immutable Engine wave identity.
  */
 import { task } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
-import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
-import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
+import { generationProfile, isProductionQualityGenerationProfile } from "@/engine/generationProfiles";
+import { StillRenderManifestSchema } from "@/engine/renderArtifacts";
 import {
   assertPlanWeekPreparedImagesBinding,
   assertPlanWeekPreparationManifestBinding,
   normalizePlanWeekPreparationManifest,
-  planWeekPreparedImageKey,
   planWeekPreparedFootageKey,
   planWeekPreparedImagesKey,
   planWeekPreparedFootageClipKey,
@@ -36,9 +35,9 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
-import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
-import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
+import { prepareStudioErnieImages } from "@/lib/studioPreparedErnieImages";
+import { STUDIO_ERNIE_CONTRACT, STUDIO_ERNIE_SOURCE } from "@/lib/renderEngineErnieClient";
+import { type Shot } from "@/lib/novitaRenderFarm";
 import { bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
@@ -71,6 +70,8 @@ export interface PlanWeekPreparedImagesArgs {
   negative?: string;
   director?: string;
   maxCostUsd: number;
+  /** Explicit resolution choice; absence preserves the approved pixel floor. */
+  approvedErnieNativeGeometry?: "1376x768";
 }
 
 type PreparedH3Batch = {
@@ -124,21 +125,6 @@ const CAMERA_MOVES = new Set<Shot["cameraMove"]>([
   "truck_left", "truck_right", "handheld_drift",
 ]);
 const SHOT_SCALES = new Set<Shot["shotScale"]>(["wide", "medium", "close", "extreme_close", "establishing"]);
-
-function generationIdentity(profile: GenerationProfile): StillRenderManifest["generation"] {
-  return {
-    contractVersion: profile.contractVersion,
-    profileId: profile.id,
-    model: profile.image.model,
-    revision: profile.image.revision,
-    checkpoint: profile.image.checkpoint,
-    precision: profile.image.precision,
-    width: profile.image.width,
-    height: profile.image.height,
-    steps: profile.image.steps,
-    allowFallback: false,
-  };
-}
 
 function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
   return {
@@ -284,6 +270,7 @@ export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPrepar
   if (new Set(shots.map((shot) => shot.id)).size !== shots.length) throw new Error("weekly prepared image shot ids must be unique");
   const profileId = raw.generationProfile === undefined ? "production" : raw.generationProfile;
   if (profileId !== "production" && profileId !== "hero") throw new Error("weekly prepared images require a production or hero profile");
+  if (raw.approvedErnieNativeGeometry !== undefined && raw.approvedErnieNativeGeometry !== "1376x768") throw new Error("weekly prepared ERNIE geometry choice is invalid");
   const maxCostUsd = raw.maxCostUsd;
   if (typeof maxCostUsd !== "number" || !Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 1_000) {
     throw new Error("weekly prepared images maxCostUsd must be greater than zero and no more than 1000");
@@ -298,6 +285,7 @@ export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPrepar
     ...(typeof raw.negative === "string" && raw.negative.trim() ? { negative: raw.negative.trim() } : {}),
     ...(typeof raw.director === "string" && raw.director.trim() ? { director: raw.director.trim() } : {}),
     maxCostUsd,
+    ...(raw.approvedErnieNativeGeometry === "1376x768" ? { approvedErnieNativeGeometry: "1376x768" as const } : {}),
   };
 }
 
@@ -334,10 +322,6 @@ export async function verifyStoredSidecar(key: string, manifest: PlanWeekPrepara
     }
   });
   return prepared;
-}
-
-async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<void> {
-  await persistPreparedResult(key, bytes, "image/png", {});
 }
 
 export function buildStudioSceneManifest(args: {
@@ -585,58 +569,18 @@ export const planWeekPreparedImagesTask = task({
       const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
       return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
-    rejectNewNovitaGeneration();
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
-    const shots: Shot[] = payload.shots.map((shot) => ({
-      id: shot.id,
-      prompt: shot.prompt,
-      cameraMove: shot.cameraMove ?? "static",
-      shotScale: shot.shotScale ?? "medium",
-      lens: shot.lens ?? "50mm",
-      seconds: shot.seconds ?? 1,
-      motion: shot.motion ?? "",
-      ...(shot.negative ? { negative: shot.negative } : {}),
-      ...(shot.seed === undefined ? {} : { seed: shot.seed }),
-      ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
-    }));
-    await claimPreparedGeneration("images", manifest, { payload, shots, profile });
-    const result = await renderImages({
-      prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
-      shots,
-      profile: toNovitaPhaseProfile(profile, "image"),
-      ...(payload.style ? { style: payload.style } : {}),
-      ...(payload.negative ? { negative: payload.negative } : {}),
-      ...(payload.director ? { director: payload.director } : {}),
-      maxCostUsd: payload.maxCostUsd,
-      lifecycle: { ownerId: payload.ownerId, channelId: payload.channelId, runId: `plan-week-images-${payload.batchId}-${payload.itemId}`, blockId: "plan_week_prepared_images" },
-    });
-    const candidates = result.candidates ?? [];
-    const expected = payload.shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile.image.candidates), 0);
-    if (candidates.length !== expected) throw new Error(`weekly prepared images returned ${candidates.length} candidates; expected ${expected}`);
-    const shotOrder = new Map(payload.shots.map((shot, index) => [shot.id, index]));
-    const ordered = [...candidates].sort((a, b) => (shotOrder.get(a.shotId)! - shotOrder.get(b.shotId)!) || (a.candidateIndex - b.candidateIndex));
-    const seen = new Set<string>();
-    const items = [] as PlanWeekPreparedImages["items"];
-    const stillItems = [] as StillRenderManifest["items"];
-    for (const [index, candidate] of ordered.entries()) {
-      const identity = `${candidate.shotId}:${candidate.candidateIndex}`;
-      if (seen.has(identity)) throw new Error(`weekly prepared images returned duplicate candidate ${identity}`);
-      seen.add(identity);
-      const source = await getObjectBytes(candidate.key, undefined, { maxBytes: 50 * 1024 * 1024, timeoutMs: 300_000 });
-      const stillKey = planWeekPreparedImageKey({ ...canonicalScope(payload), index });
-      await persistMediaCreateOnly(stillKey, source);
-      const sha256 = sha256BytesHex(source);
-      items.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, stillKey, sha256, byteLength: source.byteLength });
-      stillItems.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, outputId: candidate.outputId, stillKey });
-    }
-    const expectedIdentities = new Set(
-      payload.shots.flatMap((shot) => Array.from({ length: shot.candidateCount ?? profile.image.candidates }, (_, candidateIndex) => `${shot.id}:${candidateIndex}`)),
-    );
-    if (seen.size !== expectedIdentities.size || [...expectedIdentities].some((identity) => !seen.has(identity))) {
-      throw new Error("weekly prepared images returned an incomplete shot/candidate mapping");
-    }
-    const stillRenderManifest = StillRenderManifestSchema.parse({ version: "1.0.0", generation: generationIdentity(profile), items: stillItems });
+    const result = await prepareStudioErnieImages(payload);
+    if (result.kind === "pending") return {
+      ok: false, pending: true, ...result, sidecarKey, outputs: 0, costUsd: null, manifestSha256: payload.manifestSha256,
+    };
+    const items = result.items;
+    const stillRenderManifest = StillRenderManifestSchema.parse({ version: "1.0.0", generation: {
+      contractVersion: "1.0.0", profileId: profile.id, ...STUDIO_ERNIE_SOURCE,
+      precision: STUDIO_ERNIE_CONTRACT.precision, width: STUDIO_ERNIE_CONTRACT.width, height: STUDIO_ERNIE_CONTRACT.height,
+      steps: STUDIO_ERNIE_CONTRACT.steps, allowFallback: false,
+    }, items: result.stillItems });
     const prepared: PlanWeekPreparedImages = {
       version: "plan-week-prepared-images/v1",
       manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -655,6 +599,6 @@ export const planWeekPreparedImagesTask = task({
     const body = new TextEncoder().encode(canonicalJson(prepared));
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
     const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prepared);
-    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: null, manifestSha256: prepared.manifestSha256 };
   },
 });

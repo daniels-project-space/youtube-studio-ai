@@ -133,6 +133,7 @@ async function main() {
       recordModelUsage({ provider: "openrouter", model: "fixture", kind: "text", reportedCostUsd: 0.25 });
       return script;
     } };
+    if (id === "@/lib/studioPreparedErnieImages") return { ...actual as object, prepareStudioErnieImages: async () => ({ kind: "pending", state: "awaiting-image-geometry-approval", jobs: [] }) };
     if (id === "@/lib/novitaRenderFarm") return { ...actual as object, renderImages: stop };
     if (id === "@/lib/music") return { ...actual as object, generateMureka: stop, generateSuno: stop };
     if (id === "@/lib/tts") return { ...actual as object, synthNarration: stop };
@@ -189,13 +190,13 @@ async function main() {
     await assert.rejects(() => tasks[0].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
     assert.equal(paidCalls, 1, "a lost script result cannot buy another attempt");
     missingKey = planWeekPreparedImagesKey(manifest); events.length = 0;
-    await assert.rejects(() => tasks[3].run(payload), /stubbed generation boundary/);
-    assert.ok(events.indexOf(`read:${missingKey}`) < events.indexOf("vault:novita"));
-    assert.ok(events.indexOf("vault:novita") < events.indexOf("generation"));
-    assert.equal(paidCalls, 2); assert.equal(writes, 0);
-    await assert.rejects(() => tasks[3].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
-    assert.equal(paidCalls, 2, "a lost image result cannot buy another wave");
-    assert.equal(claims.size, 2);
+    const pending = await tasks[3].run(payload) as unknown as { pending: boolean; state: string };
+    assert.equal(pending.pending, true);
+    assert.equal(pending.state, "awaiting-image-geometry-approval");
+    assert.ok(!events.includes("vault:novita"));
+    await tasks[3].run(payload);
+    assert.equal(paidCalls, 1, "held Engine image intent cannot buy a wave");
+    assert.equal(claims.size, 1);
     for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)], [2, planWeekPreparedMusicKey(manifest)]] as const) {
       missingKey = key;
       const fresh = { ...payload, speaker: "fixture-voice" };
@@ -205,7 +206,7 @@ async function main() {
       await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
       assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
     }
-    assert.equal(claims.size, 4);
+    assert.equal(claims.size, 3);
     missingKey = "";
     for (const task of tasks) assert.equal((await task.run(payload)).reused, true,
       "a completed sidecar replays even when the dispatch claim exists");
