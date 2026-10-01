@@ -337,7 +337,7 @@ async function main() {
     await provider.run();
     assert.deepEqual(provider.bootstrapOptions, [
       { services: ["cloudflare"], required: [] },
-      { services: ["cloudflare", "novita", "openrouter", "langfuse"], required: [] },
+      { services: ["cloudflare", "openrouter", "langfuse"], required: [] },
     ]);
     const refused = harness("missing-receipt", undefined, undefined, blockId);
     await assert.rejects(refused.run(), /STAGE_REUSE_RECONCILIATION_REQUIRED/);

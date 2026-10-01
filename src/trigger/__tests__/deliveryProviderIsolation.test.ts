@@ -37,6 +37,7 @@ function fixture(kind: Kind, due: Row[] = [], claim?: Row, triggerFailure: boole
   const loaded = { exports: {} as Record<string, (input: Row) => Promise<unknown>> };
   const requireFixture = (name: string) => {
     if (name === "@trigger.dev/sdk") return {
+      task: (definition: unknown) => definition,
       schedules: { task: (definition: unknown) => definition },
       idempotencyKeys: { create: async (seed: string, options: Row) => {
         keys.push({ seed, options }); return `key:${seed}`;

@@ -51,7 +51,7 @@ test("six actual recovery handlers share bounded HTTP, isolate a stalled outbox,
     }).outputText;
     const evaluated = { exports: {} as Record<string, unknown> };
     const requireFixture = (name: string): unknown => {
-      if (name === "@trigger.dev/sdk") return { schedules: { task: (value: unknown) => value },
+      if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition, schedules: { task: (value: unknown) => value },
         tasks: { trigger: forbidden }, idempotencyKeys: { create: forbidden } };
       if (name === "../../convex/_generated/api") return { api };
       if (name === "@/lib/studioConvexHttpClient") return { StudioConvexHttpClient: FixtureClient };

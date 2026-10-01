@@ -40,6 +40,7 @@ let sidecar = prepared;
 let started = 0, active = 0, peak = 0, providerCalls = 0;
 let failure = false;
 const writes: string[] = [];
+const scenePackets = new Map<string, Uint8Array>();
 const stagedFootageSidecars = new Map<string, Uint8Array>();
 let inputUploads = 0, stagedJobs = 0, qualificationCalls = 0;
 let stagedState = "awaiting-input-qualification";
@@ -54,6 +55,10 @@ loader._load = function (name, ...args) {
         assert.deepEqual(options, PREPARED_METADATA_READ);
         return new TextEncoder().encode(JSON.stringify(sidecar));
       }
+      if (key.endsWith("/h3-scenes.json")) {
+        if (scenePackets.has(key)) return scenePackets.get(key)!;
+        throw Object.assign(new Error("missing scene packet"), { $metadata: { httpStatusCode: 404 } });
+      }
       if (stagedFootageSidecars.has(key)) return stagedFootageSidecars.get(key)!;
       assert(items.some(item => item.stillKey === key));
       assert.deepEqual(options, { maxBytes: 512, timeoutMs: 300_000 });
@@ -66,6 +71,11 @@ loader._load = function (name, ...args) {
     },
     putObject: async (key: string, value: Uint8Array, options: { ifNoneMatch: string }) => {
       assert.equal(options.ifNoneMatch, "*");
+      if (key.endsWith("/h3-scenes.json")) {
+        if (scenePackets.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
+        scenePackets.set(key, value);
+        return;
+      }
       if (key.endsWith(".engine-h3-staged.json")) {
         if (stagedFootageSidecars.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
         stagedFootageSidecars.set(key, value);
@@ -77,6 +87,7 @@ loader._load = function (name, ...args) {
   };
   if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
   if (name === "@/lib/renderEngineH3StageClient") return {
+    bindStudioScenesInRenderEngine: async () => ({ sceneCount: 12, reused: scenePackets.size > 0 }),
     provisionStudioH3WorkflowInRenderEngine: async () => ({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "a".repeat(64) }),
     uploadH3InputToRenderEngine: async (_config: unknown, input: { sha256: string }) => {
       inputUploads++;
@@ -98,7 +109,7 @@ async function main() {
   const { verifyStoredSidecar, dispatchPreparedFootage, assertPlanWeekPreparedImagesArgs } = await import("../planWeekPreparedImages");
   let settled = false;
   const success = verifyStoredSidecar("sidecar", manifest).then(value => { settled = true; return value; });
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(started, 4);
   assert.equal(active, 4);
   assert.equal(settled, false);
@@ -114,7 +125,7 @@ async function main() {
   const rejected = verifyStoredSidecar("sidecar", manifest).then(
     () => { throw new Error("expected rejection"); }, error => { settled = true; return error; },
   );
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(started, 4, "failure must stop new transfer admission");
   assert.equal(active, 3);
   assert.equal(settled, false, "started reads must drain before the task can retry");
@@ -157,7 +168,7 @@ async function main() {
   started = 0; peak = 0;
   gate = new Promise<void>(resolve => { release = resolve; });
   const copy = dispatchPreparedFootage(footageManifest, payload, prepared);
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(started, 1);
   assert.equal(stagedJobs, 0, "H3 cannot stage before the first source frame is retained");
   release();

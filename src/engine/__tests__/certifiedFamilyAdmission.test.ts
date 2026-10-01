@@ -1,3 +1,4 @@
+import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -72,7 +73,7 @@ assert.ok(
   declaredAutomaticFamilySet.has("loreshort"),
   "Lore must declare its full route/composition/inception agreement before a benchmark can promote it",
 );
-assert.equal(lore.checks.runtime, false, "the LTX benchmark remains an independent final admission gate");
+assert.equal(lore.checks.runtime, false, "the H3 runtime admission remains independently blocked");
 
 const cinematic = certifiedFamilyAdmission("cinematic");
 assert.equal(cinematic.automatic, false);
@@ -87,8 +88,8 @@ assert.ok(
   "missing automatic-admission registration must not be misreported as missing release quality policy",
 );
 assert.ok(
-  cinematic.blockers.every((blocker) => blocker.includes("MINIMAX_H3_NOVITA_")),
-  "the cinematic route, composition, planning, inception, and quality contracts are now registered; only the qualified MiniMax H3 runtime may block it",
+  cinematic.blockers.every((blocker) => (blocker.includes("MINIMAX_H3_NOVITA_") || blocker.includes(NOVITA_GENERATION_RETIRED))),
+  "registered cinematic contracts remain blocked by direct-route retirement and missing runtime qualification",
 );
 assert.ok(
   !cinematic.blockers.some((blocker) => blocker.includes("no explicit CertifiedFamilyAdmission definition")),
@@ -105,7 +106,7 @@ assert.deepEqual(
     referenceQuality: true,
     runtime: false,
   },
-  "cinematic remains fail-closed only at the exact unqualified Novita H3 runtime boundary",
+  "cinematic remains blocked at its retired and unqualified direct runtime boundary",
 );
 assert.equal(
   certifiedFamilyAdmissionCanAwaitRuntimeEvidence(cinematic),
@@ -134,4 +135,10 @@ assert.ok(
   "CertifiedFamilyAdmission must stop a false automatic family claim before the deterministic illustrated foundation can run",
 );
 
+assert.ok(
+  certifiedFamilyAdmission("cinematic").blockers.some(blocker => blocker.includes(NOVITA_GENERATION_RETIRED)),
+  "direct generation retirement remains an explicit runtime blocker",
+);
+
 console.log("CertifiedFamilyAdmission cross-check tests passed");
+

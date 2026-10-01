@@ -1,3 +1,4 @@
+import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 import assert from "node:assert/strict";
 
 import {
@@ -60,10 +61,16 @@ const admission = certifiedFamilyAdmission("cinematic");
 assert.equal(admission.automatic, false);
 assert.deepEqual(admission.routeKeys, ["cinematic/foundation/v1"]);
 assert.equal(admission.compositionKey, "cinematic_visual_control_story");
-assert.equal(admission.checks.runtime, false, "the qualified immutable MiniMax H3 runtime remains the final promotion gate");
+assert.equal(admission.checks.runtime, false, "runtime qualification and direct-route retirement remain independent blocking gates");
 assert.ok(
-  admission.blockers.every((blocker) => blocker.includes("MINIMAX_H3_NOVITA_")),
-  "the fresh cinematic lane must fail closed on the H3 worker admission fence, never on a retired LTX profile",
+  admission.blockers.every((blocker) => (blocker.includes("MINIMAX_H3_NOVITA_") || blocker.includes(NOVITA_GENERATION_RETIRED))),
+  "the cinematic lane exposes direct-route retirement and H3 qualification fences",
+);
+
+assert.ok(
+  certifiedFamilyAdmission("cinematic").blockers.some(blocker => blocker.includes(NOVITA_GENERATION_RETIRED)),
+  "direct generation retirement remains an explicit runtime blocker",
 );
 
 console.log("cinematic foundation route, planner, composition, and runtime gate tests passed");
+

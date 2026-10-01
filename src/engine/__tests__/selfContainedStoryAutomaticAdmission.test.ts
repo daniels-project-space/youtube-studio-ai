@@ -1,3 +1,4 @@
+import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 import assert from "node:assert/strict";
 
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
@@ -111,9 +112,9 @@ assert.deepEqual(loreAdmission.checks, {
 });
 assert.ok(
   familyProductionReadiness("loreshort").blockers.every((blocker) =>
-    blocker.startsWith("Lore micro-documentary: lore_short:MINIMAX_H3_NOVITA_"),
+    (blocker.startsWith("Lore micro-documentary: lore_short:MINIMAX_H3_NOVITA_") || blocker.includes("Lore micro-documentary: lore_short:" + NOVITA_GENERATION_RETIRED)),
   ),
-  "after its common planner path is complete, only a qualified H3 route may unlock Lore",
+  "registered Lore remains blocked by direct-route retirement and H3 qualification",
 );
 
 console.log("self-contained automatic channel admission tests passed");

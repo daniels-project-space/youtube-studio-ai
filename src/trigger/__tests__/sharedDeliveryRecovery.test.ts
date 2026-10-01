@@ -28,7 +28,7 @@ function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promi
   const env = mode === undefined ? {} : { STUDIO_DELIVERY_RECOVERY_MODE: mode };
   const modeExports = evaluate("src/lib/deliveryRecoveryMode.ts", name => { throw new Error(name); }, env);
   const requireFixture = (name: string): unknown => {
-    if (name === "@trigger.dev/sdk") return { schedules: { task: (definition: Definition) => definition } };
+    if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition, schedules: { task: (definition: Definition) => definition } };
     if (name === "@/lib/deliveryRecoveryMode") return modeExports;
     if (name === "../../convex/_generated/api") return { api: {} };
     const file = name.startsWith("./") ? name.slice(2) : "";
@@ -46,13 +46,14 @@ function fixture(mode?: string, dispatch: (name: string, args: unknown) => Promi
   return { calls, load, mode: modeExports.deliveryRecoveryMode as () => string };
 }
 
-test("exactly six individual crons or one shared cron are declared, never both", async () => {
+test("paused Studio declares no recovery crons in either mode", async () => {
   for (const mode of [undefined, "individual", "shared"]) {
     const f = fixture(mode);
     const individual = Object.keys(handlers).map(file => f.load(file)[file] as Definition);
     const shared = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
-    assert.equal(individual.filter(task => task.cron === "* * * * *").length, mode === "shared" ? 0 : 6);
-    assert.equal(shared.cron, mode === "shared" ? "* * * * *" : undefined);
+    assert.deepEqual(individual.map(task => task.cron), Array(6).fill(undefined),
+      "no recovery task may register any cron while Studio is paused");
+    assert.equal(shared.cron, undefined);
     if (mode === "shared") {
       for (const task of individual) assert.deepEqual(await task.run(), { skipped: "shared-delivery-recovery" });
     } else {
@@ -62,10 +63,11 @@ test("exactly six individual crons or one shared cron are declared, never both",
   }
 });
 
-test("invalid deployment mode fails closed during task declaration", () => {
+test("invalid deployment mode fails closed on explicit task invocation", async () => {
   for (const mode of ["", "SHARED", " shared", "disabled", "SECRET_SENTINEL"]) {
     const f = fixture(mode);
-    assert.throws(() => f.load("sharedDeliveryRecovery"), error => {
+    const task = f.load("sharedDeliveryRecovery").sharedDeliveryRecovery as Definition;
+    await assert.rejects(() => task.run(), error => {
       assert.match(String(error), /must be individual or shared/);
       assert.doesNotMatch(String(error), /SECRET_SENTINEL/);
       return true;
