@@ -190,7 +190,13 @@ test("rejects an unverified, retired, or cross-job output before it can be consu
 
 test("scene binding uses the actual authenticated Engine endpoint and rejects invalid scene counts",async()=>{
  const binding={ownerId:"owner1",batchId:"week1",itemId:"item1",manifestSha256:"d".repeat(64)};
- const client={...config,fetchImpl:async(url:any,init:any)=>{assert.equal(new URL(url).pathname,"/client/studio-batch-scenes");assert.equal(init.headers.authorization,`Bearer ${config.projectCapability}`);assert.deepEqual(JSON.parse(init.body),{projectName:config.projectName,...binding});assert.ok(init.signal);return jsonResponse({sceneCount:2,reused:true});}};
+ const client: RenderEngineH3StageConfig={...config,fetchImpl:async(url,init)=>{
+  assert.equal(new URL(url instanceof Request ? url.url : url).pathname,"/client/studio-batch-scenes");
+  assert.equal(new Headers(init?.headers).get("authorization"),`Bearer ${config.projectCapability}`);
+  assert.ok(init && typeof init.body === "string");
+  assert.deepEqual(JSON.parse(init.body),{projectName:config.projectName,...binding});
+  assert.ok(init?.signal);return jsonResponse({sceneCount:2,reused:true});
+ }};
  assert.deepEqual(await bindStudioScenesInRenderEngine(client,binding),{sceneCount:2,reused:true});
  await assert.rejects(bindStudioScenesInRenderEngine({...config,fetchImpl:async()=>jsonResponse({sceneCount:0,reused:true})},binding),/binding failed/);
  await assert.rejects(bindStudioScenesInRenderEngine({...config,fetchImpl:async()=>jsonResponse({sceneCount:2,reused:true},409)},binding),/binding failed/);

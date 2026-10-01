@@ -58,7 +58,7 @@ test("real multi-scene submitter freezes intent before admission and replays eve
   const keys: string[] = [];
   const events: string[] = [];
   let uncertain = true;
-  const deps: any = {
+  const deps: NonNullable<Parameters<typeof dispatchPreparedFootage>[3]> = {
     provision: async () => ({
       workflowId: "workflow1",
       profileRevisionSha256: "c".repeat(64),
@@ -79,10 +79,16 @@ test("real multi-scene submitter freezes intent before admission and replays eve
       return { sceneCount: 2, reused: jobs.size > 0 };
     },
     read: async (key: string) => f.frames[Number(key.split("-")[1])],
-    upload: async (_engine: any, input: any) => ({
-      key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`,
-    }),
-    stage: async (config: any) => {
+    upload: async (engine, input) => {
+      assert.equal(engine.projectName, "youtube-studio-ai");
+      return {
+        key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`,
+        url: "https://r2.example/fixture-put",
+        headers: {},
+      };
+    },
+    stage: async (config) => {
+      assert.ok(config.studioBatch?.sceneId);
       assert.ok(events.includes("bind"));
       const key = config.request.idempotencyKey;
       keys.push(key);
@@ -120,15 +126,15 @@ test("real multi-scene submitter freezes intent before admission and replays eve
     assert.equal(jobs.size, 2);
     const packet = JSON.parse(
       [...saved.entries()].find(([key]) => key.endsWith("h3-scenes.json"))![1],
-    );
+    ) as ReturnType<typeof buildStudioSceneManifest>;
     assert.equal(packet.scenes.length, 2);
     assert.deepEqual(
-      packet.scenes.map((s: any) => s.sceneId),
+      packet.scenes.map((s) => s.sceneId),
       ["shot-1", "shot-2"],
     );
     assert.ok(
       packet.scenes.every(
-        (s: any) =>
+        (s) =>
           s.request.output.width === 1280 &&
           s.request.output.height === 736 &&
           s.request.durationSeconds === 5,
