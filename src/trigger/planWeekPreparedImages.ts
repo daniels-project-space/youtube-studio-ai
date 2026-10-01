@@ -39,7 +39,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
-import { admitStudioBatchInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+import { bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
 const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
@@ -340,19 +340,93 @@ async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<v
   await persistPreparedResult(key, bytes, "image/png", {});
 }
 
+export function buildStudioSceneManifest(args: {
+  payload: PlanWeekPreparedImagesArgs;
+  prepared: PlanWeekPreparedImages;
+  batch: PreparedH3Batch;
+  profileRevisionSha256: string;
+}) {
+  const { payload, prepared, batch } = args;
+  if (
+    batch.jobs.length !== batch.sceneIds.length ||
+    batch.jobs.length !== batch.firstFrames.length ||
+    new Set(batch.sceneIds).size !== batch.jobs.length
+  )
+    throw new Error("Scene packet is incomplete or duplicated");
+  return {
+    version: "studio-h3-scenes/v1" as const,
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    preparationManifestSha256: payload.manifestSha256,
+    preparedImagesKey: planWeekPreparedImagesKey(canonicalScope(payload)),
+    preparedImagesSha256: sha256Hex(canonicalJson(prepared)),
+    scenes: batch.jobs.map((job, ordinal) => {
+      const sceneId = batch.sceneIds[ordinal]!;
+      const frame = batch.firstFrames[ordinal]!;
+      return {
+        ordinal,
+        sceneId,
+        source: {
+          key: frame.sourceKey,
+          sha256: frame.sha256,
+          bytes: frame.byteLength,
+        },
+        request: {
+          version: 2 as const,
+          idempotencyKey: `studio-h3-${sha256Hex(canonicalJson([payload.ownerId, payload.batchId, payload.itemId, ordinal, sceneId])).slice(0, 48)}`,
+          prompt: job.prompt.trim(),
+          firstFrame: {
+            r2Key: `projects/${RENDER_ENGINE_PROJECT_NAME}/inputs/sha256/${frame.sha256}.png`,
+            sha256: frame.sha256,
+          },
+          seed: job.seed,
+          durationSeconds: 5 as const,
+          output: {
+            width: 1280 as const,
+            height: 736 as const,
+            fps: 24 as const,
+            container: "mp4" as const,
+            videoCodec: "h264" as const,
+          },
+          maxCostUsd: job.maxCostUsd,
+          profileRevisionSha256: args.profileRevisionSha256,
+        },
+      };
+    }),
+  };
+}
+
 export async function dispatchPreparedFootage(
   manifest: PlanWeekPreparationManifest,
   payload: PlanWeekPreparedImagesArgs,
   prepared: PlanWeekPreparedImages,
+  deps = {
+    provision: provisionStudioH3WorkflowInRenderEngine,
+    persist: persistPreparedResult,
+    bind: bindStudioScenesInRenderEngine,
+    read: getObjectBytes,
+    upload: uploadH3InputToRenderEngine,
+    stage: stageH3RequestInRenderEngine,
+    qualify: qualifyH3InputInRenderEngine,
+  },
 ): Promise<readonly string[] | undefined> {
   if (!hasGeneratedFootageStage(manifest)) return undefined;
-  const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
-  if (!/^[a-f0-9]{64}$/.test(projectCapability)) throw new Error("weekly H3 Engine project capability is not configured");
+  const projectCapability =
+    process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
+  if (!/^[a-f0-9]{64}$/.test(projectCapability))
+    throw new Error("weekly H3 Engine project capability is not configured");
   // Engine's Final H3 admission protects a full billable GPU-hour at the
   // agreed $1.20/hour cap. Keep a small rounding margin by default.
-  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "1.25");
+  const maxCostUsd = Number(
+    process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "1.25",
+  );
   if (!Number.isFinite(maxCostUsd) || maxCostUsd < 1.2 || maxCostUsd > 10) {
-    throw new Error("weekly H3 Engine cost cap must cover one permitted GPU hour");
+    throw new Error(
+      "weekly H3 Engine cost cap must cover one permitted GPU hour",
+    );
   }
   const batch = buildPreparedH3Batch({
     payload,
@@ -360,52 +434,133 @@ export async function dispatchPreparedFootage(
     manifestSha256: payload.manifestSha256,
     maxCostUsd,
   });
-  const engine = { baseUrl: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, projectCapability };
-  await admitStudioBatchInRenderEngine(engine, { ownerId: payload.ownerId, batchId: payload.batchId });
-  const workflow = await provisionStudioH3WorkflowInRenderEngine(engine);
+  const engine = {
+    baseUrl: RENDER_ENGINE_SITE,
+    projectName: RENDER_ENGINE_PROJECT_NAME,
+    projectCapability,
+  };
+  const workflow = await deps.provision(engine);
+  const sceneManifest = buildStudioSceneManifest({
+    payload,
+    prepared,
+    batch,
+    profileRevisionSha256: workflow.profileRevisionSha256,
+  });
+  const sceneBody = new TextEncoder().encode(canonicalJson(sceneManifest));
+  const sceneKey = payload.manifestKey.replace(
+    /\/inputs\.json$/,
+    "/h3-scenes.json",
+  );
+  // This immutable intent survives a lost Engine response. A changed packet
+  // cannot overwrite the path or obtain a new scene/job identity on retry.
+  await deps.persist(sceneKey, sceneBody, "application/json", {
+    "studio-h3-scenes": "v1",
+  });
+  const bound = await deps.bind(engine, {
+    ownerId: payload.ownerId,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    manifestSha256: sha256BytesHex(sceneBody),
+  });
+  if (bound.sceneCount !== sceneManifest.scenes.length)
+    throw new Error("Engine expected scene count mismatch");
   const stagedJobIds: string[] = [];
   const stagedJobs: RenderEngineH3StagedFootage["jobs"] = [];
   for (const [index, frame] of batch.firstFrames.entries()) {
-    const bytes = await getObjectBytes(frame.sourceKey, undefined, { maxBytes: frame.byteLength, timeoutMs: 300_000 });
-    if (bytes.byteLength !== frame.byteLength || sha256BytesHex(bytes) !== frame.sha256) {
-      throw new Error(`weekly prepared H3 source frame ${frame.sourceKey} failed its image receipt check`);
+    const bytes = await deps.read(frame.sourceKey, undefined, {
+      maxBytes: frame.byteLength,
+      timeoutMs: 300_000,
+    });
+    if (
+      bytes.byteLength !== frame.byteLength ||
+      sha256BytesHex(bytes) !== frame.sha256
+    ) {
+      throw new Error(
+        `weekly prepared H3 source frame ${frame.sourceKey} failed its image receipt check`,
+      );
     }
-    const input = await uploadH3InputToRenderEngine(engine, { sha256: frame.sha256, bytes: frame.byteLength, contentType: "image/png" }, bytes);
+    const input = await deps.upload(
+      engine,
+      {
+        sha256: frame.sha256,
+        bytes: frame.byteLength,
+        contentType: "image/png",
+      },
+      bytes,
+    );
     const job = batch.jobs[index];
-    if (!job) throw new Error("weekly H3 Engine job/frame pairing is incomplete");
-    const receipt = await stageH3RequestInRenderEngine({ ...engine, workflowId: workflow.workflowId,
-      studioBatch: { ownerId: payload.ownerId, batchId: payload.batchId, itemId: payload.itemId }, request: {
-      version: 2,
-      idempotencyKey: `${batch.orderKey}:${String(index).padStart(3, "0")}`,
-      prompt: job.prompt,
-      firstFrame: { r2Key: input.key, sha256: frame.sha256 },
-      seed: job.seed,
-      durationSeconds: 5,
-      output: { width: 1280, height: 736, fps: 24, container: "mp4", videoCodec: "h264" },
-      maxCostUsd: job.maxCostUsd,
-      profileRevisionSha256: workflow.profileRevisionSha256,
-    } });
+    if (!job)
+      throw new Error("weekly H3 Engine job/frame pairing is incomplete");
+    const receipt = await deps.stage({
+      ...engine,
+      workflowId: workflow.workflowId,
+      studioBatch: {
+        ownerId: payload.ownerId,
+        batchId: payload.batchId,
+        itemId: payload.itemId,
+        sceneId: batch.sceneIds[index]!,
+        ordinal: index,
+      },
+      request: {
+        version: 2,
+        idempotencyKey: sceneManifest.scenes[index]!.request.idempotencyKey,
+        prompt: job.prompt,
+        firstFrame: { r2Key: input.key, sha256: frame.sha256 },
+        seed: job.seed,
+        durationSeconds: 5,
+        output: {
+          width: 1280,
+          height: 736,
+          fps: 24,
+          container: "mp4",
+          videoCodec: "h264",
+        },
+        maxCostUsd: job.maxCostUsd,
+        profileRevisionSha256: workflow.profileRevisionSha256,
+      },
+    });
     if (receipt.state === "awaiting-input-qualification") {
-      await qualifyH3InputInRenderEngine(engine, receipt.jobId);
+      await deps.qualify(engine, receipt.jobId);
     }
     stagedJobIds.push(receipt.jobId);
     stagedJobs.push({
-      sceneId: batch.sceneIds[index]!, engineJobId: receipt.jobId, requestManifestSha256: receipt.manifestSha256,
-      prompt: job.prompt, seed: job.seed, studioFirstFrame: job.firstFrame,
-      engineFirstFrame: { r2Key: input.key, sha256: frame.sha256 }, output: job.output, maxCostUsd: job.maxCostUsd,
+      sceneId: batch.sceneIds[index]!,
+      engineJobId: receipt.jobId,
+      requestManifestSha256: receipt.manifestSha256,
+      prompt: job.prompt,
+      seed: job.seed,
+      studioFirstFrame: job.firstFrame,
+      engineFirstFrame: { r2Key: input.key, sha256: frame.sha256 },
+      output: job.output,
+      maxCostUsd: job.maxCostUsd,
     });
   }
   const stagedFootage: RenderEngineH3StagedFootage = {
-    version: "render-engine-h3-staged-footage/v1", manifestSha256: payload.manifestSha256,
-    ownerId: payload.ownerId, channelId: payload.channelId, channelSlug: payload.channelSlug,
-    batchId: payload.batchId, itemId: payload.itemId, requestKey: manifest.requestKey,
-    engine: { site: RENDER_ENGINE_SITE, projectName: RENDER_ENGINE_PROJECT_NAME, workflowId: workflow.workflowId, profileRevisionSha256: workflow.profileRevisionSha256 },
+    version: "render-engine-h3-staged-footage/v1",
+    manifestSha256: payload.manifestSha256,
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    requestKey: manifest.requestKey,
+    engine: {
+      site: RENDER_ENGINE_SITE,
+      projectName: RENDER_ENGINE_PROJECT_NAME,
+      workflowId: workflow.workflowId,
+      profileRevisionSha256: workflow.profileRevisionSha256,
+    },
     jobs: stagedJobs,
   };
   const stageBody = new TextEncoder().encode(canonicalJson(stagedFootage));
-  await persistPreparedResult(renderEngineH3StagedFootageKey(canonicalScope(payload)), stageBody, "application/json", {
-    "render-engine-h3-staged-footage": stagedFootage.version,
-  });
+  await deps.persist(
+    renderEngineH3StagedFootageKey(canonicalScope(payload)),
+    stageBody,
+    "application/json",
+    {
+      "render-engine-h3-staged-footage": stagedFootage.version,
+    },
+  );
   return stagedJobIds;
 }
 

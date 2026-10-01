@@ -98,7 +98,7 @@ export type RenderEngineH3StageConfig = Readonly<{
   workflowId: string;
   projectCapability: string;
   request: RenderEngineH3StageRequest;
-  studioBatch?: Readonly<{ ownerId: string; batchId: string; itemId: string }>;
+  studioBatch?: Readonly<{ ownerId: string; batchId: string; itemId: string; sceneId?: string; ordinal?: number }>;
   fetchImpl?: typeof fetch;
 }>;
 
@@ -142,12 +142,12 @@ function validateInputUpload(input: RenderEngineInputUpload): void {
   }
 }
 
-async function jsonRequest(config: { baseUrl: string; projectName: string; projectCapability: string; fetchImpl?: typeof fetch }, path: string, body: unknown): Promise<unknown> {
+async function jsonRequest(config: { baseUrl: string; projectName: string; projectCapability: string; fetchImpl?: typeof fetch }, path: string, body: unknown, timeoutMs = 15_000): Promise<unknown> {
   validateProjectCapability(config.projectName, config.projectCapability);
   const response = await (config.fetchImpl ?? fetch)(engineEndpoint(config.baseUrl, path), {
     method: "POST",
     headers: { authorization: `Bearer ${config.projectCapability}`, "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     throw new Error(`Render Engine ${path} returned a non-JSON response`);
@@ -392,4 +392,37 @@ export async function getVerifiedH3OutputReadbackInRenderEngine(
   const result = await jsonGet(config, "/client/jobs/output", jobId) as { status: number; body: unknown };
   if (result.status !== 200) throw new Error(`Render Engine H3 output readback returned HTTP ${result.status}`);
   return parseH3OutputReadback(result.body, jobId);
+}
+
+/** Engine verifies the immutable R2 scene packet and all source frames before any job is staged. */
+export async function bindStudioScenesInRenderEngine(
+  config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
+  binding: {
+    ownerId: string;
+    batchId: string;
+    itemId: string;
+    manifestSha256: string;
+  },
+): Promise<{ sceneCount: number; reused: boolean }> {
+  const result = (await jsonRequest(
+    config,
+    "/client/studio-batch-scenes",
+    { projectName: config.projectName, ...binding },
+    330_000,
+  )) as { status: number; body: unknown };
+  if (
+    result.status !== 202 ||
+    !isRecord(result.body) ||
+    !Number.isSafeInteger(result.body.sceneCount) ||
+    (result.body.sceneCount as number) < 1 ||
+    (result.body.sceneCount as number) > 60 ||
+    typeof result.body.reused !== "boolean"
+  )
+    throw new Error(
+      "Render Engine scene manifest binding failed; retain frozen intent for reconciliation",
+    );
+  return {
+    sceneCount: result.body.sceneCount as number,
+    reused: result.body.reused,
+  };
 }

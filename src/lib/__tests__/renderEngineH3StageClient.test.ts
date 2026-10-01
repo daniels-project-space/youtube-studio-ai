@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { admitStudioBatchInRenderEngine, getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
+import { bindStudioScenesInRenderEngine, admitStudioBatchInRenderEngine, getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -186,4 +186,12 @@ test("rejects an unverified, retired, or cross-job output before it can be consu
   await assert.rejects(getH3JobStatusInRenderEngine(base, jobId), /invalid verified H3 output receipt/);
   const crossJob = { ...base, fetchImpl: async () => jsonResponse({ bucket: "youtube-studio-renders", key: "projects/project/workflows/workflow/jobs/anotherjob1234567890123456789012/outputs/h3-render.mp4", bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200) };
   await assert.rejects(getVerifiedH3OutputReadbackInRenderEngine(crossJob, jobId), /invalid H3 output readback receipt/);
+});
+
+test("scene binding uses the actual authenticated Engine endpoint and rejects invalid scene counts",async()=>{
+ const binding={ownerId:"owner1",batchId:"week1",itemId:"item1",manifestSha256:"d".repeat(64)};
+ const client={...config,fetchImpl:async(url:any,init:any)=>{assert.equal(new URL(url).pathname,"/client/studio-batch-scenes");assert.equal(init.headers.authorization,`Bearer ${config.projectCapability}`);assert.deepEqual(JSON.parse(init.body),{projectName:config.projectName,...binding});assert.ok(init.signal);return jsonResponse({sceneCount:2,reused:true});}};
+ assert.deepEqual(await bindStudioScenesInRenderEngine(client,binding),{sceneCount:2,reused:true});
+ await assert.rejects(bindStudioScenesInRenderEngine({...config,fetchImpl:async()=>jsonResponse({sceneCount:0,reused:true})},binding),/binding failed/);
+ await assert.rejects(bindStudioScenesInRenderEngine({...config,fetchImpl:async()=>jsonResponse({sceneCount:2,reused:true},409)},binding),/binding failed/);
 });
