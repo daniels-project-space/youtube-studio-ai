@@ -78,30 +78,8 @@ assert.match(
   /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,
   "weekly receipt must retain full per-shot H3 provenance for prepared-footage reconciliation",
 );
-assert.match(
-  weeklySource,
-  /persistWeeklyJobReceipt\([\s\S]*onJobComplete/,
-  "each verified shot must be persisted before the aggregate batch receipt",
-);
-assert.match(
-  weeklySource,
-  /createMiniMaxH3WeeklyJobReceipt\(args\)/,
-  "shot claims must use one canonical receipt constructor",
-);
-assert.match(
-  weeklySource,
-  /readPersistedJobReceipts\([\s\S]*pendingJobs/,
-  "replays must restore completed shot claims and render only missing jobs",
-);
-assert.match(
-  weeklySource,
-  /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length,\s*\{/,
-  "weekly paid dispatch must be gated by a current Salad capacity admission",
-);
-const admissionIndex = weeklySource.indexOf("assertMiniMaxH3SaladCapacity(payload.jobs.length");
-const upgradeIndex = weeklySource.indexOf("api.saladFleetReservations.upgradePriority");
-const providerStartIndex = weeklySource.indexOf("providerStarted = true;");
-assert(admissionIndex >= 0 && upgradeIndex > admissionIndex && providerStartIndex > upgradeIndex,
-  "high fallback must upgrade the durable Salad lease after admission and before any provider request");
-assert.match(weeklySource, /priority:\s*"high"/, "the high-priority lease upgrade must be explicit");
+assert.match(weeklySource, /return rejectRetiredWeeklyH3Task\(\)/,
+  "the stale weekly task cannot resume direct paid dispatch");
+assert.doesNotMatch(weeklySource, /renderMiniMaxH3WeeklyBatch|assertMiniMaxH3SaladCapacity|bootstrapSecrets/,
+  "retired task retains historical receipt helpers without paid-provider admission");
 console.log("weekly MiniMax H3 batch task contracts passed");

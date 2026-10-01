@@ -3,7 +3,7 @@
  * atomically drained. The persistent 30 GB disk is retained by OpenRelay;
  * GPU billing stops and the next accepted Qwen request restarts this same VM.
  */
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { OpenRelayVmClient } from "@/lib/openRelay";
 import {
@@ -30,11 +30,10 @@ function isPinnedQwenVm(vm: {
     vm.gpuModelName.includes("3090") && vm.diskSizeGb === 30;
 }
 
-export const openRelayQwenIdleReaper = schedules.task({
+export const openRelayQwenIdleReaper = task({
   id: "openrelay-qwen-idle-reaper",
   // A one-minute check means the externally observed 300-second idle ceiling
   // has at most one additional minute of provider billing before shutdown.
-  cron: "* * * * *",
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },

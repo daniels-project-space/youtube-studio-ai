@@ -1,4 +1,4 @@
-import { schedules, tasks, idempotencyKeys } from "@trigger.dev/sdk";
+import { task, tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
@@ -298,9 +298,8 @@ export async function dispatchPendingRouteQualificationBenchmarks(input?: {
   return { pending: pending.length, triggered };
 }
 
-export const routeQualificationBenchmarkDispatcher = schedules.task({
+export const routeQualificationBenchmarkDispatcher = task({
   id: "route-qualification-benchmark-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async () => {

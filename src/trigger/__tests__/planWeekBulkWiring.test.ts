@@ -8,8 +8,12 @@ assert.match(source, /buildPlanWeekBulkOrder/);
 assert.match(source, /api\.channels\.listChannels/);
 assert.match(source, /api\.planWeekBulkOrders\.admit/);
 assert.match(source, /api\.planWeekBulkOrders\.markDispatched/);
+assert.match(source, /tasks\.trigger\("plan-week-ahead"[\s\S]*?api\.planWeekBulkOrders\.markChildDispatched/,
+  "each successful child Trigger handle must be persisted before the next wave outcome can abort the parent");
 assert.match(source, /idempotencyKeys\.create/);
 assert.match(source, /tasks\.trigger\("plan-week-ahead"/);
+assert.match(source, /idempotencyKey,[\s\S]*?\}, \{ retry: \{ maxAttempts: 1 \} \}\)/,
+  "uncertain child enqueue must make one SDK HTTP attempt and recover through stable idempotency");
 assert.match(source, /bulkOrderFingerprint: order\.fingerprint/);
 assert.match(source, /Promise\.all/);
 assert.match(receiptSource, /requireStudioServiceIdentity/);
@@ -19,6 +23,7 @@ assert.match(receiptSource, /planWeekContractReservation/);
 assert.match(receiptSource, /request key was reused with different parameters/);
 assert.match(receiptSource, /export const markChildStarted/);
 assert.match(receiptSource, /export const markChildFinished/);
+assert.match(receiptSource, /export const markChildDispatched[\s\S]*?requireStudioServiceIdentity[\s\S]*?child dispatch identity mismatch/);
 assert.match(readFileSync(resolve(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8"), /markChildStarted/);
 assert.match(readFileSync(resolve(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8"), /markChildFinished/);
 console.log("plan-week bulk dispatch wiring passed");

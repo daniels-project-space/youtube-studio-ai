@@ -26,13 +26,9 @@ assert.throws(() => saladFleetReservationExpiry(0), /timestamp/);
 
 const weeklySource = readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8");
 const convexSource = readFileSync(resolve(process.cwd(), "convex/saladFleetReservations.ts"), "utf8");
-assert.match(weeklySource, /api\.saladFleetReservations\.acquire/);
-assert.match(weeklySource, /api\.saladFleetReservations\.upgradePriority/);
-assert.match(weeklySource, /api\.saladFleetReservations\.release/);
-assert.match(weeklySource, /SALAD_FLEET_RESERVATION_ENABLED !== "0"/,
-  "the organization-wide fleet fence must be enabled by default and only explicitly disabled");
-assert.match(weeklySource, /providerStarted = true/);
-assert.match(weeklySource, /pre-provider-failure/);
+assert.match(weeklySource, /return rejectRetiredWeeklyH3Task\(\)/);
+assert.doesNotMatch(weeklySource, /api\.saladFleetReservations\.|SALAD_FLEET_RESERVATION_ENABLED|providerStarted = true/,
+  "retired Studio weekly generation cannot acquire, upgrade or bypass a fleet reservation");
 assert.match(convexSource, /export const upgradePriority = mutation/);
 assert.match(convexSource, /priority: v\.literal\("high"\)/);
 assert.match(convexSource, /row\.leaseToken !== args\.leaseToken/);

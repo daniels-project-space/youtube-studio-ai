@@ -5,7 +5,6 @@
  */
 const OWNER_ACTION_ROUTE_PREFIXES = [
   "/settings",
-  "/novita-render",
   "/casefile",
   "/editorial-evidence",
 ] as const;

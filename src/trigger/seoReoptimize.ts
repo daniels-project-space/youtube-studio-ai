@@ -9,7 +9,7 @@
  * attribution contract exists, even explicitly approved runs stop before Gemini or
  * YouTube calls and request manual reconciliation instead.
  */
-import { schedules, task } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -154,9 +154,8 @@ export async function reoptimize(
   return { ok: true, updated };
 }
 
-export const seoReoptimizeSchedule = schedules.task({
+export const seoReoptimizeSchedule = task({
   id: "seo-reoptimize",
-  cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

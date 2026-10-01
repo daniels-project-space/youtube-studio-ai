@@ -40,7 +40,10 @@ let sidecar = prepared;
 let started = 0, active = 0, peak = 0, providerCalls = 0;
 let failure = false;
 const writes: string[] = [];
-let dispatches = 0;
+const scenePackets = new Map<string, Uint8Array>();
+const stagedFootageSidecars = new Map<string, Uint8Array>();
+let inputUploads = 0, stagedJobs = 0, qualificationCalls = 0;
+let stagedState = "awaiting-input-qualification";
 let release!: () => void;
 let gate = new Promise<void>(resolve => { release = resolve; });
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
@@ -52,6 +55,11 @@ loader._load = function (name, ...args) {
         assert.deepEqual(options, PREPARED_METADATA_READ);
         return new TextEncoder().encode(JSON.stringify(sidecar));
       }
+      if (key.endsWith("/h3-scenes.json")) {
+        if (scenePackets.has(key)) return scenePackets.get(key)!;
+        throw Object.assign(new Error("missing scene packet"), { $metadata: { httpStatusCode: 404 } });
+      }
+      if (stagedFootageSidecars.has(key)) return stagedFootageSidecars.get(key)!;
       assert(items.some(item => item.stillKey === key));
       assert.deepEqual(options, { maxBytes: 512, timeoutMs: 300_000 });
       started++; active++; peak = Math.max(peak, active);
@@ -63,14 +71,33 @@ loader._load = function (name, ...args) {
     },
     putObject: async (key: string, value: Uint8Array, options: { ifNoneMatch: string }) => {
       assert.equal(options.ifNoneMatch, "*");
+      if (key.endsWith("/h3-scenes.json")) {
+        if (scenePackets.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
+        scenePackets.set(key, value);
+        return;
+      }
+      if (key.endsWith(".engine-h3-staged.json")) {
+        if (stagedFootageSidecars.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
+        stagedFootageSidecars.set(key, value);
+        return;
+      }
       assert.deepEqual(value, bytes);
       writes.push(key);
     },
   };
-  if (name === "@trigger.dev/sdk") return {
-    task: (definition: unknown) => definition,
-    tasks: { trigger: async () => { dispatches++; return { id: "fixture-h3" }; } },
-    idempotencyKeys: { create: async () => "fixture-key" },
+  if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
+  if (name === "@/lib/renderEngineH3StageClient") return {
+    bindStudioScenesInRenderEngine: async () => ({ sceneCount: 12, reused: scenePackets.size > 0 }),
+    provisionStudioH3WorkflowInRenderEngine: async () => ({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "a".repeat(64) }),
+    uploadH3InputToRenderEngine: async (_config: unknown, input: { sha256: string }) => {
+      inputUploads++;
+      return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
+    },
+    stageH3RequestInRenderEngine: async () => ({ jobId: `job${(stagedJobs++ % 12) + 1}`, state: stagedState, manifestSha256: "b".repeat(64) }),
+    qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => {
+      qualificationCalls++;
+      return { jobId, state: "awaiting-final-qualification" };
+    },
   };
   if (name === "@/lib/novitaRenderFarm") return {
     renderImages: async () => { providerCalls++; throw new Error("generation forbidden"); },
@@ -82,7 +109,7 @@ async function main() {
   const { verifyStoredSidecar, dispatchPreparedFootage, assertPlanWeekPreparedImagesArgs } = await import("../planWeekPreparedImages");
   let settled = false;
   const success = verifyStoredSidecar("sidecar", manifest).then(value => { settled = true; return value; });
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(started, 4);
   assert.equal(active, 4);
   assert.equal(settled, false);
@@ -98,7 +125,7 @@ async function main() {
   const rejected = verifyStoredSidecar("sidecar", manifest).then(
     () => { throw new Error("expected rejection"); }, error => { settled = true; return error; },
   );
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(started, 4, "failure must stop new transfer admission");
   assert.equal(active, 3);
   assert.equal(settled, false, "started reads must drain before the task can retry");
@@ -136,23 +163,49 @@ async function main() {
     shots: items.map(item => ({ id: item.shotId, prompt: "A detailed archive map", candidateCount: 1 })), maxCostUsd: 5,
   });
   const footageManifest = { ...manifest, execution: { ...manifest.execution, pipeline: [{ block: "gen_footage" }] } };
+  const priorToken = process.env.RENDER_ENGINE_PROJECT_TOKEN;
+  process.env.RENDER_ENGINE_PROJECT_TOKEN = "a".repeat(64);
   started = 0; peak = 0;
   gate = new Promise<void>(resolve => { release = resolve; });
   const copy = dispatchPreparedFootage(footageManifest, payload, prepared);
-  for (let tick = 0; tick < 20; tick++) await Promise.resolve();
-  assert.equal(started, 4);
-  assert.equal(dispatches, 0, "H3 cannot start before every source frame is retained");
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(started, 1);
+  assert.equal(stagedJobs, 0, "H3 cannot stage before the first source frame is retained");
   release();
-  assert.equal(await copy, "fixture-h3");
-  assert.equal(writes.length, 12);
-  assert.equal(peak, 4);
-  assert.equal(dispatches, 1);
+  assert.deepEqual(await copy, Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.equal(writes.length, 0);
+  assert.equal(peak, 1);
+  assert.equal(inputUploads, 12);
+  assert.equal(stagedJobs, 12);
+  assert.equal(qualificationCalls, 12, "only fresh input-qualification jobs call the qualifier");
+  assert.equal(stagedFootageSidecars.size, 1, "staged Engine job identities persist for the later manual R2 materializer");
+  const [stageKey, stageBytes] = [...stagedFootageSidecars.entries()][0]!;
+  assert.match(stageKey, /prepared\/footage\.engine-h3-staged\.json$/);
+  const stagedFootage = JSON.parse(new TextDecoder().decode(stageBytes)) as { engine: { projectName: string }; jobs: Array<{ engineJobId: string; output: { r2Key: string } }> };
+  assert.equal(stagedFootage.engine.projectName, "youtube-studio-ai");
+  assert.deepEqual(stagedFootage.jobs.map((job) => job.engineJobId), Array.from({ length: 12 }, (_, index) => `job${index + 1}`));
+  assert.match(stagedFootage.jobs[0]!.output.r2Key, /prepared\/footage\/clip-0001\.mp4$/);
+  for (const terminalState of ["completed", "failed", "cancelled"] as const) {
+    stagedState = terminalState;
+    qualificationCalls = 0;
+    const replayIds = await dispatchPreparedFootage(footageManifest, payload, prepared);
+    assert.equal(replayIds?.length, 12);
+    assert.equal(qualificationCalls, 0, `${terminalState} replays must not requalify the original input`);
+  }
+  stagedState = "awaiting-final-qualification";
+  qualificationCalls = 0;
+  await dispatchPreparedFootage(footageManifest, payload, prepared);
+  assert.equal(qualificationCalls, 0, "a previously qualified job must not requalify its input");
+  stagedState = "awaiting-input-qualification";
+  const stagedBeforeFailure = stagedJobs;
   started = 0; failure = true;
   await assert.rejects(dispatchPreparedFootage(footageManifest, payload, prepared), /fixture transfer limit/);
-  assert.equal(dispatches, 1, "a failed source-frame copy cannot dispatch H3");
+  assert.equal(stagedJobs, stagedBeforeFailure, "a failed source-frame copy cannot stage H3");
   assert.equal(active, 0);
   assert.equal(providerCalls, 0);
-  console.log("Prepared image transfer bounds: real sidecar reader, four active transfers, drain-on-failure, exact byte limits, admission and digest rejection passed");
+  if (priorToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
+  else process.env.RENDER_ENGINE_PROJECT_TOKEN = priorToken;
+  console.log("Prepared image transfer bounds: real sidecar reader, bounded Engine input transfer, staged H3 receipts, and source-byte rejection passed");
 }
 
 void main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { loader._load = originalLoad; });

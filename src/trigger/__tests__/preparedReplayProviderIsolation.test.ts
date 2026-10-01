@@ -189,13 +189,14 @@ async function main() {
     await assert.rejects(() => tasks[0].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
     assert.equal(paidCalls, 1, "a lost script result cannot buy another attempt");
     missingKey = planWeekPreparedImagesKey(manifest); events.length = 0;
-    await assert.rejects(() => tasks[3].run(payload), /stubbed generation boundary/);
-    assert.ok(events.indexOf(`read:${missingKey}`) < events.indexOf("vault:novita"));
-    assert.ok(events.indexOf("vault:novita") < events.indexOf("generation"));
-    assert.equal(paidCalls, 2); assert.equal(writes, 0);
-    await assert.rejects(() => tasks[3].run(payload), /PAID_STAGE_RECONCILIATION_REQUIRED/);
-    assert.equal(paidCalls, 2, "a lost image result cannot buy another wave");
-    assert.equal(claims.size, 2);
+    for (let replay = 0; replay < 2; replay++) {
+      await assert.rejects(() => tasks[3].run(payload), /Direct Novita generation is retired/);
+      assert.equal(paidCalls, 1, "retired image generation never reaches paid provider work");
+      assert.equal(writes, 0);
+      assert.ok(!events.includes("vault:novita"));
+      assert.ok(!events.includes("generation"));
+    }
+    assert.equal(claims.size, 1, "retirement happens before a paid image claim");
     for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)], [2, planWeekPreparedMusicKey(manifest)]] as const) {
       missingKey = key;
       const fresh = { ...payload, speaker: "fixture-voice" };
@@ -205,7 +206,7 @@ async function main() {
       await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
       assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
     }
-    assert.equal(claims.size, 4);
+    assert.equal(claims.size, 3);
     missingKey = "";
     for (const task of tasks) assert.equal((await task.run(payload)).reused, true,
       "a completed sidecar replays even when the dispatch claim exists");

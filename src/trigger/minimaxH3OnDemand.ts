@@ -17,6 +17,7 @@ import {
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 
 export interface MiniMaxH3OnDemandArgs {
   /** Stable owner/run identity used for task idempotency and reconciliation. */
@@ -167,10 +168,9 @@ export const minimaxH3OnDemandTask = task({
   run: async (rawPayload: MiniMaxH3OnDemandArgs) => {
     const payload = assertMiniMaxH3OnDemandArgs(rawPayload);
     await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "novita"],
+      services: ["cloudflare"],
       required: [
         "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-        "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN",
       ],
     });
     const request = {
@@ -185,6 +185,7 @@ export const minimaxH3OnDemandTask = task({
       outputKey: request.output.r2Key,
     });
     if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
+    rejectNewNovitaGeneration();
     const result = await renderMiniMaxH3({
       ...request,
     });

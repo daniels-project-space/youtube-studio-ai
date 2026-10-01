@@ -14,6 +14,7 @@ import { DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS } from "@/lib/files";
 import { getObjectBytes, presignDownload } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import {
   CINEMATIC_KEYFRAME_REVIEW_VERSION,
   type CinematicKeyframeReview,
@@ -522,6 +523,7 @@ export async function renderNovitaImage(args: {
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
 }): Promise<NovitaRenderedImage> {
+  rejectNewNovitaGeneration();
   const profile = generationProfile(args.profileId ?? "production");
   const envelope = novitaCostEnvelope({
     label: "novita image",

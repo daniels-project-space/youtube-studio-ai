@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { candidatePreviewIds } from "@/app/api/thumbnail-refresh/route";
+import { candidatePreviewIds } from "@/lib/thumbnailRefreshCandidate";
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 const route = read("src/app/api/thumbnail-refresh/route.ts");
+const previewValidation = read("src/lib/thumbnailRefreshCandidate.ts");
 const panel = read("src/components/ThumbnailRefreshInventoryPanel.tsx");
 
-assert.match(route, /MAX_BATCHED_CANDIDATE_PREVIEWS = 6/);
+assert.match(previewValidation, /MAX_BATCHED_CANDIDATE_PREVIEWS = 6/);
 assert.match(route, /candidatePreviewRunIds/);
 assert.match(route, /One inventory read serves the entire compact rail/);
 assert.match(route, /item\.candidateRunId === runId/);

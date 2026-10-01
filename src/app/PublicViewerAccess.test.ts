@@ -92,7 +92,6 @@ assert.match(
 assert.match(assetRoute, /!key\.startsWith\(ownerPrefix\) && !sharedVoiceAudition/);
 
 for (const route of [
-  "./api/novita-render/route.ts",
   "./api/publish-intents/route.ts",
   "./api/youtube-connect/route.ts",
   "./api/youtube-revoke/route.ts",

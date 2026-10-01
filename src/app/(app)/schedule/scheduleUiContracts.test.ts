@@ -66,7 +66,7 @@ assert.match(bulkPlanner, /credentials: "same-origin"/,
   "bulk planning must preserve the authenticated owner session");
 assert.match(bulkPlanner, /onRequestOwner/,
   "paid weekly planning must preserve the shared owner boundary");
-assert.match(bulkPlanner, /href="\/novita-render\?mode=weekly"/,
+assert.match(bulkPlanner, /href="\/render-engine"/,
   "weekly planning must expose the dedicated Salad H3 batch desk");
 assert.match(styles, /\.bulkControls \{[^}]*auto auto/,
   "the compact weekly controls must reserve a slot for the H3 batch desk link");

@@ -192,9 +192,9 @@ type ModuleDestination = { href: string; label: string };
 type ModuleCover = { src: string; alt: string; status: "reference" | "context" };
 
 const MODULE_DESTINATIONS: Readonly<Record<string, ModuleDestination>> = {
-  "novita-render-farm": { href: "/novita-render", label: "Open render fleet" },
-  "imagecraft-novita": { href: "/novita-render", label: "Open render fleet" },
-  "videocraft-novita": { href: "/novita-render", label: "Open render fleet" },
+  "novita-render-farm": { href: "/render-engine", label: "Open Render Engine" },
+  "imagecraft-novita": { href: "/render-engine", label: "Open Render Engine" },
+  "videocraft-novita": { href: "/render-engine", label: "Open Render Engine" },
   lofi: { href: "/lofi", label: "Open Lo-fi references" },
   loreshort: { href: "/loreshort", label: "Open lore references" },
   "studio-assets": { href: "/studio-assets", label: "Open Studio assets" },

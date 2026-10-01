@@ -34,9 +34,10 @@ assert.match(
 );
 assert.match(
   dispatcher,
-  /id: "reviewed-data-story-initial-dispatcher"[\s\S]*cron: "\* \* \* \* \*"/,
-  "initial reviewed runs do not wait for generic scheduler cadence",
+  /task\(\{[\s\S]*id: "reviewed-data-story-initial-dispatcher"/,
+  "paused initial reviewed runs retain their manual dispatcher",
 );
+assert.doesNotMatch(dispatcher, /^\s*cron:/m);
 assert.doesNotMatch(dispatcher, /bootstrapSecrets|anthropic|browserbase|openai/i,
   "the initial dispatcher has no provider path");
 assert.match(

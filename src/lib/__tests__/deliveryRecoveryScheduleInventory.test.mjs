@@ -116,5 +116,5 @@ test("verifier inventory tracks actual scheduled task declarations", () => {
     }
     visit(source);
   }
-  assert.deepEqual(ids.sort(), [...INDIVIDUAL_DELIVERY_TASKS, SHARED_DELIVERY_TASK].sort());
+  assert.deepEqual(ids, [], "the Studio pause removes every declarative recovery schedule from source");
 });

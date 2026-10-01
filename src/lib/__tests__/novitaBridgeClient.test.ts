@@ -38,7 +38,7 @@ async function main() {
   assert.equal(hasNovitaRenderFarmConfig(), false, "old bridge variables never configure the direct control plane");
   await assert.rejects(
     () => launchImages(renderCfg),
-    /legacy Novita bridge is disabled/,
+    /Direct Novita generation is retired/,
   );
   await assert.rejects(
     () => getNovitaRenderStatus("image-0123456789abcdef0123456789abcdef"),

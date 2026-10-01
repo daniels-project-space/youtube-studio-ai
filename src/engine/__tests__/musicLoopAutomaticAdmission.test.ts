@@ -1,3 +1,4 @@
+import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 import assert from "node:assert/strict";
 
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
@@ -70,9 +71,9 @@ assert.deepEqual(admission.checks, {
 });
 assert.ok(
   familyProductionReadiness("music_loop").blockers.every((blocker) =>
-    blocker.startsWith("Music + looping visual: loop_clips:MINIMAX_H3_NOVITA_"),
+    (blocker.startsWith("Music + looping visual: loop_clips:MINIMAX_H3_NOVITA_") || blocker.includes("Music + looping visual: loop_clips:" + NOVITA_GENERATION_RETIRED)),
   ),
-  "once the program path is registered, only a qualified H3 route may unlock Music Loop",
+  "registered Music Loop remains blocked by direct-route retirement and H3 qualification",
 );
 
 console.log("music-loop automatic admission path tests passed");

@@ -276,6 +276,7 @@ export interface ResolvedGeneratedFootageScenePlan {
  */
 export type GeneratedFootageRenderer =
   | { kind: "minimax-h3"; provider: MiniMaxH3Provider; execution: MiniMaxH3Execution; runtimeId: typeof MINIMAX_H3_RUNTIME_ID; profileId: typeof MINIMAX_H3_PROFILE.id; modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256 }
+  | { kind: "render-engine-h3"; projectName: "youtube-studio-ai"; workflowId: string; profileRevisionSha256: string }
   | { kind: "source-proof" };
 
 /** Prompts that ask for baked-in lettering fight the engine's own no-text clause. */
@@ -1194,7 +1195,7 @@ export const genFootage: Block = {
         throw new Error("gen_footage: prepared weekly footage is invalid");
       }
       const preparedManifest = preparedFootage.generatedFootageSceneManifest;
-      if (preparedFootage.renderer?.kind === "minimax-h3") {
+      if (preparedFootage.renderer?.kind === "minimax-h3" || preparedFootage.renderer?.kind === "render-engine-h3") {
         const nativeDurationSec = 124 / 24;
         const timingMatches = scenes.length === preparedFootage.clips.length && scenes.every((scene, index) => {
           const clip = preparedFootage.clips[index];
@@ -1241,14 +1242,12 @@ export const genFootage: Block = {
             sceneId: scene.id,
             durationSec: scene.durationSec,
           }))),
-          footageRenderer: {
-            kind: "minimax-h3" as const,
-            provider: preparedFootage.renderer.provider,
-            execution: preparedFootage.renderer.execution,
-            runtimeId: MINIMAX_H3_RUNTIME_ID,
-            profileId: MINIMAX_H3_PROFILE.id,
-            modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
-          },
+          footageRenderer: preparedFootage.renderer.kind === "render-engine-h3"
+            ? { kind: "render-engine-h3" as const, projectName: "youtube-studio-ai" as const,
+              workflowId: preparedFootage.renderer.workflowId, profileRevisionSha256: preparedFootage.renderer.profileRevisionSha256 }
+            : { kind: "minimax-h3" as const, provider: preparedFootage.renderer.provider,
+              execution: preparedFootage.renderer.execution, runtimeId: MINIMAX_H3_RUNTIME_ID,
+              profileId: MINIMAX_H3_PROFILE.id, modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256 },
           // This field is a visual-treatment style ABI used by downstream
           // editor code; the explicit renderer identity lives on the receipt.
           h3VisualTreatmentId: h3VisualTreatmentSelection.styleId,

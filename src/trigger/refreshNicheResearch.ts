@@ -9,7 +9,7 @@
  *
  * SOURCE: YouTube Data API v3 ONLY. Graceful degradation on missing keys.
  */
-import { task, schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import {
@@ -50,9 +50,8 @@ export const refreshNicheResearchTask = task({
  * Scheduled weekly refresh. Iterates active channels and refreshes each
  * distinct niche (from identity.niche). Skips channels without a niche set.
  */
-export const refreshNicheResearchSchedule = schedules.task({
+export const refreshNicheResearchSchedule = task({
   id: "refresh-niche-research-weekly",
-  cron: "0 6 * * 1", // Mondays 06:00 UTC
   maxDuration: 1800,
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);

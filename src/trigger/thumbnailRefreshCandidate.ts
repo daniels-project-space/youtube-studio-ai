@@ -1,4 +1,4 @@
-import { idempotencyKeys, schedules, task, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -330,9 +330,8 @@ export async function dispatchPendingThumbnailRefreshCandidates(input?: {
   return { pending: due.length, triggered, failed };
 }
 
-export const thumbnailRefreshDispatcher = schedules.task({
+export const thumbnailRefreshDispatcher = task({
   id: "thumbnail-refresh-dispatcher",
-  cron: "* * * * *",
   maxDuration: 120,
   run: async () => dispatchPendingThumbnailRefreshCandidates(),
 });

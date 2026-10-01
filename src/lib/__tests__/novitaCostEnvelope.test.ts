@@ -47,7 +47,7 @@ async function rawProviderBoundaryRefusesMissingSignedCeilings(): Promise<void> 
   };
   await assert.rejects(
     renderImages({ ...base, profile: toNovitaPhaseProfile(profile, "image") }),
-    /requires an explicit signed worker cost ceiling/,
+    /Direct Novita generation is retired; stage this request through Render Engine/,
     "the raw image wrapper must fail before importing a provider controller",
   );
   await assert.rejects(

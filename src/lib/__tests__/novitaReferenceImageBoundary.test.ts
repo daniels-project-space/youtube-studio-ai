@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { generationProfile } from "@/engine/generationProfiles";
 import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
 import type { NovitaRenderCfg } from "@/lib/novitaRenderFarm";
 import type { createAttestedNovitaImageGenerator, NovitaPromptImageRequest } from "@/lib/novitaMedia";
@@ -69,22 +67,13 @@ async function main(): Promise<void> {
     const textRequest = { prompt: "An original ink character holds a lantern beside a stone bridge.", negativePrompt: "no text, no watermark", seed: 731 };
     for (const extra of [{}, { images: undefined }, { images: [] }, { images: [], aspectRatio: "4:3", imageSize: "2K", allowText: false, tier: "flash" }]) {
       events.length = 0;
-      await assert.rejects(() => generate({ ...textRequest, ...extra }), new RegExp(BOUNDARY));
-      assert.deepEqual(events, ["id", "lifecycle-read", "provider-boundary", "before-spend", "lifecycle-boundary"]);
+      await assert.rejects(() => generate({ ...textRequest, ...extra }), /Direct Novita generation is retired/);
+      assert.deepEqual(events, ["id", "lifecycle-read"]);
     }
-    assert.equal(new Set(payloads).size, 1, "absent/empty refs and legacy comic knobs preserve identical transport bytes");
-    const transport = JSON.parse(payloads[0]) as { profile: unknown; shots: Array<{ prompt: string; negative: string; seed: number }>; prefix: string };
-    assert.deepEqual(transport.profile, toNovitaPhaseProfile(generationProfile("production"), "image"), "all actual model/precision/geometry/infrastructure settings remain intact");
-    assert.equal(transport.shots[0].prompt, textRequest.prompt);
-    assert.equal(transport.shots[0].negative, textRequest.negativePrompt);
-    assert.equal(transport.shots[0].seed, textRequest.seed);
-    assert.equal(transport.prefix, "owners/test/channels/test/runs/test/comic/images");
-    console.log(`text-only transport SHA256: ${createHash("sha256").update(payloads[0]).digest("hex")}`);
-    console.log(`text-only transport: ${payloads[0]}`);
-
+    assert.equal(payloads.length, 0, "retired text generation never reaches transport or spend callbacks");
     const unsupported: unknown[] = [[{ data: "c2FtcGxlLXJlZmVyZW5jZQ==", mimeType: "image/png" }], [undefined], [{}], new Array(1), "https://example.test/reference.png", "", { data: "bytes", mimeType: "image/png" }, { length: 0 }, new Uint8Array(0), null, false, 0];
     for (const [index, images] of unsupported.entries()) {
-      events.length = 0; const priorPayloads = payloads.length;
+      events.length = 0; const priorPayloads: number = payloads.length;
       let failure: unknown;
       try { await generate({ ...textRequest, images }); } catch (error) { failure = error; }
       if (events.length) console.log(JSON.stringify({ counterexample: "reference images silently reached provider", case: index, events, transportHasReferenceData: payloads.slice(priorPayloads).some((payload) => payload.includes("c2FtcGxlLXJlZmVyZW5jZQ==")) }));
@@ -92,7 +81,7 @@ async function main(): Promise<void> {
       assert.deepEqual(events, [], "reject before ID, lifecycle, spend, network, storage or receipt side effects");
       assert.equal(payloads.length, priorPayloads);
     }
-    console.log(`Novita reference boundary PASS: ${unsupported.length} malformed/nonempty cases rejected before all side effects; four legacy requests byte-equivalent; no providers invoked`);
+    console.log(`Novita reference boundary PASS: ${unsupported.length} malformed/nonempty cases rejected before all side effects; four text requests blocked by retirement; no providers invoked`);
   } finally { globalThis.fetch = originalFetch; }
 }
 void main();

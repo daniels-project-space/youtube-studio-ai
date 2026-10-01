@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { sourceProofMediaAttachments } from "./route";
+import { sourceProofMediaAttachments } from "@/lib/casefileRequestValidation";
 
 const attachment = {
   shotId: "cinematic-shot-source-proof",

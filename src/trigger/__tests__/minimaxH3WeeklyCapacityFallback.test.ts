@@ -12,17 +12,13 @@ const retrySource = readFileSync(join(root, "minimaxH3WeeklyCapacityRetry.ts"), 
 const fallbackSource = readFileSync(join(root, "minimaxH3WeeklyNovitaFallback.ts"), "utf8");
 const weeklySource = readFileSync(join(root, "minimaxH3WeeklyBatch.ts"), "utf8");
 
-assert.match(retrySource, /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length/);
-assert.match(retrySource, /MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS/);
-assert.match(retrySource, /queueMiniMaxH3WeeklyCapacityRetry\(\{ payload, now \}\)/);
-assert.match(retrySource, /minimax-h3-weekly-novita-fallback/);
-assert.match(retrySource, /state: "fallback_queued"/);
-assert.match(fallbackSource, /provider: "novita"/);
-assert.match(fallbackSource, /execution: "weekly-fallback"/);
-assert.match(fallbackSource, /ifNoneMatch: "\*"/);
-assert.match(fallbackSource, /h3-fallback-provider.*novita/);
-assert.match(weeklySource, /automatic weekly capacity retry could not be scheduled/);
-assert.match(weeklySource, /capacityHoldStartedAt: payload\.capacityHoldStartedAt/);
+for (const source of [retrySource, fallbackSource, weeklySource]) {
+  assert.match(source, /return rejectRetiredWeeklyH3Task\(\)/);
+  assert.doesNotMatch(source, /bootstrapSecrets|assertMiniMaxH3SaladCapacity|renderMiniMaxH3WeeklyBatch/,
+    "stale retry/fallback handles retain no direct provider path");
+}
+assert.match(retrySource, /id: "minimax-h3-weekly-capacity-retry"/);
+assert.match(fallbackSource, /id: "minimax-h3-weekly-novita-fallback"/);
 
 const fakeReceipt = {
   schema: "minimax-h3-worker/v1" as const,
@@ -62,4 +58,4 @@ assert.equal(receipt.schema, "minimax-h3-weekly-batch/v2");
 assert.deepEqual(receipt.sourceRequestKeys, ["f".repeat(64)]);
 assert.deepEqual(receipt.fallback, { provider: "novita", reason: "salad-capacity-timeout", waitedMs: 86_400_000 });
 assert.equal(receipt.providerReceipts?.[0]?.runtime.capacityMode, "spot");
-console.log("MiniMax H3 weekly capacity retry/fallback contracts passed");
+console.log("Retired H3 retry/fallback handles and historical receipt contracts passed");

@@ -1,5 +1,5 @@
 /** Stop the exact persistent OpenRelay H3 VM after a safe idle drain. */
-import { schedules } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { OpenRelayVmClient } from "@/lib/openRelay";
 import {
@@ -16,9 +16,8 @@ function required(name: string, minimumLength = 1): string {
   return value;
 }
 
-export const openRelayH3IdleReaper = schedules.task({
+export const openRelayH3IdleReaper = task({
   id: "openrelay-h3-idle-reaper",
-  cron: "* * * * *",
   maxDuration: 120,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000, factor: 2 },
   queue: { concurrencyLimit: 1 },

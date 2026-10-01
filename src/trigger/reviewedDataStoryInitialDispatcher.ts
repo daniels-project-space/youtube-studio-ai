@@ -1,4 +1,4 @@
-import { schedules, tasks, idempotencyKeys } from "@trigger.dev/sdk";
+import { task, tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 
 import { api } from "../../convex/_generated/api";
@@ -117,11 +117,10 @@ export async function dispatchPendingReviewedDataStoryInitialRuns(input?: {
   return { pending: pending.length, triggered };
 }
 
-export const reviewedDataStoryInitialDispatcher = schedules.task({
+export const reviewedDataStoryInitialDispatcher = task({
   id: "reviewed-data-story-initial-dispatcher",
   // This provider-free minute scanner is the only component that turns an
   // owner-created immutable admission into a Trigger delivery.
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120,
   retry: { maxAttempts: 1 },
   run: async () => {

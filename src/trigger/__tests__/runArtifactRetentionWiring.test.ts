@@ -40,9 +40,10 @@ assert.doesNotMatch(
 );
 assert.match(
   sweeper,
-  /cron: "17 \* \* \* \*"[\s\S]*?concurrencyLimit: 1/,
-  "deferred cleanup must run serially on a bounded hourly cadence",
+  /task\(\{[\s\S]*?id: "run-artifact-retention-sweeper"[\s\S]*?concurrencyLimit: 1/,
+  "paused deferred cleanup remains a serial manual task",
 );
+assert.doesNotMatch(sweeper, /^\s*cron:/m);
 assert.match(
   sweeper,
   /parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?assets\.pruneRun[\s\S]*?runArtifactRetentions\.complete/,

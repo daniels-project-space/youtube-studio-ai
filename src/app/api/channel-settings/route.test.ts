@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {
   assertCasefileAutoResearchLaneEligible,
   validatedSchedule,
-} from "./route";
+} from "@/lib/channelSettingsValidation";
 
 assert.throws(
   () => validatedSchedule({}, { frequency: "weekly", days: [] }),

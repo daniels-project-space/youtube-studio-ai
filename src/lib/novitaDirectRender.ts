@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { api } from "../../convex/_generated/api";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import {
   assertNovitaVideoPhaseProfileRuntime,
   assessNovitaVideoProfileRuntime,
@@ -1948,6 +1949,7 @@ function directStatus(args: {
  * adapter and is rejected before any secret, worker, or provider boundary.
  */
 export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+  rejectNewNovitaGeneration();
   const legacyVideoRequested = phase === "video";
   if (legacyVideoRequested) {
     throw new NovitaAdmissionError(

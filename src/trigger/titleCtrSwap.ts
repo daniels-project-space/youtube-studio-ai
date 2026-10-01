@@ -20,7 +20,7 @@
  * Studio, but this worker will not mislabel that edit as an experiment. Native
  * test-result ingestion remains a separate unfinished connector surface.
  */
-import { schedules, task } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
@@ -214,9 +214,8 @@ export async function runTitleCtrSwap(
  * work out which titles are underperforming, but renaming a published video is
  * the owner's call, and a schedule cannot give consent on their behalf.
  */
-export const titleCtrSwapSchedule = schedules.task({
+export const titleCtrSwapSchedule = task({
   id: "title-ctr-swap",
-  cron: "0 10 * * 1", // Monday 10:00, an hour after the weekend metrics settle
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

@@ -82,6 +82,7 @@ async function main() {
       assert.equal(count, service === "salad" ? 2 : 1, `${service}: concurrent general bootstrap must deduplicate`);
     }
     assert.equal(reads.has("gemini"), false, "generic bootstrap cannot hydrate sealed thumbnail credentials");
+    assert.equal(reads.has("novita"), false, "generic bootstrap cannot hydrate retired generation credentials");
     assert.equal(reads.has("openrelay"), false, "shared provider credentials cannot shadow Studio's key");
     assert.equal(process.env.OPENRELAY_API_KEY, secretSentinel);
     assert.equal(process.env.OPENRELAY_ORG_ID, "studio-org");

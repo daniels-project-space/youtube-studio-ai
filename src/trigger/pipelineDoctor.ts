@@ -11,7 +11,7 @@
  * persisted to R2 and summarized to Telegram. The Doctor PROPOSES — risky
  * changes stay operator decisions; the only thing it auto-fires is analysis.
  */
-import { idempotencyKeys, task, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -628,12 +628,11 @@ async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?
   return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, factualReviewContinuationsQueued, musicAuditionContinuationsQueued, channelPipelineSync, commentsPosted, actions };
 }
 
-export const pipelineDoctorSchedule = schedules.task({
+export const pipelineDoctorSchedule = task({
   id: "pipeline-doctor",
   // RE-ENABLED 2026-07-04: the Doctor is the root-cause loop — paused, every
   // defect class it exists to catch (advisory rot, grounding gaps, heal
   // treadmills) accumulated unseen. Daily, after learning-refresh (07:00).
-  cron: "30 7 * * *",
   run: async (_payload, options) => sweep(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`),
     options?.ctx ? { projectId: options.ctx.project.id, environmentId: options.ctx.environment.id } : undefined),
 });

@@ -17,9 +17,10 @@ function main(): void {
 
   assert.match(
     dispatcher,
-    /schedules\.task\(\{[\s\S]*id: "serialized-program-episode-retry-dispatcher"[\s\S]*cron: "\* \* \* \* \*"/,
-    "the durable receipt has a minute dispatcher rather than relying on the six-hour generation scheduler",
+    /task\(\{[\s\S]*id: "serialized-program-episode-retry-dispatcher"/,
+    "the paused durable receipt retains a manual dispatcher",
   );
+  assert.doesNotMatch(dispatcher, /^\s*cron:/m);
   assert.match(
     dispatcher,
     /api\.runs\.listDueSerializedProgramEpisodeRetries/,

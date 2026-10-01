@@ -8,7 +8,7 @@
  * Requires the yt-analytics.readonly OAuth scope (scripts/youtube-oauth.ts);
  * degrades to a no-op without it.
  */
-import { schedules, task } from "@trigger.dev/sdk";
+import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
@@ -1035,9 +1035,8 @@ async function refresh(ownerId: string, log: Logger) {
   return { ok: true, channels: channels.length, videos, adapted };
 }
 
-export const learningRefreshSchedule = schedules.task({
+export const learningRefreshSchedule = task({
   id: "learning-refresh",
-  cron: "0 7 * * *", // daily, after metrics settle
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
     if (!gate.enabled) return gate;

@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { classifyStudioR2Asset, studioR2AssetExpiresAt, STUDIO_R2_ASSET_RETENTION_VERSION } from "../src/lib/studioR2AssetRetention";
 
 /**
  * Media artifact registry. Bytes live in R2; rows here index them by r2Key and
@@ -16,7 +17,28 @@ export const recordAsset = mutation({
   },
   returns: v.id("assets"),
   handler: async (ctx, args) => {
-    return await ctx.db.insert("assets", {
+    const channel = await ctx.db.get(args.channelId);
+    const run = args.runId ? await ctx.db.get(args.runId) : null;
+    if (!channel || channel.ownerId !== args.ownerId ||
+        (args.runId && (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId))) {
+      throw new Error("asset owner, channel, and run must match");
+    }
+    const existingAssets = await ctx.db.query("assets")
+      .withIndex("by_r2_key", (q) => q.eq("r2Key", args.r2Key)).take(2);
+    if (existingAssets.length) {
+      const prior = existingAssets[0];
+      if (existingAssets.length !== 1 || prior.ownerId !== args.ownerId ||
+          prior.channelId !== args.channelId || prior.runId !== args.runId || prior.kind !== args.kind) {
+        throw new Error("asset key already belongs to another indexed object");
+      }
+      return prior._id;
+    }
+    const keyRetentions = await ctx.db.query("studioR2AssetRetentions")
+      .withIndex("by_owner_key", (q) => q.eq("ownerId", args.ownerId).eq("r2Key", args.r2Key)).take(1);
+    if (keyRetentions.length) {
+      throw new Error("asset key is under retention cleanup");
+    }
+    const assetId = await ctx.db.insert("assets", {
       ownerId: args.ownerId,
       channelId: args.channelId,
       runId: args.runId,
@@ -24,6 +46,22 @@ export const recordAsset = mutation({
       r2Key: args.r2Key,
       meta: args.meta,
     });
+    const classification = classifyStudioR2Asset({
+      ownerId: args.ownerId, channelSlug: channel.slug, runId: args.runId,
+      kind: args.kind, r2Key: args.r2Key,
+    });
+    if (classification && args.runId) {
+      const createdAt = Date.now();
+      await ctx.db.insert("studioR2AssetRetentions", {
+        version: STUDIO_R2_ASSET_RETENTION_VERSION,
+        ownerId: args.ownerId, channelId: args.channelId, runId: args.runId,
+        assetId, r2Key: args.r2Key, classification,
+        createdAt, expiresAt: studioR2AssetExpiresAt(classification, createdAt),
+        nextCheckAt: studioR2AssetExpiresAt(classification, createdAt),
+        status: "pending", attempts: 0,
+      });
+    }
+    return assetId;
   },
 });
 

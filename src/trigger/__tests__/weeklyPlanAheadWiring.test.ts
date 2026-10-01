@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const source = readFileSync(resolve(process.cwd(), "src/trigger/weeklyPlanAhead.ts"), "utf8");
-assert.match(source, /schedules\.task/);
-assert.match(source, /cron:\s*["']0 5 \* \* 1/);
+assert.match(source, /task\(/);
+assert.doesNotMatch(source, /cron:\s*["']0 5 \* \* 1/);
 assert.match(source, /retry: \{ maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 \}/);
 assert.match(source, /id:\s*["']weekly-plan-ahead-recovery["']/);
-assert.match(source, /cron:\s*["']0 \*\/6 \* \* \*/);
+assert.doesNotMatch(source, /cron:\s*["']0 \*\/6 \* \* \*/);
 assert.match(source, /STUDIO_AUTOMATION_GATES\.autopilot/);
 assert.match(source, /tasks\.trigger\("plan-week-bulk"/);
 assert.match(source, /STUDIO_AUTO_CHANNELS/);

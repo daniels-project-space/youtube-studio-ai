@@ -1,4 +1,4 @@
-import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { deliveryRecoveryMode } from "@/lib/deliveryRecoveryMode";
 import { dispatchPendingYuE2Continuations, type YuE2ContinuationReceipt } from "./yue2ContinuationDispatcher";
 
@@ -90,9 +90,8 @@ export async function dispatchPendingMusicAuditionContinuations(input?: {
   return { pending: pending.length + yue2.pending, triggered: triggered + yue2.triggered };
 }
 
-export const musicAuditionContinuationDispatcher = schedules.task({
+export const musicAuditionContinuationDispatcher = task({
   id: "music-audition-continuation-dispatcher",
-  ...(deliveryRecoveryMode() === "individual" ? { cron: "* * * * *" } : {}),
   maxDuration: 120, retry: { maxAttempts: 1 },
   run: async (_payload, options) => {
     if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
