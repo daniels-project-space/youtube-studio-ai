@@ -1,23 +1,15 @@
 /**
- * The paid weekly H3 data plane. It is intentionally separate from the
- * provider-free `plan-week-bulk` planner: this task accepts only already
- * approved keyframes/prompts and records actual R2-backed render receipts.
+ * Historical weekly H3 receipt helpers and a permanently retired task handle.
+ * New scene admission uses the tenant-bound Render Engine submitter.
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
-import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
-import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
-  MINIMAX_H3_RUNTIME_ID,
   miniMaxH3RuntimeId,
   MINIMAX_H3_PROFILE,
-  MINIMAX_H3_WORKER_CONTRACT,
   MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
   MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS,
-  assertMiniMaxH3SaladCapacity,
-  miniMaxH3WeeklyRequestPacketKey,
   miniMaxH3RequestKey,
-  renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderedVideo,
   type MiniMaxH3Receipt,
   type MiniMaxH3RenderRequest,
@@ -25,18 +17,12 @@ import {
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
-import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { api } from "../../convex/_generated/api";
-import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
-import { saladPriorityPolicyFromEnv, SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
-import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
-import { legacyWeeklyH3ProviderRouteIsRetired } from "./legacyH3WeeklyRetirement";
+import { rejectRetiredWeeklyH3Task } from "./legacyH3WeeklyRetirement";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
   planWeekPreparedFootageClipKey,
   planWeekPreparedFootageKey,
-  planWeekPreparedH3FirstFrameKey,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
   type PlanWeekPreparedFootage,
@@ -292,55 +278,6 @@ export function createMiniMaxH3WeeklyRequestPacket(args: {
   };
 }
 
-function sameWeeklyRequestPacket(
-  packet: PersistedWeeklyRequestPacket,
-  expected: { orderKey: string; requestKeys: readonly string[]; jobs: MiniMaxH3WeeklyBatchArgs["jobs"]; capacityHoldStartedAt?: number },
-): boolean {
-  return packet.schema === "minimax-h3-weekly-request/v1" &&
-    packet.orderKey === expected.orderKey &&
-    canonicalJson(packet.requestKeys) === canonicalJson(expected.requestKeys) &&
-    canonicalJson(packet.jobs) === canonicalJson(expected.jobs) &&
-    (expected.capacityHoldStartedAt === undefined || packet.capacityHoldStartedAt === undefined || packet.capacityHoldStartedAt === expected.capacityHoldStartedAt) &&
-    Number.isSafeInteger(packet.createdAt) && packet.createdAt > 0;
-}
-
-/** Persist and re-read the request packet; never overwrite a competing order. */
-async function persistWeeklyRequestPacket(args: {
-  receiptKey: string;
-  orderKey: string;
-  requestKeys: readonly string[];
-  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
-  capacityHoldStartedAt?: number;
-}): Promise<string> {
-  const key = miniMaxH3WeeklyRequestPacketKey(args.receiptKey);
-  const body = canonicalJson(createMiniMaxH3WeeklyRequestPacket({
-    orderKey: args.orderKey,
-    requestKeys: args.requestKeys,
-    jobs: args.jobs,
-    capacityHoldStartedAt: args.capacityHoldStartedAt,
-  }));
-  try {
-    await putObject(key, body, {
-      contentType: "application/json",
-      metadata: { "h3-weekly-request": "v1", "h3-weekly-request-sha256": sha256Hex(body) },
-      ifNoneMatch: "*",
-    });
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-  }
-  let persisted: PersistedWeeklyRequestPacket;
-  try {
-    persisted = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as PersistedWeeklyRequestPacket;
-  } catch (error) {
-    throw new Error(`weekly MiniMax H3 request packet is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!sameWeeklyRequestPacket(persisted, args)) {
-    throw new Error("weekly MiniMax H3 request packet is bound to a different order");
-  }
-  return key;
-}
-
 /**
  * Schedule a read-only Salad capacity recheck.  The idempotency seed is tied
  * to the order and time bucket so a lost controller response cannot create a
@@ -438,174 +375,6 @@ export function createMiniMaxH3WeeklyFallbackReceipt(args: {
   };
 }
 
-/** Reconciles a prior batch receipt and every retained R2 output. */
-async function readPersistedReceipt(
-  key: string,
-  expected: { orderKey: string; requestKeys: readonly string[]; outputKeys: readonly string[] },
-): Promise<PersistedWeeklyReceipt | null> {
-  let bytes: Uint8Array;
-  try {
-    bytes = await getObjectBytes(key);
-  } catch (error) {
-    if (objectNotFound(error)) return null;
-    throw error;
-  }
-  let parsed: PersistedWeeklyReceipt;
-  try {
-    parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as PersistedWeeklyReceipt;
-  } catch {
-    throw new Error("weekly MiniMax H3 receipt exists but is not valid JSON");
-  }
-  if (
-    parsed?.schema !== "minimax-h3-weekly-batch/v1" ||
-    parsed.orderKey !== expected.orderKey ||
-    !Array.isArray(parsed.requestKeys) ||
-    parsed.requestKeys.length !== expected.requestKeys.length ||
-    parsed.requestKeys.some((requestKey, index) => requestKey !== expected.requestKeys[index]) ||
-    !Array.isArray(parsed.outputs) ||
-    parsed.outputs.length !== expected.outputKeys.length ||
-    parsed.outputs.some((output, index) =>
-      output?.r2Key !== expected.outputKeys[index] ||
-      !/^[a-f0-9]{64}$/.test(output?.contentSha256 ?? "") ||
-      !Number.isSafeInteger(output?.byteLength) || output.byteLength < 1_024 ||
-      !Number.isFinite(output?.costUsd) || output.costUsd < 0),
-    !Number.isFinite(parsed.totalCostUsd) || parsed.totalCostUsd < 0 ||
-    !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0
-  ) {
-    throw new Error("weekly MiniMax H3 receipt exists but is bound to a different request");
-  }
-  if (parsed.providerReceipts !== undefined && (
-    !Array.isArray(parsed.providerReceipts) ||
-    parsed.providerReceipts.length !== expected.requestKeys.length ||
-    parsed.providerReceipts.some((receipt, index) => {
-      const output = receipt?.output;
-      const stored = parsed.outputs[index];
-      return receipt?.schema !== "minimax-h3-worker/v1" ||
-        receipt.requestKey !== expected.requestKeys[index] ||
-        output?.r2Key !== stored?.r2Key ||
-        output?.contentSha256 !== stored?.contentSha256 ||
-        Number(output?.byteLength) !== stored?.byteLength ||
-        receipt.runtime?.costUsd !== stored?.costUsd;
-    })
-  )) {
-    throw new Error("weekly MiniMax H3 receipt provider provenance is invalid");
-  }
-  for (const output of parsed.outputs) {
-    const actual = await getObjectBytes(output.r2Key);
-    if (actual.byteLength !== output.byteLength || sha256BytesHex(actual) !== output.contentSha256) {
-      throw new Error("weekly MiniMax H3 persisted receipt does not match an R2 output");
-    }
-  }
-  return parsed;
-}
-
-function isNotFound(error: unknown): boolean {
-  return objectNotFound(error);
-}
-
-/** Read one durable shot claim and re-verify its output bytes before reuse. */
-async function readPersistedJobReceipt(args: {
-  receiptKey: string;
-  orderKey: string;
-  requestKey: string;
-  outputKey: string;
-}): Promise<MiniMaxH3RenderedVideo | null> {
-  const key = miniMaxH3WeeklyJobReceiptKey(args.receiptKey, args.requestKey);
-  let bytes: Uint8Array;
-  try {
-    bytes = await getObjectBytes(key);
-  } catch (error) {
-    if (isNotFound(error)) return null;
-    throw error;
-  }
-  let parsed: PersistedWeeklyJobReceipt;
-  try {
-    parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as PersistedWeeklyJobReceipt;
-  } catch {
-    throw new Error("weekly MiniMax H3 job receipt exists but is not valid JSON");
-  }
-  const providerReceipt = parsed?.providerReceipt;
-  if (
-    parsed?.schema !== MINIMAX_H3_WEEKLY_JOB_RECEIPT_SCHEMA ||
-    parsed.orderKey !== args.orderKey || parsed.requestKey !== args.requestKey ||
-    providerReceipt?.schema !== MINIMAX_H3_WORKER_CONTRACT ||
-    providerReceipt.requestKey !== args.requestKey || providerReceipt.execution !== "weekly-batch" ||
-    providerReceipt.runtime?.provider !== "salad" || providerReceipt.runtime.gpuModel !== "RTX 5090" ||
-    providerReceipt.runtime.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
-    providerReceipt.runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
-    (providerReceipt.runtime.capacityMode !== "medium" && providerReceipt.runtime.capacityMode !== "high") ||
-    canonicalJson(providerReceipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE) ||
-    providerReceipt.output?.r2Key !== args.outputKey ||
-    !/^[a-f0-9]{64}$/u.test(providerReceipt.output?.contentSha256 ?? "") ||
-    !Number.isSafeInteger(providerReceipt.output?.byteLength) || providerReceipt.output.byteLength < 1_024 ||
-    !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0
-  ) {
-    throw new Error("weekly MiniMax H3 job receipt is bound to a different request");
-  }
-  const outputBytes = await getObjectBytes(args.outputKey);
-  if (
-    outputBytes.byteLength !== providerReceipt.output.byteLength ||
-    sha256BytesHex(outputBytes) !== providerReceipt.output.contentSha256
-  ) {
-    throw new Error("weekly MiniMax H3 job receipt does not match its retained R2 output");
-  }
-  return { requestKey: args.requestKey, receipt: providerReceipt, outputBytes };
-}
-
-async function readPersistedJobReceipts(args: {
-  receiptKey: string;
-  orderKey: string;
-  requestKeys: readonly string[];
-  outputKeys: readonly string[];
-}): Promise<Array<MiniMaxH3RenderedVideo | undefined>> {
-  const result: Array<MiniMaxH3RenderedVideo | undefined> = new Array(args.requestKeys.length);
-  let next = 0;
-  // Keep replay reads bounded: a 60-shot batch should not open 60 R2 GETs at
-  // once while the controller is still deciding whether any paid work remains.
-  await Promise.all(Array.from({ length: Math.min(8, args.requestKeys.length) }, async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= args.requestKeys.length) return;
-      result[index] = await readPersistedJobReceipt({
-        receiptKey: args.receiptKey,
-        orderKey: args.orderKey,
-        requestKey: args.requestKeys[index]!,
-        outputKey: args.outputKeys[index]!,
-      }) ?? undefined;
-    }
-  }));
-  return result;
-}
-
-/** Create-only write for one successful, fully verified shot. */
-async function persistWeeklyJobReceipt(args: {
-  receiptKey: string;
-  orderKey: string;
-  result: MiniMaxH3RenderedVideo;
-}): Promise<void> {
-  const body = canonicalJson(createMiniMaxH3WeeklyJobReceipt(args));
-  const key = miniMaxH3WeeklyJobReceiptKey(args.receiptKey, args.result.requestKey);
-  try {
-    await putObject(key, body, {
-      contentType: "application/json",
-      metadata: { "h3-job-receipt": MINIMAX_H3_WEEKLY_JOB_RECEIPT_SCHEMA, sha256: sha256Hex(body) },
-      ifNoneMatch: "*",
-    });
-  } catch (error) {
-    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-    if (status !== 409 && status !== 412) throw error;
-  }
-  const persisted = await readPersistedJobReceipt({
-    receiptKey: args.receiptKey,
-    orderKey: args.orderKey,
-    requestKey: args.result.requestKey,
-    outputKey: args.result.receipt.output.r2Key,
-  });
-  if (!persisted || canonicalJson(persisted.receipt) !== canonicalJson(args.result.receipt)) {
-    throw new Error("weekly MiniMax H3 job receipt changed after create-only write");
-  }
-}
-
 type PreparedFootageScope = NonNullable<MiniMaxH3WeeklyBatchArgs["preparedFootage"]>;
 
 /**
@@ -637,32 +406,6 @@ export async function readPreparedFootageManifest(
     throw new Error("weekly MiniMax H3 prepared-footage manifest scope does not match the request");
   }
   return manifest;
-}
-
-async function preflightPreparedFrames(
-  jobs: readonly MiniMaxH3WeeklyBatchArgs["jobs"][number][],
-  binding: PreparedFootageScope,
-): Promise<void> {
-  await Promise.all(jobs.map(async (job, index) => {
-    const expectedKey = planWeekPreparedH3FirstFrameKey({
-      ownerId: binding.ownerId,
-      channelSlug: binding.channelSlug,
-      batchId: binding.batchId,
-      itemId: binding.itemId,
-      index,
-    });
-    if (job.firstFrame.r2Key !== expectedKey) {
-      throw new Error(`weekly MiniMax H3 prepared-footage first-frame ${index + 1} key is not canonical`);
-    }
-    const expectedOutputKey = planWeekPreparedFootageClipKey({ ...binding, index });
-    if (job.output.r2Key !== expectedOutputKey) {
-      throw new Error(`weekly MiniMax H3 prepared-footage output ${index + 1} key is not canonical`);
-    }
-    const bytes = await getObjectBytes(job.firstFrame.r2Key);
-    if (sha256BytesHex(bytes) !== job.firstFrame.sha256) {
-      throw new Error(`weekly MiniMax H3 prepared-footage first-frame ${index + 1} digest does not match R2`);
-    }
-  }));
 }
 
 export function buildPreparedFootageSidecar(args: {
@@ -779,295 +522,12 @@ export async function materializePreparedFootage(
 
 export const minimaxH3WeeklyBatchTask = task({
   id: "minimax-h3-weekly-batch",
-  // H3 workers hydrate and can run up to sixty five-second clips over three
-  // 5090 replicas. Medium is preferred, with a bounded high-priority fallback
-  // selected during admission. Trigger retries are disabled: provider
-  // submissions are reconciled by request key, while pre-provider Salad holds
-  // enqueue a separate read-only capacity waiter.
+  // Retain the stale task identity and limits; every invocation aborts.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
-  run: async (rawPayload: MiniMaxH3WeeklyBatchArgs) => {
-    if (legacyWeeklyH3ProviderRouteIsRetired()) {
-      throw new AbortTaskRunError("Studio weekly H3 provider route is retired; stage the request through Render Engine.");
-    }
-
-    const payload = assertMiniMaxH3WeeklyBatchArgs(rawPayload);
-    await bootstrapSecrets(() => undefined, {
-      services: ["cloudflare", "salad"],
-      required: [
-        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-        "MINIMAX_H3_SALAD_WORKER_URL", "MINIMAX_H3_SALAD_WORKER_TOKEN",
-      ],
-    });
-    const preparedManifest = payload.preparedFootage
-      ? await readPreparedFootageManifest(payload.preparedFootage)
-      : undefined;
-    const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({
-      ...job,
-      provider: "salad",
-      execution: "weekly-batch",
-    }));
-    const outputKeys = payload.jobs.map((job) => job.output.r2Key);
-    const prior = await readPersistedReceipt(payload.receiptKey, {
-      orderKey: payload.orderKey,
-      requestKeys,
-      outputKeys,
-    });
-    if (prior) {
-      const preparedFootageKey = payload.preparedFootage
-        ? await materializePreparedFootage(
-            payload.preparedFootage,
-            preparedManifest!,
-            payload.jobs,
-            renderedResultsFromPersistedReceipt(prior),
-          )
-        : undefined;
-      return {
-        receiptKey: payload.receiptKey,
-        ...prior,
-        ...(preparedFootageKey ? { preparedFootageKey } : {}),
-        reconciled: true as const,
-      };
-    }
-    // Freeze/re-read the request packet before restoring any per-shot claims.
-    // This keeps a claim set tied to the exact ordered jobs, even when the
-    // aggregate receipt was lost after a previous attempt.
-    const requestPacketKey = await persistWeeklyRequestPacket({
-      receiptKey: payload.receiptKey,
-      orderKey: payload.orderKey,
-      requestKeys,
-      jobs: payload.jobs,
-      capacityHoldStartedAt: payload.capacityHoldStartedAt,
-    });
-    // Restore any per-shot claims before acquiring capacity. A partially
-    // completed prior wave must never pay again for outputs already proven in
-    // R2; only missing jobs continue below.
-    const recoveredJobResults = await readPersistedJobReceipts({
-      receiptKey: payload.receiptKey,
-      orderKey: payload.orderKey,
-      requestKeys,
-      outputKeys,
-    });
-    if (recoveredJobResults.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) {
-      const reconciledResult = recoveredJobResults;
-      const reconciledReceipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, reconciledResult);
-      const body = canonicalJson(reconciledReceipt);
-      try {
-        await putObject(payload.receiptKey, body, {
-          contentType: "application/json",
-          metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(body) },
-          ifNoneMatch: "*",
-        });
-      } catch (error) {
-        const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-        if (status !== 409 && status !== 412) throw error;
-        const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
-        if (!winner) throw error;
-        const preparedFootageKey = payload.preparedFootage
-          ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, reconciledResult)
-          : undefined;
-        return {
-          receiptKey: payload.receiptKey,
-          ...winner,
-          ...(preparedFootageKey ? { preparedFootageKey } : {}),
-          reconciled: true as const,
-        };
-      }
-      const preparedFootageKey = payload.preparedFootage
-        ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, reconciledResult)
-        : undefined;
-      return {
-        receiptKey: payload.receiptKey,
-        ...reconciledReceipt,
-        ...(preparedFootageKey ? { preparedFootageKey } : {}),
-        reconciled: true as const,
-      };
-    }
-    // Salad capacity is a separate admission. The durable fleet fence is
-    // acquired first so concurrent weekly orders cannot all pass the same
-    // eventually-consistent market snapshot and allocate three GPUs each.
-    // The canonical Convex schema and Trigger task are promoted together by
-    // the production release gate, so the organization-wide fence is the safe
-    // default. Set this to "0" only for an intentional maintenance rollback;
-    // missing Convex configuration then fails closed before provider spend.
-    const fleetReservationEnabled = process.env.SALAD_FLEET_RESERVATION_ENABLED !== "0";
-    const reservationIdentity = payload.ownerId && fleetReservationEnabled
-      ? saladFleetReservationIdentity({
-          ownerId: payload.ownerId,
-          orderKey: payload.orderKey,
-          requestKeys,
-          // Keep the durable fence aligned with Salad's organization-wide
-          // three-GPU limit; do not let a second literal drift from the
-          // capacity admission contract.
-          requestedGpuCount: Math.min(SALAD_BULK_MAX_GPUS, payload.jobs.length),
-          priority: "medium",
-        })
-      : undefined;
-    const fleetConvex = payload.ownerId && fleetReservationEnabled
-      ? (() => {
-          const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-          if (!url) throw new Error("weekly MiniMax H3 fleet reservation requires NEXT_PUBLIC_CONVEX_URL");
-          return new StudioConvexHttpClient(url);
-        })()
-      : undefined;
-    const fleetLeaseToken = payload.ownerId && fleetReservationEnabled ? crypto.randomUUID() : undefined;
-    let fleetReservation: { leaseToken: string; priority?: string } | undefined;
-    try {
-      fleetReservation = reservationIdentity && fleetConvex && fleetLeaseToken
-        ? await fleetConvex.mutation(api.saladFleetReservations.acquire, {
-            reservationKey: reservationIdentity.reservationKey,
-            reservationOwnerId: reservationIdentity.ownerId,
-            orderKey: reservationIdentity.orderKey,
-            requestedGpuCount: reservationIdentity.requestedGpuCount,
-            priority: reservationIdentity.priority,
-            leaseToken: fleetLeaseToken,
-            now: Date.now(),
-          })
-        : undefined;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (payload.ownerId && isMiniMaxH3CapacityHoldError(message)) {
-        const heldPayload = { ...payload, capacityHoldStartedAt: payload.capacityHoldStartedAt ?? Date.now() };
-        try {
-          await queueMiniMaxH3WeeklyCapacityRetry({ payload: heldPayload });
-        } catch (scheduleError) {
-          throw new Error(`${message}; automatic weekly capacity retry could not be scheduled: ${scheduleError instanceof Error ? scheduleError.message : String(scheduleError)}`);
-        }
-      }
-      throw error;
-    }
-    const heldFleetPriority = fleetReservation && typeof fleetReservation.priority === "string"
-      ? fleetReservation.priority
-      : undefined;
-    let providerStarted = false;
-    const releaseFleetReservation = async (reason: string): Promise<void> => {
-      if (!fleetConvex || !reservationIdentity || !fleetReservation) return;
-      try {
-        await fleetConvex.mutation(api.saladFleetReservations.release, {
-          reservationKey: reservationIdentity.reservationKey,
-          leaseToken: fleetReservation.leaseToken,
-          now: Date.now(),
-          reason,
-        });
-      } catch (error) {
-        // Receipt durability still prevents duplicate spend; a temporary
-        // release outage is bounded by the two-hour reservation lease.
-        console.error("[minimax-h3-weekly-batch] fleet reservation release deferred", error);
-      }
-    };
-    try {
-      const policy = saladPriorityPolicyFromEnv();
-      let capacity: Awaited<ReturnType<typeof assertMiniMaxH3SaladCapacity>>;
-      try {
-        capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
-          // Medium remains the first choice. High is the explicit, costlier
-          // capacity escape hatch Daniel authorized: set the variable to "0" to
-          // disable it for a deployment, but never let request JSON select it.
-          allowHighPriorityFallback: policy.highFallbackEnabled,
-          // Medium is the safe default; set to "0" only for an intentional
-          // maintenance window. High remains a separate fallback gate.
-          mediumPriorityEnabled: policy.mediumEnabled,
-          ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!providerStarted && payload.ownerId && isMiniMaxH3CapacityHoldError(message)) {
-          const heldPayload = {
-            ...payload,
-            capacityHoldStartedAt: payload.capacityHoldStartedAt ?? Date.now(),
-          };
-          try {
-            await queueMiniMaxH3WeeklyCapacityRetry({ payload: heldPayload });
-          } catch (scheduleError) {
-            throw new Error(`${message}; automatic weekly capacity retry could not be scheduled: ${scheduleError instanceof Error ? scheduleError.message : String(scheduleError)}`);
-          }
-        }
-        throw error;
-      }
-      if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
-        // The fence is acquired before the market snapshot to prevent two
-        // weekly orders from both passing eventually-consistent capacity
-        // checks.  Keep its persisted tier honest when the admitted route has
-        // to use the explicit high-priority escape hatch.
-        await fleetConvex.mutation(api.saladFleetReservations.upgradePriority, {
-          reservationKey: reservationIdentity.reservationKey,
-          leaseToken: fleetReservation.leaseToken,
-          now: Date.now(),
-          priority: "high",
-        });
-      }
-      if (payload.preparedFootage) {
-        // Preflight every input before the first worker request; a later bad
-        // frame must never leave a partially paid weekly order.
-        await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
-      }
-      providerStarted = true;
-      const jobResults: Array<MiniMaxH3RenderedVideo | undefined> = [...recoveredJobResults];
-      const pendingIndexes = jobResults.flatMap((item, index) => item === undefined ? [index] : []);
-      const pendingJobs = pendingIndexes.map((index) => payload.jobs[index]!);
-      await renderMiniMaxH3WeeklyBatch(pendingJobs, {
-        saladCapacityMode: capacity.capacityMode,
-        onJobComplete: async (pendingIndex, rendered) => {
-          const originalIndex = pendingIndexes[pendingIndex];
-          if (originalIndex === undefined) throw new Error("weekly MiniMax H3 completion index is invalid");
-          await persistWeeklyJobReceipt({
-            receiptKey: payload.receiptKey,
-            orderKey: payload.orderKey,
-            result: rendered,
-          });
-          jobResults[originalIndex] = rendered;
-        },
-      });
-      if (!jobResults.every((item): item is MiniMaxH3RenderedVideo => item !== undefined)) {
-        throw new Error("weekly MiniMax H3 batch completed without every shot result");
-      }
-      const result = jobResults;
-      const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
-    // A batch receipt is create-only. If a controller loses its response after
-    // rendering, it must read/reconcile this immutable proof rather than issue
-    // a second paid order with a new receipt spelling.
-    const body = canonicalJson(receipt);
-      try {
-        await putObject(payload.receiptKey, body, {
-          contentType: "application/json",
-          metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(body) },
-          ifNoneMatch: "*",
-        });
-      } catch (error) {
-        const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-        if (status !== 409 && status !== 412) throw error;
-        const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
-        if (!winner) throw error;
-        await releaseFleetReservation("receipt-reconciled");
-        const preparedFootageKey = payload.preparedFootage
-          ? await materializePreparedFootage(
-              payload.preparedFootage,
-              preparedManifest!,
-              payload.jobs,
-              renderedResultsFromPersistedReceipt(winner),
-            )
-          : undefined;
-        return {
-          receiptKey: payload.receiptKey,
-          ...winner,
-          ...(preparedFootageKey ? { preparedFootageKey } : {}),
-          reconciled: true as const,
-        };
-      }
-      await releaseFleetReservation("receipt-stored");
-      const preparedFootageKey = payload.preparedFootage
-        ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, result)
-        : undefined;
-      return {
-        receiptKey: payload.receiptKey,
-        ...receipt,
-        requestPacketKey,
-        ...(preparedFootageKey ? { preparedFootageKey } : {}),
-      };
-    } catch (error) {
-      if (!providerStarted) await releaseFleetReservation("pre-provider-failure");
-      throw error;
-    }
+  run: async (_rawPayload: MiniMaxH3WeeklyBatchArgs) => {
+    void _rawPayload;
+    return rejectRetiredWeeklyH3Task();
   },
 });
