@@ -1,3 +1,4 @@
+import {getH3SceneBatchStatusInRenderEngine,getH3SceneOutputInRenderEngine} from "@/lib/renderEngineH3SceneBatchClient";
 /**
  * Manual-only Engine H3 completion bridge. It has no schedule and never asks
  * Render Engine to release or dispatch a job. It copies only a completed,
@@ -13,7 +14,7 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { getObjectBytes } from "@/lib/storage";
 import { sha256BytesHex } from "@/lib/sha256";
 import { MINIMAX_H3_PROFILE } from "@/lib/minimaxH3";
-import { renderEngineH3StagedFootageKey, type RenderEngineH3StagedFootage } from "./planWeekPreparedImages";
+import { renderEngineH3SharedStagedFootageKey,renderEngineH3StagedFootageKey, type RenderEngineH3StagedFootage } from "./planWeekPreparedImages";
 
 const MAX_ENGINE_H3_BYTES = 256 * 1024 * 1024;
 
@@ -27,15 +28,30 @@ function scope(args: RenderEngineH3MaterializeArgs) {
 }
 
 async function readStage(args: RenderEngineH3MaterializeArgs): Promise<RenderEngineH3StagedFootage> {
-  const raw = await getObjectBytes(renderEngineH3StagedFootageKey(scope(args)), undefined, PREPARED_METADATA_READ);
-  const stage = decodePreparedMetadata(raw) as RenderEngineH3StagedFootage;
-  if (!stage || stage.version !== "render-engine-h3-staged-footage/v1" || stage.ownerId !== args.ownerId || stage.channelSlug !== args.channelSlug ||
-      stage.batchId !== args.batchId || stage.itemId !== args.itemId || stage.engine?.site !== "https://jovial-camel-68.convex.site" ||
-      stage.engine.projectName !== "youtube-studio-ai" || !/^[a-z0-9]{8,64}$/.test(stage.engine.workflowId) ||
-      !/^[a-f0-9]{64}$/.test(stage.engine.profileRevisionSha256) || !Array.isArray(stage.jobs) || !stage.jobs.length) {
-    throw new Error("Engine H3 staged footage receipt is invalid");
-  }
-  return stage;
+    let raw: Uint8Array;
+    try {
+        raw = await getObjectBytes(renderEngineH3SharedStagedFootageKey(scope(args)), undefined, PREPARED_METADATA_READ);
+    }
+    catch (error) {
+        if ((error as {
+            $metadata?: {
+                httpStatusCode?: number;
+            };
+            name?: string;
+        }).$metadata?.httpStatusCode !== 404 && (error as {
+            name?: string;
+        }).name !== "NoSuchKey")
+            throw error;
+        raw = await getObjectBytes(renderEngineH3StagedFootageKey(scope(args)), undefined, PREPARED_METADATA_READ);
+    }
+    const stage = decodePreparedMetadata(raw) as RenderEngineH3StagedFootage;
+    if (!stage || !["render-engine-h3-staged-footage/v1", "render-engine-h3-staged-footage/v2"].includes(stage.version) || stage.ownerId !== args.ownerId || stage.channelSlug !== args.channelSlug ||
+        stage.batchId !== args.batchId || stage.itemId !== args.itemId || stage.engine?.site !== "https://jovial-camel-68.convex.site" ||
+        stage.engine.projectName !== "youtube-studio-ai" || !/^[a-z0-9]{8,64}$/.test(stage.engine.workflowId) ||
+        !/^[a-f0-9]{64}$/.test(stage.engine.profileRevisionSha256) || !Array.isArray(stage.jobs) || !stage.jobs.length) {
+        throw new Error("Engine H3 staged footage receipt is invalid");
+    }
+    return stage;
 }
 
 async function fetchExactVideo(url: string, bytes: number, sha256: string): Promise<Uint8Array> {
@@ -49,65 +65,77 @@ async function fetchExactVideo(url: string, bytes: number, sha256: string): Prom
 }
 
 export async function materializeRenderEngineH3PreparedFootage(args: RenderEngineH3MaterializeArgs): Promise<string> {
-  const input = scope(args);
-  const stage = await readStage(input);
-  const manifestKey = planWeekPreparationKey(input);
-  const manifestBytes = await getObjectBytes(manifestKey, undefined, PREPARED_METADATA_READ);
-  if (sha256BytesHex(manifestBytes) !== stage.manifestSha256) throw new Error("Engine H3 materializer manifest digest changed");
-  const manifest = normalizePlanWeekPreparationManifest(decodePreparedMetadata(manifestBytes));
-  assertPlanWeekPreparationManifestBinding({ manifest, pointer: { version: manifest.version, manifestKey, manifestSha256: stage.manifestSha256 },
-    ownerId: input.ownerId, channelId: stage.channelId, batchId: input.batchId, itemId: input.itemId, itemKey: manifest.itemKey,
-    requestKey: manifest.requestKey, channelSlug: input.channelSlug, topic: manifest.plan.topic, title: manifest.plan.title,
-    thumbnailKey: manifest.plan.thumbnailKey, thumbnailSource: manifest.plan.thumbnailSource });
-  const token = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
-  if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Engine H3 materializer project capability is unavailable");
-  const engine = { baseUrl: stage.engine.site, projectName: stage.engine.projectName, projectCapability: token };
-  // Do not copy the first completed scene while a later scene is still
-  // running. The final footage sidecar is an all-scenes receipt, so every
-  // Engine completion must be current before Studio mutates any clip key.
-  const verified = await Promise.all(stage.jobs.map(async (staged, index) => {
-    const expectedClipKey = planWeekPreparedFootageClipKey({ ...input, index });
-    const expectedFirstFrameKey = planWeekPreparedH3FirstFrameKey({ ...input, index });
-    if (staged.output.r2Key !== expectedClipKey || staged.studioFirstFrame.r2Key !== expectedFirstFrameKey ||
-        !/^[a-z0-9]{8,64}$/.test(staged.engineJobId) || !/^[a-f0-9]{64}$/.test(staged.requestManifestSha256) ||
-        !/^[a-f0-9]{64}$/.test(staged.studioFirstFrame.sha256) ||
-        !/^projects\/youtube-studio-ai\/inputs\/sha256\/[a-f0-9]{64}\.(?:png|jpg)$/.test(staged.engineFirstFrame.r2Key) ||
-        !/^[a-f0-9]{64}$/.test(staged.engineFirstFrame.sha256)) {
-      throw new Error("Engine H3 staged job binding is invalid");
+    const input = scope(args);
+    const stage = await readStage(input);
+    const manifestKey = planWeekPreparationKey(input);
+    const manifestBytes = await getObjectBytes(manifestKey, undefined, PREPARED_METADATA_READ);
+    if (sha256BytesHex(manifestBytes) !== stage.manifestSha256)
+        throw new Error("Engine H3 materializer manifest digest changed");
+    const manifest = normalizePlanWeekPreparationManifest(decodePreparedMetadata(manifestBytes));
+    assertPlanWeekPreparationManifestBinding({ manifest, pointer: { version: manifest.version, manifestKey, manifestSha256: stage.manifestSha256 },
+        ownerId: input.ownerId, channelId: stage.channelId, batchId: input.batchId, itemId: input.itemId, itemKey: manifest.itemKey,
+        requestKey: manifest.requestKey, channelSlug: input.channelSlug, topic: manifest.plan.topic, title: manifest.plan.title,
+        thumbnailKey: manifest.plan.thumbnailKey, thumbnailSource: manifest.plan.thumbnailSource });
+    const token = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
+    if (!/^[a-f0-9]{64}$/.test(token))
+        throw new Error("Engine H3 materializer project capability is unavailable");
+    const engine = { baseUrl: stage.engine.site, projectName: stage.engine.projectName, projectCapability: token };
+    // Do not copy the first completed scene while a later scene is still
+    // running. The final footage sidecar is an all-scenes receipt, so every
+    // Engine completion must be current before Studio mutates any clip key.
+    const sharedStatus = stage.version === "render-engine-h3-staged-footage/v2" ? await getH3SceneBatchStatusInRenderEngine(engine, stage.sharedBatchJobId ?? "") : null;
+    if (sharedStatus && (sharedStatus.manifestSha256 !== stage.sharedBatchManifestSha256 || sharedStatus.sceneManifestSha256 !== stage.sceneManifestSha256 || sharedStatus.scenes.length !== stage.jobs.length || sharedStatus.scenes.some((scene, index) => scene.sceneId !== stage.jobs[index]?.sceneId || scene.ordinal !== index || scene.requestManifestSha256 !== stage.jobs[index]?.requestManifestSha256 || scene.state !== "verified" || !scene.output)))
+        throw new Error("Shared H3 batch does not have the complete ordered verified scene set");
+    const verified = await Promise.all(stage.jobs.map(async (staged, index) => {
+        const expectedClipKey = planWeekPreparedFootageClipKey({ ...input, index });
+        const expectedFirstFrameKey = planWeekPreparedH3FirstFrameKey({ ...input, index });
+        if (staged.output.r2Key !== expectedClipKey || staged.studioFirstFrame.r2Key !== expectedFirstFrameKey ||
+            !/^[a-z0-9]{8,64}$/.test(staged.engineJobId) || !/^[a-f0-9]{64}$/.test(staged.requestManifestSha256) ||
+            !/^[a-f0-9]{64}$/.test(staged.studioFirstFrame.sha256) ||
+            !/^projects\/youtube-studio-ai\/inputs\/sha256\/[a-f0-9]{64}\.(?:png|jpg)$/.test(staged.engineFirstFrame.r2Key) ||
+            !/^[a-f0-9]{64}$/.test(staged.engineFirstFrame.sha256)) {
+            throw new Error("Engine H3 staged job binding is invalid");
+        }
+        if (sharedStatus) {
+            const scene = sharedStatus.scenes[index]!;
+            const output = await getH3SceneOutputInRenderEngine(engine, stage.sharedBatchJobId!, staged.sceneId);
+            if (!scene.output || scene.output.sha256 !== output.sha256 || scene.output.bytes !== output.bytes || scene.output.key !== output.key || scene.output.verifiedAt !== output.verifiedAt)
+                throw new Error("Shared H3 independent scene readback changed");
+            return { staged: { ...staged, engineJobId: scene.output.jobId }, output };
+        }
+        const [status, output] = await Promise.all([getH3JobStatusInRenderEngine(engine, staged.engineJobId), getVerifiedH3OutputReadbackInRenderEngine(engine, staged.engineJobId)]);
+        if (status.status !== "completed" || status.outputRetired || !status.output || status.output.sha256 !== output.sha256 ||
+            status.output.bytes !== output.bytes || status.output.key !== output.key || status.output.bucket !== output.bucket ||
+            status.output.contentType !== output.contentType || status.output.verifiedAt !== output.verifiedAt || output.contentType !== "video/mp4") {
+            throw new Error("Engine H3 job is not a current verified completion");
+        }
+        return { staged, output };
+    }));
+    const clips: PlanWeekPreparedFootage["clips"] = [];
+    const engineH3Jobs: NonNullable<PlanWeekPreparedFootage["engineH3Jobs"]> = [];
+    for (const { staged, output } of verified) {
+        const video = await fetchExactVideo(output.url, output.bytes, output.sha256);
+        await persistPreparedResult(staged.output.r2Key, video, "video/mp4", { "render-engine-h3-job": staged.engineJobId, "render-engine-h3-sha256": output.sha256 });
+        const retained = await getObjectBytes(staged.output.r2Key, undefined, { maxBytes: output.bytes, timeoutMs: 300000 });
+        if (retained.byteLength !== output.bytes || sha256BytesHex(retained) !== output.sha256) {
+            throw new Error("Studio R2 clip does not match the verified Engine output");
+        }
+        clips.push({ r2Key: staged.output.r2Key, sha256: output.sha256, byteLength: output.bytes, durationSec: MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps });
+        engineH3Jobs.push({ sceneId: staged.sceneId, jobId: staged.engineJobId, requestManifestSha256: staged.requestManifestSha256,
+            firstFrame: staged.studioFirstFrame, output: { bucket: output.bucket, key: output.key, sha256: output.sha256, byteLength: output.bytes, verifiedAt: output.verifiedAt } });
     }
-    const [status, output] = await Promise.all([getH3JobStatusInRenderEngine(engine, staged.engineJobId), getVerifiedH3OutputReadbackInRenderEngine(engine, staged.engineJobId)]);
-    if (status.status !== "completed" || status.outputRetired || !status.output || status.output.sha256 !== output.sha256 ||
-        status.output.bytes !== output.bytes || status.output.key !== output.key || status.output.bucket !== output.bucket ||
-        status.output.contentType !== output.contentType || status.output.verifiedAt !== output.verifiedAt || output.contentType !== "video/mp4") {
-      throw new Error("Engine H3 job is not a current verified completion");
-    }
-    return { staged, output };
-  }));
-  const clips: PlanWeekPreparedFootage["clips"] = [];
-  const engineH3Jobs: NonNullable<PlanWeekPreparedFootage["engineH3Jobs"]> = [];
-  for (const { staged, output } of verified) {
-    const video = await fetchExactVideo(output.url, output.bytes, output.sha256);
-    await persistPreparedResult(staged.output.r2Key, video, "video/mp4", { "render-engine-h3-job": staged.engineJobId, "render-engine-h3-sha256": output.sha256 });
-    const retained = await getObjectBytes(staged.output.r2Key, undefined, { maxBytes: output.bytes, timeoutMs: 300_000 });
-    if (retained.byteLength !== output.bytes || sha256BytesHex(retained) !== output.sha256) {
-      throw new Error("Studio R2 clip does not match the verified Engine output");
-    }
-    clips.push({ r2Key: staged.output.r2Key, sha256: output.sha256, byteLength: output.bytes, durationSec: MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps });
-    engineH3Jobs.push({ sceneId: staged.sceneId, jobId: staged.engineJobId, requestManifestSha256: staged.requestManifestSha256,
-      firstFrame: staged.studioFirstFrame, output: { bucket: output.bucket, key: output.key, sha256: output.sha256, byteLength: output.bytes, verifiedAt: output.verifiedAt } });
-  }
-  const durationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
-  const prepared: PlanWeekPreparedFootage = {
-    version: "plan-week-prepared-footage/v1", manifestSha256: stage.manifestSha256, ownerId: input.ownerId, channelId: stage.channelId,
-    batchId: input.batchId, itemId: input.itemId, requestKey: stage.requestKey, topic: manifest.plan.topic,
-    generatedFootageSceneManifest: { version: "generated-footage-scene-manifest/v1", source: "story_spine", exactOrder: true,
-      durationSec: durationSec * clips.length, items: clips.map((clip, index) => ({ sceneId: stage.jobs[index]!.sceneId, clipKey: clip.r2Key, t0: durationSec * index, t1: durationSec * (index + 1) })) },
-    clips, renderer: { kind: "render-engine-h3", projectName: "youtube-studio-ai", workflowId: stage.engine.workflowId, profileRevisionSha256: stage.engine.profileRevisionSha256 }, engineH3Jobs, createdAt: Date.now(),
-  };
-  const checked = assertPlanWeekPreparedFootageBinding({ prepared, manifest });
-  const key = planWeekPreparedFootageKey(input);
-  await persistPreparedResult(key, new TextEncoder().encode(canonicalJson(checked)), "application/json", { "plan-week-prepared-footage": checked.version });
-  return key;
+    const durationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+    const prepared: PlanWeekPreparedFootage = {
+        version: "plan-week-prepared-footage/v1", manifestSha256: stage.manifestSha256, ownerId: input.ownerId, channelId: stage.channelId,
+        batchId: input.batchId, itemId: input.itemId, requestKey: stage.requestKey, topic: manifest.plan.topic,
+        generatedFootageSceneManifest: { version: "generated-footage-scene-manifest/v1", source: "story_spine", exactOrder: true,
+            durationSec: durationSec * clips.length, items: clips.map((clip, index) => ({ sceneId: stage.jobs[index]!.sceneId, clipKey: clip.r2Key, t0: durationSec * index, t1: durationSec * (index + 1) })) },
+        clips, renderer: { kind: "render-engine-h3", projectName: "youtube-studio-ai", workflowId: stage.engine.workflowId, profileRevisionSha256: stage.engine.profileRevisionSha256 }, engineH3Jobs, createdAt: Date.now(),
+    };
+    const checked = assertPlanWeekPreparedFootageBinding({ prepared, manifest });
+    const key = planWeekPreparedFootageKey(input);
+    await persistPreparedResult(key, new TextEncoder().encode(canonicalJson(checked)), "application/json", { "plan-week-prepared-footage": checked.version });
+    return key;
 }
 
 export const renderEngineH3MaterializePreparedFootageTask = task({ id: "render-engine-h3-materialize-prepared-footage", maxDuration: 1_800, retry: { maxAttempts: 1 },

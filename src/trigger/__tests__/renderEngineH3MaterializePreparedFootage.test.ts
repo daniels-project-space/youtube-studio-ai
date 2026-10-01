@@ -92,6 +92,10 @@ loader._load = function (name, ...args) {
       return { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
     },
   };
+  if (name === "@/lib/renderEngineH3SceneBatchClient") return {
+    getH3SceneBatchStatusInRenderEngine: async () => ({ manifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64), scenes: [{ sceneId: "shot-1", ordinal: 0, requestManifestSha256: "b".repeat(64), state: "verified", output: { jobId: "enginejob789", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, verifiedAt: 1999 } }] }),
+    getH3SceneOutputInRenderEngine: async () => ({ bucket: "render-engine-output", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1999, url: "https://example.test/enginejob789.mp4", expiresInSeconds: 3600 }),
+  };
   return originalLoad.call(this, name, ...args);
 };
 
@@ -129,6 +133,17 @@ async function main() {
     assert.equal(videoFetches, 0, "no completed scene is copied while another staged scene is not complete");
     assert.equal(objects.has(clipKey), false);
     assert.equal(objects.has(secondClipKey), false);
+    const shared = structuredClone(incomplete) as typeof incomplete & Record<string, unknown>;
+    shared.jobs = [shared.jobs[0]];
+    shared.version = "render-engine-h3-staged-footage/v2";
+    shared.sharedBatchJobId = "batchjob123";
+    shared.sharedBatchManifestSha256 = "e".repeat(64);
+    shared.sceneManifestSha256 = "f".repeat(64);
+    objects.set(stageKey.replace(".engine-h3-staged.json", ".engine-h3-shared-staged.json"), new TextEncoder().encode(canonicalJson(shared)));
+    await materializeRenderEngineH3PreparedFootage(scope);
+    assert.deepEqual(objects.get(clipKey), outputBytes, "shared family materializes independently verified repair child output");
+    assert.equal(videoFetches, 1);
+
   } finally {
     globalThis.fetch = originalFetch;
     if (previousToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
