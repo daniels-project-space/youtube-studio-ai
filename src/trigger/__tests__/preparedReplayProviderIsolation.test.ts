@@ -133,7 +133,10 @@ async function main() {
       recordModelUsage({ provider: "openrouter", model: "fixture", kind: "text", reportedCostUsd: 0.25 });
       return script;
     } };
-    if (id === "@/lib/studioPreparedErnieImages") return { ...actual as object, prepareStudioErnieImages: async () => ({ kind: "pending", state: "awaiting-image-geometry-approval", jobs: [] }) };
+    if (id === "@/lib/preparedResultStorage") return { ...actual as object, persistPreparedResult: async (key: string, ...values: unknown[]) => {
+      if (key.includes(".engine-ernie.")) { assert.ok(key.endsWith(".source.json"), "geometry pending may only freeze the source"); events.push("freeze:ernie-source"); return; }
+      return (actual as typeof import("../../lib/preparedResultStorage")).persistPreparedResult(key, ...values as [Uint8Array, string, Record<string, string>]);
+    } };
     if (id === "@/lib/novitaRenderFarm") return { ...actual as object, renderImages: stop };
     if (id === "@/lib/music") return { ...actual as object, generateMureka: stop, generateSuno: stop };
     if (id === "@/lib/tts") return { ...actual as object, synthNarration: stop };
@@ -194,6 +197,7 @@ async function main() {
     assert.equal(pending.pending, true);
     assert.equal(pending.state, "awaiting-image-geometry-approval");
     assert.ok(!events.includes("vault:novita"));
+    assert.ok(events.includes("freeze:ernie-source"));
     await tasks[3].run(payload);
     assert.equal(paidCalls, 1, "held Engine image intent cannot buy a wave");
     assert.equal(claims.size, 1);
