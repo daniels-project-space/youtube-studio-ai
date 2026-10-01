@@ -6,6 +6,7 @@ import { generationProfile } from "@/engine/generationProfiles";
 import { planWeekPreparedImagesKey, planWeekPreparedImageKey } from "@/lib/planWeekPreparation";
 import { STUDIO_ERNIE_CONTRACT, provisionStudioErnieWorkflow, stageStudioErnieBatch, readStudioErnieBatch, readStudioErnieOutputs, type ErnieRequest } from "@/lib/renderEngineErnieClient";
 import type { PlanWeekPreparedImagesArgs } from "@/trigger/planWeekPreparedImages";
+import { buildStudioErniePreservedPixelProposal } from "@/lib/studioErniePreservedPixelProposal";
 
 export const erniePreparedDependencies = { persist: persistPreparedResult, read: getObjectBytes,
   provision: provisionStudioErnieWorkflow, stage: stageStudioErnieBatch, readiness: readStudioErnieBatch, outputs: readStudioErnieOutputs };
@@ -22,13 +23,19 @@ export async function prepareStudioErnieImages(payload: PlanWeekPreparedImagesAr
     prompt: [payload.director, payload.style, shot.prompt, [payload.negative, shot.negative].filter(Boolean).length ? `Avoid: ${[payload.negative, shot.negative].filter(Boolean).join("; ")}` : undefined].filter(Boolean).join("\n"),
   })));
   if (candidates.some(c => !Number.isSafeInteger(c.seed) || c.seed < 0 || c.seed > 0xffffffff || c.prompt.length > 20_000)) throw new Error("Studio ERNIE candidate exceeds Engine limits");
+  const preservedPixelProposal = buildStudioErniePreservedPixelProposal({
+    profileId: profile.id === "hero" ? "hero" : "production", candidate: candidates[0]!, maxCostUsd: payload.maxCostUsd,
+  });
   const source = { version: "studio-ernie-source/v1", preparationManifestSha256: payload.manifestSha256,
     ownerId: payload.ownerId, channelId: payload.channelId, batchId: payload.batchId, itemId: payload.itemId,
-    requestedProfile: profile.id, requestedGeometry: { width: profile.image.width, height: profile.image.height }, maxCostUsd: payload.maxCostUsd, candidates };
+    requestedProfile: profile.id, requestedGeometry: { width: profile.image.width, height: profile.image.height }, maxCostUsd: payload.maxCostUsd, candidates,
+    preservedPixelQualificationProposal: preservedPixelProposal,
+  };
   await freeze(`${prefix}.source.json`, source);
   if (payload.approvedErnieNativeGeometry !== "1376x768") return {
     kind: "pending" as const, state: "awaiting-image-geometry-approval", sourceKey: `${prefix}.source.json`,
     requestedGeometry: source.requestedGeometry, availableGeometry: { width: 1376, height: 768 }, jobs: [],
+    preservedPixelQualification: { state: preservedPixelProposal.state, proposalSha256: sha256Hex(canonicalJson(preservedPixelProposal)), dispatchable: false },
   };
   const capability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
   const bucket = process.env.R2_BUCKET?.trim() ?? "";
