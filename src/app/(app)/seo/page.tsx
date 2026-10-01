@@ -25,7 +25,7 @@ type ChannelWithNiche = Pick<ChannelRow, "_id" | "name" | "slug"> & { niche: str
 
 type SeoSection = "brief" | "signals" | "strategy";
 
-export type SeoWorkspaceProps = {
+type SeoWorkspaceProps = {
   channelSlug?: string | null;
   embedded?: boolean;
   initialSection?: SeoSection;
@@ -76,7 +76,7 @@ function SeoRoute() {
   );
 }
 
-export function SeoWorkspace({
+function SeoWorkspace({
   channelSlug,
   embedded = false,
   initialSection = "brief",

@@ -12,6 +12,8 @@ import { listThumbnailRefreshInventory } from "@/lib/thumbnailRefreshRuntime";
 import { thumbnailRefreshRuntimeApi } from "@/lib/thumbnailRefreshRuntime";
 import {
   THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
+  candidatePreviewIds,
+  isThumbnailPreviewRunId,
   assertThumbnailRefreshCandidateDispatch,
   thumbnailRefreshCandidateApprovalSubject,
   thumbnailRefreshDispatchKey,
@@ -28,9 +30,6 @@ import {
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 export const runtime = "nodejs";
-
-const PREVIEW_RUN_ID = /^[A-Za-z0-9_-]{8,256}$/;
-const MAX_BATCHED_CANDIDATE_PREVIEWS = 6;
 
 /**
  * Candidate refresh is intentionally usable from the Library without an
@@ -86,15 +85,6 @@ async function thumbnailPreviewUrl(key: string): Promise<string> {
  * it already received from the public inventory, while this route keeps the
  * corresponding storage keys server-side.
  */
-export function candidatePreviewIds(value: string | null): string[] | null {
-  if (value === null) return null;
-  const ids = value.split(",").filter(Boolean);
-  if (!ids.length || ids.length > MAX_BATCHED_CANDIDATE_PREVIEWS || ids.some((id) => !PREVIEW_RUN_ID.test(id))) {
-    throw new Error("invalid candidate thumbnail preview batch");
-  }
-  return [...new Set(ids)];
-}
-
 async function reviewedErnieBatchPreview(input: {
   ownerId: string;
   inventory: Awaited<ReturnType<typeof listThumbnailRefreshInventory>>;
@@ -157,7 +147,7 @@ export async function GET(request: Request) {
       // owner-scoped inventory. Resolve the R2 key server-side; never let a
       // client supply or receive a storage locator.
       const requestedRunId = previewRunId ?? candidatePreviewRunId!;
-      if (!PREVIEW_RUN_ID.test(requestedRunId)) {
+      if (!isThumbnailPreviewRunId(requestedRunId)) {
         return NextResponse.json({ ok: false, error: "invalid thumbnail preview request" }, { status: 400 });
       }
       const item = candidatePreviewRunId

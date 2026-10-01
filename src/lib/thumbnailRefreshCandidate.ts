@@ -3,6 +3,22 @@ import { sha256Hex } from "@/lib/sha256";
 
 export const THUMBNAIL_REFRESH_MAXIMUM_COST_USD = 0.4;
 export const THUMBNAIL_REFRESH_DISPATCH_VERSION = "thumbnail-refresh-candidate/v1";
+export const MAX_BATCHED_CANDIDATE_PREVIEWS = 6;
+
+const PREVIEW_RUN_ID = /^[A-Za-z0-9_-]{8,256}$/;
+
+export function isThumbnailPreviewRunId(value: string): boolean {
+  return PREVIEW_RUN_ID.test(value);
+}
+
+export function candidatePreviewIds(value: string | null): string[] | null {
+  if (value === null) return null;
+  const ids = value.split(",").filter(Boolean);
+  if (!ids.length || ids.length > MAX_BATCHED_CANDIDATE_PREVIEWS || ids.some((id) => !isThumbnailPreviewRunId(id))) {
+    throw new Error("invalid candidate thumbnail preview batch");
+  }
+  return [...new Set(ids)];
+}
 
 export type ThumbnailRefreshCandidateDispatch = Readonly<{
   version: typeof THUMBNAIL_REFRESH_DISPATCH_VERSION;

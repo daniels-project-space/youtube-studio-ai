@@ -21,7 +21,7 @@ import {
 export const runtime = "nodejs";
 
 const BASE = process.env.OAUTH_REDIRECT_BASE ?? "https://youtube-studio-ai.vercel.app";
-export const REDIRECT_URI = `${BASE}/api/youtube-callback`;
+const REDIRECT_URI = `${BASE}/api/youtube-callback`;
 
 export async function GET(request: NextRequest) {
   const channelId = new URL(request.url).searchParams.get("channelId");
