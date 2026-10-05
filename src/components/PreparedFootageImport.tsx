@@ -24,13 +24,13 @@ export function PreparedFootageImport() {
       setMessage(error instanceof Error ? error.message : "Could not request footage import.");
     } finally { setBusy(false); }
   }
-  return <section>
+  return <section className="studio-panel" style={{ padding: "1.5rem", marginTop: "1.5rem", maxWidth: "42rem" }}>
     <h2>Import completed prepared footage</h2>
     <p>Use the channel, batch, and item identifiers from your prepared plan after its scenes finish in Render Engine.</p>
     <form onSubmit={(event) => void submit(event)}>
       {[["channelSlug", "Channel slug"], ["batchId", "Batch ID"], ["itemId", "Item ID"]].map(([name, label]) =>
-        <label key={name} style={{ display: "block", marginBottom: "0.75rem" }}>{label} <input name={name} required maxLength={160} pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,159}" disabled={busy} /></label>)}
-      <button type="submit" disabled={busy}>{busy ? "Requesting import…" : "Verify and import completed footage"}</button>
+        <label key={name} style={{ display: "block", marginBottom: "0.75rem" }}>{label} <input style={{ display: "block", width: "100%", border: "1px solid rgba(255,255,255,0.25)", borderRadius: "0.5rem", padding: "0.6rem", marginTop: "0.3rem", background: "rgba(255,255,255,0.04)" }} name={name} required maxLength={160} pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,159}" disabled={busy} /></label>)}
+      <button className="studio-action studio-action-primary" type="submit" disabled={busy}>{busy ? "Requesting import…" : "Verify and import completed footage"}</button>
     </form>
     <p role="status">{message}</p>
   </section>;
