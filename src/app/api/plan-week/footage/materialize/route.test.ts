@@ -3,7 +3,7 @@ import Module from "node:module";
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
 const original = loader._load;
 let authorized = true;
-let calls: unknown[][] = [];
+const calls: unknown[][] = [];
 class AuthError extends Error { status = 403; }
 loader._load = function (name, ...args) {
   if (name === "@/lib/operatorSession") return { StudioAuthError: AuthError, requireStudioActor: async () => {
