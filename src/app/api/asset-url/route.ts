@@ -72,12 +72,10 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, max-age=600" } },
       );
     }
-    // Keep private video playback same-origin as well. R2's signed response
-    // can carry a restrictive cross-origin resource policy, which makes a
-    // browser-side <video> used for the truthful Lo-Fi 15-second fallback
-    // fail with ORB even though the object itself is valid. The proxy forwards
-    // byte ranges and streams the provider body; it never materialises a full
-    // master in the Next request.
+    // Keep a stable ownership-checked video signing URL. It redirects native
+    // playback directly to private R2, whose exact-origin CORS policy and
+    // anonymous video requests are qualified together. JSON range probes
+    // remain here on the app's origin; video bytes never pass through Vercel.
     if (isInlineVideo(key)) {
       return NextResponse.json(
         { url: `/api/asset-video?key=${encodeURIComponent(key)}` },
