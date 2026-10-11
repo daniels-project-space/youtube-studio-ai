@@ -277,6 +277,7 @@ export function MediaPreview({
       {selection.src && showingVideoStill && (
         <video
           ref={videoRef}
+          crossOrigin="anonymous"
           className={joinClassNames(styles.image, imageClassName)}
           src={videoSourceReady ? selection.src : undefined}
           muted

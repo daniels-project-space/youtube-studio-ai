@@ -69,8 +69,8 @@ test("abandoning aggregate proof cancels all three in-flight reads with no retry
   assert.equal(f.signs(), 1);
 });
 
-test("abandoning retry backoff cancels the real timer and prevents fallback", async () => {
-  for (const probe of [false, true]) {
+test("abandoning probe retry backoff cancels the real timer", async () => {
+  for (const probe of [true]) {
     const controller = new AbortController();
     let reads = 0;
     let bodiesCancelled = 0;
@@ -90,29 +90,22 @@ test("abandoning retry backoff cancels the real timer and prevents fallback", as
   }
 });
 
-test("active viewers retain range retries and full-source fallback, whose stream stays abortable", async () => {
-  const controller = new AbortController();
-  const ranges: (string | null)[] = [];
-  let storageSignal: AbortSignal | undefined;
-  const f = fixture(async (_url, init) => {
-    ranges.push(new Headers(init?.headers).get("range"));
-    if (ranges.length < 3) return new Response(null, { status: 404 });
-    storageSignal = init!.signal!;
-    return new Response(new ReadableStream({ start(stream) {
-      stream.enqueue(new Uint8Array([1, 2, 3]));
-      storageSignal!.addEventListener("abort", () => stream.error(storageSignal!.reason), { once: true });
-    } }), { status: 200, headers: { "content-type": "video/mp4", etag: "unchanged-master" } });
-  });
-  const response = await f.get(controller.signal, false, "bytes=100-200");
-  assert.deepEqual(ranges, ["bytes=100-200", "bytes=100-200", null]);
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("etag"), "unchanged-master");
-  const reader = response.body!.getReader();
-  assert.deepEqual((await reader.read()).value, new Uint8Array([1, 2, 3]));
-  controller.abort();
-  assert.equal(storageSignal!.aborted, true);
-  await assert.rejects(reader.read(), { name: "AbortError" });
+test("playback and seeking sign a private redirect without fetching any media", async () => {
+  const f = fixture(async () => { throw new Error("Vercel must not fetch playback bytes"); });
+  for (const range of [undefined, "bytes=100-200", "bytes=1048576-"]) {
+    const response = await f.get(new AbortController().signal, false, range);
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "https://storage.invalid/video");
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(response.body, null);
+  }
   assert.equal(f.signs(), 3);
+});
+
+test("a probe cannot request an arbitrary large media range", async () => {
+  const f = fixture(async () => { throw new Error("Unexpected storage read"); });
+  assert.equal((await f.get(new AbortController().signal, true, "bytes=0-999999")).status, 400);
+  assert.equal(f.signs(), 0);
 });
 
 test("active proof preserves all three range checks and five-wave failure boundary", async () => {
@@ -135,7 +128,7 @@ test("active proof preserves all three range checks and five-wave failure bounda
   }
 });
 
-test("real HTTP storage transfer closes when a streaming preview is abandoned", { timeout: 5000 }, async () => {
+test("real HTTP probe closes its storage stream without relaying it", { timeout: 5000 }, async () => {
   let closed!: () => void;
   const storageClosed = new Promise<void>(resolve => { closed = resolve; });
   const server = createServer((_request, response) => {
@@ -148,12 +141,9 @@ test("real HTTP storage transfer closes when a streaming preview is abandoned", 
   try {
     const port = (server.address() as AddressInfo).port;
     const f = fixture(fetch, undefined, async () => `http://127.0.0.1:${port}/master.mp4`);
-    const response = await f.get(controller.signal, false, "bytes=0-999999");
-    assert.equal(response.status, 206);
-    const reader = response.body!.getReader();
-    assert.equal((await reader.read()).value!.byteLength, 1024);
-    controller.abort();
-    await assert.rejects(reader.read(), { name: "AbortError" });
+    const response = await f.get(controller.signal, true, "bytes=0-0");
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { available: true });
     await storageClosed;
     assert.equal(f.signs(), 1);
   } finally {
