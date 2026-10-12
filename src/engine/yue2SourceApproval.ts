@@ -8,14 +8,14 @@ const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
 export const YuE2SourceApprovalBasisSchema = z.object({
   ownerId: id, channelId: id, runId: id, invocationSha256: hash,
   candidateSha256: hash, arrangementFingerprint: hash,
-  jobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
+  jobId: z.string().regex(/^(?:yue2-eval-[a-f0-9]{64}|[a-z0-9]{32})$/u),
   listeningAudioKey: z.string(), listeningAudioSha256: hash,
   nativeFrames: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   sampleRateHz: z.literal(48000), channels: z.literal(2),
   sectionIds: z.array(z.string().min(1).max(80)).min(1).max(16),
   technicalStatus: z.literal("needs_audition"), contextRetained: z.literal(true),
 }).strict().superRefine((value, ctx) => {
-  const root = `owner/${value.ownerId}/runs/${value.runId}/music/yue2-evaluation/`;
+  const root = `owner/${value.ownerId}/runs/${value.runId}/music/${/^[a-z0-9]{32}$/.test(value.jobId) ? "yue2-engine" : "yue2-evaluation"}/`;
   if (![`${root}audio-native-${value.listeningAudioSha256}.wav`,
     `${root}audio-headroom-${value.listeningAudioSha256}.wav`].includes(value.listeningAudioKey) ||
     new Set(value.sectionIds).size !== value.sectionIds.length) {

@@ -34,6 +34,16 @@ try {
     assert.equal(modules.find(module => module.id === (family === "music_loop" ? "assemble" : "timeline_assemble"))?.version,
       playback === "once" ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop");
     assert.deepEqual(result.pipeline.find(entry => entry.block === "music")?.params, sourceParams);
+    const engineParams = { renderer: "render-engine" as const, seed: 42, personalCreatorAcknowledged: true,
+      maxCostUsd: 1, maxExecutionSeconds: 600 };
+    const engineSelection = { ...chosen, sourceParams: engineParams };
+    const native = designPipeline({ ...opts, yue2Music: engineSelection });
+    assert.equal(native.compilation!.modules.find(module => module.id === "music")?.version, "4.0.0-yue2-engine-candidate");
+    assert.deepEqual(native.pipeline.find(entry => entry.block === "music")?.params, engineParams);
+    assert.deepEqual(selectYuE2Pipeline(native.pipeline, engineSelection), native.pipeline);
+    assert.equal(native.compilation!.bindings.music.acceptedMusicArrangement, "music_arrangement_plan:acceptedMusicArrangement");
+    assert.ok(Math.abs(native.compilation!.reservedMaxCostUsd - result.compilation!.reservedMaxCostUsd - .96) < 1e-8);
+    assert.equal(native.productionReady, false, "Engine transport does not qualify musical output");
     assert.deepEqual(result.pipeline.find(entry => entry.block === "composer_brief")?.params?.musicIntent, chosen.musicIntent);
     assert.equal(result.pipeline.filter(entry => entry.block === "music_arrangement_plan").length, 1);
     if (family === "music_loop") {

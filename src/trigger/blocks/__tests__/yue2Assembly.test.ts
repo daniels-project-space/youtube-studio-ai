@@ -82,8 +82,8 @@ loader._load = function (id, ...args) {
     }
     async mutation(ref: Parameters<typeof getFunctionName>[0]) { assert.equal(getFunctionName(ref), "assets:recordAsset"); }
   } };
-  if (id.endsWith("/yue2DurableEvaluation")) return {
-    readDurableYuE2Candidate: async () => { durableReads++; return structuredClone(currentMaterial); },
+  if (id.endsWith("/currentYuE2Source")) return {
+    readCurrentYuE2Candidate: async () => { durableReads++; return structuredClone(currentMaterial); },
     executeDurableYuE2Evaluation: async () => { throw new Error("Adoption must never generate"); },
   };
   if (id.endsWith("/storage")) return {

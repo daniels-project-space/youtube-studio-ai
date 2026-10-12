@@ -8,7 +8,7 @@ import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangemen
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { YuE2SourceApprovalSchema } from "@/engine/yue2SourceApproval";
 import { StudioConvexHttpClient } from "./studioConvexHttpClient";
-import { readDurableYuE2Candidate } from "./yue2DurableEvaluation";
+import { readCurrentYuE2Candidate } from "./currentYuE2Source";
 import { getStudioPrivateBucket } from "./studioPrivateStorage";
 import { getObjectBytes } from "./storage";
 import { selfLoopAudio } from "./music";
@@ -57,7 +57,7 @@ export async function verifyApprovedYuE2Source(ctx: StageContext, playback: "rep
     basis.nativeFrames !== candidate.nativeFrames || canonicalJson(basis.sectionIds) !== canonicalJson(arrangement.arrangement.sections.map(section => section.id))) {
     throw new Error("YuE2 approval does not bind this exact source");
   }
-  const material = await readDurableYuE2Candidate(scope);
+  const material = await readCurrentYuE2Candidate(scope);
   if (!material || material.candidateSha256 !== candidate.candidateSha256 || material.quality.status !== "needs_audition" ||
     material.candidate.nativeOutput.frames !== candidate.nativeFrames ||
     (material.candidate.headroom?.audioSha256 ?? material.candidate.audioSha256) !== candidate.listeningAudioSha256 ||

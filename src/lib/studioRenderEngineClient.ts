@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalJson } from "./canonicalJson";
 import { StudioZImageRequestSchema, STUDIO_ZIMAGE_PROFILE_SHA256, type StudioZImageRequest } from "../engine/studioZImageRequest";
+import { StudioYuE2ScoredRequestSchema } from "../engine/studioYuE2EngineSource";
 import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_ZIMAGE_WORKFLOW, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 export { STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 const BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
@@ -123,9 +124,20 @@ export class StudioRenderEngineClient {
     if (workflowId !== registered.workflowId || request.profileRevisionSha256 !== registered.profileRevisionSha256) {
       throw new Error("Audio submission must use the registered Studio workflow and its pinned model revision");
     }
+    if (model === "yue2" && request.version === 2) {
+      const parsed = StudioYuE2ScoredRequestSchema.parse(request);
+      if (parsed.abcSha256 !== createHash("sha256").update(parsed.abc).digest("hex") ||
+          Buffer.byteLength(JSON.stringify({ workflowId, request })) > 96000) throw new Error("Scored source bytes/hash exceed the Engine contract");
+    }
     // Do not retry, rewrite fields or manufacture an alternate key after an ambiguous POST.
     const value = await this.request(nativeRoutes[model], { workflowId, request }, true);
-    try { return Admission.parse(value); }
+    try {
+      const admitted = Admission.parse(value);
+      if (model === "yue2" && request.version === 2 && admitted.manifestSha256 !== createHash("sha256").update(JSON.stringify(request)).digest("hex")) {
+        throw new Error("Scored source admission digest changed");
+      }
+      return admitted;
+    }
     catch { throw new StudioEngineError(null, true); }
   }
 

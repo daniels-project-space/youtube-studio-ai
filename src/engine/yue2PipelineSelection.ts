@@ -4,6 +4,7 @@ import { getManifest } from "./registry";
 import { canonicalJson } from "@/lib/canonicalJson";
 import type { PipelineEntry } from "./types";
 import { YuE2SourceConfigSchema } from "./yue2SourceConfig";
+import { YuE2EngineSourceConfigSchema } from "./studioYuE2EngineSource";
 
 export interface YuE2PipelineSelection {
   musicIntent: MusicArrangementIntent & Required<Pick<MusicArrangementIntent, "playback" | "role" | "requestedDurationSec">>;
@@ -16,13 +17,13 @@ export const YuE2PipelineSelectionSchema = z.object({
     playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
     requestedDurationSec: z.number().int().min(10).max(300),
   })),
-  sourceParams: YuE2SourceConfigSchema,
+  sourceParams: z.union([YuE2SourceConfigSchema, YuE2EngineSourceConfigSchema]),
 }).strict();
 
 /** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
 export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
   const selected = YuE2PipelineSelectionSchema.parse(input);
-  const musicVersion = "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
+  const musicVersion = "renderer" in selected.sourceParams ? "4.0.0-yue2-engine-candidate" : "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
   const sourceParams = selected.sourceParams;

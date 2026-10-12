@@ -394,3 +394,27 @@ is below its compiled default reservation. No budget was raised, pricing
 understated, or quality requirement removed to hide that failure. Still-image
 execution and the remaining native music/speech qualification work are not
 complete. Scheduling remains disabled; this integration branch is not live.
+
+## Shared scored-music Engine source
+
+The current shared `music` module is now version 4.0.0-yue2-engine-candidate.
+It submits the composer-owned accepted ABC and retained channel context to
+the isolated youtube-studio-render workflow, with explicit OpenRelay RTX 3090,
+cost and execution-window constraints. Five channel-family/playback selections
+compile with the new version; existing explicitly pinned pipelines are not
+rewritten. Historical v3 candidates remain readable, but v3 cannot generate.
+
+The durable bridge retains one admission, actual Engine usage, all six hashed
+native sidecars and original 48 kHz stereo FLOAT WAV in private project R2.
+Recovery observes the same job, never a substitute or legacy supervisor.
+Authorization is checked before execution, evidence writes and candidate
+publication. A linear attenuation-only derivative may supply listening
+headroom; original source bytes and exact frame count remain retained.
+Review and approved assembly consume either verified historical sources or
+this new immutable source. Musical quality still needs audition; technical
+success cannot grant production approval or claim a verified provider invoice.
+
+Focused source/module/selection/assembly checks use real FFmpeg/ffprobe and
+mocked provider/storage transports. They do not qualify GPU generation or
+channel personality. The Engine scored-source backend release and a genuine
+new-channel render remain required. No schedule or paid render was started.

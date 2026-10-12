@@ -1,5 +1,6 @@
-import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { wait } from "@trigger.dev/sdk/v3";
+import { YuE2SourceConfigSchema } from "@/engine/yue2SourceConfig";
+import { YuE2EngineSourceConfigSchema } from "@/engine/studioYuE2EngineSource";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { ExecutionError } from "@/engine/executionErrors";
@@ -7,98 +8,75 @@ import { manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
-import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
+import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
+import { executeYuE2EngineSource } from "@/lib/yue2EngineSource";
+import { StudioRenderEngineClient } from "@/lib/studioRenderEngineClient";
 import { musicProgramForCurrentRoute } from "./blockContext";
 
-export const YUE2_MUSIC_CANDIDATE_VERSION = "3.0.0-yue2-candidate";
-
+export const YUE2_MUSIC_CANDIDATE_VERSION = "4.0.0-yue2-engine-candidate";
 function hold(reason: string, charge?: number): Error {
-  return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 ${reason}; recover the same job, never regenerate`,
-    { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false }),
-  charge === undefined ? {} : { additionalObservedCostUsd: charge });
+  return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 ${reason}; recover the same immutable source, never regenerate`,
+    { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false }), charge === undefined ? {} : { additionalObservedCostUsd: charge });
 }
-
+function currentArrangement(ctx: Parameters<Block["run"]>[0]) {
+  const program = musicProgramForCurrentRoute(ctx, String(ctx.store["topic"]));
+  if (program && program.audio.providerPreference !== "yue2") throw new Error("YuE2 requires the sealed channel provider choice");
+  const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+  if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId || arrangement.runId !== ctx.runId ||
+      arrangement.topic !== ctx.store["topic"] || !arrangement.symbolicScore || !arrangement.reviewContext) throw new Error("YuE2 requires the current run's accepted score and channel context");
+  return arrangement;
+}
 const block: Block & { version: string } = {
   id: "music", version: YUE2_MUSIC_CANDIDATE_VERSION,
   consumes: ["topic", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate"], paid: true,
   run: async ctx => {
-    const params = config.parse(ctx.params);
-    const program = musicProgramForCurrentRoute(ctx, String(ctx.store["topic"]));
-    if (program && program.audio.providerPreference !== "yue2") {
-      throw new Error("YuE2 music requires a sealed YuE2 program; a legacy provider choice cannot be overwritten");
-    }
-    const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
-    if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
-      arrangement.runId !== ctx.runId || arrangement.topic !== ctx.store["topic"] ||
-      !arrangement.symbolicScore || !arrangement.reviewContext) {
-      throw new Error("YuE2 music requires the current run's scored arrangement and retained channel context");
-    }
+    const params = YuE2EngineSourceConfigSchema.parse(ctx.params), arrangement = currentArrangement(ctx);
     if (!Number.isFinite(ctx.budgetUsd) || ctx.budgetUsd < params.maxCostUsd ||
-      !Number.isFinite(ctx.stageBudgetUsd) || ctx.stageBudgetUsd! < params.maxCostUsd || !ctx.assertInlinePaidExecutionLease) {
-      throw new Error("YuE2 music requires a finite run/stage reservation and active execution authority");
-    }
-    const request = createYuE2AcceptedArrangementRequest({ arrangement, seed: params.seed, personalCreatorAcknowledged: true });
-    const input = {
-      request, endpoint: process.env.YUE2_EVALUATION_URL ?? "", bearerToken: process.env.YUE2_EVALUATION_TOKEN ?? "",
-      expectedExecutionPolicy: params.executionPolicy,
-      authorizeSubmission: ctx.assertInlinePaidExecutionLease,
-    };
-    validateDurableYuE2Evaluation(input);
+        !Number.isFinite(ctx.stageBudgetUsd) || ctx.stageBudgetUsd! < params.maxCostUsd || !ctx.assertInlinePaidExecutionLease) throw new Error("YuE2 Engine needs finite run/stage reservations and active authority");
+    const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
     await bootstrapSecrets(() => undefined, { services: ["cloudflare"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] });
-    let charge: number | undefined;
     try {
-      let result = await executeDurableYuE2Evaluation(input);
-      const checks = Math.ceil((params.executionPolicy.max_execution_seconds + params.executionPolicy.termination_grace_seconds) / 120) + 2;
-      for (let index = 0; result.status === "pending" && index < checks; index++) {
-        ctx.log(`music: YuE2 source ${result.jobId} pending; recovering the same job`);
-        await wait.for({ seconds: 120, idempotencyKey: `${request.job.job_id}:music-source-wait:${index}` });
-        result = await executeDurableYuE2Evaluation({ ...input, recoverOnly: true });
-      }
-      if (result.status === "held") charge = result.executionAccounting.allocatedCostUsdMicros / 1_000_000;
-      if (result.status !== "completed") throw hold(result.status, charge);
-      if (result.candidate.version !== "studio-yue2-durable-candidate/v2") throw hold("missing supervised accounting");
-      charge = result.candidate.executionAccounting.allocatedCostUsdMicros / 1_000_000;
-      const material = await readDurableYuE2Candidate({ ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId });
-      if (!material || canonicalJson(material.request) !== canonicalJson(request) ||
-        canonicalJson(material.candidate) !== canonicalJson(result.candidate) || charge > params.maxCostUsd) {
-        throw hold("candidate, request or allocation mismatch", charge);
-      }
-      const candidate = material.candidate;
-      const yue2MusicCandidate = YuE2MusicCandidateSchema.parse({
-        version: "shared-yue2-music-candidate/v1", ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
-        arrangementFingerprint: arrangement.fingerprint, jobId: request.job.job_id,
-        candidateSha256: material.candidateSha256, candidateKey: result.candidateKey,
-        listeningAudioKey: material.listeningAudioKey,
-        listeningAudioSha256: candidate.headroom?.audioSha256 ?? candidate.audioSha256,
-        nativeFrames: candidate.nativeOutput.frames, sampleRateHz: 48000, channels: 2,
-        technicalStatus: material.quality.status,
-        allocatedCostUsdMicros: candidate.executionAccounting.allocatedCostUsdMicros,
-        costBasis: "supervised_dispatch_wall_time", providerBilledCostUsdMicros: null, productionApproved: false,
-      });
-      ctx.log(`music: retained YuE2 candidate (${material.quality.status}); allocation estimate $${charge.toFixed(6)}, provider bill unknown`);
-      return { yue2MusicCandidate, [COST_PATCH_KEY]: charge };
+      const material = await executeYuE2EngineSource(arrangement, params, { client, authorize: ctx.assertInlinePaidExecutionLease,
+        wait: async (seconds, key) => { ctx.log("music: Engine source pending; observing its original admission"); await wait.for({ seconds, idempotencyKey: key }); } });
+      const c = material.candidate;
+      if (canonicalJson(material.request.acceptedArrangement) !== canonicalJson(arrangement)) throw hold("accepted arrangement changed", c.usage.costUsd);
+      const yue2MusicCandidate = YuE2MusicCandidateSchema.parse({ version: "shared-yue2-music-candidate/v2", ownerId: ctx.ownerId,
+        channelId: ctx.channelId, runId: ctx.runId, arrangementFingerprint: arrangement.fingerprint, jobId: c.jobId,
+        candidateSha256: material.candidateSha256, candidateKey: `owner/${ctx.ownerId}/runs/${ctx.runId}/music/yue2-engine/candidate.json`,
+        listeningAudioKey: material.listeningAudioKey, listeningAudioSha256: c.headroom?.audioSha256 ?? c.audioSha256,
+        nativeFrames: c.nativeOutput.frames, sampleRateHz: 48000, channels: 2, technicalStatus: material.quality.status,
+        costUsd: c.usage.costUsd, gpuSeconds: c.usage.gpuSeconds, costBasis: "engine-reported-usage", providerInvoiceVerified: false, productionApproved: false });
+      ctx.log(`music: retained Engine source (${material.quality.status}); usage $${c.usage.costUsd.toFixed(6)}, provider invoice not independently verified`);
+      return { yue2MusicCandidate, [COST_PATCH_KEY]: c.usage.costUsd };
     } catch (error) {
       if (error instanceof ExecutionError) throw error;
-      if (error instanceof YuE2EvaluationError && error.code === "worker_rejected_invalid_job") {
-        throw new ExecutionError("PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 worker rejected the frozen score/request before queue admission; review inputs explicitly, same-job retries cannot repair this refusal",
-          { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false });
-      }
-      throw hold("source execution or retained verification requires reconciliation", charge);
+      throw hold("Engine generation or retained evidence requires reconciliation", (error as { additionalObservedCostUsd?: number }).additionalObservedCostUsd);
     }
   },
 };
-
-/** Explicit shared-module source version; no old provider, assembly or release fallback. */
-export function createYuE2MusicManifest() {
-  const manifest = manifestFromBlock(block, {
-    version: block.version,
-    capabilities: ["audio.music_candidate"], requiredCapabilities: ["music.arrangement.accepted"],
-    optionalConsumes: ["channelProgramRoute", "musicProgramPlan"],
-    providerProfiles: [{ id: "yue2-native-v1", provider: "openrelay", quality: "production", allowFallback: false }],
-    maxCostUsd: 1, maxCostUsdFor: params => config.parse(params).maxCostUsd, maxLatencySec: 1800,
-    certification: "contract", qualityRequired: true,
-    certificationEvidence: "Opt-in native source generation/recovery and private candidate handoff; not musical or production qualification.",
+/** Historical data stays readable; this retired version cannot admit new generation. */
+const legacyBlock: typeof block = { ...block, version: "3.0.0-yue2-candidate", run: async ctx => {
+  YuE2SourceConfigSchema.parse(ctx.params);
+  const arrangement = currentArrangement(ctx), material = await readDurableYuE2Candidate({ ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId });
+  if (!material || canonicalJson(material.request.acceptedArrangement) !== canonicalJson(arrangement)) throw hold("legacy generation is retired; use a new Engine pipeline/run");
+  const c = material.candidate;
+  return { yue2MusicCandidate: YuE2MusicCandidateSchema.parse({ version: "shared-yue2-music-candidate/v1", ownerId: ctx.ownerId,
+    channelId: ctx.channelId, runId: ctx.runId, arrangementFingerprint: arrangement.fingerprint, jobId: c.jobId,
+    candidateSha256: material.candidateSha256, candidateKey: `owner/${ctx.ownerId}/runs/${ctx.runId}/music/yue2-evaluation/candidate.json`,
+    listeningAudioKey: material.listeningAudioKey, listeningAudioSha256: c.headroom?.audioSha256 ?? c.audioSha256,
+    nativeFrames: c.nativeOutput.frames, sampleRateHz: 48000, channels: 2, technicalStatus: material.quality.status,
+    allocatedCostUsdMicros: c.executionAccounting.allocatedCostUsdMicros, costBasis: "supervised_dispatch_wall_time",
+    providerBilledCostUsdMicros: null, productionApproved: false }), [COST_PATCH_KEY]: c.executionAccounting.allocatedCostUsdMicros / 1_000_000 };
+} };
+function manifest(source: typeof block, engine: boolean) {
+  const result = manifestFromBlock(source, { version: source.version,
+    capabilities: ["audio.music_candidate"], requiredCapabilities: ["music.arrangement.accepted"], optionalConsumes: ["channelProgramRoute", "musicProgramPlan"],
+    providerProfiles: [{ id: engine ? "yue2-scored-engine-v2" : "yue2-historical-source", provider: "openrelay", quality: "production", allowFallback: false }],
+    maxCostUsd: 1, maxCostUsdFor: params => (engine ? YuE2EngineSourceConfigSchema : YuE2SourceConfigSchema).parse(params).maxCostUsd,
+    maxLatencySec: 1800, certification: "contract", qualityRequired: true,
+    certificationEvidence: engine ? "Owned Engine source generation/recovery and measured private source handoff; not musical Final qualification." : "Read-only historical handoff; legacy generation retired.",
   });
-  return { ...manifest, configSchema: config, retryAndResume: { retryable: false, durableCheckpoint: true } };
+  return { ...result, configSchema: engine ? YuE2EngineSourceConfigSchema : YuE2SourceConfigSchema, retryAndResume: { retryable: false, durableCheckpoint: true } };
 }
+export const createYuE2MusicManifest = () => manifest(block, true);
+export const createLegacyYuE2MusicManifest = () => manifest(legacyBlock, false);
