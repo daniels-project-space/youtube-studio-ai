@@ -142,9 +142,18 @@ export async function executeYuE2EngineSource(arrangement: unknown, params: unkn
     const status = await options.client.observeAudio({ jobId: result.jobId, state: "completed", manifestSha256: result.manifestSha256 }, "yue2", workflow.workflowId);
     const rawUsage = z.object({ gpuSeconds: z.number().finite().nonnegative(), costUsd: z.number().finite().nonnegative(), complete: z.boolean() }).parse(status.usage);
     knownCostUsd = rawUsage.costUsd;
-    const usage = YuE2EngineUsageSchema.parse(rawUsage);
-    if (usage.costUsd > input.config.maxCostUsd || status.status !== "completed" || status.outputRetired || canonicalJson(status.output) !== canonicalJson(result.output)) throw new Error("Engine source accounting or current completion requires reconciliation");
+    const budgetUsage = rawUsage.complete ? rawUsage : z.object({ gpuSeconds: z.number().finite().nonnegative(),
+      costUsd: z.number().finite().positive(), complete: z.boolean(), costBasis: z.literal("engine-reservation-debit"),
+      providerInvoiceVerified: z.literal(false) }).strict().parse(status.allocationUsage);
+    knownCostUsd = budgetUsage.costUsd;
+    if (budgetUsage.costUsd < rawUsage.costUsd || Math.abs(budgetUsage.gpuSeconds - rawUsage.gpuSeconds) > 1) throw new Error("Engine allocation accounting conflicts with observed usage");
+    const usage = YuE2EngineUsageSchema.parse({ gpuSeconds: budgetUsage.gpuSeconds, costUsd: budgetUsage.costUsd,
+      complete: budgetUsage.complete, costBasis: "costBasis" in budgetUsage ? budgetUsage.costBasis : "engine-reported-usage" });
     const output = nativeOutput.parse(result.output);
+    if (usage.costUsd > input.config.maxCostUsd || status.status !== "completed" || status.outputRetired || !status.output ||
+        (["bucket", "key", "bytes", "sha256", "contentType", "verifiedAt"] as const).some(field => status.output![field] !== output[field])) {
+      throw new Error("Engine source accounting or current completion requires reconciliation");
+    }
     if (output.key !== `projects/${STUDIO_ENGINE_PROJECT}/jobs/${result.jobId}/audio.wav`) throw new Error("Engine source output belongs to a different job");
     const actual = evidence(input, output, result.nativeArtifactBytes);
     const provenance = provenanceSchema.parse({ version: "studio-yue2-engine-provenance/v1", jobId: result.jobId,

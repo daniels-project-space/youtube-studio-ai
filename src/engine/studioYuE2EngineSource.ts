@@ -22,7 +22,8 @@ export const StudioYuE2ScoredRequestSchema = z.object({
 }).strict();
 export type StudioYuE2ScoredRequest = z.infer<typeof StudioYuE2ScoredRequestSchema>;
 export const YuE2EngineUsageSchema = z.object({ gpuSeconds: z.number().finite().nonnegative(),
-  costUsd: z.number().finite().nonnegative(), complete: z.literal(true) }).strict();
+  costUsd: z.number().finite().nonnegative(), complete: z.literal(true),
+  costBasis: z.enum(["engine-reported-usage", "engine-reservation-debit"]).default("engine-reported-usage") }).strict();
 export const YuE2EngineCandidateSchema = z.object({
   version: z.literal("studio-yue2-engine-candidate/v1"), ownerId: id, channelId: id, runId: id,
   jobId: z.string().regex(/^[a-z0-9]{32}$/), programFingerprint: hash,

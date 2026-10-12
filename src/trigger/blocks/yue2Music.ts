@@ -45,8 +45,8 @@ const block: Block & { version: string } = {
         candidateSha256: material.candidateSha256, candidateKey: `owner/${ctx.ownerId}/runs/${ctx.runId}/music/yue2-engine/candidate.json`,
         listeningAudioKey: material.listeningAudioKey, listeningAudioSha256: c.headroom?.audioSha256 ?? c.audioSha256,
         nativeFrames: c.nativeOutput.frames, sampleRateHz: 48000, channels: 2, technicalStatus: material.quality.status,
-        costUsd: c.usage.costUsd, gpuSeconds: c.usage.gpuSeconds, costBasis: "engine-reported-usage", providerInvoiceVerified: false, productionApproved: false });
-      ctx.log(`music: retained Engine source (${material.quality.status}); usage $${c.usage.costUsd.toFixed(6)}, provider invoice not independently verified`);
+        costUsd: c.usage.costUsd, gpuSeconds: c.usage.gpuSeconds, costBasis: c.usage.costBasis ?? "engine-reported-usage", providerInvoiceVerified: false, productionApproved: false });
+      ctx.log(`music: retained Engine source (${material.quality.status}); ${c.usage.costBasis} $${c.usage.costUsd.toFixed(6)}, provider invoice not independently verified`);
       return { yue2MusicCandidate, [COST_PATCH_KEY]: c.usage.costUsd };
     } catch (error) {
       if (error instanceof ExecutionError) throw error;

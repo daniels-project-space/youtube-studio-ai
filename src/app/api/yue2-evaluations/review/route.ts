@@ -96,7 +96,7 @@ export async function GET(request: Request) {
         channelPersonalityVerified: false,
       },
       ...(candidate.version === "studio-yue2-engine-candidate/v1" ? { engineAccounting: {
-        ...candidate.usage, basis: "engine-reported-usage" as const, providerInvoiceVerified: false as const,
+        ...candidate.usage, basis: candidate.usage.costBasis, providerInvoiceVerified: false as const,
       } } : { allocation: {
         allocatedCostUsdMicros: candidate.executionAccounting.allocatedCostUsdMicros,
         providerBilledCostUsdMicros: null,

@@ -35,7 +35,7 @@ const EngineMusicCandidateSchema = z.object({
   nativeFrames: z.number().int().positive(), sampleRateHz: z.literal(48000), channels: z.literal(2),
   technicalStatus: z.enum(["needs_audition", "blocked"]),
   costUsd: z.number().finite().nonnegative(), gpuSeconds: z.number().finite().nonnegative(),
-  costBasis: z.literal("engine-reported-usage"), providerInvoiceVerified: z.literal(false), productionApproved: z.literal(false),
+  costBasis: z.enum(["engine-reported-usage", "engine-reservation-debit"]), providerInvoiceVerified: z.literal(false), productionApproved: z.literal(false),
 }).strict().superRefine((value, ctx) => {
   const root = `owner/${value.ownerId}/runs/${value.runId}/music/yue2-engine/`;
   if (value.candidateKey !== `${root}candidate.json` ||

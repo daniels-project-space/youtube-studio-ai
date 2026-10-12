@@ -21,6 +21,6 @@ export type YuE2CandidateReview = {
     channelPersonalityVerified: false;
   };
   allocation?: { allocatedCostUsdMicros: number; providerBilledCostUsdMicros: null };
-  engineAccounting?: { costUsd: number; gpuSeconds: number; complete: true; basis: "engine-reported-usage"; providerInvoiceVerified: false };
+  engineAccounting?: { costUsd: number; gpuSeconds: number; complete: true; basis: "engine-reported-usage" | "engine-reservation-debit"; providerInvoiceVerified: false };
   quality: Material["quality"];
 };

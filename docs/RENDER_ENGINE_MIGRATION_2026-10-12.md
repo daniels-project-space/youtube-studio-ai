@@ -418,3 +418,12 @@ Focused source/module/selection/assembly checks use real FFmpeg/ffprobe and
 mocked provider/storage transports. They do not qualify GPU generation or
 channel personality. The Engine scored-source backend release and a genuine
 new-channel render remain required. No schedule or paid render was started.
+
+OpenRelay provider invoices remain unknown after shutdown, so its existing
+usage.complete is deliberately false. Music now also understands the Engine's
+separate, physically stopped allocation receipt, debiting the full reservation
+against the existing budget with engine-reservation-debit as its explicit
+basis. Review labels this Reserved budget debit, never a final provider bill.
+An incomplete allocation still cannot publish a source candidate. The actual
+Engine job-reader test preserves unknown invoice usage, and the real Studio
+adapter fixture exercises incomplete billing plus stopped reservation recovery.

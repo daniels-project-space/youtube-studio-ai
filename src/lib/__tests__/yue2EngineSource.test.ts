@@ -37,6 +37,7 @@ const descriptors = Object.entries(files).map(([name, body]) => ({ name, key: `$
 const output = { bucket: STUDIO_ENGINE_BUCKET, key: `${prefix}/audio.wav`, bytes: audio.length, sha256: audioHash,
   contentType: "audio/wav", verifiedAt: 1, nativeArtifacts: descriptors };
 const objects = new Map<string, Uint8Array>(); let posts = 0, authorizations = 0, dataReads = 0;
+let allocationComplete = true;
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown }, original = loader._load;
 loader._load = function (name, ...args) {
   if (name === "./storage" || name === "@/lib/storage") return {
@@ -64,16 +65,18 @@ const fetcher: typeof fetch = async (value, options) => {
     if (url.pathname.endsWith("/jobs/output")) return Response.json({ ...output, url: "https://fixture.r2.cloudflarestorage.com/audio.wav",
       nativeArtifactReads: descriptors.map(d => ({ ...d, url: `https://fixture.r2.cloudflarestorage.com/${d.name}`,
         readHeaders: { "If-Match": d.sha256 }, expiresInSeconds: 600 })) });
+    const { nativeArtifacts: sidecars, ...statusOutput } = output; void sidecars;
     return Response.json({ jobId: id, workflowId: STUDIO_ENGINE_AUDIO_WORKFLOWS.yue2.workflowId, profileId: "yue2",
-      requestSha256: sha256Hex(JSON.stringify(input.native)), status: "completed", outputRetired: false, output,
-      usage: { gpuSeconds: 50, costUsd: .01, complete: true } });
+      requestSha256: sha256Hex(JSON.stringify(input.native)), status: "completed", outputRetired: false, output: statusOutput,
+      usage: { gpuSeconds: 50, costUsd: 0, complete: false },
+      allocationUsage: { gpuSeconds: 50, costUsd: .01, complete: allocationComplete, costBasis: "engine-reservation-debit", providerInvoiceVerified: false } });
   }
   assert.equal(url.hostname, "fixture.r2.cloudflarestorage.com");
   assert.ok(!(options?.headers as Record<string, string> | undefined)?.authorization, "management credentials never reach object storage");
   dataReads++; return new Response(Buffer.from(url.pathname === "/audio.wav" ? audio : files[url.pathname.slice(1)]));
 };
 
-test("Engine music retains exact native source, settled usage, review context and same-job recovery", async () => {
+test("Engine music retains exact native source, stopped reservation debit, review context and same-job recovery", async () => {
   const savedPrivateBucket = process.env.R2_PRIVATE_BUCKET, savedPublicBucket = process.env.R2_BUCKET;
   process.env.R2_PRIVATE_BUCKET = "youtube-studio-ai-private"; process.env.R2_BUCKET = "youtube-studio-ai";
   try {
@@ -85,6 +88,7 @@ test("Engine music retains exact native source, settled usage, review context an
     assert.equal(posts, 1); assert.equal(dataReads, 7); assert.ok(authorizations >= 4);
     assert.equal(retained.candidate.version, "studio-yue2-engine-candidate/v1");
     assert.equal(retained.candidate.jobId, id); assert.equal(retained.candidate.usage.costUsd, .01);
+    assert.equal(retained.candidate.usage.costBasis, "engine-reservation-debit", "reserved budget is never labeled a final invoice");
     assert.equal(retained.quality.status, "needs_audition"); assert.equal(retained.candidate.productionApproved, false);
     assert.deepEqual(retained.request.acceptedArrangement.reviewContext, arrangement.reviewContext);
     assert.equal(retained.candidate.nativeOutput.frames, frames);
@@ -111,6 +115,16 @@ test("Engine music retains exact native source, settled usage, review context an
     objects.set(`${root}native/score.abc`, Buffer.from("altered"));
     await assert.rejects(source.readYuE2EngineCandidate(arrangement), /accepted score|sidecar changed/);
     objects.set(`${root}native/score.abc`, saved);
+    const savedCandidate = objects.get(`${root}candidate.json`)!;
+    objects.delete(`${root}candidate.json`); allocationComplete = false;
+    await assert.rejects(run(), error => {
+      assert.equal((error as { additionalObservedCostUsd: number }).additionalObservedCostUsd, .01,
+        "unresolved allocation retains the known reservation debit instead of falsely charging zero");
+      return true;
+    });
+    assert.equal(objects.has(`${root}candidate.json`), false);
+    assert.equal(posts, 1, "incomplete accounting still recovers the original admission");
+    objects.set(`${root}candidate.json`, savedCandidate); allocationComplete = true;
   } finally {
     loader._load = original; rmSync(directory, { recursive: true, force: true });
     if (savedPrivateBucket === undefined) delete process.env.R2_PRIVATE_BUCKET; else process.env.R2_PRIVATE_BUCKET = savedPrivateBucket;
