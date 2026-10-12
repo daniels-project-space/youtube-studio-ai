@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { prepareQwenTtsRequest, synthQwenNarration, validateRetainedQwenTtsAudio, type QwenTtsReceipt, type QwenTtsRequestArgs } from "@/lib/qwenTts";
+import { prepareQwenTtsRequest, validateRetainedQwenTtsAudio, type QwenTtsReceipt, type QwenTtsRequestArgs } from "@/lib/qwenTts";
 
 const cases: QwenTtsRequestArgs[] = [
   { text: "A retained qualification take.", speaker: "Aiden" },
@@ -29,23 +29,23 @@ const transportHashes: string[] = [];
 process.env.QWEN3_TTS_WORKER_URL = "https://guarded.invalid/synthesize";
 process.env.QWEN3_TTS_WORKER_TOKEN = "local-synthetic-token-no-real-credential-0000";
 process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
-globalThis.fetch = async (_url, init) => {
-  const index = posts++; const body = String(init?.body), request = JSON.parse(body);
+function retainedFixture(item: QwenTtsRequestArgs) {
+  const index = posts++;
+  const prepared = prepareQwenTtsRequest(item);
+  const body = JSON.stringify({ ...prepared.payload, requestKey: prepared.requestKey }), request = JSON.parse(body);
   const actual = createHash("sha256").update(body).digest("hex"); transportHashes.push(actual);
   assert.equal(actual, beforeBodySha256[index], "valid transport bytes changed during pure extraction");
-  assert.equal(new Headers(init?.headers).get("Idempotency-Key"), request.requestKey);
-  const prepared = prepareQwenTtsRequest(cases[index]!);
   assert.equal(body, JSON.stringify({ ...prepared.payload, requestKey: prepared.requestKey }));
   const response = execFileSync("python3", [join(process.cwd(), "workers/qwen3-tts/contract.py"), "--fixture"], {
     input: JSON.stringify({ payload: request, idempotencyKey: request.requestKey, audioBase64: audio.toString("base64"), durationSec: 20, requestGpuSeconds: 10, gpuRateUsdPerSecond: 0.00005 }), encoding: "utf8",
   });
-  return Response.json(JSON.parse(response));
-};
+  return (JSON.parse(response) as { receipt: QwenTtsReceipt }).receipt;
+}
+globalThis.fetch = async () => { throw new Error("retained legacy verification must never dispatch a provider"); };
 
 async function main() {
   for (const item of cases) {
-    const returned = await synthQwenNarration({ ...item, onReceipt: (value) => { receipt = value; } });
-    assert.deepEqual(returned, new Uint8Array(audio));
+    receipt = retainedFixture(item);
     assert.equal(validateRetainedQwenTtsAudio(item, audio, receipt), receipt, "reuse original cost receipt object without rebilling");
   }
   assert.equal(posts, 6); assert.ok(receipt);

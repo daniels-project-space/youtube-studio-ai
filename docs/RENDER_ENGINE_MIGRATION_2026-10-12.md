@@ -19,9 +19,9 @@ and its uncommitted Qwen/Runpod changes were preserved.
 
 Existing Studio source has Engine batch/H3/still staging and verified footage
 materialization, but it uses the older `youtube-studio-ai` project capability.
-The managed API returned 404 for that workspace. Music and speech still have
-direct-provider request/receipt contracts; those are not migrated by merely
-changing an endpoint URL.
+The managed API returned 404 for that workspace. Music still has direct-provider
+request/receipt contracts. Qwen narration now uses the owned managed workspace;
+other speech lanes still need their own explicit migration.
 
 ## Owned Engine workspace
 
@@ -98,10 +98,44 @@ then verifies specification readback. It preserves `executionReady: false` when
 reported. No fabricated production Comfy graph or custom executor was registered.
 The native model workflows remain separate from Comfy executor qualification.
 
+## Connected Qwen narration module
+
+The real `synthQwenNarration` entry point now submits only to the owned Engine
+workflow. Pipeline narration forwards its active paid-execution lease and a
+channel/run-scoped immutable identity; prepared weekly narration uses its sealed
+manifest identity. Trigger waits checkpoint rather than hold a polling worker.
+The old direct-worker POST and OpenRelay startup dependency were removed from
+new Qwen synthesis. Historical receipts remain verifiable offline.
+
+The adapter verifies the native R2 WAV and settled Engine usage, parses its
+actual 24 kHz mono sample frames, and produces the existing 160 kbps MP3 format
+using FFmpeg. Private seekable encoding scratch is deleted in `finally`.
+Native R2 provenance and local transformation are recorded separately; a worker
+image or raw transport attestation is not fabricated. Reused Engine job costs
+are counted once in source/preflight evidence. Incomplete billing, changed
+completion, ambiguous admission or exceeded stage envelopes stop advancement
+and retain the accepted job identity for reconciliation.
+
+The public API's optional legacy `maxCostUsd` field is not an enforced spend
+cap. Studio does not send it or claim a provider-enforced limit: this adapter
+checks settled usage against the existing stage envelope after execution.
+
+Casting admits only the presently supported English/Ryan pair for new Qwen
+requests. Existing voice metadata and retained casts are preserved. Per-take
+auditions, transcript/source QA and channel direction remain required; configured
+Engine admission is not a quality acceptance result. The Convex receipt union
+must be released before the new production Trigger writer. Runtime credential
+access and live model output have not yet been qualified in this branch.
+
+Focused lifecycle tests use fixture API responses, real WAV bytes and actual
+FFmpeg encoding. Casting, source provenance, retained legacy receipts, bootstrap,
+prepared narration and source-QA wiring tests passed, as did TypeScript checking.
+These are integration contracts, not a live model or complete-channel test.
+
 ## Next acceptance steps
 
-1. Connect Engine request and artifact receipts to the existing music, narration
-   and image/video module consumers, retaining channel direction and quality gates.
+1. Finish connecting Engine request and artifact receipts to the remaining music,
+   speech and image/video consumers, retaining channel direction and quality gates.
 2. Resolve required scored YuE2 and speech voice contracts through Engine. Only
    remove a legacy generation path after its replacement is verified.
 3. Build the project's required real Comfy profiles from supported nodes/model
