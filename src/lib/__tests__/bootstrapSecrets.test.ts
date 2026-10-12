@@ -8,6 +8,7 @@ async function main() {
     "BOOTSTRAP_SHARED_FIXTURE", "BOOTSTRAP_RETRY_FIXTURE", "BOOTSTRAP_MISSING_FIXTURE",
     "TELEGRAM_CHAT_ID", "TELEGRAM_ADMIN_CHAT_ID",
     "OPENRELAY_API_KEY", "OPENRELAY_ORG_ID",
+    "RENDER_MANAGEMENT_API_KEY",
   ];
   const savedEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
   const reads = new Map<string, number>();
@@ -23,12 +24,17 @@ async function main() {
     process.env.TELEGRAM_ADMIN_CHAT_ID = "fixture-chat";
     globalThis.fetch = (async (_url, init) => {
       const request = JSON.parse(String(init?.body)) as {
-        path: string; args: { service: string; vaultToken: string };
+        path: string; args: { service: string; keyName?: string; vaultToken: string };
       };
-      assert.equal(request.path, "secrets:listByService");
       assert.equal(request.args.vaultToken, "fixture-token");
       const service = request.args.service;
       reads.set(service, (reads.get(service) ?? 0) + 1);
+      if (service === "render-engine") {
+        assert.equal(request.path, "secrets:getOne", "Engine credentials must never be bulk hydrated");
+        assert.equal(request.args.keyName, "MANAGEMENT_API_TOKEN");
+        return Response.json({ status: "success", value: { service, keyName: request.args.keyName, value: "e".repeat(64) } });
+      }
+      assert.equal(request.path, "secrets:listByService");
       // Make concurrent callers overlap at the actual vault boundary.
       await new Promise((resolve) => setTimeout(resolve, 2));
       if ((service === "salad" && failSalad) || (service === "openrouter" && failOpenrouter)) {
@@ -55,6 +61,13 @@ async function main() {
     assert.ok(failedCalls.every((result) => result.status === "rejected"), "required keys must fail closed for every waiter");
     assert.equal(reads.size, 1, "Salad bootstrap must not fetch unrelated credentials");
     assert.ok(!logs.join("\n").includes(secretSentinel), "vault error bodies must not leak into logs");
+
+    await bootstrapSecrets(log, { services: ["render-engine"], required: ["RENDER_MANAGEMENT_API_KEY"] });
+    assert.equal(process.env.RENDER_MANAGEMENT_API_KEY, "e".repeat(64));
+    assert.equal(reads.get("render-engine"), 1);
+    assert.ok(!logs.join("\n").includes("e".repeat(64)), "Engine key must not enter logs");
+    await bootstrapSecrets(log, { services: ["render-engine"] });
+    assert.equal(reads.get("render-engine"), 1, "Engine key hydration is cached like other successful services");
 
     failSalad = false;
     await Promise.all(Array.from({ length: 8 }, () => bootstrapSecrets(log, {

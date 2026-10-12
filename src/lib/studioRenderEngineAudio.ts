@@ -35,6 +35,7 @@ export async function executeStudioEngineAudio(inputValue: unknown, options: {
   if (!Number.isSafeInteger(count) || count < 1 || count > 120) throw new Error("Invalid Engine observation bound");
   await options.authorize();
   const admission = options.recovery?.admission ?? await options.client.submitAudio(input.model, input.workflowId, input.request);
+  try {
   await options.onAccepted({ inputSha256, admission });
   for (let index = 0; index < count; index++) {
     await options.authorize();
@@ -66,4 +67,10 @@ export async function executeStudioEngineAudio(inputValue: unknown, options: {
     if (index + 1 < count) await options.wait(30, `${admission.jobId}:studio-audio:${index}`);
   }
   throw new Error(`Render Engine audio ${admission.jobId} remains pending; recover this admission without creating another job`);
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error("Accepted Engine audio requires reconciliation");
+    Object.assign(failure, { engineJobId: admission.jobId, retryable: false, submissionMayExist: true,
+      recovery: { inputSha256, admission } });
+    throw failure;
+  }
 }
