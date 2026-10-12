@@ -92,7 +92,9 @@ export async function withStagehand<T>(
   const { browserbase, Stagehand } = await import("@browserbasehq/stagehand");
 
   const contextId = process.env.BROWSERBASE_CONTEXT_ID;
-  const browser = await browserbase.launch({
+  // Stagehand's runtime preserves Browserbase session fields, while its launch
+  // declaration omits the SDK's supported timeout field.
+  const launchOptions = {
     apiKey: process.env.BROWSERBASE_API_KEY!,
     projectId: process.env.BROWSERBASE_PROJECT_ID,
     // Long enough for a multi-step create flow (default Browserbase timeout is
@@ -103,7 +105,8 @@ export async function withStagehand<T>(
     ...(contextId
       ? { browserSettings: { context: { id: contextId, persist: true } } }
       : {}),
-  });
+  };
+  const browser = await browserbase.launch(launchOptions);
 
   const sessionId = browser.sessionId;
   let stagehand: Awaited<ReturnType<typeof Stagehand.create>>;
