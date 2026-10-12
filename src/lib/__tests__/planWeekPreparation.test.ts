@@ -369,6 +369,29 @@ assert.equal(
   "render-engine-h3",
   "a verified Engine H3 receipt remains distinct from legacy worker provenance",
 );
+const managedH3Prepared = {
+  ...engineH3Prepared,
+  renderer: { ...engineH3Prepared.renderer, projectName: "youtube-studio-render" as const },
+  clips: [{ ...engineH3Prepared.clips[0], durationSec: 5 }],
+  generatedFootageSceneManifest: { ...engineH3Prepared.generatedFootageSceneManifest,
+    durationSec: 5, items: [{ sceneId: "shot-1", clipKey: h3ClipKey, t0: 0, t1: 5 }] },
+  engineH3Jobs: [{ ...engineH3Prepared.engineH3Jobs[0], media: {
+    version: "studio-engine-h3-media/v1" as const, sha256: "3".repeat(64),
+    width: 1280 as const, height: 736 as const, codec: "h264" as const, fps: 24 as const, frames: 120, durationSec: 5,
+  } }],
+};
+assert.equal(assertPlanWeekPreparedFootageBinding({ prepared: managedH3Prepared, manifest }).clips[0].durationSec, 5);
+assert.throws(() => assertPlanWeekPreparedFootageBinding({ prepared: {
+  ...managedH3Prepared, engineH3Jobs: engineH3Prepared.engineH3Jobs,
+}, manifest }), /physical media/, "new managed receipts require measured media, unlike historical receipts");
+assert.throws(() => assertPlanWeekPreparedFootageBinding({ prepared: {
+  ...managedH3Prepared, generatedFootageSceneManifest: { ...managedH3Prepared.generatedFootageSceneManifest,
+    items: [{ sceneId: "shot-1", clipKey: h3ClipKey }] },
+}, manifest }), /timeline/, "measured managed receipts cannot omit timeline boundaries");
+assert.throws(() => assertPlanWeekPreparedFootageBinding({ prepared: {
+  ...managedH3Prepared, generatedFootageSceneManifest: { ...managedH3Prepared.generatedFootageSceneManifest,
+    durationSec: 6, items: [{ sceneId: "shot-1", clipKey: h3ClipKey, t0: 0, t1: 6 }] },
+}, manifest }), /timeline/, "managed scene timing must follow measured video, not requested duration");
 assert.throws(
   () => assertPlanWeekPreparedFootageBinding({
     prepared: { ...engineH3Prepared, engineH3Jobs: [{ ...engineH3Prepared.engineH3Jobs[0], output: { ...engineH3Prepared.engineH3Jobs[0].output, sha256: "6".repeat(64) } }] },

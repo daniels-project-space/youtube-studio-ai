@@ -371,3 +371,26 @@ No paid render was started during this assessment/connection checkpoint. No GPU
 or persistent model disk was provisioned. Nine focused lifecycle/ownership
 checks, TypeScript and scoped lint passed; no full output
 or production migration qualification is claimed.
+
+## Measured H3 media and assembly timing
+
+The managed H3 completion bridge now counts decoded frames with bounded
+ffprobe execution on the actual hash-verified MP4, before copying that clip.
+It checks the admitted 1280x736 H.264/24fps contract and the five-second
+acceptance window (114-126 frames), rejecting decode errors and incompatible
+media. Receipts retain measured frame counts and durations, bound to output
+SHA-256; scene boundaries accumulate those measured durations. They no longer
+borrow the legacy Turbo profile's fixed 124-frame duration.
+
+New `youtube-studio-render` footage requires that media evidence and exact
+timeline consistency. Historical `youtube-studio-ai` receipts keep their old
+validation, so this change does not rewrite legacy pipelines or evidence.
+CPU-generated MP4 fixtures exercise 120/124 frames, wrong geometry/frame rate,
+short/corrupt output, cleanup, receipt tampering, and rejection before a clip
+write. This is physical-media validation, not model-output quality acceptance.
+
+The broad module contract check still fails: the narrated-stock creator budget
+is below its compiled default reservation. No budget was raised, pricing
+understated, or quality requirement removed to hide that failure. Still-image
+execution and the remaining native music/speech qualification work are not
+complete. Scheduling remains disabled; this integration branch is not live.

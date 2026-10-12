@@ -1,4 +1,5 @@
 import { canonicalJson } from "@/lib/canonicalJson";
+import { assertStudioEngineH3Media, type StudioEngineH3Media } from "@/engine/studioEngineH3Media";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   assertPlanWeekThumbnailSource,
@@ -232,6 +233,7 @@ export interface PlanWeekPreparedFootage {
     jobId: string;
     requestManifestSha256: string;
     firstFrame: { r2Key: string; sha256: string };
+    media?: StudioEngineH3Media;
     output: { bucket: string; key: string; sha256: string; byteLength: number; verifiedAt: number };
   }>;
   createdAt: number;
@@ -1011,6 +1013,7 @@ export function assertPlanWeekPreparedFootageBinding(args: {
         throw new Error("prepared footage Engine jobs must match the ordered clips without legacy receipts");
       }
       const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+      let measuredEnd = 0;
       for (let index = 0; index < clips.length; index++) {
         const clip = clips[index]!;
         const job = requiredRecord(engineJobs[index], `prepared Engine H3 job ${index + 1}`);
@@ -1024,9 +1027,22 @@ export function assertPlanWeekPreparedFootageBinding(args: {
             typeof output.bucket !== "string" || !output.bucket || typeof output.key !== "string" || !output.key ||
             requiredText(output.sha256, `prepared Engine H3 job ${index + 1} output digest`).toLowerCase() !== clip.sha256 ||
             Number(output.byteLength) !== clip.byteLength || !Number.isSafeInteger(Number(output.verifiedAt)) || Number(output.verifiedAt) <= 0 ||
-            Math.abs(clip.durationSec - nativeDurationSec) > 0.08) {
+            (rendererRecord.projectName === "youtube-studio-ai" && Math.abs(clip.durationSec - nativeDurationSec) > 0.08)) {
           throw new Error("prepared footage Engine H3 job binding mismatch");
         }
+        if (rendererRecord.projectName === "youtube-studio-render") {
+          assertStudioEngineH3Media(job.media, clip.sha256, clip.durationSec);
+          const scene = generatedFootageSceneManifest.items[index]!;
+          if (scene.t0 === undefined || scene.t1 === undefined || Math.abs(scene.t0 - measuredEnd) > 0.000001 ||
+              Math.abs(scene.t1 - scene.t0 - clip.durationSec) > 0.000001) {
+            throw new Error("prepared footage Engine H3 timeline does not match measured media");
+          }
+          measuredEnd = scene.t1;
+        }
+      }
+      if (rendererRecord.projectName === "youtube-studio-render" &&
+          Math.abs(generatedFootageSceneManifest.durationSec - measuredEnd) > 0.000001) {
+        throw new Error("prepared footage Engine H3 timeline does not match measured media");
       }
     } else if (rendererRecord.kind !== "minimax-h3") {
       throw new Error("prepared footage renderer must be the explicit minimax-h3 contract");

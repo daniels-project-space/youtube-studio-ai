@@ -9,12 +9,12 @@ import { boundedBytes } from "@/lib/studioRenderEngineClient";
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { assertPlanWeekPreparedFootageBinding, assertPlanWeekPreparationManifestBinding, normalizePlanWeekPreparationManifest, planWeekPreparedFootageClipKey, planWeekPreparedFootageKey, planWeekPreparedH3FirstFrameKey, planWeekPreparationKey, planWeekPreparationManifestSha256, type PlanWeekPreparedFootage } from "@/lib/planWeekPreparation";
+import { assertPlanWeekPreparedFootageBinding, assertPlanWeekPreparationManifestBinding, normalizePlanWeekPreparationManifest, planWeekPreparedFootageClipKey, planWeekPreparedFootageKey, planWeekPreparedH3FirstFrameKey, planWeekPreparationKey, type PlanWeekPreparedFootage } from "@/lib/planWeekPreparation";
 import { decodePreparedMetadata, PREPARED_METADATA_READ } from "@/lib/preparedMediaStorage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { getObjectBytes } from "@/lib/storage";
 import { sha256BytesHex } from "@/lib/sha256";
-import { MINIMAX_H3_PROFILE } from "@/lib/minimaxH3";
+import { inspectStudioEngineH3Media } from "@/lib/studioEngineH3Media";
 import { renderEngineH3SharedStagedFootageKey,renderEngineH3StagedFootageKey, type RenderEngineH3StagedFootage } from "./planWeekPreparedImages";
 
 const MAX_ENGINE_H3_BYTES = 256 * 1024 * 1024;
@@ -107,24 +107,30 @@ export async function materializeRenderEngineH3PreparedFootage(args: RenderEngin
     const engineH3Jobs: NonNullable<PlanWeekPreparedFootage["engineH3Jobs"]> = [];
     for (const { staged, output } of verified) {
         const video = await fetchExactVideo(output.url, output.bytes, output.sha256);
+        const media = await inspectStudioEngineH3Media(video);
         await persistPreparedResult(staged.output.r2Key, video, "video/mp4", { "render-engine-h3-job": staged.engineJobId, "render-engine-h3-sha256": output.sha256 });
         const retained = await getObjectBytes(staged.output.r2Key, undefined, { maxBytes: output.bytes, timeoutMs: 300000 });
         if (retained.byteLength !== output.bytes || sha256BytesHex(retained) !== output.sha256) {
             throw new Error("Studio R2 clip does not match the verified Engine output");
         }
-        clips.push({ r2Key: staged.output.r2Key, sha256: output.sha256, byteLength: output.bytes, durationSec: MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps });
+        clips.push({ r2Key: staged.output.r2Key, sha256: output.sha256, byteLength: output.bytes, durationSec: media.durationSec });
         engineH3Jobs.push({ sceneId: staged.sceneId, jobId: staged.engineJobId, requestManifestSha256: staged.requestManifestSha256,
-            firstFrame: staged.studioFirstFrame, output: { bucket: output.bucket, key: output.key, sha256: output.sha256, byteLength: output.bytes, verifiedAt: output.verifiedAt } });
+            firstFrame: staged.studioFirstFrame, media, output: { bucket: output.bucket, key: output.key, sha256: output.sha256, byteLength: output.bytes, verifiedAt: output.verifiedAt } });
     }
     const current = await getH3SceneBatchStatusInRenderEngine(engine, stage.sharedBatchJobId!);
     if (current.manifestSha256 !== sharedStatus.manifestSha256 || current.sceneManifestSha256 !== sharedStatus.sceneManifestSha256 ||
       canonicalJson(current.scenes) !== canonicalJson(sharedStatus.scenes)) throw new Error("H3 verified scene set changed during transfer");
-    const durationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+    let durationSec = 0;
+    const items = clips.map((clip, index) => {
+        const t0 = durationSec;
+        durationSec += clip.durationSec;
+        return { sceneId: stage.jobs[index]!.sceneId, clipKey: clip.r2Key, t0, t1: durationSec };
+    });
     const prepared: PlanWeekPreparedFootage = {
         version: "plan-week-prepared-footage/v1", manifestSha256: stage.manifestSha256, ownerId: input.ownerId, channelId: stage.channelId,
         batchId: input.batchId, itemId: input.itemId, requestKey: stage.requestKey, topic: manifest.plan.topic,
         generatedFootageSceneManifest: { version: "generated-footage-scene-manifest/v1", source: "story_spine", exactOrder: true,
-            durationSec: durationSec * clips.length, items: clips.map((clip, index) => ({ sceneId: stage.jobs[index]!.sceneId, clipKey: clip.r2Key, t0: durationSec * index, t1: durationSec * (index + 1) })) },
+            durationSec, items },
         clips, renderer: { kind: "render-engine-h3", projectName: STUDIO_ENGINE_PROJECT, workflowId: stage.engine.workflowId, profileRevisionSha256: stage.engine.profileRevisionSha256 }, engineH3Jobs, createdAt: Date.now(),
     };
     const checked = assertPlanWeekPreparedFootageBinding({ prepared, manifest });

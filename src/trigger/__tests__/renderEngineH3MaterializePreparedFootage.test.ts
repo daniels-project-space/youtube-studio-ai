@@ -63,12 +63,21 @@ const objects = new Map<string, Uint8Array>([
 let statusReads = 0;
 let signedReads = 0;
 let videoFetches = 0;
+let rejectMedia = false;
 let pendingJobId: string | null = null;
 const loader = Module as unknown as { _load: (name: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (name, ...args) {
   if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
   if (name === "@/lib/bootstrap") return { bootstrapSecrets: async () => undefined };
+  if (name === "@/lib/studioEngineH3Media") return {
+    inspectStudioEngineH3Media: async (bytes: Uint8Array) => {
+      assert.equal(sha256BytesHex(bytes), outputSha256);
+      if (rejectMedia) throw new Error("fixture physical media rejection");
+      return { version: "studio-engine-h3-media/v1", sha256: outputSha256,
+        width: 1280, height: 736, codec: "h264", fps: 24, frames: 120, durationSec: 5 };
+    },
+  };
   if (name === "@/lib/storage") return {
     getObjectBytes: async (key: string) => {
       const bytes = objects.get(key);
@@ -116,6 +125,10 @@ async function main() {
     assert.deepEqual(Buffer.from(objects.get(clipKey)!), Buffer.from(outputBytes), "the Engine bytes are copied to Studio's canonical R2 clip key");
     const result = decodePreparedMetadata(objects.get(sidecarKey)!);
     assert.equal((result as { renderer: { kind: string } }).renderer.kind, "render-engine-h3");
+    const measured = result as { clips: Array<{ durationSec: number }>; generatedFootageSceneManifest: { durationSec: number }; engineH3Jobs: Array<{ media: { frames: number } }> };
+    assert.equal(measured.clips[0].durationSec, 5, "receipt uses measured frames, not the legacy 124-frame profile");
+    assert.equal(measured.generatedFootageSceneManifest.durationSec, 5);
+    assert.equal(measured.engineH3Jobs[0].media.frames, 120);
     assert.equal(statusReads, 2);
     assert.equal(signedReads, 1);
     assert.equal(videoFetches, 1);
@@ -144,6 +157,14 @@ async function main() {
     await materializeRenderEngineH3PreparedFootage(scope);
     assert.deepEqual(Buffer.from(objects.get(clipKey)!), Buffer.from(outputBytes), "shared family materializes independently verified repair child output");
     assert.equal(videoFetches, 1);
+
+    objects.delete(clipKey);
+    objects.delete(sidecarKey);
+    rejectMedia = true;
+    await assert.rejects(materializeRenderEngineH3PreparedFootage(scope), /physical media rejection/);
+    assert.equal(objects.has(clipKey), false, "invalid physical media is rejected before Studio R2 writes");
+    assert.equal(objects.has(sidecarKey), false);
+    rejectMedia = false;
 
     shared.version = "render-engine-h3-staged-footage/v2";
     objects.set(stageKey, new TextEncoder().encode(canonicalJson(shared)));
