@@ -68,7 +68,8 @@ export async function encodeEngineQwenMp3(bytes: Uint8Array): Promise<Uint8Array
   const path = join(directory, "take.mp3");
   try {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+    // The executable is supplied by the Trigger image, not a project asset.
+    const child = spawn(/* turbopackIgnore: true */ process.env.FFMPEG_BIN ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0",
       "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "160k", "-f", "mp3", path], { stdio: ["pipe", "ignore", "pipe"] });
     let failed = false;
     const timer = setTimeout(() => { failed = true; child.kill("SIGKILL"); }, 90_000);
