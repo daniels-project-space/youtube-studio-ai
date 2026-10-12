@@ -4,7 +4,7 @@ import {
   ChannelMusicProgramSchema,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
-import { canonicalJson } from "@/lib/canonicalJson";
+import { engineMusic3Request, renderEngineMusic3, validateEngineMusic3Receipt, type EngineMusic3Receipt } from "./music3Engine";
 
 // v2 deliberately seals the complete official high-VRAM graph rather than
 // merely naming ComfyUI. A worker that silently swaps in the low-VRAM UNet or
@@ -59,7 +59,7 @@ export interface MiniMaxMusic3RuntimeReceipt {
   costUsd: number;
 }
 
-export interface MiniMaxMusic3Receipt {
+export interface LegacyMiniMaxMusic3Receipt {
   schema: typeof MINIMAX_MUSIC3_WORKER_CONTRACT;
   requestKey: string;
   jobId: string;
@@ -98,6 +98,7 @@ export interface MiniMaxMusic3Receipt {
   };
   runtime: MiniMaxMusic3RuntimeReceipt;
 }
+export type MiniMaxMusic3Receipt = LegacyMiniMaxMusic3Receipt | EngineMusic3Receipt;
 
 export interface MiniMaxMusic3Readiness {
   configured: boolean;
@@ -129,50 +130,17 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function workerUrl(): string {
-  const raw = process.env.MINIMAX_MUSIC3_WORKER_URL?.trim() ?? "";
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new MiniMaxMusic3Error("MINIMAX_MUSIC3_WORKER_URL is missing or invalid");
-  }
-  const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
-  if (url.protocol !== "https:" && !loopback) {
-    throw new MiniMaxMusic3Error("MINIMAX_MUSIC3_WORKER_URL must use HTTPS outside loopback qualification");
-  }
-  if (url.username || url.password || url.hash) {
-    throw new MiniMaxMusic3Error("MINIMAX_MUSIC3_WORKER_URL must not contain embedded credentials or a fragment");
-  }
-  return url.toString();
-}
-
-function workerToken(): string {
-  const token = process.env.MINIMAX_MUSIC3_WORKER_TOKEN?.trim() ?? "";
-  if (token.length < 32) {
-    throw new MiniMaxMusic3Error("MINIMAX_MUSIC3_WORKER_TOKEN is missing or too short");
-  }
-  return token;
-}
-
-export function minimaxMusic3Readiness(): MiniMaxMusic3Readiness {
+function music3Readiness(legacy: boolean): MiniMaxMusic3Readiness {
   const blockers: string[] = [];
-  let urlConfigured = true;
-  let tokenConfigured = true;
-  try { workerUrl(); } catch (error) {
-    urlConfigured = false;
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  try { workerToken(); } catch (error) {
-    tokenConfigured = false;
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  const qualificationReceipt = process.env.MINIMAX_MUSIC3_QUALITY_RECEIPT_SHA256?.trim() ?? "";
-  if (process.env.MINIMAX_MUSIC3_QUALITY_QUALIFIED !== "1") {
-    blockers.push("MINIMAX_MUSIC3_QUALITY_QUALIFIED is not enabled");
+  const configured = legacy || /^[a-f0-9]{64}$/.test(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
+  if (!configured) blockers.push("RENDER_MANAGEMENT_API_KEY is missing or invalid");
+  const prefix = legacy ? "MINIMAX_MUSIC3" : "MINIMAX_MUSIC3_ENGINE";
+  const qualificationReceipt = process.env[`${prefix}_QUALITY_RECEIPT_SHA256`]?.trim() ?? "";
+  if (process.env[`${prefix}_QUALITY_QUALIFIED`] !== "1") {
+    blockers.push(`${prefix}_QUALITY_QUALIFIED is not enabled`);
   }
   if (!SHA256.test(qualificationReceipt)) {
-    blockers.push("MINIMAX_MUSIC3_QUALITY_RECEIPT_SHA256 is missing or invalid");
+    blockers.push(`${prefix}_QUALITY_RECEIPT_SHA256 is missing or invalid`);
   }
   const attestationFlags = [
     "MINIMAX_MUSIC3_LICENSE_ATTESTED",
@@ -183,9 +151,11 @@ export function minimaxMusic3Readiness(): MiniMaxMusic3Readiness {
   for (const flag of attestationFlags) {
     if (process.env[flag] !== "1") blockers.push(`${flag} is not enabled`);
   }
-  const configured = urlConfigured && tokenConfigured;
   return { configured, qualified: configured && blockers.length === 0, blockers };
 }
+
+function legacyMusic3Readiness(): MiniMaxMusic3Readiness { return music3Readiness(true); }
+export function minimaxMusic3Readiness(): MiniMaxMusic3Readiness { return music3Readiness(false); }
 
 export function hasQualifiedMiniMaxMusic3(): boolean {
   return minimaxMusic3Readiness().qualified;
@@ -244,7 +214,7 @@ function durableOutputUrl(value: unknown): string {
   return url.toString();
 }
 
-function parsePcmWav(audio: Uint8Array): {
+export function parseMiniMaxMusic3Wav(audio: Uint8Array): {
   sampleRateHz: number;
   channels: number;
   bitsPerSample: number;
@@ -255,18 +225,19 @@ function parsePcmWav(audio: Uint8Array): {
     throw new Error("MiniMax-Music3 WAV is missing or outside the bounded size");
   }
   const bytes = Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength);
-  if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") {
+  if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE" || bytes.readUInt32LE(4) + 8 !== bytes.length) {
     throw new Error("MiniMax-Music3 output is not a RIFF/WAVE file");
   }
   let offset = 12;
   let format: { audioFormat: number; channels: number; sampleRateHz: number; bitsPerSample: number } | undefined;
-  let dataBytes = 0;
+  let dataBytes = 0, hasData = false;
   while (offset + 8 <= bytes.length) {
     const id = bytes.toString("ascii", offset, offset + 4);
     const size = bytes.readUInt32LE(offset + 4);
     const contentOffset = offset + 8;
     if (contentOffset + size > bytes.length) throw new Error("MiniMax-Music3 WAV contains a truncated chunk");
     if (id === "fmt " && size >= 16) {
+      if (format) throw new Error("MiniMax-Music3 WAV contains duplicate format chunks");
       format = {
         audioFormat: bytes.readUInt16LE(contentOffset),
         channels: bytes.readUInt16LE(contentOffset + 2),
@@ -274,11 +245,13 @@ function parsePcmWav(audio: Uint8Array): {
         bitsPerSample: bytes.readUInt16LE(contentOffset + 14),
       };
     } else if (id === "data") {
-      dataBytes += size;
+      if (hasData) throw new Error("MiniMax-Music3 WAV contains duplicate data chunks");
+      hasData = true; dataBytes = size;
     }
     offset = contentOffset + size + (size % 2);
   }
-  if (!format || format.audioFormat !== 1 || dataBytes <= 0) {
+  if (offset !== bytes.length || !format || format.audioFormat !== 1 || dataBytes <= 0 ||
+    format.bitsPerSample !== 16 || !format.channels || !format.sampleRateHz || dataBytes % (format.channels * 2)) {
     throw new Error("MiniMax-Music3 WAV must contain non-empty linear PCM audio");
   }
   const bytesPerSecond = format.sampleRateHz * format.channels * (format.bitsPerSample / 8);
@@ -295,7 +268,7 @@ function validateReceipt(args: {
   cfgScale: number;
   topK: number;
   maxCostUsd: number;
-}): MiniMaxMusic3Receipt {
+}): LegacyMiniMaxMusic3Receipt {
   if (!args.value || typeof args.value !== "object" || Array.isArray(args.value)) {
     throw new Error("MiniMax-Music3 worker receipt is missing");
   }
@@ -364,8 +337,8 @@ function validateReceipt(args: {
     throw new Error("MiniMax-Music3 runtime cost receipt is internally inconsistent");
   }
   return {
-    ...(value as unknown as MiniMaxMusic3Receipt),
-    output: { ...(output as unknown as MiniMaxMusic3Receipt["output"]), url: outputUrl },
+    ...(value as unknown as LegacyMiniMaxMusic3Receipt),
+    output: { ...(output as unknown as LegacyMiniMaxMusic3Receipt["output"]), url: outputUrl },
   };
 }
 
@@ -374,11 +347,16 @@ export function assertPinnedMiniMaxMusic3Receipt(
   value: unknown,
   programInput: unknown,
 ): MiniMaxMusic3Receipt {
-  const readiness = minimaxMusic3Readiness();
+  const program = ChannelMusicProgramSchema.parse(programInput);
+  if ((value as { schema?: unknown } | null)?.schema === "studio-engine-music3-receipt/v1") {
+    const engineReadiness = minimaxMusic3Readiness();
+    if (!engineReadiness.qualified) throw new MiniMaxMusic3Error(`Engine Music3 release readiness failed: ${engineReadiness.blockers.join("; ")}`);
+    return validateEngineMusic3Receipt(value, program);
+  }
+  const readiness = legacyMusic3Readiness();
   if (!readiness.qualified) {
     throw new MiniMaxMusic3Error(`MiniMax-Music3 release readiness failed: ${readiness.blockers.join("; ")}`);
   }
-  const program = ChannelMusicProgramSchema.parse(programInput);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new MiniMaxMusic3Error("MiniMax-Music3 durable runtime receipt is missing");
   }
@@ -410,37 +388,12 @@ export function assertPinnedMiniMaxMusic3Receipt(
   }
 }
 
-async function downloadAndVerifyOutput(receipt: MiniMaxMusic3Receipt): Promise<Uint8Array> {
-  let response: Response;
-  try {
-    response = await fetch(receipt.output.url, { signal: AbortSignal.timeout(300_000) });
-  } catch (error) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 output download failed after accepted job ${receipt.jobId}; reconcile request ${receipt.requestKey}`,
-      receipt.requestKey,
-      undefined,
-      receipt.runtime.costUsd,
-      { cause: error },
-    );
-  }
-  if (!response.ok) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 output download HTTP ${response.status} after accepted job ${receipt.jobId}`,
-      receipt.requestKey,
-      response.status,
-      receipt.runtime.costUsd,
-    );
-  }
-  const length = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(length) && length > OUTPUT_DOWNLOAD_LIMIT_BYTES) {
-    throw new MiniMaxMusic3Error("MiniMax-Music3 output exceeds the 50 MB bound", receipt.requestKey, response.status, receipt.runtime.costUsd);
-  }
-  const audio = new Uint8Array(await response.arrayBuffer());
+export function validateRetainedMiniMaxMusic3Audio(audio: Uint8Array, receipt: MiniMaxMusic3Receipt): void {
   try {
     if (audio.byteLength !== receipt.output.byteLength || sha256(audio) !== receipt.output.contentSha256) {
       throw new Error("downloaded bytes do not match the output integrity receipt");
     }
-    const wav = parsePcmWav(audio);
+    const wav = parseMiniMaxMusic3Wav(audio);
     if (wav.sampleRateHz !== MINIMAX_MUSIC3_SAMPLE_RATE_HZ || wav.channels !== MINIMAX_MUSIC3_CHANNELS || wav.bitsPerSample !== MINIMAX_MUSIC3_BITS_PER_SAMPLE) {
       throw new Error("downloaded WAV is not pinned 32 kHz 16-bit stereo PCM");
     }
@@ -451,12 +404,11 @@ async function downloadAndVerifyOutput(receipt: MiniMaxMusic3Receipt): Promise<U
     throw new MiniMaxMusic3Error(
       `MiniMax-Music3 output attestation failed: ${error instanceof Error ? error.message : String(error)}`,
       receipt.requestKey,
-      response.status,
+      undefined,
       receipt.runtime.costUsd,
       { cause: error },
     );
   }
-  return audio;
 }
 
 export async function generateMiniMaxMusic3(args: {
@@ -465,133 +417,45 @@ export async function generateMiniMaxMusic3(args: {
   cfgScale?: number;
   topK?: number;
   maxCostUsd?: number;
+  requestScope?: string;
+  authorize?: () => Promise<void>;
   onReceipt?: (receipt: MiniMaxMusic3Receipt) => void | Promise<void>;
 }): Promise<MiniMaxMusic3Result> {
   const readiness = minimaxMusic3Readiness();
   if (!readiness.qualified) {
     throw new MiniMaxMusic3Error(`MiniMax-Music3 is not production-ready: ${readiness.blockers.join("; ")}`);
   }
-  const program = ChannelMusicProgramSchema.parse(args.program);
-  if (program.generation.providerPreference !== "minimax_music3") {
-    throw new MiniMaxMusic3Error("MiniMax-Music3 generation requires a program that explicitly selects MiniMax-Music3");
-  }
-  const seed = Number.isSafeInteger(args.seed) && Number(args.seed) >= 0 ? Number(args.seed) : 4_242;
-  const cfgScale = MINIMAX_MUSIC3_RENDER_PROFILE.conditioning.cfgScale;
-  const topK = MINIMAX_MUSIC3_RENDER_PROFILE.conditioning.topK;
-  if (args.cfgScale !== undefined && args.cfgScale !== cfgScale) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 requires the qualified conditioning CFG ${cfgScale}; rerun a benchmark before changing it`,
-    );
-  }
-  if (args.topK !== undefined && args.topK !== topK) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 requires the qualified conditioning top-k ${topK}; rerun a benchmark before changing it`,
-    );
-  }
-  const maxCostUsd = Math.min(10, args.maxCostUsd ?? 5);
-  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
-    throw new MiniMaxMusic3Error("MiniMax-Music3 requires a positive per-request cost ceiling");
-  }
-  const captionSha256 = sha256(program.generation.structuredCaption);
-  const lyricsControlSha256 = sha256(program.generation.lyricsControl);
-  const payload = {
-    schema: MINIMAX_MUSIC3_WORKER_CONTRACT,
-    programFingerprint: program.fingerprint,
-    model: MINIMAX_MUSIC3_MODEL,
-    modelRevision: MINIMAX_MUSIC3_MODEL_REVISION,
-    runtimeRepository: MINIMAX_MUSIC3_COMFYUI_REPOSITORY,
-    runtimeRevision: MINIMAX_MUSIC3_COMFYUI_REVISION,
-    caption: program.generation.structuredCaption,
-    captionSha256,
-    lyricsControl: program.generation.lyricsControl,
-    lyricsControlSha256,
-    instrumental: true,
-    seed,
-    durationSec: program.generation.durationSec,
-    cfgScale,
-    topK,
-    renderProfile: MINIMAX_MUSIC3_RENDER_PROFILE,
-    output: {
-      sampleRateHz: MINIMAX_MUSIC3_SAMPLE_RATE_HZ,
-      channels: MINIMAX_MUSIC3_CHANNELS,
-      bitsPerSample: MINIMAX_MUSIC3_BITS_PER_SAMPLE,
-      codec: "pcm_s16le",
-      container: "wav",
-    },
-    runtime: {
-      provider: "novita",
-      gpuModel: "RTX 4090",
-      gpuCount: 2,
-      capacityMode: "spot",
-      persistentStorage: true,
-      checkpointing: true,
-      idleShutdownMaxSeconds: 900,
-    },
-    license: {
-      uiAttribution: MINIMAX_MUSIC3_UI_ATTRIBUTION,
-      prominentCommercialAttributionRequired: true,
-      generatedContentDisclosureRequired: true,
-      safeguardsRequired: true,
-      operatorAttestationRequired: true,
-    },
-    qualityQualificationReceiptSha256: process.env.MINIMAX_MUSIC3_QUALITY_RECEIPT_SHA256,
-    maxCostUsd,
-  } as const;
-  const requestKey = sha256(canonicalJson(payload));
-  let response: Response;
+  // Native BF16 has a different AR sampler; legacy Comfy controls are not
+  // equivalent and must not be silently discarded or recorded as applied.
+  if (args.cfgScale !== undefined || args.topK !== undefined) throw new MiniMaxMusic3Error("Engine Music3 does not accept legacy Comfy CFG/top-k overrides");
+  const { StudioRenderEngineClient } = await import("./studioRenderEngineClient");
+  const { wait } = await import("@trigger.dev/sdk");
+  const { taskContext } = await import("@trigger.dev/core/v3");
+  let requestKey: string | undefined;
+  let accepted: EngineMusic3Receipt | undefined;
   try {
-    response = await fetch(workerUrl(), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${workerToken()}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": requestKey,
+    requestKey = engineMusic3Request(args.program, args.seed ?? 4242, args.requestScope).requestKey;
+    const result = await renderEngineMusic3({ program: args.program, seed: args.seed ?? 4242,
+      scope: args.requestScope, maxCostUsd: args.maxCostUsd ?? 5 }, {
+      client: new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? ""),
+      authorize: args.authorize ?? (async () => undefined),
+      wait: async (seconds, key) => {
+        if (taskContext.ctx) await wait.for({ seconds, idempotencyKey: key });
+        else await new Promise(resolve => setTimeout(resolve, seconds * 1000));
       },
-      body: JSON.stringify({ ...payload, requestKey }),
-      signal: AbortSignal.timeout(900_000),
     });
+    accepted = result.receipt;
+    await args.onReceipt?.(result.receipt);
+    return result;
   } catch (error) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 outcome is unknown after submission; request ${requestKey} must be reconciled, not retried`,
-      requestKey,
-      undefined,
-      0,
-      { cause: error },
-    );
+    const evidence = error as { requestKey?: string; engineJobId?: string; additionalObservedCostUsd?: number; submissionMayExist?: boolean };
+    const failure = new MiniMaxMusic3Error(error instanceof Error ? error.message : "Engine Music3 failed",
+      evidence?.requestKey ?? requestKey, undefined, evidence?.additionalObservedCostUsd ?? accepted?.runtime.costUsd ?? 0);
+    const engineJobId = evidence?.engineJobId ?? accepted?.jobId;
+    const observedCostUsd = evidence?.additionalObservedCostUsd ?? accepted?.runtime.costUsd;
+    Object.assign(failure, { ...(engineJobId ? { engineJobId } : {}),
+      ...(engineJobId || evidence?.submissionMayExist ? { code: "PAID_STAGE_RECONCILIATION_REQUIRED" } : {}),
+      ...(observedCostUsd === undefined ? {} : { additionalObservedCostUsd: observedCostUsd }) });
+    throw failure;
   }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new MiniMaxMusic3Error(`MiniMax-Music3 worker HTTP ${response.status}: ${detail.slice(0, 220)}`, requestKey, response.status);
-  }
-  let body: { receipt?: unknown };
-  try {
-    body = await response.json() as { receipt?: unknown };
-  } catch (error) {
-    throw new MiniMaxMusic3Error("MiniMax-Music3 worker returned malformed JSON", requestKey, response.status, 0, { cause: error });
-  }
-  let receipt: MiniMaxMusic3Receipt;
-  try {
-    receipt = validateReceipt({
-      value: body.receipt,
-      requestKey,
-      program,
-      captionSha256,
-      lyricsControlSha256,
-      seed,
-      cfgScale,
-      topK,
-      maxCostUsd,
-    });
-  } catch (error) {
-    throw new MiniMaxMusic3Error(
-      `MiniMax-Music3 response attestation failed: ${error instanceof Error ? error.message : String(error)}`,
-      requestKey,
-      response.status,
-      0,
-      { cause: error },
-    );
-  }
-  const audio = await downloadAndVerifyOutput(receipt);
-  await args.onReceipt?.(receipt);
-  return { audio, receipt };
 }

@@ -208,8 +208,8 @@ const managed: ProviderProfile = {
   allowFallback: false,
 };
 const minimaxMusic3: ProviderProfile = {
-  id: "novita-minimax-music3-qualified-production",
-  provider: "novita",
+  id: "studio-render-engine-music3-native-bf16",
+  provider: "render-engine",
   quality: "production",
   allowFallback: false,
 };

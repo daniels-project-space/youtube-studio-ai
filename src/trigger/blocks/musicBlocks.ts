@@ -337,6 +337,7 @@ export const music: Block = {
           programFingerprint: channelMusicProgram.fingerprint,
           qualityReceiptKey: minimax.qualityReceiptKey,
           reviewBinding: "native-worker-wav",
+          runtimeReceiptSchema: runtime.schema,
         });
         musicRuntimeReceiptKey = minimax.runtimeReceiptKey;
       }
@@ -453,6 +454,8 @@ export const music: Block = {
             cfgScale: ctx.params.cfgScale === undefined ? undefined : Number(ctx.params.cfgScale),
             topK: ctx.params.topK === undefined ? undefined : Number(ctx.params.topK),
             maxCostUsd: Math.min(10, remainingBudgetUsd),
+            requestScope: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:music`,
+            authorize: ctx.assertInlinePaidExecutionLease,
           });
           billedAttestedCostUsd += candidate.receipt.runtime.costUsd;
           const technicalQuality = await measureNativeMusicQuality({
@@ -503,7 +506,10 @@ export const music: Block = {
           mechanicalArtifactScore: nativeTechnicalQuality.measurements.mechanicalArtifactScore,
           // This is a retained review artifact. It is deliberately distinct
           // from the mastered MP3, which has its own asset row below.
+          // Existing audition discriminator denotes the unmastered native WAV;
+          // the receipt schema, not this label, identifies Engine provenance.
           reviewBinding: "native-worker-wav",
+          runtimeReceiptSchema: result.receipt.schema,
         });
         musicRuntimeReceiptKey =
           `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-runtime-${result.receipt.requestKey}.json`;
@@ -517,7 +523,9 @@ export const music: Block = {
           jobId: result.receipt.jobId,
           programFingerprint: channelMusicProgram.fingerprint,
           modelRevision: result.receipt.modelRevision,
-          runtimeRevision: result.receipt.runtimeRevision,
+          ...(result.receipt.schema === "studio-engine-music3-receipt/v1"
+            ? { profileRevisionSha256: result.receipt.engine.profileRevisionSha256, engineProjectName: result.receipt.engine.projectName }
+            : { runtimeRevision: result.receipt.runtimeRevision }),
           observedCostUsd: result.receipt.runtime.costUsd,
           uiAttribution: result.receipt.license.uiAttribution,
           generatedContentDisclosureEnabled: result.receipt.license.generatedContentDisclosureEnabled,
@@ -526,9 +534,11 @@ export const music: Block = {
         generations = 1;
         usedProvider = "minimax_music3";
         jobIds = [result.receipt.jobId];
+        const retainedSourceUrl = result.receipt.schema === "studio-engine-music3-receipt/v1"
+          ? `r2://${musicNativeWavKey}` : result.receipt.output.url;
         tracks = [{
-          url: result.receipt.output.url,
-          wavUrl: result.receipt.output.url,
+          url: retainedSourceUrl,
+          wavUrl: retainedSourceUrl,
           durationSec: result.receipt.durationSec,
         }];
       } else if (prov === "suno") {

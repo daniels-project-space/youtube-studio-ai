@@ -19,9 +19,9 @@ and its uncommitted Qwen/Runpod changes were preserved.
 
 Existing Studio source has Engine batch/H3/still staging and verified footage
 materialization, but it uses the older `youtube-studio-ai` project capability.
-The managed API returned 404 for that workspace. Music still has direct-provider
-request/receipt contracts. Qwen narration now uses the owned managed workspace;
-other speech lanes still need their own explicit migration.
+The managed API returned 404 for that workspace. Qwen narration and Music3 now
+use the owned managed workspace; YuE2, other speech and other music lanes still
+need their own explicit migrations.
 
 ## Owned Engine workspace
 
@@ -133,6 +133,28 @@ prepared narration and source-QA wiring tests passed, as did TypeScript checking
 These are integration contracts, not a live model or complete-channel test.
 
 ## Next acceptance steps
+
+Music3's real shared-module generation entry point now uses its registered
+owned Engine workflow. Its direct Novita worker POST, output fetch and worker
+URL/token readiness dependency were removed. Archived Comfy receipts remain
+readable without reviving that generation lane. New receipts preserve native
+R2 provenance, program/caption/instrumental-control hashes, actual WAV duration,
+settled usage and the immutable native BF16 profile. The same model revision
+is retained, but native BF16 is not represented as the former Comfy FP16 graph.
+Explicit old CFG/top-k controls are rejected before submission, not ignored.
+
+The production caller forwards its active execution lease and owner/channel/run
+scope. Technical analysis, rejected-take evidence, bounded musical repair,
+per-song auditions, prepared-source checks and publishing disclosure remain
+in place. License safeguards remain required. New Engine qualification requires
+`MINIMAX_MUSIC3_ENGINE_QUALITY_QUALIFIED` and its separate receipt hash; historical
+Comfy qualification cannot open this route. Those controls were not enabled by
+this migration. Engine still reports Music3 executor readiness false, and no
+live Music3 sound or new-channel quality acceptance is claimed.
+
+Fixture tests exercise the actual generation entry point, owned output bytes,
+settled and incomplete accounting, tampering, unsupported controls and ambiguous
+admission. Source-direction, audition/disclosure and prepared-reuse checks pass.
 
 1. Finish connecting Engine request and artifact receipts to the remaining music,
    speech and image/video consumers, retaining channel direction and quality gates.
