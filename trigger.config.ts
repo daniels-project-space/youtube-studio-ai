@@ -182,6 +182,8 @@ const FORWARDED_ENV = [
   "STUDIO_OWNER_ID",
   // Studio's own Engine capability; only the staged H3 handoff receives it.
   "RENDER_ENGINE_PROJECT_TOKEN",
+  // Public Engine API credential only; never hydrate its provider namespaces.
+  "RENDER_MANAGEMENT_API_KEY",
   "YOUTUBE_CLIENT_ID",
   "YOUTUBE_CLIENT_SECRET",
   "YOUTUBE_TOKEN_ENCRYPTION_KEY",
@@ -229,6 +231,7 @@ const FORWARDED_ENV = [
 ];
 
 const SECRET_FORWARDED_ENV = new Set([
+  "RENDER_MANAGEMENT_API_KEY",
   "INTERNAL_QUERY_SECRET",
   "STUDIO_CONVEX_JWT_PRIVATE_KEY",
   "STUDIO_INTERNAL_API_TOKEN",

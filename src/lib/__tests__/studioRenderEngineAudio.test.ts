@@ -71,6 +71,27 @@ test("expired authority prevents submission; mismatched or retired output cannot
 test("capacity waits exhaust a bound with the same recoverable job, without resubmission", async () => {
   const f = fixture({ waiting: true });
   await assert.rejects(executeStudioEngineAudio(input, { client: f.client, authorize: async () => undefined,
-    wait: async () => undefined, onAccepted: async () => undefined, maxObservations: 2 }), /remains pending/);
+    wait: async () => undefined, onAccepted: async () => undefined, maxObservations: 2 }), error => {
+      const failure = error as Error & { engineJobId: string; retryable: boolean; recovery: StudioEngineAudioRecovery };
+      assert.match(failure.message, /remains pending/);
+      assert.equal(failure.engineJobId, jobId);
+      assert.equal(failure.retryable, false);
+      assert.deepEqual(failure.recovery.admission, admission);
+      return true;
+    });
   assert.deepEqual(f.counts(), { submits: 1, observations: 2 });
+});
+
+test("an accepted job remains recoverable when saving its admission fails", async () => {
+  const f = fixture();
+  await assert.rejects(executeStudioEngineAudio(input, { client: f.client, authorize: async () => undefined,
+    wait: async () => undefined, onAccepted: async () => { throw new Error("receipt store unavailable"); } }), error => {
+      const failure = error as Error & { engineJobId: string; submissionMayExist: boolean; recovery: StudioEngineAudioRecovery };
+      assert.match(failure.message, /receipt store unavailable/);
+      assert.equal(failure.engineJobId, jobId);
+      assert.equal(failure.submissionMayExist, true);
+      assert.deepEqual(failure.recovery.admission, admission);
+      return true;
+    });
+  assert.deepEqual(f.counts(), { submits: 1, observations: 0 });
 });
