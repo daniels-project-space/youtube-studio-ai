@@ -130,6 +130,51 @@ export class StudioRenderEngineClient {
 
   modelStorage() { return this.request("model-storage"); }
 
+  /** Storage import only; casting still owns consent evidence and voice quality. */
+  async importVoiceReference(audio: Uint8Array, options: { consentConfirmed: true; authorize: () => Promise<void> }) {
+    if (options.consentConfirmed !== true || audio.byteLength < 88_244 || audio.byteLength > 2_646_044) {
+      throw new Error("Voice reference needs explicit consent and bounded native WAV bytes");
+    }
+    // Reuse the existing pure PCM16 parser; no music render/readiness is invoked.
+    const actual = (await import("./minimaxMusic3")).parseMiniMaxMusic3Wav(audio);
+    if (actual.sampleRateHz !== 44100 || actual.channels !== 1 || actual.bitsPerSample !== 16 || actual.durationSec < 1 || actual.durationSec > 30) {
+      throw new Error("Voice reference must be 1-30 seconds of 44.1kHz mono PCM16");
+    }
+    const sha256 = createHash("sha256").update(audio).digest("hex"), bytes = audio.byteLength;
+    const key = `projects/${STUDIO_ENGINE_PROJECT}/assets/voices/sha256/${sha256}.wav`;
+    const input = { sha256, bytes, contentType: "audio/wav" };
+    await options.authorize();
+    const upload = z.object({ bucket: z.literal(STUDIO_ENGINE_BUCKET), key: z.literal(key), sha256: z.literal(sha256),
+      bytes: z.literal(bytes), contentType: z.literal("audio/wav"), url: z.string().url(), headers: z.object({
+        "Content-Type": z.literal("audio/wav"), "Content-Length": z.literal(String(bytes)),
+        "x-amz-meta-sha256": z.literal(sha256), "If-None-Match": z.literal("*"),
+      }).strict() }).parse(
+      await this.request("voice-reference-uploads", input),
+    );
+    const url = new URL(upload.url);
+    if (url.protocol !== "https:" || !url.hostname.endsWith(".r2.cloudflarestorage.com") || url.username || url.password || url.hash ||
+      upload.headers["Content-Type"] !== "audio/wav" || upload.headers["Content-Length"] !== String(bytes) ||
+      upload.headers["x-amz-meta-sha256"] !== sha256 || upload.headers["If-None-Match"] !== "*") {
+      throw new Error("Voice reference upload is not a frozen owned R2 capability");
+    }
+    await options.authorize();
+    try {
+      const response = await this.fetchImpl(upload.url, { method: "PUT", headers: upload.headers, body: Buffer.from(audio),
+        redirect: "error", signal: AbortSignal.timeout(30_000) });
+      void response.body?.cancel().catch(() => undefined);
+      // A matching immutable object may already exist. Verification, never an
+      // overwrite or another key, is the only safe continuation from 412.
+      if (!response.ok && response.status !== 412) throw new StudioEngineError(response.status, false);
+    } catch { throw new StudioEngineError(null, false); }
+    await options.authorize();
+    const receipt = z.object({ bucket: z.literal(STUDIO_ENGINE_BUCKET), key: z.literal(key), sha256: z.literal(sha256),
+      bytes: z.literal(bytes), contentType: z.literal("audio/wav"), sampleRateHz: z.literal(44100), channels: z.literal(1),
+      bitsPerSample: z.literal(16), frames: z.literal(actual.dataBytes / 2), durationSeconds: z.literal(actual.durationSec),
+      verifiedAt: z.number().positive() }).strict().parse(await this.request("voice-reference-uploads/verify", input));
+    await options.authorize();
+    return receipt;
+  }
+
   private async download(url: string, maximum: number, headers?: Record<string, string>) {
     try {
       const response = await this.fetchImpl(url, { headers, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(120_000) });

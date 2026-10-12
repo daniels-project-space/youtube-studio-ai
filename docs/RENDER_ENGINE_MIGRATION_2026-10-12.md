@@ -134,6 +134,24 @@ These are integration contracts, not a live model or complete-channel test.
 
 ## Next acceptance steps
 
+Fish S2 Pro cannot consume the old hosted Fish voice IDs. It needs actual owned
+reference audio and a transcript. A separate Engine API patch, based on release
+`d1a0e94b` in `/root/worktrees/engine-studio-voice-reference-upload-20261012`, adds
+immutable voice-reference upload and verification endpoints plus OpenAPI shapes.
+It preserves the requesting-project bucket, uses create-only PUT and conditional
+GET, verifies full SHA256 and actual PCM16 frames, and allocates no GPU/storage
+volume. That Engine patch is not deployed by this Studio source change.
+
+Studio's `import-voice-reference SOURCE_JSON` operator command reads a consented
+local WAV and uses those endpoints. Its source JSON needs `audioPath` and
+`consentConfirmed: true`. The client validates 1-30 seconds of 44.1 kHz mono
+PCM16 before upload, checks the exact owned key/bucket and signed headers,
+verifies fresh or existing immutable objects, and returns only durable metadata.
+It never stores temporary capabilities. Transcript accuracy, voice identity,
+rights evidence and musical/speech quality remain casting/QA responsibilities.
+No real voice was imported or certified by these fixture checks. Fish generation
+and casting consumers still require migration after the API is released.
+
 Music3's real shared-module generation entry point now uses its registered
 owned Engine workflow. Its direct Novita worker POST, output fetch and worker
 URL/token readiness dependency were removed. Archived Comfy receipts remain

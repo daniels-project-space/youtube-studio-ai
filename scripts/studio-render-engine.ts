@@ -1,15 +1,26 @@
 import { StudioRenderEngineClient, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET, type StudioEngineAudioModel } from "../src/lib/studioRenderEngineClient";
 import { executeStudioEngineAudio, type StudioEngineAudioRecovery } from "../src/lib/studioRenderEngineAudio";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 
 async function main() {
   const [command, value, ...extra] = process.argv.slice(2);
-  if (extra.length || !["inspect", "prepare-audio", "observe", "render-audio", "register-comfy"].includes(command)) {
-    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON");
+  if (extra.length || !["inspect", "prepare-audio", "observe", "render-audio", "register-comfy", "import-voice-reference"].includes(command)) {
+    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | import-voice-reference SOURCE_JSON");
   }
   const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
-  if (command === "register-comfy") {
+  if (command === "import-voice-reference") {
+    const source = JSON.parse(await readFile(value, "utf8"));
+    if (!source || source.consentConfirmed !== true || typeof source.audioPath !== "string") {
+      throw new Error("Voice reference import requires an owned audioPath and consentConfirmed: true");
+    }
+    const info = await stat(source.audioPath);
+    if (!info.isFile() || info.size < 88_244 || info.size > 2_646_044) throw new Error("Invalid reference source size");
+    const receipt = await client.importVoiceReference(await readFile(source.audioPath), {
+      consentConfirmed: true, authorize: async () => undefined,
+    });
+    console.log(JSON.stringify(receipt));
+  } else if (command === "register-comfy") {
     const registered = await client.registerComfy(JSON.parse(await readFile(value, "utf8")));
     console.log(JSON.stringify(registered));
   } else if (command === "render-audio") {
