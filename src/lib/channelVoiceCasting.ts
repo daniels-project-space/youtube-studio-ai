@@ -71,10 +71,14 @@ export function resolveRequestedChannelVoice(args: {
   if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(qwenSpeaker)) {
     throw new Error(`Qwen3 channel inception does not recognize CustomVoice speaker ${qwenSpeaker}`);
   }
+  const qwenLanguage = resolveQwenTtsLanguage(configured["language"] ?? params["language"] ?? args.locale);
+  if (qwenSpeaker !== "Ryan" || qwenLanguage !== "English") {
+    throw new Error("Render Engine Qwen channel casting currently supports English/Ryan; the requested channel voice requires another Engine profile");
+  }
   return {
     provider,
     qwenSpeaker,
-    qwenLanguage: resolveQwenTtsLanguage(configured["language"] ?? params["language"] ?? args.locale),
+    qwenLanguage,
   };
 }
 

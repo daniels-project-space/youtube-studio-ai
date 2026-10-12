@@ -7,7 +7,7 @@ import {
   assertQwenNarrationSourceEvidence,
   createQwenNarrationSourceEvidence,
   prepareQwenTtsRequest,
-  synthQwenNarration,
+  validateRetainedQwenTtsAudio,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
 import { assertNarrationPerformanceEvidence } from "@/lib/narrationPerformance";
@@ -40,29 +40,21 @@ function fixture(request: Record<string, unknown>): unknown {
 }
 
 async function synth(text: string): Promise<{ bytes: Uint8Array; receipt: QwenTtsReceipt }> {
-  let accepted: QwenTtsReceipt | undefined;
-  const bytes = await synthQwenNarration({
+  const args = {
     text,
     speaker: "Aiden",
     language: "English",
     instruction: "Measured documentary delivery.",
     speed: 0.95,
-    onReceipt: (receipt) => { accepted = receipt; },
-  });
-  assert.ok(accepted, "the raw worker response must be independently attested before it enters the batch evidence");
-  return { bytes, receipt: accepted };
+  };
+  const prepared = prepareQwenTtsRequest(args);
+  const raw = fixture({ ...prepared.payload, requestKey: prepared.requestKey }) as { receipt: QwenTtsReceipt };
+  const accepted = validateRetainedQwenTtsAudio(args, audio, raw.receipt);
+  return { bytes: audio, receipt: accepted };
 }
 
 async function main(): Promise<void> {
-  globalThis.fetch = async (_url, init) => {
-    const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    const prepared = prepareQwenTtsRequest({
-      text: String(request.text), speaker: "Aiden", language: "English",
-      instruction: "Measured documentary delivery.", speed: 0.95,
-    });
-    assert.equal(request.requestKey, prepared.requestKey);
-    return Response.json(fixture(request));
-  };
+  globalThis.fetch = async () => { throw new Error("legacy source evidence verification must not dispatch a provider"); };
   const first = await synth("The signal changed before sunrise.");
   const second = await synth("The archive proved why it mattered.");
   const cold = await synth("The signal changed before sunrise. The archive proved why it mattered.");

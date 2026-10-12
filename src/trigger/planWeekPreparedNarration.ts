@@ -47,6 +47,7 @@ import { planStorySpine } from "@/engine/storySpine";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   createQwenNarrationSourceEvidence,
+  qwenTtsReceiptCost,
   composeQwenNarrationInstruction,
   QWEN3_TTS_SPEAKERS,
   qwenTtsInstruction,
@@ -365,7 +366,8 @@ export const planWeekPreparedNarrationTask = task({
           qwenInstruction: provider === "qwen3" ? instruction : undefined,
           qwenSeed: 4_242,
           qwenMaxCostUsd: provider === "qwen3" ? Math.max(0.02, narrationAllowance - observedQwenCost) : undefined,
-          onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost += receipt.runtime.costUsd; },
+          qwenRequestScope: `weekly:${planWeekPreparationManifestSha256(manifest)}`,
+          onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost = qwenTtsReceiptCost(qwenReceipts); },
           onBillableCharacters: (characters) => { billableCharacters += characters; },
         });
         await writeBytes(path, audio);
@@ -425,7 +427,7 @@ export const planWeekPreparedNarrationTask = task({
       }
       const audioSha256 = sha256BytesHex(finalBytes);
       const costUsd = provider === "qwen3"
-        ? qwenReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0)
+        ? qwenTtsReceiptCost(qwenReceipts)
         : narrationTtsCost(provider, billableCharacters, 0, 0);
       if (!Number.isFinite(costUsd) || costUsd > narrationAllowance) {
         throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${narrationAllowance} USD allowance after script review`);

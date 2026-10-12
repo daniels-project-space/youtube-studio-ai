@@ -6,13 +6,14 @@
  * .env.local (or Trigger-deployed env var) always wins. No secret is ever
  * logged — only the count + key NAMES that were loaded.
  */
-import { hydrateEnv } from "@/lib/vault";
+import { hydrateEnv, getOne } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
   // Studio owns its OpenRelay credentials here; the shared provider namespace
   // belongs to other projects and must never shadow the Studio key.
   "youtube", // YOUTUBE_* plus OPENRELAY_API_KEY / OPENRELAY_ORG_ID
+  "render-engine", // Only its public management API credential is loaded below.
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
   "fish-audio", // FISH_AUDIO_API_KEY (narration_tts)
@@ -46,7 +47,11 @@ async function hydrateService(service: BootstrapService): Promise<string[]> {
   if (hydratedServices.has(service)) return [];
   const pending = pendingServices.get(service);
   if (pending) return pending;
-  const request = hydrateEnv(service).then((keys) => {
+  const request = (service === "render-engine" ? (async () => {
+    if (process.env.RENDER_MANAGEMENT_API_KEY) return [];
+    process.env.RENDER_MANAGEMENT_API_KEY = await getOne("render-engine", "MANAGEMENT_API_TOKEN");
+    return ["RENDER_MANAGEMENT_API_KEY"];
+  })() : hydrateEnv(service)).then((keys) => {
     hydratedServices.add(service);
     return keys;
   });

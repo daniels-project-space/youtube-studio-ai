@@ -1,217 +1,69 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { join } from "node:path";
-import {
-  hasQualifiedQwenTts,
-  composeQwenNarrationInstruction,
-  isPinnedQwenTtsReceipt,
-  qwenTtsReadiness,
-  qwenTtsInstruction,
-  QWEN3_TTS_MODEL,
-  QWEN3_TTS_MODEL_REVISION,
-  QWEN3_TTS_WORKER_CONTRACT,
-  QwenTtsError,
-  synthQwenNarration,
-  type QwenTtsReceipt,
-} from "@/lib/qwenTts";
+import { createHash } from "node:crypto";
+import { composeQwenNarrationInstruction, qwenTtsInstruction, qwenTtsReadiness, hasQualifiedQwenTts,
+  synthQwenNarration, isPinnedQwenTtsReceipt, validateRetainedQwenTtsAudio, type QwenTtsReceipt } from "../qwenTts";
+import { createQwenNarrationSourceEvidence, assertQwenNarrationSourceEvidence } from "../qwenTts";
+import { synthNarration, normalizeTtsProvider } from "../tts";
 import { narrationTtsCost } from "@/engine/pricing";
-import { normalizeTtsProvider } from "@/lib/tts";
+import { qwenEngineFixture } from "./fixtures/qwenEngineFixture";
 
-const savedFetch = globalThis.fetch;
-const savedEnv = { ...process.env };
-
-function workerRuntimeEnv(): NodeJS.ProcessEnv {
-  const profile = process.env.QWEN3_TTS_RUNTIME_PROFILE ?? "novita-4090-serverless";
-  if (profile === "openrelay-3090-persistent") {
-    return {
-      ...process.env,
-      QWEN3_TTS_RUNTIME_PROVIDER: "openrelay",
-      QWEN3_TTS_RUNTIME_GPU: "RTX 3090",
-      QWEN3_TTS_RUNTIME_CAPACITY_MODE: "persistent-disk-auto-stop",
-    };
-  }
-  return {
-    ...process.env,
-    QWEN3_TTS_RUNTIME_PROVIDER: "novita",
-    QWEN3_TTS_RUNTIME_GPU: "RTX 4090",
-    QWEN3_TTS_RUNTIME_CAPACITY_MODE: "serverless-scale-to-zero",
-  };
-}
-
-function actualPythonWorkerResponse(request: Record<string, unknown>, audio: Uint8Array): unknown {
-  const output = execFileSync(
-    "python3",
-    [join(process.cwd(), "workers/qwen3-tts/contract.py"), "--fixture"],
-    {
-      input: JSON.stringify({
-        payload: request,
-        idempotencyKey: request.requestKey,
-        audioBase64: Buffer.from(audio).toString("base64"),
-        durationSec: 2.4,
-        requestGpuSeconds: 10,
-        gpuRateUsdPerSecond: 0.00005,
-      }),
-      encoding: "utf8",
-      env: workerRuntimeEnv(),
-    },
-  );
-  return JSON.parse(output) as unknown;
-}
-
-async function main(): Promise<void> {
-  delete process.env.QWEN3_TTS_WORKER_URL;
-  delete process.env.QWEN3_TTS_WORKER_TOKEN;
-  delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST;
+const originalFetch = globalThis.fetch, env = { ...process.env };
+async function main() {
+  delete process.env.RENDER_MANAGEMENT_API_KEY;
+  process.env.QWEN3_TTS_WORKER_URL = "https://retired-worker.invalid/synthesize";
+  process.env.QWEN3_TTS_WORKER_TOKEN = "retired-worker-token";
   assert.equal(qwenTtsReadiness().configured, false);
-  let unconfiguredSubmissions = 0;
-  globalThis.fetch = async () => {
-    unconfiguredSubmissions += 1;
-    throw new Error("an unconfigured worker must not be contacted");
-  };
-  await assert.rejects(
-    () => synthQwenNarration({ text: "Fail before a worker submission.", speaker: "Aiden" }),
-    /WORKER_IMAGE_DIGEST/,
-  );
-  assert.equal(unconfiguredSubmissions, 0);
-  process.env.QWEN3_TTS_WORKER_URL = "https://qwen-worker.example/v1/synthesize";
-  process.env.QWEN3_TTS_WORKER_TOKEN = "qwen-test-token-that-is-longer-than-thirty-two-characters";
-  process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
-  process.env.OPENRELAY_API_KEY = "openrelay-test-token-that-is-longer-than-thirty-two-characters";
-  process.env.QWEN3_TTS_QUALITY_QUALIFIED = "1";
-  process.env.QWEN3_TTS_QUALITY_RECEIPT_SHA256 = "a".repeat(64);
+  let contacts = 0;
+  globalThis.fetch = async () => { contacts++; throw new Error("must not contact a provider"); };
+  await assert.rejects(synthQwenNarration({ text: "Require Engine configuration", speaker: "Ryan" }), /management credential/);
+  assert.equal(contacts, 0);
+  process.env.RENDER_MANAGEMENT_API_KEY = "f".repeat(64);
   assert.equal(hasQualifiedQwenTts(), true);
   assert.equal(normalizeTtsProvider("QWEN3"), "qwen3");
-  assert.throws(() => normalizeTtsProvider("qewn3"), /Unsupported narration TTS provider/);
-  assert.equal(
-    narrationTtsCost("qwen3", 99_999, 0, 0.42),
-    0.42,
-    "Qwen runtime accounting must use the attested GPU receipt, not fictional character billing",
-  );
+  assert.throws(() => normalizeTtsProvider("qewn3"), /Unsupported/);
+  assert.equal(narrationTtsCost("qwen3", 99999, 0, 0.42), 0.42);
   assert.match(qwenTtsInstruction("Calm documentary delivery.", 0.9), /unhurried/);
-  assert.equal(
-    composeQwenNarrationInstruction({
-      explicit: "Use a close, intimate delivery.",
-      editorialBrief: "This must not replace the channel's explicit direction.",
-      delivery: "warm and patient",
-      pacing: "measured",
-      archetype: "documentary",
-    }),
-    "Use a close, intimate delivery. This must not replace the channel's explicit direction. warm and patient. measured. documentary.",
-    "an explicit instruction must stay first without deleting frozen editorial and channel delivery controls",
-  );
-  assert.equal(
-    composeQwenNarrationInstruction({
-      explicit: "Warm and patient",
-      delivery: "warm and patient",
-      pacing: "Warm And Patient",
-    }),
-    "Warm and patient.",
-    "duplicate delivery controls must not consume the bounded worker instruction",
-  );
-  assert.equal(
-    composeQwenNarrationInstruction({
-      editorialBrief: "Open with quiet urgency",
-      delivery: "restrained but intimate",
-      pacing: "measured documentary",
-      archetype: "documentary",
-    }),
-    "Open with quiet urgency. restrained but intimate. measured documentary. documentary.",
-    "weekly narration must retain both its frozen brief and the channel Style DNA",
-  );
-
-  const audio = new Uint8Array(2_048).fill(23);
-  audio.set([0x49, 0x44, 0x33], 0);
-  let requests = 0;
-  let acceptedReceipt: QwenTtsReceipt | undefined;
-  globalThis.fetch = async (_input, init) => {
-    requests += 1;
-    const headers = new Headers(init?.headers);
-    if (process.env.QWEN3_TTS_RUNTIME_PROFILE === "openrelay-3090-persistent") {
-      assert.equal(headers.get("Authorization"), null);
-      assert.equal(headers.get("x-worker-authorization")?.startsWith("Bearer "), true);
-      assert.equal(headers.get("x-api-key")?.startsWith("openrelay-test-token"), true);
-    } else {
-      assert.equal(headers.get("Authorization")?.startsWith("Bearer "), true);
-      assert.equal(headers.get("x-worker-authorization"), null);
-    }
-    const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    assert.equal(request.model, QWEN3_TTS_MODEL);
-    assert.equal(request.revision, QWEN3_TTS_MODEL_REVISION);
-    assert.equal(request.schema, QWEN3_TTS_WORKER_CONTRACT);
-    assert.equal(request.speaker, "Aiden");
-    assert.equal(request.language, "English");
-    assert.match(String(request.instruction), /measured/);
-    assert.equal(new Headers(init?.headers).get("Idempotency-Key"), request.requestKey);
-    return Response.json(actualPythonWorkerResponse(request, audio));
-  };
-  const bytes = await synthQwenNarration({
-    text: "A measured open narration qualification line.",
-    speaker: "Aiden",
-    language: "English",
-    speed: 0.95,
-    onReceipt: (receipt) => { acceptedReceipt = receipt; },
-  });
-  assert.deepEqual(bytes, audio);
-  assert.equal(requests, 1);
-  assert.equal(acceptedReceipt?.runtime.accounting, "conservative-upper-bound");
-  assert.equal(acceptedReceipt?.runtime.requestGpuSeconds, 10);
-  assert.equal(acceptedReceipt?.runtime.gpuSeconds, 310);
-  assert.equal(acceptedReceipt?.runtime.costUsd, 0.0155);
-  assert.equal(acceptedReceipt?.workerImageDigest, process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST);
-  assert.equal(isPinnedQwenTtsReceipt(acceptedReceipt), true);
-
-  globalThis.fetch = async (_input, init) => {
-    const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    const response = actualPythonWorkerResponse(request, audio) as { receipt: { workerImageDigest: string } };
-    response.receipt.workerImageDigest = "registry.example/ysa/qwen3-tts@sha256:" + "c".repeat(64);
-    return Response.json(response);
-  };
-  await assert.rejects(
-    () => synthQwenNarration({ text: "Reject a worker image that changed after qualification.", speaker: "Aiden" }),
-    /worker image digest is not the pinned value/,
-  );
-
-  globalThis.fetch = async (_input, init) => {
-    requests += 1;
-    const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return Response.json({
-      receipt: {
-        schema: QWEN3_TTS_WORKER_CONTRACT,
-        requestKey: request.requestKey,
-        workerImageDigest: process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST,
-        model: QWEN3_TTS_MODEL,
-        revision: "unpinned",
-      },
-      audioBase64: Buffer.from(audio).toString("base64"),
-    });
-  };
-  await assert.rejects(
-    () => synthQwenNarration({ text: "Reject an unpinned worker.", speaker: "Aiden" }),
-    /revision is not the pinned value/,
-  );
-
-  requests = 0;
-  globalThis.fetch = async () => {
-    requests += 1;
-    throw new TypeError("socket reset after upload");
-  };
-  await assert.rejects(
-    () => synthQwenNarration({ text: "Never buy this take twice.", speaker: "Aiden" }),
-    (error: unknown) => error instanceof QwenTtsError && error.retryable === false && /reconciled, not retried/.test(error.message),
-  );
-  assert.equal(requests, 1, "an ambiguous Qwen POST must never be resubmitted");
-  await assert.rejects(
-    () => synthQwenNarration({ text: "Unsupported voice.", speaker: "George" }),
-    /speaker is unsupported/,
-  );
-  await assert.rejects(
-    () => synthQwenNarration({ text: "No unsigned spend.", speaker: "Aiden", maxCostUsd: 0 }),
-    /positive per-request cost ceiling/,
-  );
-  console.log("QWEN3 TTS ATTESTED WORKER CONTRACT PASS");
+  assert.equal(composeQwenNarrationInstruction({ explicit: "Use a close, intimate delivery.",
+    editorialBrief: "Keep the channel's explicit direction.", delivery: "warm and patient", pacing: "measured", archetype: "documentary" }),
+  "Use a close, intimate delivery. Keep the channel's explicit direction. warm and patient. measured. documentary.");
+  assert.equal(composeQwenNarrationInstruction({ explicit: "Warm and patient", delivery: "warm and patient", pacing: "Warm And Patient" }), "Warm and patient.");
+  const fixture = qwenEngineFixture();
+  globalThis.fetch = fixture.fetchImpl;
+  let receipt: QwenTtsReceipt | undefined;
+  let authorities = 0, characters = 0;
+  const text = "A measured narration line.";
+  const bytes = await synthNarration({ provider: "qwen3", text, qwenSpeaker: "Ryan", qwenLanguage: "English",
+    qwenInstruction: "Measured documentary delivery.", qwenSeed: 4242, qwenMaxCostUsd: 0.1,
+    qwenRequestScope: "owner:channel:run:narration", qwenAuthorize: async () => { authorities++; },
+    onQwenReceipt: value => { receipt = value; }, onBillableCharacters: count => { characters += count; } });
+  assert.equal(fixture.counts().submissions, 1);
+  assert.ok(authorities >= 3);
+  assert.equal(characters, text.length);
+  assert.equal(receipt?.schema, "studio-engine-qwen-receipt/v1");
+  assert.equal(receipt?.runtime.costUsd, 0.04);
+  assert.equal(receipt?.audioSha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(receipt?.durationSec, 2);
+  assert.equal(isPinnedQwenTtsReceipt(receipt), true);
+  assert.ok(receipt);
+  const sha = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
+  const sourceEvidence = createQwenNarrationSourceEvidence({ speaker: "Ryan", language: "English",
+    source: { narrationKey: "owner/test/runs/test/narration.mp3", sha256: sha(bytes), byteLength: bytes.length, durationSec: 2,
+      transcriptSha256: sha(text), assembly: "concat_audio_with_gaps/v1", gapPlanSha256: sha("[0]"), mode: "sentence", voiceFx: null },
+    sourceChunks: [{ ordinal: 0, textSha256: receipt.textSha256, audioSha256: sha(bytes), byteLength: bytes.length, receipt }],
+    preflightReceipts: [receipt] });
+  assert.equal(assertQwenNarrationSourceEvidence(sourceEvidence).totalCostUsd, 0.04,
+    "one Engine job reused for preflight and source is accounted once");
+  validateRetainedQwenTtsAudio({ text, speaker: "Ryan", language: "English", instruction: "Measured documentary delivery.",
+    seed: 4242, requestScope: "owner:channel:run:narration" }, bytes, receipt);
+  assert.throws(() => validateRetainedQwenTtsAudio({ text: "Another script", speaker: "Ryan" }, bytes, receipt), /does not match/);
+  await assert.rejects(synthQwenNarration({ text, speaker: "Aiden" }), /refusing to replace/);
+  assert.equal(fixture.counts().submissions, 1);
+  const unknown = qwenEngineFixture(); unknown.failSubmission(); globalThis.fetch = unknown.fetchImpl;
+  await assert.rejects(synthQwenNarration({ text, speaker: "Ryan" }), /original immutable key/);
+  assert.equal(unknown.counts().submissions, 1);
+  const unsettled = qwenEngineFixture(); unsettled.setUsage(false, 0.01); globalThis.fetch = unsettled.fetchImpl;
+  await assert.rejects(synthQwenNarration({ text, speaker: "Ryan" }), /usage requires reconciliation/);
+  assert.equal(unsettled.counts().submissions, 1);
+  console.log("Qwen narration: Engine-only dispatch, actual encoding, preserved direction/identity, usage and recovery checks passed");
 }
-
-main().finally(() => {
-  globalThis.fetch = savedFetch;
-  process.env = savedEnv;
-});
+main().finally(() => { globalThis.fetch = originalFetch; process.env = env; }).catch(error => { console.error(error); process.exitCode = 1; });

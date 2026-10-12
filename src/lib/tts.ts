@@ -287,6 +287,8 @@ export async function synthNarration(args: {
   qwenInstruction?: string;
   qwenSeed?: number;
   qwenMaxCostUsd?: number;
+  qwenRequestScope?: string;
+  qwenAuthorize?: () => Promise<void>;
   onQwenReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
   const provider = normalizeTtsProvider(args.provider);
@@ -301,6 +303,8 @@ export async function synthNarration(args: {
       speed: args.speed,
       seed: args.qwenSeed,
       maxCostUsd: args.qwenMaxCostUsd ?? Math.max(0.02, text.length / 1_000),
+      requestScope: args.qwenRequestScope,
+      authorize: args.qwenAuthorize,
       onReceipt: args.onQwenReceipt,
     });
     args.onBillableCharacters?.(text.length);

@@ -174,6 +174,7 @@ import {
   composeQwenNarrationInstruction,
   createQwenNarrationSourceEvidence,
   qwenTtsReadiness,
+  qwenTtsReceiptCost,
   QWEN3_TTS_SPEAKERS,
   resolveQwenTtsLanguage,
   type QwenNarrationSourceChunk,
@@ -1409,7 +1410,7 @@ export const narrationTts: Block = {
     const onQwenReceipt = (receipt: QwenTtsReceipt) => {
       qwenReceipts.push(receipt);
       qwenReceiptByAudioSha.set(receipt.audioSha256, receipt);
-      qwenObservedCostUsd += receipt.runtime.costUsd;
+      qwenObservedCostUsd = qwenTtsReceiptCost(qwenReceipts);
     };
 
     // COLD-OPEN GATE — production requires a persisted >=7 human audition, an
@@ -1456,6 +1457,8 @@ export const narrationTts: Block = {
       qwenInstruction,
       qwenSeed: 4_242,
       qwenMaxCostUsd: ttsProvider === "qwen3" ? qwenRemainingCostUsd : undefined,
+      qwenRequestScope: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:narration`,
+      qwenAuthorize: ctx.assertInlinePaidExecutionLease,
       onQwenReceipt,
       onBillableCharacters,
       });
@@ -1483,8 +1486,7 @@ export const narrationTts: Block = {
       if (!sourceRequestCount || qwenReceipts.length !== sourceRequestCount + qwenPreflightReceipts.length) {
         throw new Error("narration_tts: Qwen3 receipt set does not exactly cover final source and preflight requests");
       }
-      const sourceCostUsd = args.sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
-      const expectedCostUsd = sourceCostUsd + qwenPreflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
+      const expectedCostUsd = qwenTtsReceiptCost([...args.sourceChunks.map(chunk => chunk.receipt), ...qwenPreflightReceipts]);
       if (Math.abs(expectedCostUsd - qwenObservedCostUsd) > 0.000001) {
         throw new Error("narration_tts: Qwen3 observed provider cost does not bind the sealed receipt set");
       }

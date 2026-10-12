@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { ensureOpenRelayQwenReady } from "@/lib/openRelayQwen";
+import { EngineQwenReceiptSchema, type EngineQwenReceipt } from "@/engine/qwenEngineReceipt";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
@@ -28,9 +28,8 @@ export type QwenTtsRuntimeProfile =
     };
 
 /**
- * The exact execution profile is part of every sealed request and receipt.
- * OpenRelay uses a persistent local disk with an external idle-stop controller;
- * the legacy Novita profile remains available for retained qualified takes.
+ * Historical profile identity is retained for offline receipt verification.
+ * New narration is submitted exclusively through the owned Render Engine API.
  */
 export function qwenTtsRuntimeProfile(): QwenTtsRuntimeProfile {
   const profile = (process.env.QWEN3_TTS_RUNTIME_PROFILE ?? "novita-4090-serverless").trim();
@@ -121,7 +120,7 @@ export type QwenTtsRuntimeReceipt = QwenTtsRuntimeReceiptEvidence & (
     }
 );
 
-export interface QwenTtsReceipt {
+export interface LegacyQwenTtsReceipt {
   schema: typeof QWEN3_TTS_WORKER_CONTRACT;
   requestKey: string;
   /** Immutable OCI image identity reported by the worker itself. */
@@ -142,6 +141,19 @@ export interface QwenTtsReceipt {
   sampleRateHz: typeof QWEN3_TTS_SAMPLE_RATE_HZ;
   durationSec: number;
   runtime: QwenTtsRuntimeReceipt;
+}
+export type QwenTtsReceipt = LegacyQwenTtsReceipt | EngineQwenReceipt;
+
+/** One Engine job may be reused by several identical takes in the same source. */
+export function qwenTtsReceiptCost(receipts: readonly QwenTtsReceipt[]): number {
+  const engineJobs = new Set<string>();
+  return receipts.reduce((total, receipt) => {
+    if (receipt.schema === "studio-engine-qwen-receipt/v1") {
+      if (engineJobs.has(receipt.engine.jobId)) return total;
+      engineJobs.add(receipt.engine.jobId);
+    }
+    return total + receipt.runtime.costUsd;
+  }, 0);
 }
 
 /**
@@ -189,11 +201,6 @@ export interface QwenNarrationSourceEvidence {
   preflightReceipts: QwenTtsReceipt[];
 }
 
-interface QwenTtsWorkerResponse {
-  receipt: QwenTtsReceipt;
-  audioBase64: string;
-}
-
 export interface QwenTtsReadiness {
   configured: boolean;
   qualified: boolean;
@@ -202,7 +209,10 @@ export interface QwenTtsReadiness {
 
 export function isPinnedQwenTtsReceipt(value: unknown): value is QwenTtsReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const receipt = value as Partial<QwenTtsReceipt>;
+  if ((value as { schema?: unknown }).schema === "studio-engine-qwen-receipt/v1") {
+    return EngineQwenReceiptSchema.safeParse(value).success;
+  }
+  const receipt = value as Partial<LegacyQwenTtsReceipt>;
   const runtime = receipt.runtime as Partial<QwenTtsRuntimeReceipt> | undefined;
   let expectedRuntime: QwenTtsRuntimeProfile;
   try {
@@ -354,10 +364,11 @@ export function assertQwenNarrationSourceEvidence(value: unknown): QwenNarration
   if (raw.requestCount !== requestCount || raw.sourceRequestCount !== sourceChunks.length || raw.preflightRequestCount !== preflightReceipts.length) {
     throw new Error("Qwen3 narration source evidence request counts do not bind its receipts");
   }
-  const sourceCostUsd = sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
-  const totalCostUsd = sourceCostUsd + preflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
-  const recordedSourceCostUsd = finiteReceiptNumber(raw.sourceCostUsd, "source cost", 0.000001, 2_000);
-  const recordedTotalCostUsd = finiteReceiptNumber(raw.totalCostUsd, "total cost", 0.000001, 2_000);
+  const sourceCostUsd = qwenTtsReceiptCost(sourceChunks.map(chunk => chunk.receipt));
+  const totalCostUsd = qwenTtsReceiptCost([...sourceChunks.map(chunk => chunk.receipt), ...preflightReceipts]);
+  const minimum = sourceChunks.every(chunk => chunk.receipt.schema === "studio-engine-qwen-receipt/v1") ? 0 : 0.000001;
+  const recordedSourceCostUsd = finiteReceiptNumber(raw.sourceCostUsd, "source cost", minimum, 2_000);
+  const recordedTotalCostUsd = finiteReceiptNumber(raw.totalCostUsd, "total cost", minimum, 2_000);
   if (Math.abs(recordedSourceCostUsd - sourceCostUsd) > 0.000001 || Math.abs(recordedTotalCostUsd - totalCostUsd) > 0.000001) {
     throw new Error("Qwen3 narration source evidence costs do not bind its receipts");
   }
@@ -398,8 +409,8 @@ export function assertQwenNarrationSourceEvidence(value: unknown): QwenNarration
 }
 
 export function createQwenNarrationSourceEvidence(args: Omit<QwenNarrationSourceEvidence, "schema" | "provider" | "model" | "revision" | "requestCount" | "sourceRequestCount" | "preflightRequestCount" | "sourceCostUsd" | "totalCostUsd" | "receiptSha256">): QwenNarrationSourceEvidence {
-  const sourceCostUsd = args.sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
-  const totalCostUsd = sourceCostUsd + args.preflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
+  const sourceCostUsd = qwenTtsReceiptCost(args.sourceChunks.map(chunk => chunk.receipt));
+  const totalCostUsd = qwenTtsReceiptCost([...args.sourceChunks.map(chunk => chunk.receipt), ...args.preflightReceipts]);
   const receiptSha256 = sha256(canonicalJson({
     sourceChunks: args.sourceChunks.map(({ receipt }) => receipt),
     preflightReceipts: args.preflightReceipts,
@@ -452,89 +463,17 @@ function finiteNumber(value: unknown, label: string, min: number, max: number): 
   return value;
 }
 
-function workerUrl(): string {
-  const raw = process.env.QWEN3_TTS_WORKER_URL?.trim() ?? "";
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new QwenTtsError("QWEN3_TTS_WORKER_URL is missing or invalid");
-  }
-  const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
-  if (url.protocol !== "https:" && !loopback) {
-    throw new QwenTtsError("QWEN3_TTS_WORKER_URL must use HTTPS outside loopback qualification");
-  }
-  if (url.username || url.password || url.hash) {
-    throw new QwenTtsError("QWEN3_TTS_WORKER_URL must not contain embedded credentials or a fragment");
-  }
-  return url.toString();
-}
-
-function workerToken(): string {
-  const token = process.env.QWEN3_TTS_WORKER_TOKEN?.trim() ?? "";
-  if (token.length < 32) throw new QwenTtsError("QWEN3_TTS_WORKER_TOKEN is missing or too short");
-  return token;
-}
-
 /** A mutable tag cannot identify the worker code that created an audio take. */
 function isPinnedWorkerImageDigest(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/.test(value);
 }
 
-function workerImageDigest(): string {
-  const digest = process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST?.trim() ?? "";
-  if (!isPinnedWorkerImageDigest(digest)) {
-    throw new QwenTtsError("QWEN3_TTS_WORKER_IMAGE_DIGEST must be a full immutable OCI @sha256 reference");
-  }
-  return digest;
-}
-
-/** Consumed by the private OpenRelay gateway and stripped before proxying. */
-function openRelayGatewayToken(): string {
-  const token = process.env.OPENRELAY_API_KEY?.trim() ?? "";
-  if (token.length < 32) {
-    throw new QwenTtsError("OPENRELAY_API_KEY is missing or too short for the private Qwen endpoint");
-  }
-  return token;
-}
-
 export function qwenTtsReadiness(): QwenTtsReadiness {
-  const blockers: string[] = [];
-  let urlConfigured = true;
-  let tokenConfigured = true;
-  let imageConfigured = true;
-  let runtimeProfile: QwenTtsRuntimeProfile | undefined;
-  let gatewayConfigured = true;
-  try { workerUrl(); } catch (error) {
-    urlConfigured = false;
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  try { workerToken(); } catch (error) {
-    tokenConfigured = false;
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  try { workerImageDigest(); } catch (error) {
-    imageConfigured = false;
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  try { runtimeProfile = qwenTtsRuntimeProfile(); } catch (error) {
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  if (runtimeProfile?.provider === "openrelay") {
-    try { openRelayGatewayToken(); } catch (error) {
-      gatewayConfigured = false;
-      blockers.push(error instanceof Error ? error.message : String(error));
-    }
-  }
-  const qualityReceipt = process.env.QWEN3_TTS_QUALITY_RECEIPT_SHA256?.trim() ?? "";
-  if (process.env.QWEN3_TTS_QUALITY_QUALIFIED !== "1") {
-    blockers.push("QWEN3_TTS_QUALITY_QUALIFIED is not enabled");
-  }
-  if (!/^[a-f0-9]{64}$/.test(qualityReceipt)) {
-    blockers.push("QWEN3_TTS_QUALITY_RECEIPT_SHA256 is missing or invalid");
-  }
-  const configured = urlConfigured && tokenConfigured && imageConfigured && Boolean(runtimeProfile) && gatewayConfigured;
-  return { configured, qualified: configured && blockers.length === 0, blockers };
+  // This is Engine admission configuration. Per-take quality and channel
+  // auditions remain the responsibility of the existing narration consumers.
+  const configured = /^[a-f0-9]{64}$/.test(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
+  return { configured, qualified: configured,
+    blockers: configured ? [] : ["RENDER_MANAGEMENT_API_KEY is missing or invalid"] };
 }
 
 export function hasQwenTtsConfig(): boolean {
@@ -731,6 +670,8 @@ export interface QwenTtsRequestArgs {
   speed?: number;
   seed?: number;
   maxCostUsd?: number;
+  requestScope?: string;
+  authorize?: () => Promise<void>;
 }
 
 /** Pure request identity, shared by live submission and offline qualification. */
@@ -793,6 +734,17 @@ export function prepareQwenTtsRequest(args: QwenTtsRequestArgs) {
 /** Validate retained bytes against the CURRENT request, not a receipt's own claim.
  * Integrity linkage only: this neither authorizes spend nor proves worker identity. */
 export function validateRetainedQwenTtsAudio(args: QwenTtsRequestArgs, audio: Uint8Array, receipt: unknown): QwenTtsReceipt {
+  if ((receipt as { schema?: unknown } | null)?.schema === "studio-engine-qwen-receipt/v1") {
+    const admitted = EngineQwenReceiptSchema.parse(receipt);
+    if (admitted.textSha256 !== sha256(args.text.replace(/\s+/g, " ").trim()) || admitted.speaker !== args.speaker ||
+      admitted.language !== (args.language ?? "English") || admitted.seed !== (args.seed ?? 4242) ||
+      admitted.instructionSha256 !== sha256(qwenTtsInstruction(args.instruction, args.speed)) || admitted.audioSha256 !== sha256(audio) ||
+      (args.requestScope !== undefined && admitted.requestScope !== args.requestScope)) {
+      throw new Error("Engine Qwen retained take does not match the current request or bytes");
+    }
+    strictBase64(Buffer.from(audio).toString("base64"));
+    return admitted;
+  }
   const { payload, requestKey } = prepareQwenTtsRequest(args);
   // Reuse the live size/header checks as well as its complete attestation checks.
   if (!(audio instanceof Uint8Array) || audio.byteLength < 1_000 || audio.byteLength > 36_000_000) {
@@ -810,95 +762,35 @@ export function validateRetainedQwenTtsAudio(args: QwenTtsRequestArgs, audio: Ui
 export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   onReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
-  const { payload, requestKey } = prepareQwenTtsRequest(args);
-  // Resolve the deployment allow-list before submitting a paid request.  A
-  // missing or mutable image identity must not spend first and fail later.
-  const expectedWorkerImageDigest = workerImageDigest();
-  const runtimeProfile = qwenTtsRuntimeProfile();
-  const managedOpenRelay = runtimeProfile.provider === "openrelay" && Boolean(process.env.OPENRELAY_QWEN_VM_ID?.trim());
-  if (managedOpenRelay) await ensureOpenRelayQwenReady();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Idempotency-Key": requestKey,
-  };
-  if (runtimeProfile.provider === "openrelay") {
-    // OpenRelay consumes Authorization for its organization credential, so
-    // retain the worker's second auth layer in a header it forwards intact.
-    headers["x-worker-authorization"] = `Bearer ${workerToken()}`;
-    headers["x-api-key"] = openRelayGatewayToken();
-  } else {
-    headers.Authorization = `Bearer ${workerToken()}`;
-  }
-  const submit = async (): Promise<Response> => {
-    try {
-      return await fetch(workerUrl(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...payload, requestKey }),
-        signal: AbortSignal.timeout(runtimeProfile.provider === "openrelay" ? 8 * 60_000 : 180_000),
-      });
-    } catch (error) {
-      throw new QwenTtsError(
-        `Qwen3 TTS outcome is unknown after submission; request ${requestKey} must be reconciled, not retried`,
-        requestKey,
-        undefined,
-        { cause: error },
-      );
-    }
-  };
-  let response = await submit();
-  // The reaper's drain endpoint rejects before taking the inference lock. It
-  // is therefore the one response that is safe to re-start and re-submit with
-  // the same idempotency key; network failures and every other result retain
-  // the normal no-automatic-retry rule.
-  if (managedOpenRelay && response.status === 503) {
-    const detail = await response.text().catch(() => "");
-    if (/draining for safe idle shutdown/i.test(detail)) {
-      await ensureOpenRelayQwenReady();
-      response = await submit();
-    }
-  }
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new QwenTtsError(
-      `Qwen3 TTS worker HTTP ${response.status}: ${detail.slice(0, 220)}`,
-      requestKey,
-      response.status,
-    );
-  }
-  const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > 50_000_000) {
-    throw new QwenTtsError("Qwen3 TTS worker response exceeds the 50 MB bound", requestKey, response.status);
-  }
-  let body: QwenTtsWorkerResponse;
+  const { renderEngineQwen, engineQwenRequest } = await import("./qwenEngine");
+  const { StudioRenderEngineClient } = await import("./studioRenderEngineClient");
+  const { wait } = await import("@trigger.dev/sdk");
+  const { taskContext } = await import("@trigger.dev/core/v3");
+  const text = args.text.replace(/\s+/g, " ").trim();
+  const input = { text, speaker: args.speaker, language: args.language ?? "English",
+    instruction: qwenTtsInstruction(args.instruction, args.speed), seed: args.seed ?? 4242,
+    maxCostUsd: args.maxCostUsd ?? Math.max(0.1, text.length / 1000), scope: args.requestScope };
+  let requestKey: string | undefined;
   try {
-    body = await response.json() as QwenTtsWorkerResponse;
+  requestKey = engineQwenRequest(input).requestKey;
+  const result = await renderEngineQwen(input, {
+    client: new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? ""),
+    authorize: args.authorize ?? (async () => undefined),
+    wait: async (seconds, key) => {
+      if (taskContext.ctx) await wait.for({ seconds, idempotencyKey: key });
+      else await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+    },
+  });
+  args.onReceipt?.(result.receipt);
+  return result.audio;
   } catch (error) {
-    throw new QwenTtsError("Qwen3 TTS worker returned malformed JSON", requestKey, response.status, { cause: error });
-  }
-  try {
-    const audio = strictBase64(body.audioBase64);
-    const receipt = validateReceipt({
-      value: body.receipt,
-      requestKey,
-      textSha256: payload.textSha256,
-      instructionSha256: payload.instructionSha256,
-      speaker: payload.speaker,
-      language: payload.language,
-      seed: payload.seed,
-      audio,
-      maxCostUsd: payload.maxCostUsd,
-      idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
-      expectedWorkerImageDigest,
+    const wrapped = new QwenTtsError(error instanceof Error ? error.message : "Engine Qwen failed", requestKey);
+    const evidence = error as { engineJobId?: string; additionalObservedCostUsd?: number; submissionMayExist?: boolean };
+    Object.assign(wrapped, {
+      ...(typeof evidence?.engineJobId === "string" ? { engineJobId: evidence.engineJobId } : {}),
+      ...(typeof evidence?.additionalObservedCostUsd === "number" ? { additionalObservedCostUsd: evidence.additionalObservedCostUsd } : {}),
+      ...(evidence?.submissionMayExist || evidence?.engineJobId ? { code: "PAID_STAGE_RECONCILIATION_REQUIRED" } : {}),
     });
-    args.onReceipt?.(receipt);
-    return audio;
-  } catch (error) {
-    throw new QwenTtsError(
-      `Qwen3 TTS response attestation failed: ${error instanceof Error ? error.message : String(error)}`,
-      requestKey,
-      response.status,
-      { cause: error },
-    );
+    throw wrapped;
   }
 }

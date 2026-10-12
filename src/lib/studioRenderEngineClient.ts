@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { STUDIO_ENGINE_AUDIO_WORKFLOWS } from "./studioRenderEngineWorkflows";
-
-export const STUDIO_ENGINE_PROJECT = "youtube-studio-render";
-export const STUDIO_ENGINE_BUCKET = "re-youtube-studio-render-p2w18g596q";
+import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
+export { STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 const BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
 const nativeRoutes = {
   yue2: "yue2-jobs",

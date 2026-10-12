@@ -1,4 +1,6 @@
 /** Live project-owned registrations; update only with an explicit new Engine workflow. */
+export const STUDIO_ENGINE_PROJECT = "youtube-studio-render";
+export const STUDIO_ENGINE_BUCKET = "re-youtube-studio-render-p2w18g596q";
 export const STUDIO_ENGINE_AUDIO_WORKFLOWS = {
   yue2: {
     workflowId: "jn7317xe2gbj997hcrq91cjsrh8g52n2",
