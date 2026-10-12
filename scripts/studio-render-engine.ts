@@ -3,14 +3,35 @@ import { executeStudioEngineAudio, type StudioEngineAudioRecovery } from "../src
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { studioErnieReferenceComfyProfile, STUDIO_ERNIE_REFERENCE_COMFY } from "../src/engine/studioErnieComfyProfile";
+import { StudioZImageRequestSchema } from "../src/engine/studioZImageRequest";
+import { createHash } from "node:crypto";
 
 async function main() {
   const [command, value, ...extra] = process.argv.slice(2);
-  if (extra.length || !["inspect", "prepare-audio", "observe", "render-audio", "register-comfy", "prepare-reference-comfy", "import-voice-reference"].includes(command)) {
-    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | prepare-reference-comfy | import-voice-reference SOURCE_JSON");
+  if (extra.length || !["inspect", "prepare-audio", "prepare-zimage", "stage-zimage", "observe", "render-audio", "register-comfy", "prepare-reference-comfy", "import-voice-reference"].includes(command)) {
+    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | prepare-zimage | stage-zimage REQUEST_JSON | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | prepare-reference-comfy | import-voice-reference SOURCE_JSON");
   }
   const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
-  if (command === "prepare-reference-comfy") {
+  if (command === "prepare-zimage") {
+    console.log(JSON.stringify({ project: STUDIO_ENGINE_PROJECT, bucket: STUDIO_ENGINE_BUCKET, ...await client.prepareZImage() }));
+  } else if (command === "stage-zimage") {
+    const source = JSON.parse(await readFile(value, "utf8")), request = StudioZImageRequestSchema.parse(source.request);
+    const requestSha256 = createHash("sha256").update(JSON.stringify(request)).digest("hex");
+    const recoveryFile = `${value}.engine-admission.json`;
+    let saved;
+    try { saved = JSON.parse(await readFile(recoveryFile, "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (saved) {
+      if (saved.schema !== "studio-engine-zimage-admission/v1" || saved.workflowId !== source.workflowId ||
+        saved.requestSha256 !== requestSha256 || saved.admission?.manifestSha256 !== requestSha256) throw new Error("Z-Image recovery input changed");
+      console.log(JSON.stringify({ phase: "observed", ...await client.observeZImage(saved.admission, saved.workflowId) }));
+    } else {
+      const admission = await client.submitZImage(source.workflowId, request);
+      await writeFile(recoveryFile, JSON.stringify({ schema: "studio-engine-zimage-admission/v1", workflowId: source.workflowId,
+        requestSha256, admission }), { flag: "wx", mode: 0o600 });
+      console.log(JSON.stringify({ phase: "staged-not-rendered", ...admission }));
+    }
+  } else if (command === "prepare-reference-comfy") {
     if (value !== undefined) throw new Error("Reference Comfy registration takes no override");
     const registered = await client.registerComfy(studioErnieReferenceComfyProfile());
     if (registered.workflowId !== STUDIO_ERNIE_REFERENCE_COMFY.workflowId ||

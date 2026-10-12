@@ -131,6 +131,19 @@ already has the exact `studio-zimage-turbo` Final contract (same Z-Image revisio
 held and `/client/studio-zimage-batches` is not in the managed-operation allowlist.
 That native route needs public API exposure and genuine executor completion.
 
+Update: the public managed API now exposes `studio-zimage-batches`, Studio batch
+admission/scene binding, and H3 scene-batch intake/readback/output. Authenticated
+invalid requests to the exact Vercel public alias returned 400; requests without
+credentials returned 401. No probe created a job or GPU. Studio registered
+`studio-zimage-turbo-final` as `jn739qpstjjme9afp2zw3a07dh8g580s`, with the exact
+Z-Image profile digest above. The SDK validates paired production/hero geometry,
+candidate count/identity, unsigned seed, independent negative prompt, workflow
+ownership and native request digest before accepting a staging receipt.
+`prepare-zimage` registers/replays that workflow; `stage-zimage REQUEST_JSON`
+saves its immutable admission and observes the same job on replay. A held state
+is reported as staged, never as successfully rendered imagery. Scene rendering,
+candidate readback/QA, and the producer-module replacement remain unfinished.
+
 Shared Studio H3 generation is the 1344x768, 124-frame, 24-fps Turbo8 profile.
 The older weekly scene-batch client uses private `/client/h3-scene-batches`
 endpoints and a different 1280x736/5-second staging request. Those endpoints and

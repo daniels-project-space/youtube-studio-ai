@@ -1,6 +1,10 @@
 /** Live project-owned registrations; update only with an explicit new Engine workflow. */
 export const STUDIO_ENGINE_PROJECT = "youtube-studio-render";
 export const STUDIO_ENGINE_BUCKET = "re-youtube-studio-render-p2w18g596q";
+export const STUDIO_ENGINE_ZIMAGE_WORKFLOW = {
+  workflowId: "jn739qpstjjme9afp2zw3a07dh8g580s",
+  profileRevisionSha256: "c5fa2752adcbefa3f28ac80eba06335e841c05e0d5bd1bb694c414cdd8488b1b",
+} as const;
 export const STUDIO_ENGINE_AUDIO_WORKFLOWS = {
   yue2: {
     workflowId: "jn7317xe2gbj997hcrq91cjsrh8g52n2",

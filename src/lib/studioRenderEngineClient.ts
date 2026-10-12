@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { canonicalJson } from "./canonicalJson";
-import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
+import { StudioZImageRequestSchema, STUDIO_ZIMAGE_PROFILE_SHA256, type StudioZImageRequest } from "../engine/studioZImageRequest";
+import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_ZIMAGE_WORKFLOW, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 export { STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 const BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
 const nativeRoutes = {
@@ -138,6 +139,39 @@ export class StudioRenderEngineClient {
   }
 
   modelStorage() { return this.request("model-storage"); }
+
+  async prepareZImage() {
+    const registered = Workflow.parse(await this.request("workflows", {
+      workflowName: "studio-zimage-turbo-final", profileId: "studio-zimage-turbo",
+    }));
+    if (registered.profileRevisionSha256 !== STUDIO_ZIMAGE_PROFILE_SHA256 || registered.workflowId !== STUDIO_ENGINE_ZIMAGE_WORKFLOW.workflowId) throw new Error("Studio's exact Z-Image Final profile changed");
+    return registered;
+  }
+
+  /** Native staging only; a held receipt is never treated as generated imagery. */
+  async submitZImage(workflowId: string, input: StudioZImageRequest) {
+    const request = StudioZImageRequestSchema.parse(input);
+    JobId.parse(workflowId);
+    if (workflowId !== STUDIO_ENGINE_ZIMAGE_WORKFLOW.workflowId) throw new Error("Z-Image submission must use Studio's registered workflow");
+    const body = { workflowId, request };
+    if (Buffer.byteLength(JSON.stringify(body)) > 120000) throw new Error("Z-Image batch exceeds the Engine intake bound");
+    const expected = createHash("sha256").update(JSON.stringify(request)).digest("hex");
+    const raw = await this.request("studio-zimage-batches", body, true);
+    try {
+      const accepted = Admission.parse(raw);
+      if (accepted.manifestSha256 !== expected) throw new Error("Native request digest changed");
+      return accepted;
+    } catch { throw new StudioEngineError(null, true); }
+  }
+
+  async observeZImage(admission: StudioEngineAdmission, workflowId: string) {
+    const status = z.object({ jobId: JobId, workflowId: JobId, profileId: z.literal("studio-zimage-turbo"),
+      requestSha256: Hash, status: z.string().min(1), outputRetired: z.boolean() }).passthrough().parse(await this.observe(admission.jobId));
+    if (status.workflowId !== workflowId || status.jobId !== admission.jobId || status.requestSha256 !== admission.manifestSha256) {
+      throw new Error("Z-Image staged job identity changed");
+    }
+    return status;
+  }
 
   /** Storage import only; casting still owns consent evidence and voice quality. */
   async importVoiceReference(audio: Uint8Array, options: { consentConfirmed: true; authorize: () => Promise<void> }) {
