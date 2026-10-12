@@ -58,6 +58,7 @@ import {
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
+import { engineFishRequest } from "@/lib/fishEngine";
 import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
 import { prepareWeeklyScriptReview } from "./planWeekPreparedScriptReview";
 
@@ -330,8 +331,10 @@ export const planWeekPreparedNarrationTask = task({
     }
     const speaker = String(speakerValue ?? "").trim();
     if (!speaker && provider !== "qwen3") throw new Error("weekly prepared narration requires an explicit voice");
+    if (provider === "fish") engineFishRequest({ text: sentences[0], reference: config.fishEngineReference,
+      voiceId: speaker, speed, scope: `weekly:${planWeekPreparationManifestSha256(manifest)}` });
 
-    const estimatedUpperCost = provider === "qwen3"
+    const estimatedUpperCost = provider === "qwen3" || provider === "fish"
       ? (text.length * 1) / 1_000
       : narrationTtsCost(provider, text.length, 0, 0);
     if (estimatedUpperCost > payload.maxCostUsd) {
@@ -339,7 +342,7 @@ export const planWeekPreparedNarrationTask = task({
     }
     const scriptReview = await prepareWeeklyScriptReview(manifest, preparedScript, payload.maxCostUsd - estimatedUpperCost);
     const narrationAllowance = payload.maxCostUsd - scriptReview.chargedCostUsd;
-    if (provider === "fish") await bootstrapSecrets(() => undefined, { services: ["fish-audio"] });
+    if (provider === "fish") await bootstrapSecrets(() => undefined, { services: ["render-engine"], required: ["RENDER_MANAGEMENT_API_KEY"] });
     if (provider === "elevenlabs") await bootstrapSecrets(() => undefined, { services: ["elevenlabs"] });
 
     const workDir = await mkdtemp(join(tmpdir(), "plan-week-narration-"));
@@ -348,6 +351,8 @@ export const planWeekPreparedNarrationTask = task({
     const partByteLengths: number[] = [];
     const qwenReceipts: QwenTtsReceipt[] = [];
     let billableCharacters = 0;
+    let observedFishCost = 0;
+    const fishJobs = new Set<string>();
     try {
       await claimPreparedGeneration("narration", manifest, { payload, scriptSha256: preparedScript.scriptSha256,
         scriptReviewFingerprint: scriptReview.fingerprint, provider, speed, cadence, speaker, language, instruction });
@@ -369,6 +374,15 @@ export const planWeekPreparedNarrationTask = task({
           qwenRequestScope: `weekly:${planWeekPreparationManifestSha256(manifest)}`,
           onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost = qwenTtsReceiptCost(qwenReceipts); },
           onBillableCharacters: (characters) => { billableCharacters += characters; },
+          fishEngineReference: config.fishEngineReference,
+          fishMaxCostUsd: provider === "fish" ? Math.max(0, narrationAllowance - observedFishCost) : undefined,
+          fishSeed: 4242,
+          engineRequestScope: `weekly:${planWeekPreparationManifestSha256(manifest)}`,
+          onFishReceipt: receipt => {
+            if (!fishJobs.has(receipt.engine.jobId)) {
+              fishJobs.add(receipt.engine.jobId); observedFishCost += receipt.runtime.costUsd;
+            }
+          },
         });
         await writeBytes(path, audio);
         const measured = await probe(path);
@@ -428,7 +442,7 @@ export const planWeekPreparedNarrationTask = task({
       const audioSha256 = sha256BytesHex(finalBytes);
       const costUsd = provider === "qwen3"
         ? qwenTtsReceiptCost(qwenReceipts)
-        : narrationTtsCost(provider, billableCharacters, 0, 0);
+        : narrationTtsCost(provider, billableCharacters, 0, 0, provider === "fish" ? observedFishCost : undefined);
       if (!Number.isFinite(costUsd) || costUsd > narrationAllowance) {
         throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${narrationAllowance} USD allowance after script review`);
       }
@@ -461,6 +475,13 @@ export const planWeekPreparedNarrationTask = task({
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prepared);
       return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId,
         costUsd: costUsd + scriptReview.costUsd, scriptReviewReceiptKey: scriptReview.receiptKey, audioSha256 };
+    } catch (error) {
+      if (provider === "fish" && error instanceof Error) {
+        const evidence = error as Error & { engineJobId?: string; additionalObservedCostUsd?: number };
+        if (evidence.engineJobId && fishJobs.has(evidence.engineJobId)) delete evidence.additionalObservedCostUsd;
+        if (observedFishCost > 0) Object.assign(error, { retryable: false, observedCostUsd: observedFishCost });
+      }
+      throw error;
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }

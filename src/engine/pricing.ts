@@ -219,6 +219,7 @@ export function narrationTtsCost(
   billableCharacters: number,
   audioJudgeCalls: number,
   qwenObservedCostUsd = 0,
+  fishEngineObservedCostUsd?: number,
 ): number {
   const characters = Number.isFinite(billableCharacters)
     ? Math.max(0, billableCharacters)
@@ -227,6 +228,10 @@ export function narrationTtsCost(
     ? Math.max(0, Math.floor(audioJudgeCalls))
     : 0;
   const normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === "fish" && fishEngineObservedCostUsd !== undefined) {
+    if (!Number.isFinite(fishEngineObservedCostUsd) || fishEngineObservedCostUsd < 0) throw new Error("Invalid Engine Fish usage cost");
+    return fishEngineObservedCostUsd + judges * PRICE.visionGraderUsd;
+  }
   if (normalizedProvider === "qwen3") {
     const observed = Number.isFinite(qwenObservedCostUsd) ? Math.max(0, qwenObservedCostUsd) : 0;
     return observed + judges * PRICE.visionGraderUsd;

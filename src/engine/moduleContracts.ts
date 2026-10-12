@@ -645,7 +645,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       const provider = String(params["ttsProvider"] ?? "fish").toLowerCase();
       const rate = provider === "elevenlabs"
         ? PRICE.ttsElevenPerKCharUsd
-        : provider === "qwen3"
+        : provider === "qwen3" || provider === "fish"
           ? PRICE.ttsQwenMaxPerKCharUsd
           : PRICE.ttsPerKCharUsd;
       return (

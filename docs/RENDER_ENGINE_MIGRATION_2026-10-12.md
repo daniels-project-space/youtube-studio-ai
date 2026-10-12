@@ -159,8 +159,34 @@ immutable reuse with PUT statuses 200/412. Its receipt SHA256 is
 `d9a973f35fcb8db925635592b20f32c7e7bb4b88c62dd063d6caa2e4bf00543f`;
 176444 bytes, 88200 frames, two seconds, 44.1 kHz mono PCM16. That private object
 is storage qualification evidence, not a registered voice or speech quality
-example. No model/GPU job ran. Fish generation and casting consumers still
-require migration and genuine reference/voice quality acceptance.
+example. No model/GPU job ran. Fish casting still requires migration and genuine
+reference/voice quality acceptance.
+
+The real `synthNarration` Fish path now uses the registered S2 Pro Engine
+workflow; its hosted Fish POST and local 429 retries were removed. It requires
+`fishEngineReference` with the exact imported object key, SHA256 and transcript.
+Voice identity is `engine-fish:<reference-sha256>`. Hosted voice IDs are not
+equivalent, and non-native speaking-rate requests are rejected before submission.
+Text, reference transcript, seed, scope and profile revision bind the request.
+
+Completion verifies current owned native WAV bytes and settled usage, then
+delivers 192 kbps/44.1 kHz mono MP3. Qwen retains 160 kbps/24 kHz. Fish receipts
+keep native R2 and encoded output identities separate, without inventing a
+hosted bill or quality grade. Pending, ambiguous, incomplete-billing and
+over-budget outcomes retain the original job for reconciliation, never automatic
+repurchase. Narration runs forward their lease/run scope, retain take receipts
+in R2 and deduplicate costs. Weekly preparation forwards its manifest scope and
+uses native usage. Failed receipt writes cannot double-count an accepted take.
+
+Run ceilings remain enforced. Native reservation estimates follow the existing
+conservative Qwen envelope rather than retired hosted Fish character pricing;
+this is not an Engine-enforced cap or measured economics. Fixture responses with
+actual FFmpeg encoding, identity/tampering, unsupported controls, usage and
+recovery checks pass. Qwen, runtime accounting, weekly narration, typechecking,
+lint and production build pass. Studio production was not released by this
+source change. Fish casting and live speech acceptance remain unfinished, and
+Engine last reported Fish executor readiness false. Legacy channel records and
+generation schedules were not changed.
 
 Music3's real shared-module generation entry point now uses its registered
 owned Engine workflow. Its direct Novita worker POST, output fetch and worker

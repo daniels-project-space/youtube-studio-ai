@@ -196,7 +196,8 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
   process.env.ELEVENLABS_API_KEY = "test-eleven-key";
 
   try {
-    for (const provider of ["fish", "elevenlabs"] as const) {
+    // Native Fish admission/accounting is covered by fishEngine.test.ts.
+    for (const provider of ["elevenlabs"] as const) {
       let calls = 0;
       let billableCharacters = 0;
       globalThis.fetch = async () => {
@@ -301,7 +302,7 @@ async function timedOutTtsIsTerminal(): Promise<void> {
   process.env.ELEVENLABS_API_KEY = "test-eleven-key";
 
   try {
-    for (const provider of ["fish", "elevenlabs"] as const) {
+    for (const provider of ["elevenlabs"] as const) {
       const text = `bounded ${provider} request`;
       let successCalls = 0;
       globalThis.fetch = async (_input, init) => {

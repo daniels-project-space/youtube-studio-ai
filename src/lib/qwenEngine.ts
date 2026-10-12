@@ -63,14 +63,15 @@ export function engineQwenWavDuration(value: Uint8Array): number {
 }
 
 /** A seekable encode retains MP3 delay metadata; private scratch is always removed. */
-export async function encodeEngineQwenMp3(bytes: Uint8Array): Promise<Uint8Array> {
+export async function encodeEngineNarrationMp3(bytes: Uint8Array, format: "qwen" | "fish"): Promise<Uint8Array> {
+  if (format !== "qwen" && format !== "fish") throw new Error("Unsupported narration compatibility format");
   const directory = await mkdtemp(join(tmpdir(), "studio-engine-qwen-"));
   const path = join(directory, "take.mp3");
   try {
   await new Promise<void>((resolve, reject) => {
     // The executable is supplied by the Trigger image, not a project asset.
     const child = spawn(/* turbopackIgnore: true */ process.env.FFMPEG_BIN ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-      "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "160k", "-f", "mp3", path], { stdio: ["pipe", "ignore", "pipe"] });
+      "-ar", format === "fish" ? "44100" : "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", format === "fish" ? "192k" : "160k", "-f", "mp3", path], { stdio: ["pipe", "ignore", "pipe"] });
     let failed = false;
     const timer = setTimeout(() => { failed = true; child.kill("SIGKILL"); }, 90_000);
     child.stderr.resume();
@@ -78,16 +79,18 @@ export async function encodeEngineQwenMp3(bytes: Uint8Array): Promise<Uint8Array
     child.on("error", () => { failed = true; });
     child.on("close", code => {
       clearTimeout(timer);
-      if (failed || code !== 0) reject(new Error("Engine Qwen compatibility encoding failed"));
+      if (failed || code !== 0) reject(new Error("Engine narration compatibility encoding failed"));
       else resolve();
     });
     child.stdin.end(bytes);
   });
   const info = await stat(path);
-  if (!info.isFile() || info.size < 1000 || info.size > 36_000_000) throw new Error("Encoded Qwen take exceeds bounds");
+  if (!info.isFile() || info.size < 1000 || info.size > 36_000_000) throw new Error("Encoded narration take exceeds bounds");
   return await readFile(path);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+export function encodeEngineQwenMp3(bytes: Uint8Array): Promise<Uint8Array> { return encodeEngineNarrationMp3(bytes, "qwen"); }
 
 export async function renderEngineQwen(input: {
   text: string; speaker: string; language: string; instruction: string; seed: number; maxCostUsd: number; scope?: string;

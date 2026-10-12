@@ -1,6 +1,7 @@
 /** Shared managed/open narration seam. Every provider returns MP3 bytes and
  * must preserve at-most-once paid submission semantics. */
 import { spreadDefault } from "@/lib/identitySpread";
+import type { EngineFishReceipt } from "./fishEngine";
 import {
   synthQwenNarration,
   type QwenTtsReceipt,
@@ -31,7 +32,7 @@ const NICHE_VOICES: Record<string, string> = {
 };
 
 export function hasFishKey(): boolean {
-  return Boolean(process.env.FISH_AUDIO_API_KEY);
+  return /^[a-f0-9]{64}$/.test(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
 }
 
 /**
@@ -290,6 +291,12 @@ export async function synthNarration(args: {
   qwenRequestScope?: string;
   qwenAuthorize?: () => Promise<void>;
   onQwenReceipt?: (receipt: QwenTtsReceipt) => void;
+  fishEngineReference?: unknown;
+  fishSeed?: number;
+  fishMaxCostUsd?: number;
+  engineRequestScope?: string;
+  engineAuthorize?: () => Promise<void>;
+  onFishReceipt?: (receipt: EngineFishReceipt) => void | Promise<void>;
 }): Promise<Uint8Array> {
   const provider = normalizeTtsProvider(args.provider);
   if (provider === "elevenlabs") return synthElevenLabs(args);
@@ -310,66 +317,31 @@ export async function synthNarration(args: {
     args.onBillableCharacters?.(text.length);
     return audio;
   }
-  const key = process.env.FISH_AUDIO_API_KEY;
-  if (!key) throw new TtsError("FISH_AUDIO_API_KEY is not configured");
-  const reference_id = resolveVoiceId(args.voiceId, args.niche);
-  const speed = Math.max(0.5, Math.min(2, args.speed ?? 1));
-  // Defensive: a tagged script routed to Fish must never SPEAK the brackets.
-  args = { ...args, text: stripAudioTags(args.text) };
-
-  // Retry only an explicit 429 admission rejection. A transport failure or
-  // any other response can be ambiguous after POST and must not buy the same
-  // speech again.
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let res: Response;
-    try {
-      res = await fetch("https://api.fish.audio/v1/tts", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-        signal: AbortSignal.timeout(TTS_SUBMISSION_TIMEOUT_MS),
-        body: JSON.stringify({
-          text: args.text,
-          format: "mp3",
-          mp3_bitrate: 192,
-          reference_id,
-          // Fish prosody control — the per-channel pacing knob ("too fast
-          // narration" fix). Omitted at exactly 1.0 to keep the legacy shape.
-          ...(speed !== 1 ? { prosody: { speed } } : {}),
-        }),
-      });
-    } catch (e) {
-      throw new TtsError(
-        `Fish Audio TTS outcome is unknown after transport failure; not retrying: ${e instanceof Error ? e.message : String(e)}`,
-        undefined,
-        { cause: e },
-      );
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      const message = `Fish Audio TTS HTTP ${res.status}: ${detail.slice(0, 200)}`;
-      if (res.status === 429 && attempt < 2) {
-        await sleep(2000 * (attempt + 1));
-        continue;
-      }
-      throw new TtsError(message, res.status);
-    }
-    args.onBillableCharacters?.(args.text.length);
-    let bytes: Uint8Array;
-    try {
-      bytes = new Uint8Array(await res.arrayBuffer());
-    } catch (e) {
-      throw new TtsError(
-        `Fish Audio returned a successful response but its audio could not be read; not retrying: ${e instanceof Error ? e.message : String(e)}`,
-        res.status,
-        { cause: e },
-      );
-    }
-    if (bytes.length < 1000) {
-      // A 2xx may already consume character quota. Never repurchase it.
-      throw new TtsError("Fish Audio returned empty/tiny audio after a successful response", res.status);
-    }
-    return bytes;
+  const { engineFishRequest, renderEngineFish } = await import("./fishEngine");
+  const { StudioRenderEngineClient } = await import("./studioRenderEngineClient");
+  const { wait } = await import("@trigger.dev/sdk");
+  const { taskContext } = await import("@trigger.dev/core/v3");
+  const input = { text: stripAudioTags(args.text), reference: args.fishEngineReference, seed: args.fishSeed,
+    scope: args.engineRequestScope, speed: args.speed, voiceId: args.voiceId, maxCostUsd: args.fishMaxCostUsd ?? 1 };
+  let requestKey: string | undefined, accepted: EngineFishReceipt | undefined;
+  try {
+    requestKey = engineFishRequest(input).requestKey;
+    const result = await renderEngineFish(input, { client: new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? ""),
+      authorize: args.engineAuthorize ?? (async () => undefined), wait: async (seconds, key) => {
+        if (taskContext.ctx) await wait.for({ seconds, idempotencyKey: key });
+        else await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+      } });
+    accepted = result.receipt;
+    await args.onFishReceipt?.(result.receipt);
+    return result.audio;
+  } catch (error) {
+    const evidence = error as { engineJobId?: string; additionalObservedCostUsd?: number; submissionMayExist?: boolean };
+    const failure = new TtsError(error instanceof Error ? error.message : "Engine Fish failed");
+    const jobId = evidence?.engineJobId ?? accepted?.engine.jobId;
+    const cost = evidence?.additionalObservedCostUsd ?? accepted?.runtime.costUsd;
+    Object.assign(failure, { requestKey, ...(jobId ? { engineJobId: jobId } : {}),
+      ...(jobId || evidence?.submissionMayExist ? { code: "PAID_STAGE_RECONCILIATION_REQUIRED" } : {}),
+      ...(cost === undefined ? {} : { additionalObservedCostUsd: cost }) });
+    throw failure;
   }
-  throw new TtsError("Fish Audio TTS retry budget exhausted", 429);
 }

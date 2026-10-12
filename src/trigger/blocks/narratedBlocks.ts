@@ -1337,6 +1337,8 @@ export const narrationTts: Block = {
     // thumbnail-only Google permission cannot leak into any narration call.
     let billableTtsCharacters = 0;
     let qwenObservedCostUsd = 0;
+    let fishObservedCostUsd = 0;
+    const fishJobs = new Set<string>();
     const onBillableCharacters = (characters: number) => {
       billableTtsCharacters += characters;
     };
@@ -1461,6 +1463,22 @@ export const narrationTts: Block = {
       qwenAuthorize: ctx.assertInlinePaidExecutionLease,
       onQwenReceipt,
       onBillableCharacters,
+      fishEngineReference: ctx.params["fishEngineReference"],
+      fishSeed: 4242,
+      fishMaxCostUsd: ttsProvider === "fish" ? Math.max(0, Number(ctx.stageBudgetUsd ?? 0) - fishObservedCostUsd) : undefined,
+      engineRequestScope: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:narration`,
+      engineAuthorize: ctx.assertInlinePaidExecutionLease,
+      onFishReceipt: async receipt => {
+        if (!fishJobs.has(receipt.engine.jobId)) {
+          fishJobs.add(receipt.engine.jobId); fishObservedCostUsd += receipt.runtime.costUsd;
+        }
+        await ctx.assertInlinePaidExecutionLease?.();
+        const key = `${ctx.keyPrefix}runs/${ctx.runId}/narration/fish-engine-${receipt.requestKey}.json`;
+        await putObject(key, Buffer.from(JSON.stringify(receipt)), { contentType: "application/json" });
+        await recordAsset(ctx, "fish_engine_take_receipt", key, { jobId: receipt.engine.jobId,
+          voiceId: receipt.voiceId, referenceSha256: receipt.referenceSha256, audioSha256: receipt.audioSha256,
+          nativeOutputSha256: receipt.engine.nativeOutput.sha256, observedCostUsd: receipt.runtime.costUsd });
+      },
       });
       if (ttsProvider !== "qwen3") return { bytes };
       const audioSha256 = createHash("sha256").update(bytes).digest("hex");
@@ -1826,7 +1844,7 @@ export const narrationTts: Block = {
         narrationPerformanceEvidence: sealedNarrationPerformanceEvidence,
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
+        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd, ttsProvider === "fish" ? fishObservedCostUsd : undefined),
       };
     }
 
@@ -1981,14 +1999,21 @@ export const narrationTts: Block = {
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
+      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd, ttsProvider === "fish" ? fishObservedCostUsd : undefined),
     };
     } catch (error) {
+      const fishFailure = error as { engineJobId?: string; additionalObservedCostUsd?: number };
+      if (ttsProvider === "fish" && fishFailure?.engineJobId && fishJobs.has(fishFailure.engineJobId)) {
+        // A failed receipt write follows an already-counted successful take.
+        // Its cost is in observedCostUsd, not an additional purchase.
+        delete fishFailure.additionalObservedCostUsd;
+      }
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
         billableTtsCharacters,
         0,
         qwenObservedCostUsd,
+        ttsProvider === "fish" ? fishObservedCostUsd : undefined,
       );
       if (observedCostUsd <= 0) throw error;
       // The provider work has already happened. Make the failure terminal so an
