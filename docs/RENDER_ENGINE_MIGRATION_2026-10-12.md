@@ -140,7 +140,10 @@ reference audio and a transcript. A separate Engine API patch, based on release
 immutable voice-reference upload and verification endpoints plus OpenAPI shapes.
 It preserves the requesting-project bucket, uses create-only PUT and conditional
 GET, verifies full SHA256 and actual PCM16 frames, and allocates no GPU/storage
-volume. That Engine patch is not deployed by this Studio source change.
+volume. Engine release `717a47b3` is now live through an additive overlay against
+the actual deployed 815-module baseline, not a full push of the old checkout.
+Post-publication hashes verified all 826 modules; schema/root and 812 unrelated
+modules stayed exact. Public integration guidance exposes both new endpoints.
 
 Studio's `import-voice-reference SOURCE_JSON` operator command reads a consented
 local WAV and uses those endpoints. Its source JSON needs `audioPath` and
@@ -149,8 +152,15 @@ PCM16 before upload, checks the exact owned key/bucket and signed headers,
 verifies fresh or existing immutable objects, and returns only durable metadata.
 It never stores temporary capabilities. Transcript accuracy, voice identity,
 rights evidence and musical/speech quality remain casting/QA responsibilities.
-No real voice was imported or certified by these fixture checks. Fish generation
-and casting consumers still require migration after the API is released.
+No real voice was imported or certified by these fixture checks. The explicit
+live smoke command `scripts/test-studio-voice-reference-live.ts --live` additionally
+verified owned R2 upload and full-byte readback of a synthetic signal, then
+immutable reuse with PUT statuses 200/412. Its receipt SHA256 is
+`d9a973f35fcb8db925635592b20f32c7e7bb4b88c62dd063d6caa2e4bf00543f`;
+176444 bytes, 88200 frames, two seconds, 44.1 kHz mono PCM16. That private object
+is storage qualification evidence, not a registered voice or speech quality
+example. No model/GPU job ran. Fish generation and casting consumers still
+require migration and genuine reference/voice quality acceptance.
 
 Music3's real shared-module generation entry point now uses its registered
 owned Engine workflow. Its direct Novita worker POST, output fetch and worker
