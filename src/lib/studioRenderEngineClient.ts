@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { canonicalJson } from "./canonicalJson";
 import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 export { STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 const BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
@@ -37,6 +38,14 @@ const Status = z.object({
 }).passthrough();
 const Admission = z.object({ jobId: JobId, state: z.string().min(1), manifestSha256: Hash });
 export type StudioEngineAdmission = z.infer<typeof Admission>;
+
+// Engine's Comfy hashes sort numeric node IDs lexically, unlike JSON.stringify.
+function canonicalComfyJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalComfyJson).join(",")}]`;
+  if (value !== null && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalComfyJson(entry)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
 
 export class StudioEngineError extends Error {
   constructor(readonly status: number | null, readonly submissionMayExist: boolean) {
@@ -190,7 +199,7 @@ export class StudioRenderEngineClient {
     workflowName: string; profileId: string; graph: Record<string, unknown>;
     models: Record<string, unknown>[]; settings: Record<string, unknown>; loras?: Record<string, unknown>[];
   }) {
-    if (!/^[a-z][a-z0-9-]{2,79}$/.test(input.workflowName) || !input.profileId || !Object.keys(input.graph).length) {
+    if (!/^[a-z][a-z0-9-]{2,63}$/.test(input.workflowName) || !input.profileId || !Object.keys(input.graph).length) {
       throw new Error("A named model workflow and real Comfy API graph are required");
     }
     const bytes = Buffer.from(JSON.stringify(input.graph));
@@ -210,16 +219,21 @@ export class StudioRenderEngineClient {
     // during registration, so a conflict never authorizes an overwrite.
     if (!response.ok && response.status !== 412 && response.status !== 409) throw new StudioEngineError(response.status, false);
     void response.body?.cancel().catch(() => undefined);
+    const specification = { version: 1, workflow: { key: upload.key, bytes: bytes.length, sha256 },
+      models: input.models, loras: input.loras ?? [], settings: input.settings };
+    const expectedSpecificationHash = createHash("sha256").update(canonicalComfyJson(specification)).digest("hex");
     const registered = z.object({ workflowId: JobId, specificationSha256: Hash, executionReady: z.boolean() }).parse(
       await this.request("workflows", { workflowName: input.workflowName, profileId: input.profileId,
-        comfySpecification: { version: 1, workflow: { key: upload.key, bytes: bytes.length, sha256 },
-          models: input.models, loras: input.loras ?? [], settings: input.settings } }),
+        comfySpecification: specification }),
     );
-    const readback = z.object({ workflowId: JobId, specificationSha256: Hash, executionReady: z.boolean() }).passthrough().parse(
+    const readback = z.object({ workflowId: JobId, profileId: z.literal(input.profileId), specificationSha256: Hash,
+      executionReady: z.boolean(), sourceBucket: z.literal(STUDIO_ENGINE_BUCKET), specification: z.record(z.unknown()),
+      effectiveGraphSha256: Hash, sourcesVerifiedAt: z.number().positive() }).passthrough().parse(
       await this.request(`workflows/specification?workflowId=${registered.workflowId}`),
     );
     if (readback.workflowId !== registered.workflowId || readback.specificationSha256 !== registered.specificationSha256 ||
-      readback.executionReady !== registered.executionReady) throw new Error("Comfy specification readback changed");
+      readback.executionReady !== registered.executionReady || registered.specificationSha256 !== expectedSpecificationHash ||
+      canonicalJson(readback.specification) !== canonicalJson(specification)) throw new Error("Comfy specification readback changed");
     return { ...registered, sourceSha256: sha256, readback };
   }
 

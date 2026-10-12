@@ -2,14 +2,25 @@ import { StudioRenderEngineClient, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET, 
 import { executeStudioEngineAudio, type StudioEngineAudioRecovery } from "../src/lib/studioRenderEngineAudio";
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
+import { studioErnieReferenceComfyProfile, STUDIO_ERNIE_REFERENCE_COMFY } from "../src/engine/studioErnieComfyProfile";
 
 async function main() {
   const [command, value, ...extra] = process.argv.slice(2);
-  if (extra.length || !["inspect", "prepare-audio", "observe", "render-audio", "register-comfy", "import-voice-reference"].includes(command)) {
-    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | import-voice-reference SOURCE_JSON");
+  if (extra.length || !["inspect", "prepare-audio", "observe", "render-audio", "register-comfy", "prepare-reference-comfy", "import-voice-reference"].includes(command)) {
+    throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | prepare-reference-comfy | import-voice-reference SOURCE_JSON");
   }
   const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
-  if (command === "import-voice-reference") {
+  if (command === "prepare-reference-comfy") {
+    if (value !== undefined) throw new Error("Reference Comfy registration takes no override");
+    const registered = await client.registerComfy(studioErnieReferenceComfyProfile());
+    if (registered.workflowId !== STUDIO_ERNIE_REFERENCE_COMFY.workflowId ||
+      registered.sourceSha256 !== STUDIO_ERNIE_REFERENCE_COMFY.sourceSha256 ||
+      registered.specificationSha256 !== STUDIO_ERNIE_REFERENCE_COMFY.specificationSha256 ||
+      registered.readback.effectiveGraphSha256 !== STUDIO_ERNIE_REFERENCE_COMFY.effectiveGraphSha256) {
+      throw new Error("Registered Studio reference profile changed; revise its immutable version explicitly");
+    }
+    console.log(JSON.stringify(registered));
+  } else if (command === "import-voice-reference") {
     const source = JSON.parse(await readFile(value, "utf8"));
     if (!source || source.consentConfirmed !== true || typeof source.audioPath !== "string") {
       throw new Error("Voice reference import requires an owned audioPath and consentConfirmed: true");

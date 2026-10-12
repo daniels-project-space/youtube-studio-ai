@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { StudioRenderEngineClient, StudioEngineError, STUDIO_ENGINE_BUCKET, STUDIO_ENGINE_PROJECT } from "../studioRenderEngineClient";
 import { STUDIO_ENGINE_AUDIO_WORKFLOWS } from "../studioRenderEngineWorkflows";
+import { canonicalJson } from "../canonicalJson";
 
 const key = "a".repeat(64), job = "a".repeat(32);
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -67,7 +68,11 @@ test("custom Comfy source stays content addressed in Studio R2 and registration 
   const bytes = Buffer.from(JSON.stringify(graph));
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const sourceKey = `projects/${STUDIO_ENGINE_PROJECT}/comfy/sha256/${sha256}.json`;
-  let readbackHash = key;
+  const input = { workflowName: "studio-comfy-profile", profileId: "ernie-image", graph, models: [], settings: { "1": { steps: 50 } } };
+  const specification = { version: 1, workflow: { key: sourceKey, bytes: bytes.length, sha256 },
+    models: input.models, settings: input.settings, loras: [] };
+  const specificationHash = createHash("sha256").update(canonicalJson(specification)).digest("hex");
+  let readbackHash = specificationHash, readbackSpecification = specification;
   const client = new StudioRenderEngineClient(key, async (url, init) => {
     if (String(url).endsWith("/comfy-source-uploads")) {
       assert.deepEqual(JSON.parse(String(init?.body)), { kind: "workflow", sha256, bytes: bytes.length });
@@ -83,16 +88,20 @@ test("custom Comfy source stays content addressed in Studio R2 and registration 
       const body = JSON.parse(String(init?.body));
       assert.deepEqual(body.comfySpecification.workflow, { key: sourceKey, bytes: bytes.length, sha256 });
       assert.equal(body.comfySpecification.settings["1"].steps, 50);
-      return json({ workflowId: job, specificationSha256: key, executionReady: false });
+      return json({ workflowId: job, specificationSha256: specificationHash, executionReady: false });
     }
-    return json({ workflowId: job, specificationSha256: readbackHash, executionReady: false });
+    return json({ workflowId: job, specificationSha256: readbackHash, executionReady: false,
+      profileId: "ernie-image", sourceBucket: STUDIO_ENGINE_BUCKET, specification: readbackSpecification,
+      effectiveGraphSha256: key, sourcesVerifiedAt: 123 });
   });
-  const input = { workflowName: "studio-comfy-profile", profileId: "ernie-image", graph, models: [], settings: { "1": { steps: 50 } } };
   const result = await client.registerComfy(input);
   assert.equal(result.executionReady, false, "registration never manufactures executor qualification");
   assert.equal(result.sourceSha256, sha256);
   readbackHash = "f".repeat(64);
   await assert.rejects(client.registerComfy(input), /readback changed/);
+  readbackHash = specificationHash;
+  readbackSpecification = { ...specification, settings: { "1": { steps: 1 } } };
+  await assert.rejects(client.registerComfy(input), /readback changed/, "matching hash labels cannot hide changed settings");
 });
 
 test("YuE2 preserves six scoped native artifacts, verifies their bytes and sends conditional read headers", async () => {

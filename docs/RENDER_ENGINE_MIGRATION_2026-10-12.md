@@ -55,6 +55,30 @@ The authenticated `inspect` command rechecked these states during the casting
 integration on 12 October and returned the same readiness table. It made no
 model request, GPU reservation, or scheduling change.
 
+## Registered project-specific Comfy reference workflow
+
+The live managed API registered `studio-ernie-character-reference-v1` as workflow
+`jn7fzvqf2nn087rhwtvhq75hjn8g4qx6` in the Studio-owned bucket. It returned
+`executionReady: true` and `modelFilesVerified: false`: the native executor is
+qualified, but each future job still checks its physical model seal and capacity.
+No GPU or new persistent disk was allocated by this registration.
+
+The actual twelve-node graph was compiled through Engine's current specification
+and ERNIE executor compilers before upload. It retains the native enhancer,
+attested enhanced prompt, four pinned model paths on existing filesystem 3975,
+50 steps, CFG 4, BF16, and 896x1200 reference geometry. It does not replace
+Z-Image landscape stills, thumbnails, or native H3 footage.
+
+Immutable pins are in `src/engine/studioErnieComfyProfile.ts`. The operator command
+`prepare-reference-comfy` registers/replays that exact profile and reads back its
+complete specification, owned source bucket, source hash, effective graph hash,
+settings, readiness, and capability. Changed model bindings/settings are rejected
+even when hash labels agree. Comfy hashing preserves Engine's lexical numeric
+node-ID ordering, independently from ordinary Studio request canonicalization.
+
+This is a live workspace/workflow registration, not a generated-image quality
+claim. Reference rendering and its consuming module remain to be connected.
+
 ## Native Fish new-channel casting
 
 New-channel inception can select `fish` using an explicitly imported
@@ -96,6 +120,28 @@ was submitted. Scheduling remains disabled.
    exact production alias, then create a fresh channel through the cooperating
    modules and inspect its retained final output against its channel identity.
 4. Keep publishing and scheduling inactive until separately authorized.
+
+### Visual contract findings
+
+The current shared still renderer remains `renderImages` in
+`src/lib/novitaRenderFarm.ts`; it rejects new Novita generation before its old
+direct-fleet code. Weekly image preparation also rejects that route. Engine
+already has the exact `studio-zimage-turbo` Final contract (same Z-Image revision,
+9 steps, CFG 0, BF16; production 1920x1088, hero 2048x1152), but its executor is
+held and `/client/studio-zimage-batches` is not in the managed-operation allowlist.
+That native route needs public API exposure and genuine executor completion.
+
+Shared Studio H3 generation is the 1344x768, 124-frame, 24-fps Turbo8 profile.
+The older weekly scene-batch client uses private `/client/h3-scene-batches`
+endpoints and a different 1280x736/5-second staging request. Those endpoints and
+the Studio batch admission/scene-binding endpoints are not exposed by the current
+managed-operation allowlist. Their external Studio source reader is additionally
+bound to `STUDIO_BATCH_PROJECT_NAME`, not a general arbitrary-project reader.
+The newer native FL2VA contract has distinct Base/BF16/50-step identity. Migration
+must explicitly reconcile those model/profile and timing boundaries; substituting
+the ready ERNIE/Qwen image route or another H3 variant would not preserve the
+approved contract. The registered portrait Comfy workflow does not solve these
+landscape/video boundaries by itself.
 
 ### Current validation evidence
 
