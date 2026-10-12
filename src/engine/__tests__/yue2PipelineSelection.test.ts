@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { designPipeline, designPipelineCore } from "../designer";
-import { selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
+import { defaultFreshChannelYuE2Selection, selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
 import { validatePipeline } from "../validate";
 import { compilePipeline } from "../pipelineCompiler";
 
@@ -81,6 +81,18 @@ try {
   assert.throws(() => selectYuE2Pipeline(baseline, missingPlayback));
   assert.throws(() => designPipeline({ family: "music_loop", yue2Music: selection, paramOverrides: { music: { trackCount: 2 } } }), /legacy music overrides/);
   const selected = selectYuE2Pipeline(baseline, selection);
+  const withoutComposer = selectYuE2Pipeline(baseline.filter(entry => entry.block !== "composer_brief"), selection);
+  assert.ok(withoutComposer.findIndex(entry => entry.block === "composer_brief") < withoutComposer.findIndex(entry => entry.block === "music_arrangement_plan"),
+    "a fresh Engine music route inserts the missing composer owner before arrangement acceptance");
+  const freshLofi = defaultFreshChannelYuE2Selection({ family: "music_loop", routeFingerprint: "a".repeat(64), episodeLengthSeconds: 28_800 });
+  assert.deepEqual(freshLofi.musicIntent, { role: "primary_music", requestedDurationSec: 30, playback: "repeat" });
+  assert.deepEqual(freshLofi.sourceParams, { renderer: "render-engine", seed: 0xaaaaaaaa,
+    personalCreatorAcknowledged: true, maxCostUsd: 1, maxExecutionSeconds: 1200 });
+  const freshSleep = defaultFreshChannelYuE2Selection({ family: "sleep", routeFingerprint: "b".repeat(64), episodeLengthSeconds: 28_800 });
+  assert.deepEqual(freshSleep.musicIntent, { role: "meditation_bed", requestedDurationSec: 300, playback: "repeat" });
+  const freshNarrated = defaultFreshChannelYuE2Selection({ family: "narrated_stock", routeFingerprint: "c".repeat(64), episodeLengthSeconds: 900 });
+  assert.equal(freshNarrated.musicIntent.role, "narration_bed");
+  assert.equal(freshNarrated.musicIntent.requestedDurationSec, 300);
   for (const optional of [false, true]) {
     const disconnected = validatePipeline(selected, ["styleDNA", "channelProfile"]);
     const index = disconnected.manifests.findIndex(manifest => manifest.id === "music_arrangement_plan");

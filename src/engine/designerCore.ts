@@ -88,12 +88,14 @@ import {
   type PipelineCompilation,
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
-import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
+import { defaultFreshChannelYuE2Selection, projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
   /** Supervised source selection only; does not grant listening or release approval. */
   yue2Music?: YuE2PipelineSelection;
+  /** Set only by the server compiler for a genuinely new channel. */
+  useEngineMusicForFreshChannel?: boolean;
   nicheKey?: string;
   subcategory?: string;
   /** Immutable creator intent, required by the channel-inception executor. */
@@ -1303,11 +1305,17 @@ export function designPipelineCore(
       : undefined,
   );
   pipeline = enforcedLength.pipeline;
-  if (opts.yue2Music !== undefined) {
+  const selectedYuE2Music = opts.yue2Music ?? (opts.useEngineMusicForFreshChannel && programRoute && pipeline.some(entry => entry.block === "music")
+    ? defaultFreshChannelYuE2Selection({ family: opts.family, routeFingerprint: programRoute.fingerprint, episodeLengthSeconds: lenSec })
+    : undefined);
+  if (selectedYuE2Music !== undefined) {
     if (opts.paramOverrides?.music && Object.keys(opts.paramOverrides.music).length) {
       throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
     }
-    pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
+    if (opts.useEngineMusicForFreshChannel && !("renderer" in selectedYuE2Music.sourceParams)) {
+      throw new Error("Fresh channels must use the project-owned Render Engine music source");
+    }
+    pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, selectedYuE2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
   }
   if (enforcedLength.changed.length) {
@@ -1369,7 +1377,7 @@ export function designPipelineCore(
   }
 
   const runtimeBlockers = [
-    ...(opts.yue2Music !== undefined ? ["YuE2 source and final-media qualification require supervised review before automatic production."] : []),
+    ...(selectedYuE2Music !== undefined ? ["YuE2 source and final-media qualification require supervised review before automatic production."] : []),
     ...runtimeReadiness.blockers,
     ...certifiedAdmission.blockers,
     ...(!hasRequiredSelfContainedRoute
@@ -1395,7 +1403,7 @@ export function designPipelineCore(
       && dataStoryReadiness?.autonomous !== false
       && !isSupervisedQuizShort
       && !previewOnlyGenerationProfile
-      && opts.yue2Music === undefined,
+      && selectedYuE2Music === undefined,
     runtimeBlockers,
     warnings,
     compilation,

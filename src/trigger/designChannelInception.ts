@@ -1842,6 +1842,7 @@ export async function executeDesignChannel(
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
     yue2Music: payload.yue2Music,
+    useEngineMusicForFreshChannel: !existingAtStart && !isRouteLessLegacyRetry,
     quizProfile: programRouteForCompile?.quizProfile ?? payload.quizProfile,
     ...(!isRouteLessLegacyRetry && submittedCreatorIntentDiagnosis
       ? {

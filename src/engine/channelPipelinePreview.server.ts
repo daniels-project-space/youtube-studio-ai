@@ -215,6 +215,7 @@ export function compileChannelPipelinePreview(value: unknown): ChannelPipelinePr
     syntheticScenario,
     quizProfile: programRoute.quizProfile,
     yue2Music: input.yue2Music,
+    useEngineMusicForFreshChannel: true,
   }, { validateRuntimeRegistry: false });
 
   return channelPipelinePreviewFromCompiledDesign({
