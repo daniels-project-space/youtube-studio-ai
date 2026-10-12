@@ -886,9 +886,9 @@ export function designPipelineCore(
         ? (narrEntry.params["targetSeconds"] as number)
         : undefined,
     });
-    if (advice.binding) {
-      narrEntry.params = { ...(narrEntry.params ?? {}), ttsProvider: advice.provider };
-    }
+    // Nonbinding advice is not permission to change the caster's default voice.
+    // Seal that default so budget admission and runtime cannot infer Fish instead.
+    narrEntry.params = { ...(narrEntry.params ?? {}), ttsProvider: advice.binding ? advice.provider : "elevenlabs" };
   }
 
   // Film crew (creative-direction layer, default ON): insert the family's crew

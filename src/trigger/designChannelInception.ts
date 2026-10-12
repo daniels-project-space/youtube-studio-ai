@@ -53,20 +53,22 @@ import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
 import {
   selectDeterministicElevenVoice,
   selectDeterministicQwenVoice,
+  selectDeterministicFishVoice,
 } from "@/lib/deterministicVoiceCast";
 import { renderNarration } from "@/lib/voicecraft";
 import {
   hasQualifiedQwenTts,
   qwenTtsReadiness,
   synthQwenNarration,
-  type QwenTtsReceipt,
 } from "@/lib/qwenTts";
 import {
   channelVoiceCastingProvider,
   qwenChannelCastingReceiptMatches,
+  fishChannelCastingReceiptMatches,
   resolveRequestedChannelVoice,
   type PersistedChannelVoiceCast as VoiceCastingSlim,
 } from "@/lib/channelVoiceCasting";
+import { synthNarration } from "@/lib/tts";
 import {
   buildAndPersistQuizYearFoundation,
   buildQuizYearFoundation,
@@ -1187,12 +1189,16 @@ function wireVoiceReadiness(
       const cleanParams = { ...params };
       delete cleanParams["elevenVoiceId"];
       delete cleanParams["qwenSpeaker"];
+      delete cleanParams["voiceId"];
+      delete cleanParams["fishEngineReference"];
       narration.params = {
         ...cleanParams,
         ttsProvider: provider,
         ...(provider === "qwen3"
           ? { qwenSpeaker: qualifiedCast.voiceId }
-          : { elevenVoiceId: qualifiedCast.voiceId }),
+          : provider === "fish"
+            ? { voiceId: qualifiedCast.voiceId, fishEngineReference: qualifiedCast.fishEngineReference, ttsSpeed: 1 }
+            : { elevenVoiceId: qualifiedCast.voiceId }),
         voiceCastScore: qualifiedCast.score,
         voiceCastEvidence,
         voiceColdOpenEvidence: coldOpenEvidence,
@@ -1248,10 +1254,12 @@ function validatePipelineVoiceWiring(
       voiceId: qualified.voiceId,
       castScore: qualified.score,
     });
-    const wiredVoice = provider === "qwen3" ? params["qwenSpeaker"] : params["elevenVoiceId"];
+    const wiredVoice = provider === "qwen3" ? params["qwenSpeaker"] : provider === "fish" ? params["voiceId"] : params["elevenVoiceId"];
     if (
       params["ttsProvider"] !== provider ||
       wiredVoice !== qualified.voiceId ||
+      (provider === "fish" && (params["ttsSpeed"] !== 1 ||
+        channelInceptionContentSha256(params["fishEngineReference"]) !== channelInceptionContentSha256(qualified.fishEngineReference))) ||
       params["voiceCastScore"] !== qualified.score ||
       params["voiceReadinessStatus"] !== "qualified" ||
       channelInceptionContentSha256(params["voiceColdOpenEvidence"]) !==
@@ -2935,6 +2943,10 @@ export async function executeDesignChannel(
       if (!requestedVoice) {
         throw new Error("channel-cast inception is missing its sealed voice-provider request");
       }
+      const sampleTopic = seoIdentity.topicPool[0] ?? seoIdentity.niche;
+      const coldOpenText =
+        `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
+        `Follow that detail carefully, because it reveals what most explanations leave out.`;
       const loadVoice = async () => {
         const cast = asIdentity((await currentChannel(convex, channelId)).identity).voiceCasting;
         const providerRenderReceipt = cast?.providerRenderReceipt;
@@ -2949,7 +2961,9 @@ export async function executeDesignChannel(
           cast?.voiceId === requestedVoice.qwenSpeaker &&
           Boolean(cast && qwenChannelCastingReceiptMatches(cast))
         );
-        return providerMatches && qwenReceiptMatches && validateVoiceCastingReadinessReceipt(validation)
+        const fishReceiptMatches = requestedVoice.provider !== "fish" || Boolean(cast && requestedVoice.fishEngineReference &&
+          fishChannelCastingReceiptMatches(cast, requestedVoice.fishEngineReference, coldOpenText));
+        return providerMatches && qwenReceiptMatches && fishReceiptMatches && validateVoiceCastingReadinessReceipt(validation)
           ? {
               value: validation.cast,
               evidence: {
@@ -2969,9 +2983,10 @@ export async function executeDesignChannel(
       };
       voiceCasting = await runStage("channel-inception-voice", {
         maximumAttempts: 3,
+        providerStart: requestedVoice.provider === "fish" ? "explicit" : undefined,
         loadCompleted: loadVoice,
         adoptExisting: loadVoice,
-        execute: async () => {
+        execute: async (_checkpoint, controls) => {
           // Provider labels make an explicit, repeatable pre-cast. They do not
           // masquerade as a listened Gemini audition: an actual provider take
           // is immediately measured below, and production narration still runs
@@ -2988,7 +3003,9 @@ export async function executeDesignChannel(
                 speaker: requestedVoice.qwenSpeaker ?? "",
                 language: requestedVoice.qwenLanguage ?? "English",
               })
-            : await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
+            : requestedVoice.provider === "fish"
+              ? selectDeterministicFishVoice({ niche: seoIdentity.niche, voice: requestedVoice.fishVoice!, language: requestedVoice.fishLanguage! })
+              : await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
           const judgedAt = Date.now();
           const providerSelectionReceipt = makeVoiceProviderSelectionReceipt({
             ownerId,
@@ -3007,11 +3024,8 @@ export async function executeDesignChannel(
               ...(requestedVoice.qwenLanguage ? { language: requestedVoice.qwenLanguage } : {}),
             },
           });
-          const sampleTopic = seoIdentity.topicPool[0] ?? seoIdentity.niche;
-          const coldOpenText =
-            `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
-            `Follow that detail carefully, because it reveals what most explanations leave out.`;
-          let providerRenderReceipt: QwenTtsReceipt | undefined;
+          let providerRenderReceipt: VoiceCastingSlim["providerRenderReceipt"];
+          if (cast.provider === "fish") await controls.markProviderStarted({ phase: "fish-native-cold-open", voiceId: cast.voiceId });
           const coldOpenBytes = cast.provider === "qwen3"
             ? await synthQwenNarration({
                 text: coldOpenText,
@@ -3023,7 +3037,17 @@ export async function executeDesignChannel(
                 maxCostUsd: voiceStage.maximumCostUsd,
                 onReceipt: (receipt) => { providerRenderReceipt = receipt; },
               })
-            : await renderNarration({
+            : cast.provider === "fish"
+              ? await synthNarration({ text: coldOpenText, provider: "fish", voiceId: cast.voiceId, speed: 1,
+                  fishEngineReference: requestedVoice.fishEngineReference, fishSeed: 4242,
+                  fishMaxCostUsd: voiceStage.maximumCostUsd, engineRequestScope: `inception:${plan.inceptionKey}:voice`,
+                  engineAuthorize: async () => controls.checkpoint({ phase: "fish-native-cold-open-awaiting", voiceId: cast.voiceId }),
+                  onFishReceipt: async receipt => {
+                    providerRenderReceipt = receipt;
+                    await controls.checkpoint({ phase: "fish-native-cold-open-receipt", providerRenderReceipt: receipt });
+                  },
+                })
+              : await renderNarration({
                 text: coldOpenText,
                 elevenVoiceId: cast.voiceId,
                 physics: cast.physics,
@@ -3063,6 +3087,7 @@ export async function executeDesignChannel(
             at: judgedAt,
             providerSelectionReceipt,
             localColdOpenReceipt,
+            ...(cast.provider === "fish" ? { fishEngineReference: requestedVoice.fishEngineReference } : {}),
             ...(providerRenderReceipt ? { providerRenderReceipt } : {}),
           };
           await mergeIdentity(convex, channelId, { voiceCasting: slim });

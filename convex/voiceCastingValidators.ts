@@ -3,7 +3,23 @@ import { v } from "convex/values";
 export const voiceCastingProviderValidator = v.union(
   v.literal("elevenlabs"),
   v.literal("qwen3"),
+  v.literal("fish"),
 );
+
+export const fishEngineReferenceValidator = v.object({ objectKey: v.string(), sha256: v.string(), text: v.string() });
+const fishEngineReceiptValidator = v.object({
+  schema: v.literal("studio-engine-fish-receipt/v1"), requestKey: v.string(), requestScope: v.string(),
+  voiceId: v.string(), textSha256: v.string(), referenceSha256: v.string(), referenceTextSha256: v.string(),
+  seed: v.number(), audioSha256: v.string(), durationSec: v.number(), sampleRateHz: v.literal(44100),
+  channels: v.literal(1), audioFormat: v.literal("mp3"), transformation: v.literal("ffmpeg-libmp3lame-192k-44100hz-mono/v1"),
+  engine: v.object({ projectName: v.literal("youtube-studio-render"), workflowId: v.literal("jn7cw38gsqzbmxgyy48pptn96h8g5vmv"),
+    profileRevisionSha256: v.literal("15a43637436a1307049a3441d3009d7f15a5b36760a6f486a04415bc2d4ba842"),
+    jobId: v.string(), requestSha256: v.string(), nativeOutput: v.object({ bucket: v.literal("re-youtube-studio-render-p2w18g596q"),
+      key: v.string(), bytes: v.number(), sha256: v.string(), contentType: v.literal("audio/wav"), verifiedAt: v.number() }),
+  }),
+  runtime: v.object({ provider: v.literal("render-engine"), accounting: v.literal("engine-reported-usage"),
+    gpuSeconds: v.number(), costUsd: v.number(), complete: v.literal(true) }),
+});
 
 /** Durable attestation emitted by the pinned private Qwen3-TTS worker. */
 const legacyQwenTtsReceiptValidator = v.object({
@@ -97,3 +113,5 @@ export const qwenTtsReceiptValidator = v.union(legacyQwenTtsReceiptValidator, v.
   runtime: v.object({ provider: v.literal("render-engine"), accounting: v.literal("engine-reported-usage"),
     gpuSeconds: v.number(), costUsd: v.number(), complete: v.literal(true) }),
 }));
+
+export const voiceProviderRenderReceiptValidator = v.union(qwenTtsReceiptValidator, fishEngineReceiptValidator);

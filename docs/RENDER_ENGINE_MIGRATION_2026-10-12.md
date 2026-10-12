@@ -19,9 +19,10 @@ and its uncommitted Qwen/Runpod changes were preserved.
 
 Existing Studio source has Engine batch/H3/still staging and verified footage
 materialization, but it uses the older `youtube-studio-ai` project capability.
-The managed API returned 404 for that workspace. Qwen narration and Music3 now
-use the owned managed workspace; YuE2, other speech and other music lanes still
-need their own explicit migrations.
+The managed API returned 404 for that workspace. Qwen narration, native Fish
+narration/casting, and Music3 now use the owned managed workspace in this branch;
+YuE2, other speech and other music lanes still need their own explicit migrations.
+These source changes are not yet a deployed or fully qualified Studio release.
 
 ## Owned Engine workspace
 
@@ -49,6 +50,62 @@ Live model-storage assessment on 12 October:
 These are the Engine's reported states, not proof of a Studio output. GPU
 availability is resolved by Engine during dispatch; Studio must observe the
 same accepted job rather than choose another provider or submission key.
+
+The authenticated `inspect` command rechecked these states during the casting
+integration on 12 October and returned the same readiness table. It made no
+model request, GPU reservation, or scheduling change.
+
+## Native Fish new-channel casting
+
+New-channel inception can select `fish` using an explicitly imported
+`fishEngineReference` and `fishVoiceMetadata` (name, category, labels, optional
+description). Reference metadata is an operator-declared fit score, never a
+listened audition. The real native cold-open must pass the existing local
+performance gate; final narration retains its independent source/quality gates.
+
+The saved cast contains its reference and verified Engine receipt. Reuse binds
+the exact reference hash/transcript, cold-open text, locally measured MP3 hash,
+owned R2 receipt, immutable profile, and settled usage. Metadata/local measurements
+without the native receipt cannot qualify a Fish cast. Convex now accepts that
+receipt as a separate variant without reinterpreting legacy Qwen evidence.
+
+Fish has no native rate control. Inception rejects explicit non-native rates and
+wires `ttsSpeed: 1`, the actual narration parameter, rather than an ignored
+`speed` field. Whiteboard's ElevenLabs-only audio contract remains incompatible
+with a Fish cast. No implicit replacement voice or time-stretch is introduced.
+Provider-start and receipt checkpoints fence casting against ambiguous retries.
+
+New-channel design now seals its existing ElevenLabs casting default whenever
+provider advice is nonbinding. Previously an unset provider was cast as ElevenLabs
+but reserved as native Fish, making the standard business-channel inception test
+exceed the unchanged $10 narration ceiling ($11.79). The fix aligns producer,
+caster, and budget without lowering reservations, shortening output, raising the
+cap, changing established channels, or replacing an explicitly selected provider.
+
+This is functional source integration, not native Fish speech qualification.
+No synthetic storage-test signal was used as a narrator and no paid model test
+was submitted. Scheduling remains disabled.
+
+## Remaining launch gates
+
+1. Move H3/still staging from the older project capability to the owned managed
+   workspace and register/verify the real project-specific visual workflows.
+2. Resolve YuE2's score/precision handoff and qualify current native music/Fish
+   routes without substituting models or raising approved budgets.
+3. Deploy the complete validated Studio/Convex/Trigger revision and verify the
+   exact production alias, then create a fresh channel through the cooperating
+   modules and inspect its retained final output against its channel identity.
+4. Keep publishing and scheduling inactive until separately authorized.
+
+### Current validation evidence
+
+The focused Fish/casting/readiness tests, channel-inception contract test, routing
+test, TypeScript, scoped ESLint, and full 64-page production build pass.
+The broader module-contract suite still fails its default-budget coverage check:
+`narrated_stock` declares a $2 creator floor while its correctly sealed default
+pipeline reserves $3.5282. That floor was not raised and the test was not weakened.
+Budget admission must remain honest; this mismatch is a remaining launch gate,
+not evidence that a channel was successfully rendered or deployed.
 
 The current Qwen public request is restricted to English/Ryan, 4000 text
 characters, at most 120 seconds, 24 kHz mono WAV. A different channel voice or

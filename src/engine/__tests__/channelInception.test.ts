@@ -310,6 +310,8 @@ function showProfileIsDurableAndVersionsPipelineStage(): void {
     programBrief,
     capabilitySelections,
   });
+  assert.equal(design.pipeline.find(entry => entry.block === "narration_tts")?.params?.["ttsProvider"], "elevenlabs",
+    "new-channel design must seal the same default provider used by casting and budget admission");
   const showProfile = createChannelShowProfile({
     programBrief,
     capabilitySelections,

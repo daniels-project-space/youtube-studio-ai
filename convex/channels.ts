@@ -9,7 +9,7 @@ import {
   readChannelDirectory,
   writeChannelDirectory,
 } from "./channelDirectoryProjection";
-import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
+import { voiceProviderRenderReceiptValidator, fishEngineReferenceValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
 import {
@@ -565,7 +565,8 @@ const identityValidator = v.object({
         wordsPerSec: v.number(),
         integratedLufs: v.number(),
       })),
-      providerRenderReceipt: v.optional(qwenTtsReceiptValidator),
+      providerRenderReceipt: v.optional(voiceProviderRenderReceiptValidator),
+      fishEngineReference: v.optional(fishEngineReferenceValidator),
     }),
   ),
   voiceId: v.optional(v.string()),

@@ -1,7 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { runLogLineValidator } from "./runLogChunks";
-import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
+import { voiceProviderRenderReceiptValidator, fishEngineReferenceValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import {
   CHANNEL_COMPOSITION_RECEIPT_VERSION,
   CHANNEL_PROGRAM_BRIEF_VERSION,
@@ -248,7 +248,8 @@ export default defineSchema({
             wordsPerSec: v.number(),
             integratedLufs: v.number(),
           })),
-          providerRenderReceipt: v.optional(qwenTtsReceiptValidator),
+          providerRenderReceipt: v.optional(voiceProviderRenderReceiptValidator),
+          fishEngineReference: v.optional(fishEngineReferenceValidator),
     }),
   ),
       // Persona reference material for tone-matched generation (competitor-

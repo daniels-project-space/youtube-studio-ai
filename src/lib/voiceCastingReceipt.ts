@@ -1,4 +1,6 @@
 import { channelInceptionContentSha256 } from "@/engine/channelInceptionPlan";
+import { EngineFishReceiptSchema, FishEngineReferenceSchema, type FishEngineReference } from "@/engine/fishEngineReceipt";
+import { sha256Hex } from "./sha256";
 
 export interface VoiceCastingAuditionReceipt {
   version: "voice-casting-audition/v1";
@@ -63,7 +65,7 @@ export interface VoiceLocalColdOpenReceipt {
   integratedLufs: number;
 }
 
-export type VoiceCastingProvider = "elevenlabs" | "qwen3";
+export type VoiceCastingProvider = "elevenlabs" | "qwen3" | "fish";
 
 export interface PersistedVoiceCasting {
   voiceId: string;
@@ -73,6 +75,8 @@ export interface PersistedVoiceCasting {
   coldOpenReceipt?: VoiceColdOpenReceipt;
   providerSelectionReceipt?: VoiceProviderSelectionReceipt;
   localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
+  fishEngineReference?: FishEngineReference;
+  providerRenderReceipt?: unknown;
 }
 
 function sha256(value: unknown): boolean {
@@ -276,7 +280,7 @@ export function validateVoiceProviderSelectionReceipt(args: {
   return Boolean(
     cast && receipt && receipt.version === "voice-provider-selection/v1" &&
     receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
-    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3") && receipt.voiceId === cast.voiceId &&
+    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3" || receipt.provider === "fish") && receipt.voiceId === cast.voiceId &&
     receipt.score === cast.score && receipt.selectedAt === cast.at &&
     score(receipt.score) && current(receipt.selectedAt, now) &&
     Number.isInteger(receipt.shortlistedCount) && receipt.shortlistedCount >= 1 &&
@@ -334,7 +338,7 @@ export function validateVoiceLocalColdOpenReceipt(args: {
   return Boolean(
     receipt && receipt.version === "voice-local-cold-open/v1" &&
     receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
-    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3") &&
+    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3" || receipt.provider === "fish") &&
     (!args.provider || receipt.provider === args.provider) && receipt.voiceId === args.voiceId &&
     current(receipt.measuredAt, now) && sha256(receipt.textFingerprint) &&
     sha256(receipt.physicsFingerprint) && sha256(receipt.audioFingerprint) &&
@@ -367,6 +371,14 @@ export function validateVoiceCastingReadinessReceipt(args: {
     provider: args.cast.providerSelectionReceipt.provider,
     now: args.now,
   });
+  if (args.cast?.providerSelectionReceipt?.provider === "fish" || args.cast?.localColdOpenReceipt?.provider === "fish") {
+    const receipt = EngineFishReceiptSchema.safeParse(args.cast.providerRenderReceipt);
+    const reference = FishEngineReferenceSchema.safeParse(args.cast.fishEngineReference);
+    return providerMetadata && receipt.success && reference.success &&
+      receipt.data.voiceId === args.cast.voiceId && receipt.data.referenceSha256 === reference.data.sha256 &&
+      receipt.data.referenceTextSha256 === sha256Hex(reference.data.text) &&
+      receipt.data.audioSha256 === args.cast.localColdOpenReceipt?.audioFingerprint;
+  }
   return legacy || providerMetadata;
 }
 

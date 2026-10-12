@@ -16,7 +16,7 @@ export interface ProviderVoiceCandidate {
 }
 
 export interface DeterministicVoiceCast {
-  provider: "elevenlabs" | "qwen3";
+  provider: "elevenlabs" | "qwen3" | "fish";
   voiceId: string;
   name: string;
   character: string;
@@ -202,4 +202,19 @@ export function selectDeterministicQwenVoice(args: {
     requiredVoiceId: args.speaker,
     targetLanguage: args.language,
   });
+}
+
+/** Reference labels are operator metadata, not an audition or model attestation. */
+export function selectDeterministicFishVoice(args: {
+  niche?: string;
+  voice: ProviderVoiceCandidate;
+  language: string;
+}): DeterministicVoiceCast {
+  const cast = selectVoiceFromProviderMetadata({
+    voices: [args.voice], provider: "fish", requiredVoiceId: args.voice.voiceId,
+    niche: args.niche, targetLanguage: args.language,
+  });
+  // Fish's pinned native API has no rate control. Its real pace is measured below.
+  return { ...cast, physics: { ...cast.physics, speed: 1 },
+    why: `${cast.why}; imported reference labels are operator-declared; native Fish pace` };
 }
