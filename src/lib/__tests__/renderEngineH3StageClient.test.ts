@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sha256BytesHex } from "../sha256";
+import { STUDIO_ENGINE_H3_WORKFLOW } from "../studioRenderEngineWorkflows";
 import { bindStudioScenesInRenderEngine, admitStudioBatchInRenderEngine, getH3JobStatusInRenderEngine, getVerifiedH3OutputReadbackInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine, type RenderEngineH3StageConfig } from "@/lib/renderEngineH3StageClient";
 
 const config: RenderEngineH3StageConfig = {
-  baseUrl: "https://jovial-camel-68.convex.site",
-  projectName: "youtube-studio",
+  baseUrl: "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render",
+  projectName: "youtube-studio-render",
   workflowId: "jn77hkybrrm6vfyctyv4eznmqx8ezqrg",
-  projectCapability: "a".repeat(64),
+  apiKey: "a".repeat(64),
   request: {
     version: 2,
     idempotencyKey: "youtube-studio:run-1:shot-1",
     prompt: "A quiet morning at home",
-    firstFrame: { r2Key: `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`, sha256: "b".repeat(64) },
+    firstFrame: { r2Key: `projects/youtube-studio-render/inputs/sha256/${"b".repeat(64)}.png`, sha256: "b".repeat(64) },
     seed: 19,
     durationSeconds: 5,
     output: { width: 1280, height: 736, fps: 24, container: "mp4", videoCodec: "h264" },
@@ -35,9 +37,9 @@ test("uses only the Engine stage request branch and validates its receipt", asyn
     },
   });
   assert.deepEqual(result, receipt);
-  assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/h3-jobs");
+  assert.equal(captured?.url, "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render/h3-jobs");
   assert.equal(captured?.init.method, "POST");
-  assert.equal(new Headers(captured?.init.headers).get("authorization"), `Bearer ${config.projectCapability}`);
+  assert.equal(new Headers(captured?.init.headers).get("authorization"), `Bearer ${config.apiKey}`);
   const posted = JSON.parse(String(captured?.init.body));
   assert.deepEqual(Object.keys(posted).sort(), ["projectName", "request", "workflowId"]);
   assert.deepEqual(posted.request, config.request);
@@ -76,7 +78,7 @@ test("accepts durable replay states and rejects malformed staging receipts", asy
 test("rejects unsafe Engine origins and non-202 responses", async () => {
   let calls = 0;
   const fetchImpl: typeof fetch = async () => { calls += 1; return jsonResponse({}, 200); };
-  await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl }), /HTTPS Convex site origin/);
+  await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl }), /owned public managed API/);
   await assert.rejects(() => stageH3RequestInRenderEngine({ ...config, fetchImpl }), /HTTP 200/);
   assert.equal(calls, 1);
 });
@@ -85,62 +87,66 @@ test("qualifies only the staged job through the non-billable Engine endpoint", a
   let captured: { url: string; init: RequestInit } | undefined;
   const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
   const receipt = await qualifyH3InputInRenderEngine({
-    baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+    baseUrl: config.baseUrl, projectName: config.projectName, apiKey: config.apiKey,
     fetchImpl: async (input, init) => {
       captured = { url: String(input), init: init ?? {} };
       return jsonResponse({ jobId, state: "awaiting-final-qualification" });
     },
   }, jobId);
   assert.deepEqual(receipt, { jobId, state: "awaiting-final-qualification" });
-  assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/h3-jobs/qualify-input");
+  assert.equal(captured?.url, "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render/h3-jobs/qualify-input");
   assert.deepEqual(JSON.parse(String(captured?.init.body)), { projectName: config.projectName, jobId });
 });
 
 test("admits the frozen Studio batch before any scene is staged", async () => {
   let captured: { url: string; init: RequestInit } | undefined;
   const receipt = await admitStudioBatchInRenderEngine({
-    baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+    baseUrl: config.baseUrl, projectName: config.projectName, apiKey: config.apiKey,
     fetchImpl: async (input, init) => {
       captured = { url: String(input), init: init ?? {} };
       return jsonResponse({ batchId: "batch-1", handoffSha256: "a".repeat(64), state: "awaiting-scene-artifacts", itemCount: 1, admittedAt: 1, reused: false });
     },
   }, { ownerId: "owner-1", batchId: "batch-1" });
   assert.equal(receipt.batchId, "batch-1");
-  assert.equal(captured?.url, "https://jovial-camel-68.convex.site/client/studio-batch-admission");
+  assert.equal(captured?.url, "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render/studio-batch-admission");
   assert.deepEqual(JSON.parse(String(captured?.init.body)), { projectName: config.projectName, ownerId: "owner-1", batchId: "batch-1" });
 });
 
 test("provisions the current profile revision and uploads only a hash-addressed project frame", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const frame = new Uint8Array([1, 2, 3, 4]);
+  const frameHash = sha256BytesHex(frame);
   const fetchImpl: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init: init ?? {} });
-    if (String(input).endsWith("/client/workflows")) {
-      return jsonResponse({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "e".repeat(64) }, 200);
+    if (String(input).endsWith("/workflows")) {
+      return jsonResponse(STUDIO_ENGINE_H3_WORKFLOW, 200);
     }
-    if (String(input).endsWith("/client/input-uploads")) {
-      return jsonResponse({ bucket: "youtube-studio-renders", key: `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`, bytes: 4, sha256: "b".repeat(64), contentType: "image/png", url: "https://r2.example/signed-put", headers: { "Content-Type": "image/png", "Content-Length": "4", "x-amz-meta-sha256": "b".repeat(64) } }, 200);
+    if (String(input).endsWith("/input-uploads")) {
+      return jsonResponse({ bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/youtube-studio-render/inputs/sha256/${frameHash}.png`, bytes: 4, sha256: frameHash, contentType: "image/png", url: "https://account.r2.cloudflarestorage.com/signed-put", headers: { "Content-Type": "image/png", "Content-Length": "4", "x-amz-meta-sha256": frameHash } }, 200);
     }
     return new Response(null, { status: 200 });
   };
-  const base = { baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability, fetchImpl };
-  assert.deepEqual(await provisionStudioH3WorkflowInRenderEngine(base), { workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "e".repeat(64) });
-  assert.equal((await uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 4, contentType: "image/png" }, frame)).key,
-    `projects/youtube-studio/inputs/sha256/${"b".repeat(64)}.png`);
+  const base = { baseUrl: config.baseUrl, projectName: config.projectName, apiKey: config.apiKey, fetchImpl };
+  assert.deepEqual(await provisionStudioH3WorkflowInRenderEngine(base), STUDIO_ENGINE_H3_WORKFLOW);
+  assert.equal((await uploadH3InputToRenderEngine(base, { sha256: frameHash, bytes: 4, contentType: "image/png" }, frame)).key,
+    `projects/youtube-studio-render/inputs/sha256/${frameHash}.png`);
   assert.deepEqual(calls.map((call) => call.url), [
-    "https://jovial-camel-68.convex.site/client/workflows",
-    "https://jovial-camel-68.convex.site/client/input-uploads",
-    "https://r2.example/signed-put",
+    "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render/workflows",
+    "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render/input-uploads",
+    "https://account.r2.cloudflarestorage.com/signed-put",
   ]);
-  assert.equal(new Headers(calls[2]?.init.headers).get("x-amz-meta-sha256"), "b".repeat(64));
-  await assert.rejects(uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 5, contentType: "image/png" }, frame), /byte length/);
+  assert.equal(new Headers(calls[2]?.init.headers).get("x-amz-meta-sha256"), frameHash);
+  assert.equal(new Headers(calls[2]?.init.headers).get("authorization"), null);
+  assert.equal(calls[2]?.init.redirect, "error");
+  await assert.rejects(uploadH3InputToRenderEngine(base, { sha256: frameHash, bytes: 5, contentType: "image/png" }, frame), /do not match/);
+  await assert.rejects(uploadH3InputToRenderEngine(base, { sha256: "b".repeat(64), bytes: 4, contentType: "image/png" }, frame), /do not match/);
 });
 
 test("reads only a verified completed H3 receipt and its short-lived project output capability", async () => {
   const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
   const output = {
-    bucket: "youtube-studio-renders",
-    key: `projects/project-id/workflows/workflow-id/jobs/${jobId}/outputs/h3-render.mp4`,
+    bucket: "re-youtube-studio-render-p2w18g596q",
+    key: `projects/youtube-studio-render/workflows/workflow-id/jobs/${jobId}/outputs/h3-render.mp4`,
     bytes: 12_345,
     sha256: "f".repeat(64),
     contentType: "video/mp4",
@@ -150,10 +156,10 @@ test("reads only a verified completed H3 receipt and its short-lived project out
   const base = {
     baseUrl: config.baseUrl,
     projectName: config.projectName,
-    projectCapability: config.projectCapability,
+    apiKey: config.apiKey,
     fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(input), init: init ?? {} });
-      if (String(input).includes("/client/jobs/output?")) {
+      if (String(input).includes("/jobs/output?")) {
         return jsonResponse({ ...output, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200);
       }
       return jsonResponse({
@@ -169,30 +175,30 @@ test("reads only a verified completed H3 receipt and its short-lived project out
   assert.deepEqual(await getVerifiedH3OutputReadbackInRenderEngine(base, jobId), {
     ...output, url: "https://r2.example/signed-get", expiresInSeconds: 3_600,
   });
-  assert.deepEqual(calls.map((call) => new URL(call.url).pathname), ["/client/jobs", "/client/jobs/output"]);
-  assert.equal(new URL(calls[0]!.url).searchParams.get("projectName"), config.projectName);
-  assert.equal(new Headers(calls[1]?.init.headers).get("authorization"), `Bearer ${config.projectCapability}`);
+  assert.deepEqual(calls.map((call) => new URL(call.url).pathname), ["/api/v1/projects/youtube-studio-render/jobs", "/api/v1/projects/youtube-studio-render/jobs/output"]);
+  assert.equal(new URL(calls[0]!.url).searchParams.get("projectName"), null);
+  assert.equal(new Headers(calls[1]?.init.headers).get("authorization"), `Bearer ${config.apiKey}`);
 });
 
 test("rejects an unverified, retired, or cross-job output before it can be consumed", async () => {
   const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
-  const base = { baseUrl: config.baseUrl, projectName: config.projectName, projectCapability: config.projectCapability,
+  const base = { baseUrl: config.baseUrl, projectName: config.projectName, apiKey: config.apiKey,
     fetchImpl: async () => jsonResponse({
       jobId, status: "completed", profileId: "minimax-h3", lane: "h3", createdAt: 1, completedAt: 2,
       progress: null, measurement: null, attempt: null,
-      output: { bucket: "youtube-studio-renders", key: `projects/project/workflows/workflow/jobs/${jobId}/outputs/h3-render.mp4`, bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2 },
+      output: { bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/project/workflows/workflow/jobs/${jobId}/outputs/h3-render.mp4`, bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2 },
       outputRetired: true,
     }, 200) };
   await assert.rejects(getH3JobStatusInRenderEngine(base, jobId), /invalid verified H3 output receipt/);
-  const crossJob = { ...base, fetchImpl: async () => jsonResponse({ bucket: "youtube-studio-renders", key: "projects/project/workflows/workflow/jobs/anotherjob1234567890123456789012/outputs/h3-render.mp4", bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200) };
+  const crossJob = { ...base, fetchImpl: async () => jsonResponse({ bucket: "re-youtube-studio-render-p2w18g596q", key: "projects/project/workflows/workflow/jobs/anotherjob1234567890123456789012/outputs/h3-render.mp4", bytes: 1, sha256: "f".repeat(64), contentType: "video/mp4", verifiedAt: 2, url: "https://r2.example/signed-get", expiresInSeconds: 3_600 }, 200) };
   await assert.rejects(getVerifiedH3OutputReadbackInRenderEngine(crossJob, jobId), /invalid H3 output readback receipt/);
 });
 
 test("scene binding uses the actual authenticated Engine endpoint and rejects invalid scene counts",async()=>{
  const binding={ownerId:"owner1",batchId:"week1",itemId:"item1",manifestSha256:"d".repeat(64)};
  const client: RenderEngineH3StageConfig={...config,fetchImpl:async(url,init)=>{
-  assert.equal(new URL(url instanceof Request ? url.url : url).pathname,"/client/studio-batch-scenes");
-  assert.equal(new Headers(init?.headers).get("authorization"),`Bearer ${config.projectCapability}`);
+  assert.equal(new URL(url instanceof Request ? url.url : url).pathname,"/api/v1/projects/youtube-studio-render/studio-batch-scenes");
+  assert.equal(new Headers(init?.headers).get("authorization"),`Bearer ${config.apiKey}`);
   assert.ok(init && typeof init.body === "string");
   assert.deepEqual(JSON.parse(init.body),{projectName:config.projectName,...binding});
   assert.ok(init?.signal);return jsonResponse({sceneCount:2,reused:true});

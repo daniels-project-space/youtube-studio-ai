@@ -40,10 +40,9 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
-import { bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
+import { admitStudioBatchInRenderEngine, bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
-const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
-const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
+import { STUDIO_ENGINE_API_BASE as RENDER_ENGINE_SITE, STUDIO_ENGINE_PROJECT as RENDER_ENGINE_PROJECT_NAME } from "@/lib/studioRenderEngineWorkflows";
 
 export interface PlanWeekPreparedImageShot {
   id: string;
@@ -84,7 +83,7 @@ type PreparedH3Batch = {
 
 /** Durable, non-billable bridge from staged Engine jobs to a later manual R2 materializer. */
 export interface RenderEngineH3StagedFootage {
-  version: "render-engine-h3-staged-footage/v1" | "render-engine-h3-staged-footage/v2";
+  version: "render-engine-h3-staged-footage/v1" | "render-engine-h3-staged-footage/v2" | "render-engine-h3-staged-footage/v3";
   sharedBatchJobId?:string;
   sharedBatchManifestSha256?:string;
   sceneManifestSha256?:string;
@@ -95,7 +94,7 @@ export interface RenderEngineH3StagedFootage {
   batchId: string;
   itemId: string;
   requestKey: string;
-  engine: { site: typeof RENDER_ENGINE_SITE; projectName: typeof RENDER_ENGINE_PROJECT_NAME; workflowId: string; profileRevisionSha256: string };
+  engine: { site: string; projectName: string; workflowId: string; profileRevisionSha256: string };
   jobs: Array<{
     sceneId: string;
     engineJobId: string;
@@ -158,7 +157,7 @@ export function renderEngineH3StagedFootageKey(scope: ReturnType<typeof canonica
 }
 
 export function renderEngineH3SharedStagedFootageKey(scope: ReturnType<typeof canonicalScope>): string {
-    return planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-shared-staged.json");
+    return planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-managed-v3-staged.json");
 }
 
 export function hasGeneratedFootageStage(manifest: PlanWeekPreparationManifest): boolean {
@@ -408,6 +407,7 @@ export function buildStudioSceneManifest(args: {
 }
 
 export async function dispatchPreparedFootage(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedImagesArgs, prepared: PlanWeekPreparedImages, deps = {
+    admit: admitStudioBatchInRenderEngine,
     provision: provisionStudioH3WorkflowInRenderEngine,
     persist: persistPreparedResult,
     bind: bindStudioScenesInRenderEngine,
@@ -418,9 +418,9 @@ export async function dispatchPreparedFootage(manifest: PlanWeekPreparationManif
 }): Promise<readonly string[] | undefined> {
     if (!hasGeneratedFootageStage(manifest))
         return undefined;
-    const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
-    if (!/^[a-f0-9]{64}$/.test(projectCapability))
-        throw new Error("weekly H3 Engine project capability is not configured");
+    const apiKey = process.env.RENDER_MANAGEMENT_API_KEY?.trim() ?? "";
+    if (!/^[a-f0-9]{64}$/.test(apiKey))
+        throw new Error("weekly H3 Engine management credential is not configured");
     // Engine's Final H3 admission protects a full billable GPU-hour at the
     // agreed $1.20/hour cap. Keep a small rounding margin by default.
     const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "1.25");
@@ -436,8 +436,9 @@ export async function dispatchPreparedFootage(manifest: PlanWeekPreparationManif
     const engine = {
         baseUrl: RENDER_ENGINE_SITE,
         projectName: RENDER_ENGINE_PROJECT_NAME,
-        projectCapability,
+        apiKey,
     };
+    await deps.admit(engine, { ownerId: payload.ownerId, batchId: payload.batchId });
     const workflow = await deps.provision(engine);
     const sceneManifest = buildStudioSceneManifest({
         payload,
@@ -498,7 +499,7 @@ export async function dispatchPreparedFootage(manifest: PlanWeekPreparationManif
     const shared = await deps.stage(engine, { workflowId: workflow.workflowId, ownerId: payload.ownerId, batchId: payload.batchId, itemId: payload.itemId, request: { version: 1, idempotencyKey: `studio-h3-batch-${sha256BytesHex(sceneBody).slice(0, 48)}`, sceneManifestSha256: sha256BytesHex(sceneBody), maxCostUsd, familyMaxCostUsd, scenes: sceneManifest.scenes.map(scene => ({ ...scene, requestManifestSha256: sha256Hex(JSON.stringify(scene.request)) })).map(({ ordinal, sceneId, request, requestManifestSha256 }) => ({ ordinal, sceneId, request, requestManifestSha256 })) } });
     stagedJobIds.push(shared.jobId);
     const stagedFootage: RenderEngineH3StagedFootage = {
-        version: "render-engine-h3-staged-footage/v2",
+        version: "render-engine-h3-staged-footage/v3",
         sharedBatchJobId: shared.jobId, sharedBatchManifestSha256: shared.manifestSha256, sceneManifestSha256: sha256BytesHex(sceneBody),
         manifestSha256: payload.manifestSha256,
         ownerId: payload.ownerId,

@@ -33,11 +33,12 @@ const outputBytes = new Uint8Array(2_048).fill(9);
 const outputSha256 = sha256BytesHex(outputBytes);
 const clipKey = planWeekPreparedFootageClipKey({ ...scope, index: 0 });
 const firstFrameKey = planWeekPreparedH3FirstFrameKey({ ...scope, index: 0 });
-const stageKey = planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-staged.json");
+const stageKey = planWeekPreparedFootageKey(scope).replace(/\.json$/u, ".engine-h3-managed-v3-staged.json");
 const objects = new Map<string, Uint8Array>([
   [planWeekPreparationKey(scope), new TextEncoder().encode(canonicalJson(manifest))],
   [stageKey, new TextEncoder().encode(canonicalJson({
-    version: "render-engine-h3-staged-footage/v1",
+    version: "render-engine-h3-staged-footage/v3",
+    sharedBatchJobId: "batchjob123", sharedBatchManifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64),
     manifestSha256,
     ownerId: scope.ownerId,
     channelId: manifest.channelId,
@@ -45,7 +46,7 @@ const objects = new Map<string, Uint8Array>([
     batchId: scope.batchId,
     itemId: scope.itemId,
     requestKey: manifest.requestKey,
-    engine: { site: "https://jovial-camel-68.convex.site", projectName: "youtube-studio-ai", workflowId: "workflow123", profileRevisionSha256: "a".repeat(64) },
+    engine: { site: "https://render-engine-sable.vercel.app/api/v1/projects/youtube-studio-render", projectName: "youtube-studio-render", workflowId: "workflow123", profileRevisionSha256: "a".repeat(64) },
     jobs: [{
       sceneId: "shot-1",
       engineJobId: "enginejob123",
@@ -53,7 +54,7 @@ const objects = new Map<string, Uint8Array>([
       prompt: "An archival room, no text.",
       seed: 812,
       studioFirstFrame: { r2Key: firstFrameKey, sha256: "c".repeat(64) },
-      engineFirstFrame: { r2Key: `projects/youtube-studio-ai/inputs/sha256/${"c".repeat(64)}.png`, sha256: "c".repeat(64) },
+      engineFirstFrame: { r2Key: `projects/youtube-studio-render/inputs/sha256/${"c".repeat(64)}.png`, sha256: "c".repeat(64) },
       output: { r2Key: clipKey },
       maxCostUsd: 1.25,
     }],
@@ -85,24 +86,24 @@ loader._load = function (name, ...args) {
       statusReads++;
       if (jobId === pendingJobId) return { jobId, status: "running", progress: "rendering", completedAt: null, outputRetired: false, output: null };
       return { jobId, status: "completed", progress: "report-ready", completedAt: 2_000, outputRetired: false,
-        output: { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
+        output: { bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/youtube-studio-render/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
     },
     getVerifiedH3OutputReadbackInRenderEngine: async (_engine: unknown, jobId: string) => {
       signedReads++;
-      return { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
+      return { bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/youtube-studio-render/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
     },
   };
   if (name === "@/lib/renderEngineH3SceneBatchClient") return {
-    getH3SceneBatchStatusInRenderEngine: async () => ({ manifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64), scenes: [{ sceneId: "shot-1", ordinal: 0, requestManifestSha256: "b".repeat(64), state: "verified", output: { jobId: "enginejob789", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, verifiedAt: 1999 } }] }),
-    getH3SceneOutputInRenderEngine: async () => ({ bucket: "render-engine-output", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1999, url: "https://example.test/enginejob789.mp4", expiresInSeconds: 3600 }),
+    getH3SceneBatchStatusInRenderEngine: async () => { statusReads++; return { manifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64), scenes: [{ sceneId: "shot-1", ordinal: 0, requestManifestSha256: "b".repeat(64), state: "verified", output: { jobId: "enginejob789", key: "projects/youtube-studio-render/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, verifiedAt: 1999 } }] }; },
+    getH3SceneOutputInRenderEngine: async () => { signedReads++; return { bucket: "re-youtube-studio-render-p2w18g596q", key: "projects/youtube-studio-render/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1999, url: "https://example.test/enginejob789.mp4", expiresInSeconds: 3600 }; },
   };
   return originalLoad.call(this, name, ...args);
 };
 
 async function main() {
   const originalFetch = globalThis.fetch;
-  const previousToken = process.env.RENDER_ENGINE_PROJECT_TOKEN;
-  process.env.RENDER_ENGINE_PROJECT_TOKEN = "d".repeat(64);
+  const previousToken = process.env.RENDER_MANAGEMENT_API_KEY;
+  process.env.RENDER_MANAGEMENT_API_KEY = "d".repeat(64);
   globalThis.fetch = async (url) => {
     videoFetches++;
     assert.match(String(url), /^https:\/\/example\.test\/enginejob\d+\.mp4$/);
@@ -112,10 +113,10 @@ async function main() {
     const { materializeRenderEngineH3PreparedFootage } = await import("../renderEngineH3MaterializePreparedFootage");
     const sidecarKey = await materializeRenderEngineH3PreparedFootage(scope);
     assert.equal(sidecarKey, planWeekPreparedFootageKey(scope));
-    assert.deepEqual(objects.get(clipKey), outputBytes, "the Engine bytes are copied to Studio's canonical R2 clip key");
+    assert.deepEqual(Buffer.from(objects.get(clipKey)!), Buffer.from(outputBytes), "the Engine bytes are copied to Studio's canonical R2 clip key");
     const result = decodePreparedMetadata(objects.get(sidecarKey)!);
     assert.equal((result as { renderer: { kind: string } }).renderer.kind, "render-engine-h3");
-    assert.equal(statusReads, 1);
+    assert.equal(statusReads, 2);
     assert.equal(signedReads, 1);
     assert.equal(videoFetches, 1);
     const incomplete = structuredClone(decodePreparedMetadata(objects.get(stageKey)!) as { jobs: Array<Record<string, unknown>> });
@@ -129,25 +130,30 @@ async function main() {
     objects.set(stageKey, new TextEncoder().encode(canonicalJson(incomplete)));
     pendingJobId = "enginejob456";
     videoFetches = 0;
-    await assert.rejects(materializeRenderEngineH3PreparedFootage(scope), /current verified completion/);
+    await assert.rejects(materializeRenderEngineH3PreparedFootage(scope), /complete ordered verified scene set/);
     assert.equal(videoFetches, 0, "no completed scene is copied while another staged scene is not complete");
     assert.equal(objects.has(clipKey), false);
     assert.equal(objects.has(secondClipKey), false);
     const shared = structuredClone(incomplete) as typeof incomplete & Record<string, unknown>;
     shared.jobs = [shared.jobs[0]];
-    shared.version = "render-engine-h3-staged-footage/v2";
+    shared.version = "render-engine-h3-staged-footage/v3";
     shared.sharedBatchJobId = "batchjob123";
     shared.sharedBatchManifestSha256 = "e".repeat(64);
     shared.sceneManifestSha256 = "f".repeat(64);
-    objects.set(stageKey.replace(".engine-h3-staged.json", ".engine-h3-shared-staged.json"), new TextEncoder().encode(canonicalJson(shared)));
+    objects.set(stageKey, new TextEncoder().encode(canonicalJson(shared)));
     await materializeRenderEngineH3PreparedFootage(scope);
-    assert.deepEqual(objects.get(clipKey), outputBytes, "shared family materializes independently verified repair child output");
+    assert.deepEqual(Buffer.from(objects.get(clipKey)!), Buffer.from(outputBytes), "shared family materializes independently verified repair child output");
     assert.equal(videoFetches, 1);
+
+    shared.version = "render-engine-h3-staged-footage/v2";
+    objects.set(stageKey, new TextEncoder().encode(canonicalJson(shared)));
+    await assert.rejects(materializeRenderEngineH3PreparedFootage(scope), /staged footage receipt is invalid/,
+      "legacy receipts cannot be reinterpreted as managed-workspace output");
 
   } finally {
     globalThis.fetch = originalFetch;
-    if (previousToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
-    else process.env.RENDER_ENGINE_PROJECT_TOKEN = previousToken;
+    if (previousToken === undefined) delete process.env.RENDER_MANAGEMENT_API_KEY;
+    else process.env.RENDER_MANAGEMENT_API_KEY = previousToken;
   }
   console.log("render Engine H3 materializer copies only a verified receipt into the canonical Studio R2 path");
 }

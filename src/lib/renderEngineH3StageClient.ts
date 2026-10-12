@@ -1,4 +1,7 @@
 /** A client for persisting an H3 request in Render Engine without dispatching it. */
+import { studioH3Json, validateStudioH3Connection, type StudioEngineH3Connection } from "./studioEngineH3Http";
+import { STUDIO_ENGINE_BUCKET, STUDIO_ENGINE_H3_WORKFLOW } from "./studioRenderEngineWorkflows";
+import { sha256BytesHex } from "./sha256";
 export type RenderEngineH3StageRequest = Readonly<{
   version: 2;
   idempotencyKey: string;
@@ -96,14 +99,13 @@ export type RenderEngineH3StageConfig = Readonly<{
   baseUrl: string;
   projectName: string;
   workflowId: string;
-  projectCapability: string;
+  apiKey: string;
   request: RenderEngineH3StageRequest;
   studioBatch?: Readonly<{ ownerId: string; batchId: string; itemId: string; sceneId?: string; ordinal?: number }>;
   fetchImpl?: typeof fetch;
 }>;
 
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
-const PROJECT_NAME = /^[a-z][a-z0-9-]{2,63}$/;
 const CONVEX_ID = /^[a-z0-9]{8,64}$/;
 const REQUEST_KEYS = [
   "version", "idempotencyKey", "prompt", "firstFrame", "seed", "durationSeconds",
@@ -119,21 +121,6 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function engineEndpoint(baseUrl: string, path: string): string {
-  let url: URL;
-  try { url = new URL(baseUrl); } catch { throw new Error("Render Engine URL is invalid"); }
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".convex.site") || url.username || url.password ||
-      url.pathname !== "/" || url.search || url.hash) {
-    throw new Error("Render Engine URL must be the HTTPS Convex site origin");
-  }
-  url.pathname = path;
-  return url.toString();
-}
-
-function validateProjectCapability(projectName: string, projectCapability: string): void {
-  if (!PROJECT_NAME.test(projectName)) throw new Error("Render Engine project name is invalid");
-  if (!/^[a-f0-9]{64}$/.test(projectCapability)) throw new Error("Render Engine project capability is invalid");
-}
 
 function validateInputUpload(input: RenderEngineInputUpload): void {
   if (!HEX_SHA256.test(input.sha256) || !Number.isSafeInteger(input.bytes) || input.bytes < 1 || input.bytes >= 30_000_000 ||
@@ -142,41 +129,16 @@ function validateInputUpload(input: RenderEngineInputUpload): void {
   }
 }
 
-async function jsonRequest(config: { baseUrl: string; projectName: string; projectCapability: string; fetchImpl?: typeof fetch }, path: string, body: unknown, timeoutMs = 15_000): Promise<unknown> {
-  validateProjectCapability(config.projectName, config.projectCapability);
-  const response = await (config.fetchImpl ?? fetch)(engineEndpoint(config.baseUrl, path), {
-    method: "POST",
-    headers: { authorization: `Bearer ${config.projectCapability}`, "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
-    throw new Error(`Render Engine ${path} returned a non-JSON response`);
-  }
-  let parsed: unknown;
-  try { parsed = await response.json(); } catch { throw new Error(`Render Engine ${path} returned malformed JSON`); }
-  return { status: response.status, body: parsed };
+async function jsonRequest(config: StudioEngineH3Connection, path: string, body: unknown, timeoutMs = 20000): Promise<unknown> {
+  return studioH3Json(config, path, body, timeoutMs);
 }
 
-async function jsonGet(config: { baseUrl: string; projectName: string; projectCapability: string; fetchImpl?: typeof fetch }, path: string, jobId: string): Promise<unknown> {
-  validateProjectCapability(config.projectName, config.projectCapability);
+async function jsonGet(config: StudioEngineH3Connection, path: string, jobId: string): Promise<unknown> {
   if (!CONVEX_ID.test(jobId)) throw new Error("Render Engine H3 job ID is invalid");
-  const url = new URL(engineEndpoint(config.baseUrl, path));
-  url.searchParams.set("projectName", config.projectName);
-  url.searchParams.set("jobId", jobId);
-  const response = await (config.fetchImpl ?? fetch)(url, {
-    method: "GET",
-    headers: { authorization: `Bearer ${config.projectCapability}`, accept: "application/json" },
-    cache: "no-store", signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
-    throw new Error(`Render Engine ${path} returned a non-JSON response`);
-  }
-  let parsed: unknown;
-  try { parsed = await response.json(); } catch { throw new Error(`Render Engine ${path} returned malformed JSON`); }
-  return { status: response.status, body: parsed };
+  return studioH3Json(config, `${path}?jobId=${encodeURIComponent(jobId)}`);
 }
 
-function validateStageRequest(value: unknown, projectName: string): asserts value is RenderEngineH3StageRequest {
+export function validateStageRequest(value: unknown, projectName: string): asserts value is RenderEngineH3StageRequest {
   if (!isRecord(value) || !hasExactKeys(value, REQUEST_KEYS)) throw new Error("H3 staging request fields do not match the Render Engine contract");
   const frame = value.firstFrame;
   const output = value.output;
@@ -245,7 +207,7 @@ function parseStudioBatchAdmissionReceipt(value: unknown, batchId: string): Rend
 function parseInputUploadReceipt(value: unknown, projectName: string, input: RenderEngineInputUpload): RenderEngineInputUploadReceipt {
   if (!isRecord(value) || !hasExactKeys(value, ["bucket", "key", "bytes", "sha256", "contentType", "url", "headers"]) ||
       typeof value.key !== "string" || typeof value.url !== "string" || !isRecord(value.headers) ||
-      value.bytes !== input.bytes || value.sha256 !== input.sha256 || value.contentType !== input.contentType) {
+      value.bucket !== STUDIO_ENGINE_BUCKET || value.bytes !== input.bytes || value.sha256 !== input.sha256 || value.contentType !== input.contentType) {
     throw new Error("Render Engine returned an invalid input upload receipt");
   }
   const extension = input.contentType === "image/png" ? "png" : "jpg";
@@ -254,10 +216,10 @@ function parseInputUploadReceipt(value: unknown, projectName: string, input: Ren
   }
   let url: URL;
   try { url = new URL(value.url); } catch { throw new Error("Render Engine input upload URL is invalid"); }
-  if (url.protocol !== "https:" || url.username || url.password) throw new Error("Render Engine input upload URL must be HTTPS");
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".r2.cloudflarestorage.com") || url.username || url.password || url.hash) throw new Error("Render Engine input upload URL must be owned R2 HTTPS");
   const headers: Record<string, string> = {};
   for (const [key, header] of Object.entries(value.headers)) {
-    if (typeof header !== "string" || !/^(content-type|content-length|x-amz-meta-sha256)$/i.test(key)) {
+    if (typeof header !== "string" || !/^(content-type|content-length|x-amz-meta-sha256|if-none-match)$/i.test(key)) {
       throw new Error("Render Engine input upload headers are invalid");
     }
     headers[key] = header;
@@ -314,7 +276,11 @@ function parseH3OutputReadback(value: unknown, jobId: string): RenderEngineH3Out
 export async function provisionStudioH3WorkflowInRenderEngine(config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">): Promise<RenderEngineH3WorkflowReceipt> {
   const result = await jsonRequest(config, "/client/workflows", { projectName: config.projectName, workflowName: WORKFLOW_NAME, profileId: "minimax-h3" }) as { status: number; body: unknown };
   if (result.status !== 200) throw new Error(`Render Engine H3 workflow provisioning returned HTTP ${result.status}`);
-  return parseWorkflowReceipt(result.body);
+  const workflow = parseWorkflowReceipt(result.body);
+  if (workflow.workflowId !== STUDIO_ENGINE_H3_WORKFLOW.workflowId || workflow.profileRevisionSha256 !== STUDIO_ENGINE_H3_WORKFLOW.profileRevisionSha256) {
+    throw new Error("Registered Studio H3 workflow changed; revise its immutable profile explicitly");
+  }
+  return workflow;
 }
 
 /** Verifies Studio's frozen batch through the Engine broker. This cannot stage or dispatch a GPU job. */
@@ -335,12 +301,12 @@ export async function admitStudioBatchInRenderEngine(
 /** Uploads already hash-verified Studio image bytes through an Engine project-only signed PUT. */
 export async function uploadH3InputToRenderEngine(config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">, input: RenderEngineInputUpload, bytes: Uint8Array): Promise<RenderEngineInputUploadReceipt> {
   validateInputUpload(input);
-  if (bytes.byteLength !== input.bytes) throw new Error("Render Engine input upload byte length does not match its claim");
+  if (bytes.byteLength !== input.bytes || sha256BytesHex(bytes) !== input.sha256) throw new Error("Render Engine input upload bytes do not match their receipt");
   const result = await jsonRequest(config, "/client/input-uploads", { projectName: config.projectName, ...input }) as { status: number; body: unknown };
   if (result.status !== 200) throw new Error(`Render Engine input upload admission returned HTTP ${result.status}`);
   const receipt = parseInputUploadReceipt(result.body, config.projectName, input);
-  const response = await (config.fetchImpl ?? fetch)(receipt.url, { method: "PUT", headers: receipt.headers, body: Buffer.from(bytes), signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`Render Engine input upload PUT returned HTTP ${response.status}`);
+  const response = await (config.fetchImpl ?? fetch)(receipt.url, { method: "PUT", redirect: "error", headers: receipt.headers, body: Buffer.from(bytes), signal: AbortSignal.timeout(60_000) });
+  if (!response.ok && response.status !== 412) throw new Error(`Render Engine input upload PUT returned HTTP ${response.status}`);
   return receipt;
 }
 
@@ -349,7 +315,7 @@ export async function uploadH3InputToRenderEngine(config: Omit<RenderEngineH3Sta
  * calls the prompt-only branch, polls jobs, or starts a provider execution.
  */
 export async function stageH3RequestInRenderEngine(config: RenderEngineH3StageConfig): Promise<RenderEngineH3StageReceipt> {
-  validateProjectCapability(config.projectName, config.projectCapability);
+  validateStudioH3Connection(config);
   if (!CONVEX_ID.test(config.workflowId)) throw new Error("Render Engine workflow ID is invalid");
   validateStageRequest(config.request, config.projectName);
   if (config.studioBatch && ![config.studioBatch.ownerId, config.studioBatch.batchId, config.studioBatch.itemId]
@@ -365,7 +331,7 @@ export async function qualifyH3InputInRenderEngine(
   config: Omit<RenderEngineH3StageConfig, "workflowId" | "request">,
   jobId: string,
 ): Promise<RenderEngineH3InputQualificationReceipt> {
-  validateProjectCapability(config.projectName, config.projectCapability);
+  validateStudioH3Connection(config);
   if (!CONVEX_ID.test(jobId)) throw new Error("Render Engine H3 job ID is invalid");
   const result = await jsonRequest(config, "/client/h3-jobs/qualify-input", {
     projectName: config.projectName, jobId,

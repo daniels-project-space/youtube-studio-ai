@@ -76,7 +76,7 @@ loader._load = function (name, ...args) {
         scenePackets.set(key, value);
         return;
       }
-      if (key.endsWith(".engine-h3-shared-staged.json")) {
+      if (key.endsWith(".engine-h3-managed-v3-staged.json")) {
         if (stagedFootageSidecars.has(key)) throw Object.assign(new Error("already exists"), { $metadata: { httpStatusCode: 412 } });
         stagedFootageSidecars.set(key, value);
         return;
@@ -87,11 +87,14 @@ loader._load = function (name, ...args) {
   };
   if (name === "@trigger.dev/sdk") return { task: (definition: unknown) => definition };
   if (name === "@/lib/renderEngineH3StageClient") return {
+    admitStudioBatchInRenderEngine: async (_config: unknown, batch: { batchId: string }) => ({
+      batchId: batch.batchId, handoffSha256: "a".repeat(64), state: "awaiting-scene-artifacts", itemCount: 1, admittedAt: 1, reused: false,
+    }),
     bindStudioScenesInRenderEngine: async () => ({ sceneCount: 12, reused: scenePackets.size > 0 }),
     provisionStudioH3WorkflowInRenderEngine: async () => ({ workflowId: "jn7amn3mdzgyy66h04njbvjbax8f98p7", profileRevisionSha256: "a".repeat(64) }),
     uploadH3InputToRenderEngine: async (_config: unknown, input: { sha256: string }) => {
       inputUploads++;
-      return { key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
+      return { key: `projects/youtube-studio-render/inputs/sha256/${input.sha256}.png`, url: "https://r2.example/upload", headers: {} };
     },
     stageH3RequestInRenderEngine: async () => ({ jobId: `job${(stagedJobs++ % 12) + 1}`, state: stagedState, manifestSha256: "b".repeat(64) }),
     qualifyH3InputInRenderEngine: async (_config: unknown, jobId: string) => {
@@ -171,8 +174,8 @@ async function main() {
     shots: items.map(item => ({ id: item.shotId, prompt: "A detailed archive map", candidateCount: 1 })), maxCostUsd: 5,
   });
   const footageManifest = { ...manifest, execution: { ...manifest.execution, pipeline: [{ block: "gen_footage" }] } };
-  const priorToken = process.env.RENDER_ENGINE_PROJECT_TOKEN;
-  process.env.RENDER_ENGINE_PROJECT_TOKEN = "a".repeat(64);
+  const priorToken = process.env.RENDER_MANAGEMENT_API_KEY;
+  process.env.RENDER_MANAGEMENT_API_KEY = "a".repeat(64);
   started = 0; peak = 0;
   gate = new Promise<void>(resolve => { release = resolve; });
   const copy = dispatchPreparedFootage(footageManifest, payload, prepared);
@@ -188,9 +191,9 @@ async function main() {
   assert.equal(qualificationCalls, 0, "shared staging owns complete input qualification in Engine");
   assert.equal(stagedFootageSidecars.size, 1, "staged Engine job identities persist for the later manual R2 materializer");
   const [stageKey, stageBytes] = [...stagedFootageSidecars.entries()][0]!;
-  assert.match(stageKey, /prepared\/footage\.engine-h3-shared-staged\.json$/);
+  assert.match(stageKey, /prepared\/footage\.engine-h3-managed-v3-staged\.json$/);
   const stagedFootage = JSON.parse(new TextDecoder().decode(stageBytes)) as { engine: { projectName: string }; jobs: Array<{ engineJobId: string; output: { r2Key: string } }> };
-  assert.equal(stagedFootage.engine.projectName, "youtube-studio-ai");
+  assert.equal(stagedFootage.engine.projectName, "youtube-studio-render");
   assert.deepEqual(stagedFootage.jobs.map((job) => job.engineJobId), Array.from({ length: 12 }, () => "enginebatchjob123"));
   assert.match(stagedFootage.jobs[0]!.output.r2Key, /prepared\/footage\/clip-0001\.mp4$/);
   for (const terminalState of ["completed", "failed", "cancelled"] as const) {
@@ -211,8 +214,8 @@ async function main() {
   assert.equal(stagedJobs, stagedBeforeFailure, "a failed source-frame copy cannot stage H3");
   assert.equal(active, 0);
   assert.equal(providerCalls, 0);
-  if (priorToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
-  else process.env.RENDER_ENGINE_PROJECT_TOKEN = priorToken;
+  if (priorToken === undefined) delete process.env.RENDER_MANAGEMENT_API_KEY;
+  else process.env.RENDER_MANAGEMENT_API_KEY = priorToken;
   console.log("Prepared image transfer bounds: real sidecar reader, bounded Engine input transfer, staged H3 receipts, and source-byte rejection passed");
 }
 

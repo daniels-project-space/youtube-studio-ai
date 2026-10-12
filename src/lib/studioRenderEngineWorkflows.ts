@@ -1,6 +1,11 @@
 /** Live project-owned registrations; update only with an explicit new Engine workflow. */
 export const STUDIO_ENGINE_PROJECT = "youtube-studio-render";
 export const STUDIO_ENGINE_BUCKET = "re-youtube-studio-render-p2w18g596q";
+export const STUDIO_ENGINE_API_BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
+export const STUDIO_ENGINE_H3_WORKFLOW = {
+  workflowId: "jn74f2wpbeb3v01p8j51v6m6k58g49nt",
+  profileRevisionSha256: "ae37ff63af37c524f5dc620bc2c89616bd2dd9f3ebf7de634056f091f7fb18cf",
+} as const;
 export const STUDIO_ENGINE_ZIMAGE_WORKFLOW = {
   workflowId: "jn739qpstjjme9afp2zw3a07dh8g580s",
   profileRevisionSha256: "c5fa2752adcbefa3f28ac80eba06335e841c05e0d5bd1bb694c414cdd8488b1b",

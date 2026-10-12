@@ -56,7 +56,7 @@ export class StudioEngineError extends Error {
   }
 }
 
-async function boundedBytes(response: Response, maximum: number): Promise<Uint8Array> {
+export async function boundedBytes(response: Response, maximum: number): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Missing body");
   const chunks: Uint8Array[] = [];

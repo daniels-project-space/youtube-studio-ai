@@ -210,7 +210,7 @@ export interface PlanWeekPreparedFootage {
       }
     | {
         kind: "render-engine-h3";
-        projectName: "youtube-studio-ai";
+        projectName: "youtube-studio-ai" | "youtube-studio-render";
         workflowId: string;
         profileRevisionSha256: string;
       };
@@ -1002,10 +1002,10 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     if (rendererRecord.kind === "render-engine-h3") {
       const workflowId = requiredText(rendererRecord.workflowId, "prepared footage Engine workflow id");
       const profileRevisionSha256 = requiredText(rendererRecord.profileRevisionSha256, "prepared footage Engine profile revision").toLowerCase();
-      if (rendererRecord.projectName !== "youtube-studio-ai" || !/^[a-z0-9]{8,64}$/.test(workflowId) || !/^[a-f0-9]{64}$/.test(profileRevisionSha256)) {
+      if (!["youtube-studio-ai", "youtube-studio-render"].includes(String(rendererRecord.projectName)) || !/^[a-z0-9]{8,64}$/.test(workflowId) || !/^[a-f0-9]{64}$/.test(profileRevisionSha256)) {
         throw new Error("prepared footage Engine renderer binding is invalid");
       }
-      renderer = { kind: "render-engine-h3", projectName: "youtube-studio-ai", workflowId, profileRevisionSha256 };
+      renderer = { kind: "render-engine-h3", projectName: rendererRecord.projectName as "youtube-studio-ai" | "youtube-studio-render", workflowId, profileRevisionSha256 };
       const engineJobs = prepared.engineH3Jobs;
       if (!Array.isArray(engineJobs) || engineJobs.length !== clips.length || prepared.h3Jobs !== undefined || prepared.h3Receipts !== undefined) {
         throw new Error("prepared footage Engine jobs must match the ordered clips without legacy receipts");

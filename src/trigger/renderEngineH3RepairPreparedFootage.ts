@@ -8,6 +8,7 @@ import { sha256BytesHex, sha256Hex } from '@/lib/sha256';
 import { canonicalJson } from '@/lib/canonicalJson';
 import { getH3SceneBatchStatusInRenderEngine, stageH3SceneBatchInRenderEngine, type H3SharedScene } from '@/lib/renderEngineH3SceneBatchClient';
 import { renderEngineH3SharedStagedFootageKey, type RenderEngineH3StagedFootage } from './planWeekPreparedImages';
+import { STUDIO_ENGINE_API_BASE, STUDIO_ENGINE_PROJECT } from '@/lib/studioRenderEngineWorkflows';
 export type H3PreparedRepairArgs = {
     ownerId: string;
     channelSlug: string;
@@ -21,9 +22,9 @@ export async function stageH3PreparedRepair(args: H3PreparedRepairArgs) {
     if (![args.ownerId, args.channelSlug, args.batchId, args.itemId, args.repairOfJobId].every(v => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(v)) || !Array.isArray(args.sceneIds) || !args.sceneIds.length || new Set(args.sceneIds).size !== args.sceneIds.length || !Number.isFinite(args.maxCostUsd) || args.maxCostUsd < 1.22 || args.maxCostUsd > 10)
         throw new Error('Exact H3 manual repair identity and cap required');
     const stage = decodePreparedMetadata(await getObjectBytes(renderEngineH3SharedStagedFootageKey(args), undefined, PREPARED_METADATA_READ)) as RenderEngineH3StagedFootage;
-    if (stage.version !== 'render-engine-h3-staged-footage/v2' || stage.ownerId !== args.ownerId || stage.batchId !== args.batchId || stage.itemId !== args.itemId || stage.channelSlug !== args.channelSlug || stage.engine.site !== 'https://jovial-camel-68.convex.site' || stage.engine.projectName !== 'youtube-studio-ai' || !stage.sharedBatchJobId || !stage.sceneManifestSha256)
+    if (stage.version !== 'render-engine-h3-staged-footage/v3' || stage.ownerId !== args.ownerId || stage.batchId !== args.batchId || stage.itemId !== args.itemId || stage.channelSlug !== args.channelSlug || stage.engine.site !== STUDIO_ENGINE_API_BASE || stage.engine.projectName !== STUDIO_ENGINE_PROJECT || !stage.sharedBatchJobId || !stage.sceneManifestSha256)
         throw new Error('H3 original shared receipt differs');
-    const engine = { baseUrl: stage.engine.site, projectName: stage.engine.projectName, projectCapability: process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? '' };
+    const engine = { baseUrl: stage.engine.site, projectName: stage.engine.projectName, apiKey: process.env.RENDER_MANAGEMENT_API_KEY?.trim() ?? '' };
     const status = await getH3SceneBatchStatusInRenderEngine(engine, args.repairOfJobId);
     if (status.sceneManifestSha256 !== stage.sceneManifestSha256 || !['failed', 'completed', 'cancelled'].includes(status.status))
         throw new Error('H3 repair parent is not the same terminal family');

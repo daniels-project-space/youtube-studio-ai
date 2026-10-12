@@ -110,6 +110,34 @@ This is functional source integration, not native Fish speech qualification.
 No synthetic storage-test signal was used as a narrator and no paid model test
 was submitted. Scheduling remains disabled.
 
+## Managed H3 staging and readback
+
+H3 staging, repair and materialization now use the fixed public managed API and
+`RENDER_MANAGEMENT_API_KEY`, not the private Convex origin/project capability.
+The live owned workflow `jn74f2wpbeb3v01p8j51v6m6k58g49nt` is pinned to revision
+`ae37ff63af37c524f5dc620bc2c89616bd2dd9f3ebf7de634056f091f7fb18cf`.
+Registration started no GPU and allocated no persistent disk.
+
+Frozen batch admission is now connected before scene binding/upload/staging.
+Managed staged receipts use v3 and a separate `.engine-h3-managed-v3-staged.json`
+key. Legacy v1/v2 receipts and their stored assets remain separate; the managed
+materializer refuses to relabel them. Shared source/model request digests stay
+sealed, input uploads verify exact bytes/hash, R2 transfers prohibit redirects,
+and scene readback requires the exact owned bucket/prefix. Metadata and video
+reads are bounded. Every scene must be independently verified before transfer;
+the complete ordered scene set is checked again before writing the final sidecar.
+
+Engine's source binding now accepts the explicit managed alias while retaining
+the original legacy name and the same source owner/frozen-handoff checks. Its
+scoped publication changed one action and verified all 818 live module hashes.
+Both project-binding environment values were read back; no budgets, model
+controllers, schedules or provider/storage allocations changed.
+
+This is source integration plus live workflow/source configuration, not a new
+H3 output-quality qualification. The existing staging geometry/native profile
+boundary described below still needs physical output validation before rollout.
+The fresh-channel launch proof and native Z-Image execution remain unfinished.
+
 ## Remaining launch gates
 
 1. Move H3/still staging from the older project capability to the owned managed
