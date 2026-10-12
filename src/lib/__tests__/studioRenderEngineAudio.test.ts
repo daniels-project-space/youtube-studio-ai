@@ -14,21 +14,22 @@ const output = { bucket: STUDIO_ENGINE_BUCKET, key: `projects/${STUDIO_ENGINE_PR
   sha256: createHash("sha256").update(bytes).digest("hex"), contentType: "audio/wav", verifiedAt: 123 };
 const admission = { jobId, state: "queued", manifestSha256: hash };
 
-function fixture(options: { retire?: boolean; wrongWorkflow?: boolean; waiting?: boolean } = {}) {
-  let submits = 0, observations = 0;
+function fixture(options: { retire?: boolean; wrongWorkflow?: boolean; waiting?: boolean; held?: boolean } = {}) {
+  let submits = 0, observations = 0, held = options.held ?? false;
   const client = new StudioRenderEngineClient("f".repeat(64), async (url, init) => {
-    if (init?.method === "POST") { submits++; return Response.json(admission, { status: 202 }); }
+    if (init?.method === "POST") { submits++; return Response.json({ ...admission,
+      state: held ? "awaiting-final-qualification" : admission.state }, { status: 202 }); }
     if (String(url).includes("/jobs/output?")) return Response.json({ ...output,
       url: "https://account.r2.cloudflarestorage.com/audio.wav?signature=fixture" });
     if (String(url).includes("/jobs?")) {
       observations++;
       return Response.json({ jobId, workflowId: options.wrongWorkflow ? jobId : workflowId, profileId: "qwen3-tts",
-        requestSha256: hash, status: options.waiting || observations === 1 ? "waiting-for-capacity" : "completed",
+        requestSha256: hash, status: held ? "awaiting-final-qualification" : options.waiting || observations === 1 ? "waiting-for-capacity" : "completed",
         outputRetired: !!options.retire && observations >= 3, output });
     }
     return new Response(bytes);
   });
-  return { client, counts: () => ({ submits, observations }) };
+  return { client, counts: () => ({ submits, observations }), release: () => { held = false; } };
 }
 
 test("one admission and checkpointed waits reach a twice-verified project output", async () => {
@@ -80,6 +81,30 @@ test("capacity waits exhaust a bound with the same recoverable job, without resu
       return true;
     });
   assert.deepEqual(f.counts(), { submits: 1, observations: 2 });
+});
+
+test("final-qualification holds checkpoint once and resume the same admission without polling loops", async () => {
+  const f = fixture({ held: true });
+  let recovery: StudioEngineAudioRecovery | undefined;
+  let waits = 0;
+  await assert.rejects(executeStudioEngineAudio(input, { client: f.client, authorize: async () => undefined,
+    wait: async () => { waits++; }, onAccepted: async value => { recovery = value; } }), error => {
+    const failure = error as Error & { engineJobId: string; retryable: boolean; recovery: StudioEngineAudioRecovery };
+    assert.match(failure.message, /held for final qualification/);
+    assert.equal(failure.engineJobId, jobId);
+    assert.equal(failure.retryable, false);
+    assert.deepEqual(failure.recovery.admission, { ...admission, state: "awaiting-final-qualification" });
+    return true;
+  });
+  assert.equal(waits, 0);
+  assert.deepEqual(f.counts(), { submits: 1, observations: 1 });
+
+  f.release();
+  assert.ok(recovery);
+  const result = await executeStudioEngineAudio(input, { client: f.client, recovery, authorize: async () => undefined,
+    wait: async () => undefined, onAccepted: async () => undefined, maxObservations: 3 });
+  assert.equal(result.jobId, jobId);
+  assert.equal(f.counts().submits, 1, "qualification recovery never creates another paid job");
 });
 
 test("an accepted job remains recoverable when saving its admission fails", async () => {

@@ -40,6 +40,9 @@ export async function executeStudioEngineAudio(inputValue: unknown, options: {
   for (let index = 0; index < count; index++) {
     await options.authorize();
     const status = await options.client.observeAudio(admission, input.model, input.workflowId);
+    if (status.status === "awaiting-final-qualification") {
+      throw new Error(`Render Engine audio ${admission.jobId} is held for final qualification; resume this admission when ready`);
+    }
     if (["failed", "cancelled"].includes(status.status)) {
       throw new Error(`Render Engine audio ${admission.jobId} ended ${status.status}; retain its original request`);
     }
