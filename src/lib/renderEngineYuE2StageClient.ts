@@ -138,6 +138,33 @@ async function request(config: RenderEngineYuE2Config, path: string, method: "GE
   return { status: response.status, payload };
 }
 
+export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEngineYuE2Config): Promise<void> {
+  const url = new URL(endpoint(config, "/client/integration"));
+  url.searchParams.set("projectName", config.projectName);
+  const response = await (config.fetchImpl ?? fetch)(url, {
+    method: "GET",
+    headers: { authorization: `Bearer ${config.projectCapability}`, accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Render Engine project integration handshake failed (HTTP ${response.status})`);
+  }
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    throw new Error("Render Engine project integration handshake returned a non-JSON response");
+  }
+  let payload: unknown;
+  try { payload = await response.json(); } catch {
+    throw new Error("Render Engine project integration handshake returned malformed JSON");
+  }
+  if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
+      !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
+      typeof payload.output.prefix !== "string" || payload.output.prefix.length === 0 || !record(payload.endpoints) ||
+      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
+    throw new Error("Render Engine project integration handshake returned an invalid project or YuE2 binding");
+  }
+}
+
 export async function provisionRenderEngineYuE2Workflow(config: RenderEngineYuE2Config): Promise<RenderEngineYuE2Workflow> {
   const result = await request(config, "/client/workflows", "POST", {
     projectName: config.projectName,

@@ -14,6 +14,7 @@ import {
   getRenderEngineYuE2Output,
   provisionRenderEngineYuE2Workflow,
   stageRenderEngineYuE2Request,
+  verifyRenderEngineYuE2ProjectIntegration,
   type RenderEngineYuE2Request,
 } from "@/lib/renderEngineYuE2StageClient";
 import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
@@ -65,6 +66,7 @@ const block: Block & { version: string } = {
     const sourceId = `studio-${createHash("sha256").update(`${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:${arrangement.fingerprint}`).digest("hex")}`;
     let charge: number | undefined;
     try {
+      await verifyRenderEngineYuE2ProjectIntegration(projectConfig);
       const workflow = await provisionRenderEngineYuE2Workflow(projectConfig);
       const request: RenderEngineYuE2Request = {
         version: 2,

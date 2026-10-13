@@ -10,6 +10,7 @@ import {
   stageRenderEngineYuE2Request,
   type RenderEngineYuE2Config,
   type RenderEngineYuE2Request,
+  verifyRenderEngineYuE2ProjectIntegration,
 } from "@/lib/renderEngineYuE2StageClient";
 
 const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
@@ -43,6 +44,31 @@ const nativeArtifactReads = [
 ].map(([name, contentType]) => ({ name, contentType, key: `projects/${projectName}/jobs/${jobId}/native/${name}`,
   bytes: 32, sha256: "f".repeat(64), url: `https://studio-render-output.r2.cloudflarestorage.com/${name}`,
   readHeaders: { "If-Match": `\"etag-${name}\"` }, expiresInSeconds: 3600 }));
+
+test("verifies the authenticated project, output binding, and YuE2 route before provisioning", async () => {
+  let requestUrl: URL | undefined;
+  let authorization: string | null = null;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    requestUrl = new URL(String(input));
+    authorization = new Headers(init?.headers).get("authorization");
+    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
+      endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+  };
+  await verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl });
+  assert.equal(requestUrl?.pathname, "/client/integration");
+  assert.equal(requestUrl?.searchParams.get("projectName"), projectName);
+  assert.equal(authorization, `Bearer ${config.projectCapability}`);
+});
+
+test("fails the integration handshake on unauthorized credentials before workflow creation", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return new Response("Unauthorized", { status: 401, headers: { "content-type": "text/plain" } });
+  };
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /handshake failed \(HTTP 401\)/);
+  assert.equal(calls, 1);
+});
 
 test("provisions and stages only the pinned Studio YuE2 project workflow", async () => {
   const posted: Array<{ url: string; body: unknown; authorization: string | null }> = [];
