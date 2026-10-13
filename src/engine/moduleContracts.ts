@@ -995,10 +995,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: [
       "casefileSourcePacket",
       "casefileSourceAdmission",
-      "casefileEvidenceShotMapInput",
       "sceneManifest",
       "shotList",
     ],
+    optionalConsumes: ["casefileEvidenceShotMapInput"],
     providerProfiles: [local],
     qualityRequired: true,
   }),

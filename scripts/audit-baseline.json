@@ -9,6 +9,6 @@
   "audit-inert-produces": 66,
   "audit-unchecked-number-clamps": 3,
   "audit-contract-consumes-drift": 0,
-  "audit-unproducible-consumes": 4,
+  "audit-unproducible-consumes": 3,
   "audit-undeclared-store-reads": 0
 }
