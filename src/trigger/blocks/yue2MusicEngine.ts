@@ -12,6 +12,7 @@ import { materializeRenderEngineYuE2Candidate } from "@/lib/renderEngineYuE2Cand
 import {
   getRenderEngineYuE2Job,
   getRenderEngineYuE2Output,
+  assertRenderEngineYuE2StageReplay,
   provisionRenderEngineYuE2Workflow,
   stageRenderEngineYuE2Request,
   verifyRenderEngineYuE2ProjectIntegration,
@@ -88,7 +89,7 @@ const block: Block & { version: string } = {
       let stage = await stageRenderEngineYuE2Request({ ...projectConfig, workflowId: workflow.workflowId,
         profileRevisionSha256: workflow.profileRevisionSha256, request });
       if (!stage.dispatchEnabled) {
-        throw hold("OpenRelay RTX 3090 Final qualification is unavailable; the immutable job is held before provider create");
+        ctx.log(`music: Render Engine YuE2 job ${stage.jobId} is awaiting OpenRelay RTX 3090 qualification; observing the same request`);
       }
       const checks = Math.ceil((params.executionPolicy.max_execution_seconds + params.executionPolicy.termination_grace_seconds) / 120) + 2;
       let status: Record<string, unknown> | undefined;
@@ -101,8 +102,8 @@ const block: Block & { version: string } = {
         await wait.for({ seconds: 120, idempotencyKey: `${source.job.job_id}:engine-yue2-observe:${index}` });
         if (status.status === "awaiting-final-qualification" || status.status === "queued") {
           await ctx.assertInlinePaidExecutionLease();
-          stage = await stageRenderEngineYuE2Request({ ...projectConfig, workflowId: workflow.workflowId,
-            profileRevisionSha256: workflow.profileRevisionSha256, request });
+          stage = assertRenderEngineYuE2StageReplay(stage, await stageRenderEngineYuE2Request({ ...projectConfig,
+            workflowId: workflow.workflowId, profileRevisionSha256: workflow.profileRevisionSha256, request }));
         }
       }
       if (!status || status.status !== "completed") throw hold("job did not reach verified completion within its frozen execution window", charge);

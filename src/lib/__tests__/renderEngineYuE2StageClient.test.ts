@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import {
+  assertRenderEngineYuE2StageReplay,
   getRenderEngineYuE2Job,
   getRenderEngineYuE2Output,
   provisionRenderEngineYuE2Workflow,
@@ -89,6 +90,18 @@ test("provisions and stages only the pinned Studio YuE2 project workflow", async
   assert.equal(posted[1]?.url, `https://render-engine-sable.vercel.app/api/v1/projects/${projectName}/yue2-jobs`);
   assert.equal(posted[1]?.authorization, `Bearer ${config.projectCapability}`);
   assert.deepEqual(posted[1]?.body, { projectName: config.projectName, workflowId: jobId, request });
+});
+
+test("qualifying a held YuE2 job may change its state but never its immutable job binding", () => {
+  const held = { jobId, state: "awaiting-final-qualification", manifestSha256: "c".repeat(64), dispatchEnabled: false,
+    output: { bucket: "studio-render-output", key: `projects/${projectName}/jobs/${jobId}/audio.wav`,
+      receiptKey: `projects/${projectName}/jobs/${jobId}/yue2.receipt.json` } } as const;
+  const queued = { ...held, state: "queued", dispatchEnabled: true };
+  assert.equal(assertRenderEngineYuE2StageReplay(held, queued), queued);
+  assert.throws(() => assertRenderEngineYuE2StageReplay(held, { ...queued, jobId: `${jobId}x` }), /immutable job binding/);
+  assert.throws(() => assertRenderEngineYuE2StageReplay(held, { ...queued, manifestSha256: "d".repeat(64) }), /immutable job binding/);
+  assert.throws(() => assertRenderEngineYuE2StageReplay(held, { ...queued,
+    output: { ...queued.output, key: `${queued.output.key}.other` } }), /immutable job binding/);
 });
 
 test("rejects score, profile, cost, and project-scope mismatches before dispatch", async () => {

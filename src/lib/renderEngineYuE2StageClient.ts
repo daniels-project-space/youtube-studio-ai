@@ -54,6 +54,18 @@ export type RenderEngineYuE2Stage = Readonly<{
   dispatchEnabled: boolean;
   output: Readonly<{ bucket: string; key: string; receiptKey: string }>;
 }>;
+
+export function assertRenderEngineYuE2StageReplay(
+  original: RenderEngineYuE2Stage,
+  replay: RenderEngineYuE2Stage,
+): RenderEngineYuE2Stage {
+  if (original.jobId !== replay.jobId || original.manifestSha256 !== replay.manifestSha256 ||
+      original.output.bucket !== replay.output.bucket || original.output.key !== replay.output.key ||
+      original.output.receiptKey !== replay.output.receiptKey) {
+    throw new Error("Render Engine YuE2 replay changed the immutable job binding");
+  }
+  return replay;
+}
 export type RenderEngineYuE2NativeArtifactRead = Readonly<{
   name: string;
   key: string;

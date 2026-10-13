@@ -49,7 +49,7 @@ try {
     const selectedOptions = project(payload);
     assert.equal(selectedOptions.yue2Music, yue2Music, "worker must retain the exact requested selection");
     const selected = designPipeline(selectedOptions);
-    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, "3.0.0-yue2-candidate");
+    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, "5.0.0-render-engine-yue2-scored-v2");
     assert.equal(selected.productionReady, false, "transport cannot grant production qualification");
     assert.ok(selected.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const changed = designPipeline(project({ ...payload, yue2Music: { ...yue2Music, sourceParams: { ...sourceParams, seed: 43 } } }));

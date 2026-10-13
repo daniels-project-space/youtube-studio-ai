@@ -43,6 +43,7 @@ import {
 } from "@/lib/minimaxH3";
 import { buildPreparedFootageSidecar } from "@/trigger/minimaxH3WeeklyBatch";
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   claimPlanItem,
@@ -344,7 +345,7 @@ const engineH3Prepared = {
   ...h3Prepared,
   renderer: {
     kind: "render-engine-h3" as const,
-    projectName: "youtube-studio-ai" as const,
+    projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME,
     workflowId: "workflow123",
     profileRevisionSha256: "4".repeat(64),
   },
