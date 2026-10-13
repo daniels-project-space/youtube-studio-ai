@@ -52,6 +52,11 @@ assert.match(
   "upload must re-read the exact content-addressed retained WAV, not trust only a stored worker receipt",
 );
 assert.match(
+  lofi,
+  /const reviewStatus = ctx\.store\["musicQualityReviewStatus"\][\s\S]*?reviewStatus !== "awaiting-human-audition"[\s\S]*?reviewStatus !== "passed-prepared-weekly-audition"[\s\S]*?MiniMax music review status is missing or invalid/u,
+  "the upload boundary must consume the paid music module's review-state handoff and fail closed on invalid states",
+);
+assert.match(
   panel,
   /aria-label="MiniMax-Music3 attribution and generation disclosure"[\s\S]*Music generated with MiniMax-Music3/u,
   "the selected provider must display prominent in-product attribution and disclosure",

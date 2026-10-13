@@ -582,6 +582,13 @@ async function appendMusicGenerationDisclosure(
  */
 async function assertMiniMaxMusicQualityForPublish(ctx: StageContext): Promise<void> {
   if (ctx.store["musicProvider"] !== "minimax_music3") return;
+  const reviewStatus = ctx.store["musicQualityReviewStatus"];
+  if (
+    reviewStatus !== "awaiting-human-audition" &&
+    reviewStatus !== "passed-prepared-weekly-audition"
+  ) {
+    throw new Error("upload_draft: MiniMax music review status is missing or invalid — refusing to upload");
+  }
   const programKey = str(ctx, "channelMusicProgramKey");
   const runtimeReceiptKey = str(ctx, "musicRuntimeReceiptKey");
   const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");

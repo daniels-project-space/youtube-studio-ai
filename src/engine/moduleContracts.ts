@@ -455,7 +455,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicNativeWavKey", "musicQualityReceiptKey",
+      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicNativeWavKey", "musicQualityReceiptKey", "musicQualityReviewStatus",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
         // Last-hop package-art verification for a current fictional scenario.
         "topic", "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure",
