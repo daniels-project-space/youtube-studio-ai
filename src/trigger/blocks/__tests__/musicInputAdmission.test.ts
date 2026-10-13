@@ -3,6 +3,7 @@ import Module from "node:module";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
+import type { ModuleManifest } from "@/engine/moduleManifest";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
 
@@ -35,6 +36,7 @@ loader._load = function (id, ...args) {
     getObjectBytes: async (key: string, bucket: unknown, options: unknown) => {
       storageCalls++; assert.equal(bucket, undefined); reads.push({ key, options });
       if (!transferMode) throw new Error("unexpected-storage-read");
+      if (writtenObjects.has(key)) return writtenObjects.get(key)!;
       if (key === prepared.musicKey) return master;
       if (key === "runtime.json" || key === "quality.json") return Buffer.from("{");
       throw new Error("unexpected native audio download before receipt verification");
@@ -58,6 +60,8 @@ loader._load = function (id, ...args) {
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { music } = require("../musicBlocks") as typeof import("../musicBlocks");
+const { createComposerAwareAssemblyManifest } =
+  require("../composerAwareAssembly") as typeof import("../composerAwareAssembly");
 
 async function main() {
   for (const provider of ["yue2", "yue_2", "SUNO", " mureka", "", null, false, 3, {}, ["suno"]]) {
@@ -120,9 +124,43 @@ async function main() {
   }), /provider boundary reached/);
   const programEntry = [...writtenObjects.entries()].find(([key]) => key.includes("channel-music-program-"));
   assert.ok(programEntry, "the actual music producer persists its sealed channel program before provider dispatch");
-  const producedProgram = JSON.parse(Buffer.from(programEntry[1]).toString("utf8")) as { mix: { bodyMusicVol: number } };
+  const producedProgram = JSON.parse(Buffer.from(programEntry[1]).toString("utf8")) as {
+    fingerprint: string;
+    mix: { bodyMusicVol: number };
+  };
   assert.equal(producedProgram.mix.bodyMusicVol, 0.37, "channel StyleDNA mix gain survives the real producer boundary");
+  const legacyAssembly = {
+    id: "timeline_assemble",
+    version: "fixture-assembly",
+    block: { run: async (assemblyContext: StageContext) => assemblyContext.params },
+    optionalConsumes: {},
+  } as unknown as ModuleManifest;
+  const assembly = createComposerAwareAssemblyManifest(legacyAssembly);
+  const resolvedAssembly = await assembly.execute({
+    ...ctx,
+    params: Object.freeze({}),
+    store: {
+      topic: "Quiet evening",
+      channelMusicProgramKey: programEntry[0],
+      channelMusicProgramFingerprint: producedProgram.fingerprint,
+    },
+  }) as Record<string, unknown>;
+  assert.equal(resolvedAssembly.bodyMusicVol, 0.37, "assembly consumes the exact producer-written R2 program rather than a test-authored substitute");
+  await assert.rejects(assembly.execute({
+    ...ctx,
+    params: Object.freeze({}),
+    store: { topic: "Different episode", channelMusicProgramKey: programEntry[0],
+      channelMusicProgramFingerprint: producedProgram.fingerprint },
+  }), /does not match the current channel, topic, and fingerprint/);
+  await assert.rejects(assembly.execute({
+    ...ctx,
+    channelId: "foreign-channel",
+    params: Object.freeze({}),
+    store: { topic: "Quiet evening", channelMusicProgramKey: programEntry[0],
+      channelMusicProgramFingerprint: producedProgram.fingerprint },
+  }), /does not match the current channel, topic, and fingerprint/);
   writtenObjects.clear();
+  reads.length = 0;
 
   await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, musicQualityReceiptKey: "quality.json", preparedMusic: {
     ...prepared, provider: "minimax_music3",
