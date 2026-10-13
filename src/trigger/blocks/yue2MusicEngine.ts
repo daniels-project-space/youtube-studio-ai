@@ -135,7 +135,7 @@ export function createRenderEngineYuE2MusicManifest() {
     version: block.version,
     capabilities: ["audio.music_candidate"], requiredCapabilities: ["music.arrangement.accepted"],
     optionalConsumes: ["channelProgramRoute", "musicProgramPlan"],
-    providerProfiles: [{ id: "yue2-openrelay-engine-v1", provider: "openrelay", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "yue2-openrelay-engine-v1", provider: "openrelay", quality: "draft", allowFallback: false }],
     maxCostUsd: 1, maxCostUsdFor: (params) => config.parse(params).maxCostUsd, maxLatencySec: 1800,
     certification: "contract", qualityRequired: true,
     certificationEvidence: "Project-scoped Render Engine dispatch, verified native artifacts and private run-scoped candidate retention; requires separate musical audition and production qualification.",

@@ -3,6 +3,7 @@ import { designPipeline, designPipelineCore } from "../designer";
 import { selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
 import { validatePipeline } from "../validate";
 import { compilePipeline } from "../pipelineCompiler";
+import { createRenderEngineYuE2MusicManifest } from "@/trigger/blocks/yue2MusicEngine";
 
 const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 0.04,
   executionPolicy: { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
@@ -10,6 +11,11 @@ const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 
     runtime_id: "youtube-studio-fixture", hourly_rate_usd_micros: 180000, max_execution_seconds: 600,
     termination_grace_seconds: 10, reserved_allocation_usd_micros: 30500 } };
 const selection: YuE2PipelineSelection = { musicIntent: { playback: "repeat", role: "primary_music", requestedDurationSec: 30 }, sourceParams };
+const engineManifest = createRenderEngineYuE2MusicManifest();
+assert.equal(engineManifest.providerProfiles?.[0]?.quality, "draft",
+  "the OpenRelay YuE2 profile must remain draft until its real provider and output contract are qualified");
+assert.equal(engineManifest.providerProfiles?.[0]?.allowFallback, false,
+  "an unqualified YuE2 profile must never silently fall back to another provider");
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("pipeline selection cannot dispatch providers"); };
 try {
