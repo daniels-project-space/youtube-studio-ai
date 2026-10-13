@@ -64,21 +64,22 @@ const block: Block & { version: string } = {
     let charge: number | undefined;
     try {
       const workflow = await provisionRenderEngineYuE2Workflow(projectConfig);
+      const sourceDurationPolicy = arrangement.arrangement.playback === "repeat" ? "natural_loop" : "exact";
       const request: RenderEngineYuE2Request = {
-        version: 2,
+        version: 1,
         idempotencyKey: source.job.job_id,
         sourceId,
         profileRevisionSha256: workflow.profileRevisionSha256,
-        lyrics: source.job.lyrics,
+        lyrics: "",
         style: source.job.style,
         seed: params.seed,
-        maxAudioSeconds: Math.min(300, Math.max(1, Math.ceil(arrangement.arrangement.requestedDurationSec))),
+        maxAudioSeconds: Math.min(300, Math.max(60, Math.ceil(arrangement.arrangement.requestedDurationSec * 1.5))),
         maxCostUsd: params.maxCostUsd,
         abc,
-        abcSha256: createHash("sha256").update(abc, "utf8").digest("hex"),
-        sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090", maxCostUsd: params.maxCostUsd,
-          maxExecutionSeconds: params.executionPolicy.max_execution_seconds },
-        output: { contentType: "audio/wav", sampleRateHz: 48_000, channels: 2, sampleFormat: "float32" },
+        scorePolicy: "instrumental",
+        sourceDurationPolicy,
+        sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090" },
+        output: { contentType: "audio/flac", sampleRateHz: 48_000, channels: 2 },
       };
       await ctx.assertInlinePaidExecutionLease();
       let stage = await stageRenderEngineYuE2Request({ ...projectConfig, workflowId: workflow.workflowId,
