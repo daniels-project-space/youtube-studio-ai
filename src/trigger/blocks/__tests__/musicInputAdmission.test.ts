@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
 
@@ -22,9 +24,14 @@ const originalLoad = loader._load, originalFetch = globalThis.fetch;
 let storageCalls = 0, networkCalls = 0;
 let transferMode = false;
 const reads: { key: string; options: unknown }[] = [];
+const writtenObjects = new Map<string, Uint8Array>();
 loader._load = function (id, ...args) {
   if (id === "@/lib/storage") return {
-    putObject: async () => { storageCalls++; if (!transferMode) throw new Error("admitted-first-storage-write"); },
+    putObject: async (key: string, bytes: Uint8Array) => {
+      storageCalls++;
+      if (!transferMode) throw new Error("admitted-first-storage-write");
+      writtenObjects.set(key, bytes);
+    },
     getObjectBytes: async (key: string, bucket: unknown, options: unknown) => {
       storageCalls++; assert.equal(bucket, undefined); reads.push({ key, options });
       if (!transferMode) throw new Error("unexpected-storage-read");
@@ -33,6 +40,14 @@ loader._load = function (id, ...args) {
       throw new Error("unexpected native audio download before receipt verification");
     },
     publicUrl: () => "https://fixture.invalid/reused.mp3",
+  };
+  if (id === "@/lib/music") return {
+    generateMureka: async () => { throw new Error("provider boundary reached; no generation in this contract test"); },
+    MusicError: class MusicError extends Error {
+      safeToFallback = false;
+      acceptedUnits = 0;
+    },
+    withMusicGenerationCost: (error: unknown) => error,
   };
   if (id === "./blockContext") return { ...originalLoad.call(this, id, ...args) as object, recordAsset: async () => {} };
   // This test checks transfer admission, not audio decoding or musical quality.
@@ -86,6 +101,29 @@ async function main() {
   assert.equal(storageCalls, 1, "a matching frozen program reaches the existing storage path");
   assert.equal(networkCalls, 0);
   transferMode = true;
+  const styleDNA = {
+    audio: {
+      genre: "quiet contemplative score", bpmRange: [60, 72], instrumentation: ["felt piano"],
+      textures: ["soft room tone"], moodArc: "stillness toward reassurance", loudnessLufs: -18,
+      bodyMusicVol: 0.37, loopable: false,
+    },
+  };
+  const programBrief = createChannelProgramBrief({
+    nicheKey: "educational", locale: "en", concept: "An original evidence-led channel.", family: "narrated_stock",
+  });
+  const route = resolveChannelProgramRoute(programBrief);
+  const channelProgramRoute = channelProgramRouteRunSeed({ route, programBrief });
+  await assert.rejects(music.run({
+    ...ctx,
+    params: { provider: "mureka" },
+    store: { ...ctx.store, channelProgramRoute, styleDNA },
+  }), /provider boundary reached/);
+  const programEntry = [...writtenObjects.entries()].find(([key]) => key.includes("channel-music-program-"));
+  assert.ok(programEntry, "the actual music producer persists its sealed channel program before provider dispatch");
+  const producedProgram = JSON.parse(Buffer.from(programEntry[1]).toString("utf8")) as { mix: { bodyMusicVol: number } };
+  assert.equal(producedProgram.mix.bodyMusicVol, 0.37, "channel StyleDNA mix gain survives the real producer boundary");
+  writtenObjects.clear();
+
   await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, musicQualityReceiptKey: "quality.json", preparedMusic: {
     ...prepared, provider: "minimax_music3",
     musicProgram: createChannelMusicProgram({ channelId: String(ctx.channelId), channelIdentityFingerprint: "a".repeat(64),
