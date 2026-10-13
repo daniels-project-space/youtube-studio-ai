@@ -53,6 +53,28 @@ assert.deepEqual(
   "the packet that had no delivery path now reaches the store",
 );
 
+const chessSource = {
+  id: "source-opening-game",
+  label: "Opening study",
+  locator: "https://example.test/chess/opening-game",
+  rightsNote: "Operator-supplied study source",
+  pgn: "1. e4 e5",
+  expectedPlyCount: 2,
+  expectedFinalFen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+};
+const seededChess = payloadSeedInputs({ chessReplaySource: chessSource });
+assert.deepEqual(
+  Object.keys(seededChess),
+  ["chessReplaySource"],
+  "the production chess source block can receive its strict source packet from RunPipelineInput",
+);
+chessSource.pgn = "mutated after dispatch";
+assert.equal(
+  (seededChess["chessReplaySource"] as typeof chessSource).pgn,
+  "1. e4 e5",
+  "the source packet is frozen into the invocation snapshot before later caller mutations",
+);
+
 // Frozen, not referenced: a caller mutating its object after dispatch must not
 // reach a snapshot that has already been sealed.
 (packet.claims as { id: string }[]).push({ id: "c2" });

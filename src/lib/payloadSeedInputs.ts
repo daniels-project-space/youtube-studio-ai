@@ -1,5 +1,5 @@
 /**
- * The operator-authored packets a run may carry on its payload.
+ * The operator-authored packets and source records a run may carry on its payload.
  *
  * These are the store keys that no block produces and that arrive instead on
  * `RunPipelineInput`, frozen into the invocation snapshot before any provider
@@ -35,6 +35,7 @@ export const PAYLOAD_SEED_INPUT_KEYS = [
   "curriculumEpisodeSeedInput",
   "casefileSourcePacketInput",
   "editorialEvidencePacketInput",
+  "chessReplaySource",
 ] as const;
 
 export type PayloadSeedInputKey = (typeof PAYLOAD_SEED_INPUT_KEYS)[number];

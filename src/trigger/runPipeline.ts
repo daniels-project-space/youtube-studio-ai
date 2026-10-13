@@ -402,6 +402,12 @@ export interface RunPipelineInput {
    */
   editorialEvidencePacketInput?: unknown;
   /**
+   * Operator-supplied legal replay source for the opt-in chess episode route.
+   * The chess_replay_source block validates its strict source schema before
+   * deriving any narration or downstream episode artifacts.
+   */
+  chessReplaySource?: unknown;
+  /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
    * expensive blocks (topic_select / script_gen / stock_footage / music) reuse
