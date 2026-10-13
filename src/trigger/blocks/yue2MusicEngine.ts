@@ -19,7 +19,7 @@ import {
   type RenderEngineYuE2Stage,
   type RenderEngineYuE2Request,
 } from "@/lib/renderEngineYuE2StageClient";
-import { RENDER_ENGINE_MANAGEMENT_API_BASE_URL, RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
 import { createYuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
 import { musicProgramForCurrentRoute } from "./blockContext";
 
@@ -75,7 +75,7 @@ const block: Block & { version: string } = {
     const source = createYuE2AcceptedArrangementRequest({ arrangement, seed: params.seed, personalCreatorAcknowledged: true });
     const abc = arrangement.symbolicScore;
     if (!abc) throw new Error("Render Engine YuE2 requires the exact accepted ABC score");
-    const projectConfig = { baseUrl: RENDER_ENGINE_MANAGEMENT_API_BASE_URL, projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME, projectCapability };
+    const projectConfig = { projectApiBaseUrl: RENDER_ENGINE_STUDIO_SITE, projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME, projectCapability };
     const sourceId = `studio-${createHash("sha256").update(`${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:${arrangement.fingerprint}`).digest("hex")}`;
     let charge: number | undefined;
     try {

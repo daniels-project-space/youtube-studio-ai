@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createHash as nodeCreateHash } from "node:crypto";
+import { RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
 
 const CONVEX_ID = /^[a-z0-9]{32}$/u;
 const HEX_SHA256 = /^[a-f0-9]{64}$/u;
@@ -40,7 +41,7 @@ export const RenderEngineYuE2RequestSchema = z.object({
 export type RenderEngineYuE2Request = z.infer<typeof RenderEngineYuE2RequestSchema>;
 
 export type RenderEngineYuE2Config = Readonly<{
-  baseUrl: string;
+  projectApiBaseUrl: string;
   projectName: string;
   projectCapability: string;
   fetchImpl?: typeof fetch;
@@ -103,13 +104,13 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-const MANAGEMENT_OPERATION_BY_CLIENT_PATH: Readonly<Record<string, string>> = {
-  "/client/integration": "integration",
-  "/client/workflows": "workflows",
-  "/client/yue2-jobs": "yue2-jobs",
-  "/client/jobs": "jobs",
-  "/client/jobs/output": "jobs/output",
-};
+const PROJECT_CLIENT_PATHS = new Set([
+  "/client/integration",
+  "/client/workflows",
+  "/client/yue2-jobs",
+  "/client/jobs",
+  "/client/jobs/output",
+]);
 
 export function assertRenderEngineR2SignedUrl(value: string): URL {
   let url: URL;
@@ -127,14 +128,14 @@ export function assertRenderEngineR2SignedUrl(value: string): URL {
 
 function endpoint(config: RenderEngineYuE2Config, path: string): string {
   let url: URL;
-  try { url = new URL(config.baseUrl); } catch { throw new Error("Render Engine URL is invalid"); }
-  if (url.protocol !== "https:" || url.hostname !== "render-engine-sable.vercel.app" || url.username || url.password ||
-      url.pathname !== "/" || url.search || url.hash) throw new Error("Render Engine URL must be the canonical HTTPS management API origin");
-  const operation = MANAGEMENT_OPERATION_BY_CLIENT_PATH[path];
-  if (!operation || !PROJECT_NAME.test(config.projectName) || !HEX_SHA256.test(config.projectCapability)) {
+  try { url = new URL(config.projectApiBaseUrl); } catch { throw new Error("Render Engine project API URL is invalid"); }
+  if (url.origin !== RENDER_ENGINE_STUDIO_SITE || url.username || url.password ||
+      url.pathname !== "/" || url.search || url.hash) throw new Error("Render Engine project API URL must be the pinned HTTPS project site");
+  if (!PROJECT_CLIENT_PATHS.has(path) || !PROJECT_NAME.test(config.projectName) || !HEX_SHA256.test(config.projectCapability)) {
     throw new Error("Render Engine YuE2 project capability is invalid");
   }
-  url.pathname = `/api/v1/projects/${config.projectName}/${operation}`;
+  url.pathname = path;
+  url.searchParams.set("projectName", config.projectName);
   return url.toString();
 }
 
@@ -180,9 +181,8 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
   if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
       !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
       typeof payload.output.prefix !== "string" || payload.output.prefix.length === 0 || !record(payload.endpoints) ||
-      !record(payload.contracts) || payload.contracts.yue2MusicJob !== "scored-source-abc-v2" ||
-      payload.endpoints.yue2MusicJob !== `/api/v1/projects/${config.projectName}/yue2-jobs`) {
-    throw new Error("Render Engine project integration handshake returned an invalid project or unsupported YuE2 contract");
+      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
+    throw new Error("Render Engine project integration handshake returned an invalid project or unsupported YuE2 route");
   }
 }
 
