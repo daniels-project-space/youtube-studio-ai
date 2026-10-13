@@ -15,6 +15,7 @@ import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAw
 import { music } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
+import { createRenderEngineYuE2MusicManifest } from "@/trigger/blocks/yue2MusicEngine";
 import { createYuE2AssemblyManifest } from "@/trigger/blocks/yue2Assembly";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
@@ -79,6 +80,7 @@ export function registerAllBlocks(): void {
   register(music);
   registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));
   registerManifestVersion(createYuE2MusicManifest());
+  registerManifestVersion(createRenderEngineYuE2MusicManifest());
   // Route-owned, provider-free bridge from a completed serialized Topic Select
   // receipt to the shared script/crew/QA consumers. Registration alone cannot
   // admit a route; the designer only materializes it for serialized_program/v1.

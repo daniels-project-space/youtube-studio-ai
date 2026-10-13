@@ -55,6 +55,38 @@ export type RenderEngineYuE2Stage = Readonly<{
   dispatchEnabled: boolean;
   output: Readonly<{ bucket: string; key: string; receiptKey: string }>;
 }>;
+export type RenderEngineYuE2NativeArtifactRead = Readonly<{
+  name: string;
+  key: string;
+  contentType: string;
+  bytes: number;
+  sha256: string;
+  url: string;
+  readHeaders: Readonly<{ "If-Match": string }>;
+  expiresInSeconds: number;
+}>;
+export type RenderEngineYuE2Output = Readonly<{
+  jobId: string;
+  bucket: string;
+  key: string;
+  bytes: number;
+  sha256: string;
+  contentType: "audio/wav";
+  verifiedAt: number;
+  url: string;
+  expiresInSeconds: number;
+  executionJobId: string;
+  nativeArtifactReads: readonly RenderEngineYuE2NativeArtifactRead[];
+}>;
+
+const NATIVE_SIDECARS = [
+  { name: "score.abc", contentType: "text/vnd.abc", maxBytes: 1_000_000 },
+  { name: "semantic.npy", contentType: "application/octet-stream", maxBytes: 2_000_000 },
+  { name: "latent.npy", contentType: "application/octet-stream", maxBytes: 64_000_000 },
+  { name: "request.json", contentType: "application/json", maxBytes: 60_000 },
+  { name: "config.json", contentType: "application/json", maxBytes: 60_000 },
+  { name: "result.json", contentType: "application/json", maxBytes: 60_000 },
+] as const;
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -154,7 +186,7 @@ export async function getRenderEngineYuE2Job(config: RenderEngineYuE2Config, job
   return result.payload;
 }
 
-export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, jobId: string): Promise<Record<string, unknown>> {
+export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, jobId: string): Promise<RenderEngineYuE2Output> {
   if (!CONVEX_ID.test(jobId)) throw new Error("Render Engine YuE2 job ID is invalid");
   const result = await request(config, "/client/jobs/output", "GET", jobId);
   const value = result.payload;
@@ -165,7 +197,8 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
       typeof value.url !== "string" || typeof value.executionJobId !== "string" || !CONVEX_ID.test(value.executionJobId) ||
       typeof value.verifiedAt !== "number" || !Number.isSafeInteger(value.verifiedAt) ||
       typeof value.expiresInSeconds !== "number" || !Number.isSafeInteger(value.expiresInSeconds) ||
-      value.expiresInSeconds < 60 || value.expiresInSeconds > 7200) {
+      value.expiresInSeconds < 60 || value.expiresInSeconds > 7200 || !Array.isArray(value.nativeArtifactReads) ||
+      value.nativeArtifactReads.length !== NATIVE_SIDECARS.length) {
     throw new Error(`Render Engine YuE2 output readback returned an invalid verified receipt (HTTP ${result.status})`);
   }
   if (value.bucket === "render-engine" || value.key !== `projects/${config.projectName}/jobs/${value.executionJobId}/audio.wav`) {
@@ -173,5 +206,24 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
   }
   const url = new URL(value.url);
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("Render Engine YuE2 output URL must be HTTPS");
-  return value;
+  for (const sidecar of NATIVE_SIDECARS) {
+    const matches = value.nativeArtifactReads.filter((item) => record(item) && item.name === sidecar.name);
+    const item = matches[0];
+    if (matches.length !== 1 || !record(item) ||
+        item.key !== `projects/${config.projectName}/jobs/${value.executionJobId}/native/${sidecar.name}` &&
+        !new RegExp(`^projects/${config.projectName}/workflows/[A-Za-z0-9_-]+/jobs/${value.executionJobId}/native/${sidecar.name.replaceAll(".", "\\.")}$`).test(String(item.key)) ||
+        item.contentType !== sidecar.contentType || typeof item.bytes !== "number" || !Number.isSafeInteger(item.bytes) ||
+        item.bytes < 1 || item.bytes > sidecar.maxBytes || typeof item.sha256 !== "string" || !HEX_SHA256.test(item.sha256) ||
+        typeof item.url !== "string" || typeof item.expiresInSeconds !== "number" || !Number.isSafeInteger(item.expiresInSeconds) ||
+        item.expiresInSeconds < 60 || item.expiresInSeconds > 7200 || !record(item.readHeaders) ||
+        Object.keys(item.readHeaders).length !== 1 || typeof item.readHeaders["If-Match"] !== "string" ||
+        !item.readHeaders["If-Match"].length || item.readHeaders["If-Match"].length > 256) {
+      throw new Error(`Render Engine YuE2 native sidecar readback is invalid: ${sidecar.name}`);
+    }
+    const sidecarUrl = new URL(item.url);
+    if (sidecarUrl.protocol !== "https:" || sidecarUrl.username || sidecarUrl.password) {
+      throw new Error(`Render Engine YuE2 native sidecar URL is invalid: ${sidecar.name}`);
+    }
+  }
+  return value as RenderEngineYuE2Output;
 }

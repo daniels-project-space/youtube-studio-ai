@@ -17,7 +17,7 @@ export const YuE2MusicCandidateSchema = z.object({
   sampleRateHz: z.literal(48000), channels: z.literal(2),
   technicalStatus: z.enum(["needs_audition", "blocked"]),
   allocatedCostUsdMicros: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  costBasis: z.literal("supervised_dispatch_wall_time"),
+  costBasis: z.enum(["supervised_dispatch_wall_time", "engine-reservation-debit"]),
   providerBilledCostUsdMicros: z.null(),
   productionApproved: z.literal(false),
 }).strict().superRefine((value, ctx) => {

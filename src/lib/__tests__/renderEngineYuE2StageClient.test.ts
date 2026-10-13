@@ -35,6 +35,12 @@ const config: RenderEngineYuE2Config = {
   projectCapability: "b".repeat(64),
 };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const nativeArtifactReads = [
+  ["score.abc", "text/vnd.abc"], ["semantic.npy", "application/octet-stream"], ["latent.npy", "application/octet-stream"],
+  ["request.json", "application/json"], ["config.json", "application/json"], ["result.json", "application/json"],
+].map(([name, contentType]) => ({ name, contentType, key: `projects/youtube-studio-ai/jobs/${jobId}/native/${name}`,
+  bytes: 32, sha256: "f".repeat(64), url: `https://files.example.test/${name}`,
+  readHeaders: { "If-Match": `\"etag-${name}\"` }, expiresInSeconds: 3600 }));
 
 test("provisions and stages only the pinned Studio YuE2 project workflow", async () => {
   const posted: Array<{ url: string; body: unknown; authorization: string | null }> = [];
@@ -75,7 +81,7 @@ test("reads only the requesting project's job and verified audio object", async 
     if (url.pathname.endsWith("/client/jobs")) return response({ jobId, profileId: "yue2", status: "completed" });
     return response({ jobId, bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.wav`,
       executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/wav", verifiedAt: 1, expiresInSeconds: 3600,
-      url: "https://files.example.test/audio.wav", nativeArtifacts: [] });
+      url: "https://files.example.test/audio.wav", nativeArtifactReads });
   };
   const status = await getRenderEngineYuE2Job({ ...config, fetchImpl }, jobId);
   assert.equal(status.status, "completed");
