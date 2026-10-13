@@ -24,7 +24,7 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { planWeekMusicConfig as moduleConfig, planWeekPreparedMusicProgram as programFor } from "@/lib/planWeekPreparedMusicProgram";
-import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { assertWeeklyPreparationVersionsSupported, engineOwnsWeeklyMusic } from "@/lib/weeklyPreparationVersionAdmission";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
@@ -166,6 +166,9 @@ export const planWeekPreparedMusicTask = task({
     const manifest = await readManifest(payload);
     assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-music");
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
+    if (engineOwnsWeeklyMusic(manifest.execution.pipeline)) {
+      return { ok: true, reused: false, deferredToMusicModule: true, sidecarKey: planWeekPreparedMusicKey(scope), audioKey: planWeekPreparedMusicAudioKey(scope), costUsd: 0 };
+    }
     const sidecarKey = planWeekPreparedMusicKey(scope);
     const audioKey = planWeekPreparedMusicAudioKey(scope);
     const prior = await readSidecar(sidecarKey, audioKey, manifest);

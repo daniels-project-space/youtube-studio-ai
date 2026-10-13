@@ -118,6 +118,7 @@ import {
   type PlanWeekPreparedNarration,
   type PlanWeekPreparedScript,
 } from "@/lib/planWeekPreparation";
+import { engineOwnsWeeklyMusic } from "@/lib/weeklyPreparationVersionAdmission";
 import {
   assertFreshPipelineInvocationRouteAdmission,
   assertRunPipelineAdmission,
@@ -1432,24 +1433,26 @@ export const runPipelineTask = task({
               manifest: weeklyPreparation,
             });
           }
-          const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);
-          let rawPreparedMusic: unknown | undefined;
-          try {
-            rawPreparedMusic = decodePreparedMetadata(
-              await getObjectBytes(preparedMusicKey, undefined, PREPARED_METADATA_READ),
-            );
-          } catch (error) {
-            if (!preparedObjectAbsent(error)) {
-              throw new Error(
-                `scheduled plan prepared music is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+          if (!engineOwnsWeeklyMusic(weeklyPreparation.execution.pipeline)) {
+            const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);
+            let rawPreparedMusic: unknown | undefined;
+            try {
+              rawPreparedMusic = decodePreparedMetadata(
+                await getObjectBytes(preparedMusicKey, undefined, PREPARED_METADATA_READ),
               );
+            } catch (error) {
+              if (!preparedObjectAbsent(error)) {
+                throw new Error(
+                  `scheduled plan prepared music is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
             }
-          }
-          if (rawPreparedMusic !== undefined) {
-            weeklyPreparedMusic = assertPlanWeekPreparedMusicBinding({
-              prepared: rawPreparedMusic,
-              manifest: weeklyPreparation,
-            });
+            if (rawPreparedMusic !== undefined) {
+              weeklyPreparedMusic = assertPlanWeekPreparedMusicBinding({
+                prepared: rawPreparedMusic,
+                manifest: weeklyPreparation,
+              });
+            }
           }
           const preparedFootageKey = planWeekPreparedFootageKey(weeklyPreparation);
           let rawPreparedFootage: unknown | undefined;

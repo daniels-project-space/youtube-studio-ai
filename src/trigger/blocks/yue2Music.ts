@@ -11,9 +11,10 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
 import { executeYuE2EngineSource } from "@/lib/yue2EngineSource";
 import { StudioRenderEngineClient } from "@/lib/studioRenderEngineClient";
+import { YUE2_ENGINE_MUSIC_MODULE_VERSION } from "@/engine/yue2PipelineSelection";
 import { musicProgramForCurrentRoute } from "./blockContext";
 
-export const YUE2_MUSIC_CANDIDATE_VERSION = "4.0.0-yue2-engine-candidate";
+export const YUE2_MUSIC_CANDIDATE_VERSION = YUE2_ENGINE_MUSIC_MODULE_VERSION;
 function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 ${reason}; recover the same immutable source, never regenerate`,
     { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false }), charge === undefined ? {} : { additionalObservedCostUsd: charge });

@@ -8,9 +8,10 @@ import {
   planWeekPreparationKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
-import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { assertWeeklyPreparationVersionsSupported, engineOwnsWeeklyMusic } from "@/lib/weeklyPreparationVersionAdmission";
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
+import { YUE2_ENGINE_MUSIC_MODULE_VERSION } from "@/engine/yue2PipelineSelection";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -143,6 +144,23 @@ async function main(): Promise<void> {
 
     const downstream = { block: "metadata", version: DELIVERY_METADATA_VERSION, params: { targetDurationSec: 7200 } };
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([downstream], "test"));
+    const engineMusic = { block: "music", version: YUE2_ENGINE_MUSIC_MODULE_VERSION, params: { renderer: "render-engine" } };
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([engineMusic], "test"));
+    assert.equal(engineOwnsWeeklyMusic([engineMusic]), true);
+    assert.equal(engineOwnsWeeklyMusic([{ ...engineMusic, params: { renderer: "mureka" } }]), false);
+    assert.equal(engineOwnsWeeklyMusic([{ ...engineMusic, version: "3.0.0-yue2-candidate" }]), false);
+    manifestBytes = Buffer.from(canonicalJson(normalizePlanWeekPreparationManifest({ ...base,
+      execution: { ...base.execution, pipeline: [engineMusic] } })));
+    reads = []; sidecarMode = "existing"; paidCalls = 0; writes = 0;
+    const deferredMusic = await producers[0]![1].run({ ...scope, manifestKey,
+      manifestSha256: sha256BytesHex(manifestBytes), maxCostUsd: 2,
+      shots: [{ id: "shot-1", prompt: "An archive with a sealed map", seed: 7 }],
+    }) as { deferredToMusicModule?: boolean; costUsd?: number };
+    assert.equal(deferredMusic.deferredToMusicModule, true);
+    assert.equal(deferredMusic.costUsd, 0);
+    assert.deepEqual(reads, [manifestKey], "Engine-owned music ignores even a stale legacy sidecar");
+    assert.equal(paidCalls, 0, "Engine-owned weekly music never calls Mureka or Suno");
+    assert.equal(writes, 0, "Engine-owned music is generated and receipted only by its pipeline module");
     for (const bad of [
       { ...downstream, block: "music" }, { ...downstream, version: "2.0.0-unqualified" },
       { ...downstream, params: {} }, { ...downstream, params: { targetDurationSec: "7200" } },

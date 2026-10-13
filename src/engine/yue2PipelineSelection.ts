@@ -12,6 +12,18 @@ export interface YuE2PipelineSelection {
   sourceParams: Record<string, unknown>;
 }
 
+export const YUE2_ENGINE_MUSIC_MODULE_VERSION = "4.0.0-yue2-engine-candidate" as const;
+
+export function hasEngineOwnedMusicModule(entries: readonly unknown[]): boolean {
+  return entries.some(value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const entry = value as { block?: unknown; version?: unknown; params?: unknown };
+    return entry.block === "music" && entry.version === YUE2_ENGINE_MUSIC_MODULE_VERSION &&
+      Boolean(entry.params && typeof entry.params === "object" && !Array.isArray(entry.params) &&
+        (entry.params as Record<string, unknown>).renderer === "render-engine");
+  });
+}
+
 export function isYuE2MusicCandidateVersion(version: string | undefined): boolean {
   return version !== undefined && /(?:^|-)yue2-(?:engine-)?candidate$/u.test(version);
 }
@@ -53,7 +65,7 @@ export const YuE2PipelineSelectionSchema = z.object({
 /** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
 export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
   const selected = YuE2PipelineSelectionSchema.parse(input);
-  const musicVersion = "renderer" in selected.sourceParams ? "4.0.0-yue2-engine-candidate" : "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
+  const musicVersion = "renderer" in selected.sourceParams ? YUE2_ENGINE_MUSIC_MODULE_VERSION : "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
   const sourceParams = selected.sourceParams;
