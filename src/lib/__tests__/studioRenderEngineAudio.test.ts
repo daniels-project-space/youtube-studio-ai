@@ -15,7 +15,9 @@ const output = { bucket: STUDIO_ENGINE_BUCKET, key: `projects/${STUDIO_ENGINE_PR
 const admission = { jobId, state: "queued", manifestSha256: hash };
 const yue2Input = { model: "yue2" as const, workflowId: STUDIO_ENGINE_AUDIO_WORKFLOWS.yue2.workflowId,
   request: { idempotencyKey: "studio:yue2:immutable:001", profileRevisionSha256: STUDIO_ENGINE_AUDIO_WORKFLOWS.yue2.profileRevisionSha256,
-    version: 2, sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090" }, output: { contentType: "audio/wav" } } };
+    version: 2, maxCostUsd: 0.8,
+    sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090", maxCostUsd: 0.8, maxExecutionSeconds: 1200 },
+    output: { contentType: "audio/wav", sampleRateHz: 48000, channels: 2, sampleFormat: "float32" } } };
 
 test("YuE2 shared Engine submissions are pinned to the requested OpenRelay RTX 3090 route", () => {
   assert.deepEqual(StudioEngineAudioInput.parse(yue2Input), yue2Input);
@@ -25,6 +27,12 @@ test("YuE2 shared Engine submissions are pinned to the requested OpenRelay RTX 3
     request: { ...yue2Input.request, sourceConstraints: undefined } }), /pinned to OpenRelay RTX 3090/);
   assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
     request: { ...yue2Input.request, version: 1 } }), /pinned to OpenRelay RTX 3090/);
+  assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
+    request: { ...yue2Input.request, sourceConstraints: { ...yue2Input.request.sourceConstraints, maxCostUsd: 0.2 } } }),
+    /request and source cost ceilings must match/);
+  assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
+    request: { ...yue2Input.request, output: { ...yue2Input.request.output, sampleFormat: "int16" } } }),
+    /scored float32 WAV output contract/);
 });
 
 function fixture(options: { retire?: boolean; wrongWorkflow?: boolean; waiting?: boolean; held?: boolean } = {}) {

@@ -17,12 +17,22 @@ export const StudioEngineAudioInput = z.object({
   }),
 }).strict().superRefine((input, ctx) => {
   if (input.model !== "yue2") return;
-  const pin = z.object({ version: z.literal(2), sourceConstraints: z.object({
-    provider: z.literal("openrelay"), gpuModel: z.literal("RTX 3090"),
-  }).passthrough() }).passthrough();
-  if (!pin.safeParse(input.request).success) {
-    ctx.addIssue({ code: "custom", path: ["request", "sourceConstraints"],
-      message: "YuE2 submissions must remain pinned to OpenRelay RTX 3090" });
+  const pin = z.object({
+    version: z.literal(2),
+    maxCostUsd: z.number().positive().max(1),
+    sourceConstraints: z.object({
+      provider: z.literal("openrelay"), gpuModel: z.literal("RTX 3090"),
+      maxCostUsd: z.number().positive().max(1), maxExecutionSeconds: z.number().int().min(30).max(1200),
+    }).strict(),
+  }).passthrough().safeParse(input.request);
+  const output = z.object({ contentType: z.literal("audio/wav"), sampleRateHz: z.literal(48000),
+    channels: z.literal(2), sampleFormat: z.literal("float32") }).strict().safeParse(input.request.output);
+  const message = !pin.success ? "YuE2 submissions must remain pinned to OpenRelay RTX 3090"
+    : pin.data.maxCostUsd !== pin.data.sourceConstraints.maxCostUsd ? "YuE2 request and source cost ceilings must match"
+      : !output.success ? "YuE2 must preserve the scored float32 WAV output contract" : undefined;
+  if (message) {
+    ctx.addIssue({ code: "custom", path: output.success ? ["request", "sourceConstraints"] : ["request", "output"],
+      message });
   }
 });
 export type StudioEngineAudioInput = z.infer<typeof StudioEngineAudioInput>;
