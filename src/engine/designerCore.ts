@@ -90,6 +90,7 @@ import {
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
 import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
+import { selectComposerMixAssembly } from "./composerMixPipelineSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -1314,6 +1315,8 @@ export function designPipelineCore(
     }
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
+  } else {
+    pipeline = selectComposerMixAssembly(pipeline);
   }
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);

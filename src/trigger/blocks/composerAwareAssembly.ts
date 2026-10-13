@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { artifactContract } from "@/engine/artifactSchemas";
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { ASSEMBLE_DEFAULTS } from "@/lib/assembly/planTimeline";
 import { getObjectBytes } from "@/lib/storage";
 
-export const COMPOSER_MIX_ASSEMBLY_VERSION = "2.0.0-composer-mix";
+export { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 
 const bodyGain = z.number().finite().min(0).max(2);
 const masterLufs = z.number().finite().min(-23).max(-12);
