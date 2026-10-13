@@ -196,7 +196,8 @@ export const music: Block = {
     // Style DNA audio spec (genre/instrumentation/textures/BPM/loop) is the
     // channel's locked SOUND and WINS. Priority: DNA spec > Composer crew brief
     // (per-video nuance, only when there is no DNA) > explicit param > default.
-    const composerPrompt = getMusicBrief(ctx.store)?.musicPrompt;
+    const composerBrief = getMusicBrief(ctx.store);
+    const composerPrompt = composerBrief?.musicPrompt;
     const studioAudioRecipe = studioPostproductionRecipeProjectionFromUnknown(
       ctx.store["studioAudioRecipeProjection"],
       "audio_recipe",
@@ -277,6 +278,7 @@ export const music: Block = {
       family: route?.family ?? "music_loop",
       contentLaneKey: route?.contentLaneKey ?? "music_loop",
       topic,
+      role: composerBrief?.musicIntent?.role,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
       genre: a?.genre,

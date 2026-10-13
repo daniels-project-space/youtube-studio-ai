@@ -60,8 +60,8 @@ loader._load = function (id, ...args) {
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { music } = require("../musicBlocks") as typeof import("../musicBlocks");
-const { createComposerAwareAssemblyManifest } =
-  require("../composerAwareAssembly") as typeof import("../composerAwareAssembly");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { createComposerAwareAssemblyManifest } = require("../composerAwareAssembly") as typeof import("../composerAwareAssembly");
 
 async function main() {
   for (const provider of ["yue2", "yue_2", "SUNO", " mureka", "", null, false, 3, {}, ["suno"]]) {
@@ -120,14 +120,19 @@ async function main() {
   await assert.rejects(music.run({
     ...ctx,
     params: { provider: "mureka" },
-    store: { ...ctx.store, channelProgramRoute, styleDNA },
+    store: { ...ctx.store, channelProgramRoute, styleDNA, musicBrief: {
+      musicPrompt: "A measured, spacious meditation bed.",
+      musicIntent: { role: "meditation_bed", playback: "repeat", requestedDurationSec: 300 },
+    } },
   }), /provider boundary reached/);
   const programEntry = [...writtenObjects.entries()].find(([key]) => key.includes("channel-music-program-"));
   assert.ok(programEntry, "the actual music producer persists its sealed channel program before provider dispatch");
   const producedProgram = JSON.parse(Buffer.from(programEntry[1]).toString("utf8")) as {
     fingerprint: string;
+    role: string;
     mix: { bodyMusicVol: number };
   };
+  assert.equal(producedProgram.role, "meditation_bed", "the shared music producer must preserve the composer's explicit role instead of rebuilding a family default");
   assert.equal(producedProgram.mix.bodyMusicVol, 0.37, "channel StyleDNA mix gain survives the real producer boundary");
   const legacyAssembly = {
     id: "timeline_assemble",
