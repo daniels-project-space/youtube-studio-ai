@@ -511,7 +511,7 @@ export async function POST(request: Request) {
           }, { status: 409 });
         }
       }
-      if (!reviewedDataStoryIntake && design.yue2Music !== undefined) {
+      if (design.yue2Music !== undefined) {
         return NextResponse.json({
           error: "YuE2 music is not qualified for automatic channel creation yet; use its supervised review route until the production Render Engine contract and output qualification are complete",
           runtimeBlockers: [

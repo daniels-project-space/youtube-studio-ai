@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import { createChannelProgramBrief, type ChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
+import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+import { REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE } from "@/engine/reviewedDataStoryChannelIntake";
 import { channelBuildIntentFingerprint } from "@/lib/channelBuildRequestKey";
 import { POST } from "./route";
 
@@ -272,6 +274,29 @@ async function main() {
         "Render Engine production does not yet advertise the scored-source YuE2 contract.",
         "No accepted RTX 3090 render has completed independent output and shutdown qualification.",
       ]);
+
+      const reviewedBrief = createChannelProgramBrief({
+        family: "narrated_stock",
+        nicheKey: "educational",
+        locale: "en",
+        concept: "Source-attributed data storytelling built from a reviewed public evidence ledger.",
+      });
+      const reviewedDesign = {
+        ...designFor(reviewedBrief),
+        capabilitySelections: [creativeCapabilitySelection("source_attributed_data_story")],
+        supervisedDataStoryIntake: REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE,
+        yue2Music,
+      };
+      const reviewedYuE2 = await POST(request({
+        requestKey: requestKey(reviewedDesign),
+        mode: REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE,
+        design: reviewedDesign,
+      }));
+      assert.equal(reviewedYuE2.status, 409,
+        "supervised data-story intake must not bypass YuE2's production qualification hold");
+      const reviewedHold = await reviewedYuE2.json() as { error: string; runtimeBlockers?: string[] };
+      assert.match(reviewedHold.error, /not qualified for automatic channel creation yet/);
+      assert.deepEqual(reviewedHold.runtimeBlockers, held.runtimeBlockers);
     } finally { globalThis.fetch = originalFetch; }
     const exactPreview = await POST(request({
       requestKey: requestKey(exactPreviewDesign),
