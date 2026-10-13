@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests, getManifest } from "@/engine/registry";
@@ -61,6 +61,45 @@ function propertyName(node: ts.ObjectLiteralElementLike): string | null {
   return null;
 }
 
+function resolveStringConstant(name: string, source: ts.SourceFile, visited = new Set<string>()): string | undefined {
+  const identity = `${source.fileName}:${name}`;
+  if (visited.has(identity)) return undefined;
+  visited.add(identity);
+  const unwrapped = (value: ts.Expression): ts.Expression => {
+    while (ts.isAsExpression(value) || ts.isTypeAssertionExpression(value) ||
+      ts.isSatisfiesExpression(value) || ts.isParenthesizedExpression(value)) value = value.expression;
+    return value;
+  };
+
+  for (const statement of source.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || declaration.name.text !== name || !declaration.initializer) continue;
+        const value = unwrapped(declaration.initializer);
+        if (ts.isStringLiteral(value)) return value.text;
+        if (ts.isIdentifier(value)) {
+          const resolved = resolveStringConstant(value.text, source, visited);
+          if (resolved !== undefined) return resolved;
+        }
+      }
+    }
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.importClause || !statement.importClause.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)) continue;
+    const binding = statement.importClause.namedBindings.elements.find(element => element.name.text === name);
+    if (!binding) continue;
+    const specifier = statement.moduleSpecifier.text;
+    const importedPath = specifier.startsWith("@/")
+      ? join(process.cwd(), "src", `${specifier.slice(2)}.ts`)
+      : specifier.startsWith(".") ? resolve(dirname(source.fileName), `${specifier}.ts`) : null;
+    if (!importedPath || !existsSync(importedPath)) continue;
+    const importedSource = ts.createSourceFile(importedPath, readFileSync(importedPath, "utf8"), ts.ScriptTarget.Latest, true);
+    const resolved = resolveStringConstant(binding.propertyName?.text ?? binding.name.text, importedSource, visited);
+    if (resolved !== undefined) return resolved;
+  }
+  return undefined;
+}
+
 function literalStrings(property: ts.ObjectLiteralElementLike | undefined): string[] {
   if (!property || !ts.isPropertyAssignment(property) || !ts.isArrayLiteralExpression(property.initializer)) return [];
   return property.initializer.elements
@@ -75,8 +114,9 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
   const sources = Object.fromEntries(readdirSync(blockDir).filter(name => name.endsWith(".ts"))
     .map(file => [file, readFileSync(join(blockDir, file), "utf8")]));
   for (const [file, text] of Object.entries({ ...sources, ...additionalSources })) {
+    const sourcePath = file.includes("/") ? resolve(process.cwd(), file) : join(blockDir, file);
     const source = ts.createSourceFile(
-      file,
+      sourcePath,
       text,
       ts.ScriptTarget.Latest,
       true,
@@ -97,15 +137,7 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
       if (versionProperty && ts.isPropertyAssignment(versionProperty)) {
         const expression = versionProperty.initializer;
         if (ts.isStringLiteral(expression)) version = expression.text;
-        else if (ts.isIdentifier(expression)) {
-          for (const statement of source.statements) {
-            if (!ts.isVariableStatement(statement)) continue;
-            for (const declaration of statement.declarationList.declarations) {
-              if (ts.isIdentifier(declaration.name) && declaration.name.text === expression.text &&
-                declaration.initializer && ts.isStringLiteral(declaration.initializer)) version = declaration.initializer.text;
-            }
-          }
-        }
+        else if (ts.isIdentifier(expression)) version = resolveStringConstant(expression.text, source);
         assert.ok(version, `cannot resolve explicit ${id} version in ${file}`);
       }
       const manifest = getManifest(id, version);

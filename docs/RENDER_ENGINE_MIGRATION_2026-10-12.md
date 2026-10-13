@@ -427,3 +427,59 @@ basis. Review labels this Reserved budget debit, never a final provider bill.
 An incomplete allocation still cannot publish a source candidate. The actual
 Engine job-reader test preserves unknown invoice usage, and the real Studio
 adapter fixture exercises incomplete billing plus stopped reservation recovery.
+
+## Verified Current Status (13 October 2026)
+
+This section supersedes earlier readiness snapshots in this document. It is a
+read-only assessment; no provider resource, production alias, schedule, or
+customer pipeline was changed.
+
+- Studio production is still the healthy `5033ba839d1e6fc76a6626d448fbb7d6384f55c5`
+  deployment. The migration branch is 34 commits ahead at
+  `ad698ce10a35106fff719127ad95f69eb42ef68e` and has a READY protected preview.
+  Same-project authenticated preview checks returned `/api/health` `ok: true`
+  with this exact revision and `/channels` HTTP 200; signed-in owner UI
+  acceptance was not performed.
+  The Render Engine YuE2 integration is a
+  READY preview at `fa730d38b212d5287d1eda57cbdb80208eff27c7`; Engine production
+  is `d770f377481eb6cb2422366df3f492d1374d6e60`. The integration branch is three
+  production commits behind and must absorb the current production baseline
+  before it can be considered release-ready.
+- The authenticated Engine inspection confirmed the isolated project
+  `youtube-studio-render` and output bucket `re-youtube-studio-render-p2w18g596q`.
+  H3 and Qwen3 TTS have qualified routes. YuE2 accepts the request contract but
+  has no qualified route: RunPod is only model-installed, and OpenRelay lacks
+  exact model-storage, persistent-runtime, and provider-final-qualification
+  evidence. This does not establish that an RTX 3090 is unavailable; it does
+  establish that this project cannot currently submit a qualified YuE2 job.
+  Music3, Fish, image/upscale and reconstruction routes likewise include
+  model-installed or prepared states that are not final qualification.
+- The latest recorded portrait Comfy reference readback (12 October) was
+  `executionReady: true` with `modelFilesVerified: false`; it was not re-read
+  in this assessment. Registration and an accepting API are not proof of a
+  model-backed image. No retained output from a complete new-channel render has
+  yet been qualified.
+- YuE2's private candidate review, owner audition, exact-source approval and
+  guarded assembly handoff are implemented. The focused selection, assembly,
+  music-source and Engine-client tests pass, but the new candidate has not been
+  generated or auditioned on a qualified provider. No thumbnail-generation
+  tests or Nano Banana Pro requests were made.
+- The module-contract test's static version resolver was corrected to follow
+  aliased imported string constants while retaining exact version resolution.
+  The test now reaches the real existing failure: `narrated_stock` defaults to
+  a `$3.5282` compiler reservation while its creator floor is `$2`. Neither
+  value nor the assertion was changed. This remains an admission/release gate.
+- The separately named `studio-render-engine-migration-20261012` Vercel project
+  has no Git link, deployments, ignored-build command, or build-queue setting.
+  It is not the release target. The existing `youtube-studio-ai` project remains
+  Git-linked and has its ignored-build guard and `WAIT_FOR_NAMESPACE_QUEUE`;
+  its production alias has not been advanced to this migration.
+
+TypeScript passes. The bounded eight-file Node test run passed 12 of 13 suites;
+the remaining failure is the unchanged `narrated_stock` budget mismatch above.
+The migration is not ready for production or a complete fresh-channel quality
+claim. Keep schedules, publishing and production aliases unchanged. Next, bring
+the Engine integration branch to the current production base, resolve the
+approved storage/runtime qualification for the exact YuE2 route within the
+provider disk cap, then produce and owner-audition one retained new-channel
+output before final deployment qualification.
