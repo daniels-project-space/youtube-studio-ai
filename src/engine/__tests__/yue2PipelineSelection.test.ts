@@ -21,6 +21,8 @@ try {
     const opts = { family, nicheKey: family === "music_loop" ? "lofi" : "motivation" };
     const baseline = designPipeline(opts), before = structuredClone(baseline.pipeline);
     const chosen = { ...selection, musicIntent: { ...selection.musicIntent, playback, role } };
+    const mismatched = { ...chosen, musicIntent: { ...chosen.musicIntent, role: role === "primary_music" ? "meditation_bed" as const : "primary_music" as const } };
+    assert.throws(() => designPipeline({ ...opts, yue2Music: mismatched }), /YuE2 music route requires the/);
     const result = designPipeline({ ...opts, yue2Music: chosen });
     const preview = designPipelineCore({ ...opts, yue2Music: chosen }, { validateRuntimeRegistry: false });
     assert.deepEqual(preview.pipeline, result.pipeline, "YuE2 read-only projection matches executable graph");

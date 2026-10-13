@@ -81,6 +81,7 @@ import {
 } from "./minimumVideoFoundation";
 import { routeNarrationProvider } from "@/lib/narrationProviderRouting";
 import { resolveVoiceDoctrine as voiceDoctrine } from "@/engine/golden";
+import { musicRoleForRoute } from "./channelMusicProgram";
 import {
   compilePipeline,
   completePipelineForPolicy,
@@ -1306,6 +1307,10 @@ export function designPipelineCore(
   if (opts.yue2Music !== undefined) {
     if (opts.paramOverrides?.music && Object.keys(opts.paramOverrides.music).length) {
       throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
+    }
+    const expectedRole = musicRoleForRoute(opts.family, manifest.contentLane.key);
+    if (opts.yue2Music.musicIntent.role !== expectedRole) {
+      throw new Error(`YuE2 music route requires the ${expectedRole} role`);
     }
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
