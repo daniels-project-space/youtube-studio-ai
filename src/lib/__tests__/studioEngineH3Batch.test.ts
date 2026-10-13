@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { stageH3SceneBatchInRenderEngine, getH3SceneOutputInRenderEngine } from "../renderEngineH3SceneBatchClient";
+import { admitModuleH3RunInRenderEngine, stageH3SceneBatchInRenderEngine, getH3SceneOutputInRenderEngine } from "../renderEngineH3SceneBatchClient";
 import { STUDIO_ENGINE_API_BASE, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET, STUDIO_ENGINE_H3_WORKFLOW } from "../studioRenderEngineWorkflows";
 import { sha256Hex } from "../sha256";
 import { StudioEngineError } from "../studioRenderEngineClient";
@@ -31,4 +31,25 @@ test("real shared H3 transport keeps registered model/request identity and never
     bytes: 2000, sha256: "c".repeat(64), contentType: "video/mp4", verifiedAt: 123, url: "https://account.r2.cloudflarestorage.com/output.mp4", expiresInSeconds: 600 };
   assert.equal((await getH3SceneOutputInRenderEngine({ ...connection, fetchImpl: async () => Response.json(output) }, "e".repeat(32), "scene-1")).bucket, STUDIO_ENGINE_BUCKET);
   await assert.rejects(getH3SceneOutputInRenderEngine({ ...connection, fetchImpl: async () => Response.json({ ...output, bucket: "foreign-project" }) }, "e".repeat(32), "scene-1"));
+});
+
+test("module-run H3 admission binds the exact run, channel, and ordered scene digests", async () => {
+  const source = {
+    ownerId: "owner", channelId: "channel-1", channelSlug: "lofi-study", batchId: "run-1-loop-clips",
+    requestKey: "run-1:loop-clips:visuals", moduleId: "loop_clips", runId: "run-1", itemKey: "run-1:loop_clips",
+    sceneSourceSha256: "b".repeat(64), sceneManifestSha256: "c".repeat(64),
+    expectedScenes: [{ ordinal: 0, sceneId: "segment-1-scene-1", requestManifestSha256: "d".repeat(64) }],
+  };
+  const connection = { baseUrl: STUDIO_ENGINE_API_BASE, projectName: STUDIO_ENGINE_PROJECT, apiKey: "f".repeat(64),
+    fetchImpl: async (url: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(String(url), `${STUDIO_ENGINE_API_BASE}/module-h3-batches/admit`);
+      const body = JSON.parse(String(init?.body));
+      assert.deepEqual(body, { projectName: STUDIO_ENGINE_PROJECT, ...source, manifestSha256: body.manifestSha256 });
+      assert.match(body.manifestSha256, /^[a-f0-9]{64}$/);
+      return Response.json({ batchId: source.batchId, handoffSha256: body.manifestSha256, reused: false }, { status: 201 });
+    } };
+  const admission = await admitModuleH3RunInRenderEngine(connection, source);
+  assert.equal(admission.batchId, source.batchId);
+  assert.equal(admission.reused, false);
+  await assert.rejects(admitModuleH3RunInRenderEngine(connection, { ...source, expectedScenes: [] }), /source is invalid/);
 });

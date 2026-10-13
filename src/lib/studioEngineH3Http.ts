@@ -12,7 +12,7 @@ export function studioH3Endpoint(config: StudioEngineH3Connection, path: string)
   const [pathname, query] = path.split("?");
   if (!["/client/workflows", "/client/input-uploads", "/client/studio-batch-admission", "/client/studio-batch-scenes",
     "/client/h3-jobs", "/client/h3-jobs/qualify-input", "/client/jobs", "/client/jobs/output",
-    "/client/h3-scene-batches", "/client/h3-scene-batches/output"].includes(pathname)) throw new Error("Unsupported managed H3 operation");
+    "/client/module-h3-batches/admit", "/client/h3-scene-batches", "/client/h3-scene-batches/output"].includes(pathname)) throw new Error("Unsupported managed H3 operation");
   return `${STUDIO_ENGINE_API_BASE}/${pathname.slice("/client/".length)}${query === undefined ? "" : `?${query}`}`;
 }
 export async function studioH3Json(config: StudioEngineH3Connection, path: string, body?: unknown, timeoutMs = 20000) {
