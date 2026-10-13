@@ -8,21 +8,23 @@ import { composeMusicLoopDeblur, normalizeMusicLoopSource } from "../ffmpeg";
 
 const ffmpeg = (args: string[]) => execFileSync("ffmpeg", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
 const inspect = (path: string) => JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", path], { encoding: "utf8" }));
-const pcm = (path: string) => execFileSync("ffmpeg", ["-v", "error", "-i", path, "-map", "0:a:0", "-f", "f32le", "-"], { maxBuffer: 8_000_000 });
+const pcm = (path: string) => execFileSync("ffmpeg", ["-v", "error", "-i", path, "-map", "0:a:0", "-f", "f32le", "-"], { maxBuffer: 32_000_000 });
+const naturalSourceDurationSec = 36.439;
+const naturalSourceFrames = Math.round(naturalSourceDurationSec * 48000);
 
 for (const target of [-14, -20, -23]) test(`primary loop delivers ${target} LUFS without altering native timing or musical dynamics`, async () => {
   const dir = await mkdtemp(join(tmpdir(), "loop-master-"));
   try {
     const source = join(dir, "source.wav"), master = join(dir, "master.wav");
     const picture = join(dir, "picture.mp4"), delivery = join(dir, "final.mp4");
-    ffmpeg(["-v", "error", "-f", "lavfi", "-i", "aevalsrc=0.04*sin(2*PI*233*t)*(0.7+0.3*cos(2*PI*t)):s=48000:d=10",
+    ffmpeg(["-v", "error", "-f", "lavfi", "-i", `aevalsrc=0.04*sin(2*PI*233*t)*(0.7+0.3*cos(2*PI*t)):s=48000:d=${naturalSourceDurationSec}`,
       "-ac", "2", "-c:a", "pcm_f32le", source]);
     const original = await readFile(source);
-    await normalizeMusicLoopSource(source, master, target, 480000);
+    await normalizeMusicLoopSource(source, master, target, naturalSourceFrames);
     assert.deepEqual(await readFile(source), original, "approved bytes must remain unchanged");
     const audio = inspect(master).streams[0];
     assert.equal(audio.codec_name, "pcm_f32le"); assert.equal(audio.sample_rate, "48000");
-    assert.equal(audio.channels, 2); assert.equal(audio.duration_ts, 480000);
+    assert.equal(audio.channels, 2); assert.equal(audio.duration_ts, naturalSourceFrames);
     const before = pcm(source), after = pcm(master);
     assert.equal(after.length, before.length);
     let gain: number | undefined;
