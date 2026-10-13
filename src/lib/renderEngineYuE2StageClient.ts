@@ -178,14 +178,18 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
   try { payload = await response.json(); } catch {
     throw new Error("Render Engine project integration handshake returned malformed JSON");
   }
-  if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
-      !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
-      payload.output.bucket === "render-engine" || payload.output.prefix !== `projects/${config.projectName}` ||
-      !record(payload.endpoints) ||
-      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs" ||
-      !record(payload.contracts) ||
-      payload.contracts.yue2MusicJob !== "scored-source-abc-v2") {
-    throw new Error("Render Engine project integration handshake returned an invalid output binding or unsupported YuE2 route contract");
+  if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId)) {
+    throw new Error("Render Engine project integration handshake returned an invalid project identity");
+  }
+  if (!record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
+      payload.output.bucket === "render-engine" || payload.output.prefix !== `projects/${config.projectName}`) {
+    throw new Error("Render Engine project integration handshake returned an invalid output binding");
+  }
+  if (!record(payload.endpoints) || payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
+    throw new Error("Render Engine project integration does not expose the scored YuE2 job endpoint");
+  }
+  if (!record(payload.contracts) || payload.contracts.yue2MusicJob !== "scored-source-abc-v2") {
+    throw new Error("Render Engine project integration does not advertise the required YuE2 contract: scored-source-abc-v2");
   }
 }
 

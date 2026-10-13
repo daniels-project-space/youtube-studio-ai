@@ -71,7 +71,7 @@ test("rejects a legacy YuE2 route before any workflow write", async () => {
       endpoints: { yue2MusicJob: "/client/music3-jobs" },
       contracts: { yue2MusicJob: "scored-source-abc-v2" } });
   };
-  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route contract/);
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /does not expose the scored YuE2 job endpoint/);
   assert.equal(calls, 1);
 });
 
@@ -82,7 +82,7 @@ test("rejects an older route that exposes the path but not the scored-source con
     return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
       endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
   };
-  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route contract/);
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /does not advertise the required YuE2 contract: scored-source-abc-v2/);
   assert.equal(calls, 1, "the handshake refuses the incompatible route before any workflow write");
 });
 
