@@ -189,10 +189,18 @@ function unique(values: readonly string[] | undefined, fallback: readonly string
 }
 
 export function musicRoleForRoute(family: string, contentLaneKey: string): ChannelMusicRole {
-  const route = `${family} ${contentLaneKey}`.toLowerCase();
-  if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
-  if (/meditat|sleep|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
-  if (/short|quiz|trivia/u.test(route)) return "short_form_bed";
+  const familyRoute = family.toLowerCase();
+  const laneRoute = contentLaneKey.toLowerCase();
+  const roleFor = (route: string): ChannelMusicRole | undefined => {
+    if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
+    if (/meditat|sleep|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
+    if (/short|quiz|trivia/u.test(route)) return "short_form_bed";
+    return undefined;
+  };
+  const familyRole = roleFor(familyRoute);
+  if (familyRole) return familyRole;
+  const laneRole = roleFor(laneRoute);
+  if (laneRole) return laneRole;
   return "narration_bed";
 }
 

@@ -16,6 +16,8 @@ const sha = (value: string) => value.repeat(64);
 
 assert.equal(musicRoleForRoute("music_loop", "music_loop"), "primary_music");
 assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "meditation_bed");
+assert.equal(musicRoleForRoute("sleep", "music_loop"), "meditation_bed");
+assert.equal(musicRoleForRoute("music_loop", "meditation"), "primary_music");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
 
