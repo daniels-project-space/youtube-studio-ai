@@ -75,6 +75,7 @@ import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
 import { verifyYuE2ResumeSource } from "@/lib/yue2ResumeSource";
+import { isYuE2MusicCandidateVersion } from "@/engine/yue2PipelineSelection";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
@@ -2313,7 +2314,7 @@ export const runPipelineTask = task({
       // retained master rather than creating a second, run-local review gate.
       // The music block revalidates its bytes/program/receipts before use.
       const preparedWeeklyMusic = seedStore["preparedMusic"];
-      requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && entry.version === "3.0.0-yue2-candidate");
+      requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && isYuE2MusicCandidateVersion(entry.version));
       requiresMusicAuditionCheckpoint = entries.some((entry) =>
         entry.block === "music" && entry.params?.provider === "minimax_music3" &&
         preparedWeeklyMusic === undefined && !requiresYuE2AuditionCheckpoint,

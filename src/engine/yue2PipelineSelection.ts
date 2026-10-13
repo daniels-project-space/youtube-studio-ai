@@ -12,6 +12,10 @@ export interface YuE2PipelineSelection {
   sourceParams: Record<string, unknown>;
 }
 
+export function isYuE2MusicCandidateVersion(version: string | undefined): boolean {
+  return version !== undefined && /(?:^|-)yue2-(?:engine-)?candidate$/u.test(version);
+}
+
 export function defaultFreshChannelYuE2Selection(input: {
   family: string;
   routeFingerprint: string;

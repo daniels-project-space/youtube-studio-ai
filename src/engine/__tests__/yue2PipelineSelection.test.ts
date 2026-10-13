@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { designPipeline, designPipelineCore } from "../designer";
-import { defaultFreshChannelYuE2Selection, selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
+import { defaultFreshChannelYuE2Selection, isYuE2MusicCandidateVersion, selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
 import { validatePipeline } from "../validate";
 import { compilePipeline } from "../pipelineCompiler";
 
@@ -11,6 +11,11 @@ const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 
     termination_grace_seconds: 10, reserved_allocation_usd_micros: 30500 } };
 const selection: YuE2PipelineSelection = { musicIntent: { playback: "repeat", role: "primary_music", requestedDurationSec: 30 }, sourceParams };
 const originalFetch = globalThis.fetch;
+assert.equal(isYuE2MusicCandidateVersion("4.0.0-yue2-engine-candidate"), true);
+assert.equal(isYuE2MusicCandidateVersion("3.0.0-yue2-candidate"), true);
+assert.equal(isYuE2MusicCandidateVersion("3.0.0-yue2-score"), false);
+assert.equal(isYuE2MusicCandidateVersion("4.0.0-mureka"), false);
+assert.equal(isYuE2MusicCandidateVersion(undefined), false);
 globalThis.fetch = async () => { throw new Error("pipeline selection cannot dispatch providers"); };
 try {
   for (const [family, playback, role] of [

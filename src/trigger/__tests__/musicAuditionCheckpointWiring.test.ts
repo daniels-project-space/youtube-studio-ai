@@ -10,6 +10,8 @@ const approvalRoute = readFileSync(join(root, "src/app/api/music-audition-checkp
 const auditionPanel = readFileSync(join(root, "src/components/MusicAuditionPanel.tsx"), "utf8");
 
 assert.match(pipeline, /entry\.block === "music" && entry\.params\?\.provider === "minimax_music3"/u);
+assert.match(pipeline, /entry\.block === "music" && isYuE2MusicCandidateVersion\(entry\.version\)/u,
+  "current Engine YuE2 candidate versions must activate the same audition boundary as historical YuE2 candidates");
 assert.match(pipeline, /stopAfterBlockId: "music"/u);
 assert.match(pipeline, /createMusicAuditionCheckpoint\([\s\S]*musicNativeWavKey: nativeWavKey/u);
 assert.match(pipeline, /musicAuditionCheckpointsApi\.createAwaiting/u);
