@@ -145,7 +145,11 @@ async function main(): Promise<void> {
     const downstream = { block: "metadata", version: DELIVERY_METADATA_VERSION, params: { targetDurationSec: 7200 } };
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([downstream], "test"));
     const engineMusic = { block: "music", version: YUE2_ENGINE_MUSIC_MODULE_VERSION, params: { renderer: "render-engine" } };
-    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([engineMusic], "test"));
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([engineMusic], "test"), /unsupported explicit weekly preparation implementation versions/,
+      "the weekly producer must not claim the downstream Engine module's version");
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      engineMusic, { block: "composer_brief", version: "3.0.0-yue2-score" },
+    ], "test"), /composer_brief@/, "Engine music routing must not qualify other versioned modules");
     assert.equal(engineOwnsWeeklyMusic([engineMusic]), true);
     assert.equal(engineOwnsWeeklyMusic([{ ...engineMusic, params: { renderer: "mureka" } }]), false);
     assert.equal(engineOwnsWeeklyMusic([{ ...engineMusic, version: "3.0.0-yue2-candidate" }]), false);

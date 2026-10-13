@@ -15,7 +15,6 @@ export function assertWeeklyPreparationVersionsSupported(
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const candidate = entry as { block?: unknown; version?: unknown; params?: { targetDurationSec?: unknown } };
     if (candidate.version === undefined) return [];
-    if (hasEngineOwnedMusicModule([candidate])) return [];
     // No weekly producer substitutes for this downstream block. Its exact pin
     // and params remain in the frozen pipeline and its manifest fingerprint.
     if (candidate.block === "metadata" && candidate.version === DELIVERY_METADATA_VERSION &&
