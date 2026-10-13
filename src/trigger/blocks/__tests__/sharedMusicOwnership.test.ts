@@ -8,7 +8,7 @@ import { all, getManifest, require_ } from "@/engine/registry";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
 import { lofiBlocks } from "../lofiBlocks";
-import { music } from "../musicBlocks";
+import { music, musicProgramPlan } from "../musicBlocks";
 
 async function main(): Promise<void> {
   for (const moduleName of ["musicBlocks", "blockContext"]) {
@@ -18,12 +18,13 @@ async function main(): Promise<void> {
   }
   assert.ok(!lofiBlocks.some((block) => block.id === "music"),
     "LoFi must not own or register the shared music block");
-  assert.deepEqual(lockableModule("music")?.paths, [
-    "src/trigger/blocks/blockContext.ts",
-    // Golden also binds music_program_plan, which remains in LoFi.
-    "src/trigger/blocks/lofiBlocks.ts",
-    "src/trigger/blocks/musicBlocks.ts",
-  ], "the generated Music owner lock must protect the implementation and its shared guards");
+  const musicLockPaths = lockableModule("music")?.paths ?? [];
+  assert.ok(musicLockPaths.includes("src/trigger/blocks/blockContext.ts"));
+  assert.ok(musicLockPaths.includes("src/trigger/blocks/musicBlocks.ts"));
+  assert.ok(!musicLockPaths.includes("src/trigger/blocks/lofiBlocks.ts"),
+    "Music ownership must not require locking LoFi implementation code");
+  assert.ok(!lofiBlocks.some((block) => block.id === "music_program_plan"),
+    "LoFi must not own the shared music program planner");
   for (const owner of ["lofi", "topic-intel", "ship", "shorts"]) {
     assert.ok(lockableModule(owner)?.paths.includes("src/trigger/blocks/blockContext.ts"),
       `${owner} must retain protection of helpers extracted from LoFi`);
@@ -36,6 +37,8 @@ async function main(): Promise<void> {
     registerAllBlocks();
     registerAllBlocks();
     assert.equal(require_("music"), music, "the real registry must resolve the shared implementation");
+    assert.equal(require_("music_program_plan"), musicProgramPlan,
+      "the real registry must resolve the planner from the shared music module");
     assert.equal(getManifest("music")?.block, music);
     assert.equal(all().filter((block) => block.id === "music").length, 1);
     assert.equal(music.paid, true);
