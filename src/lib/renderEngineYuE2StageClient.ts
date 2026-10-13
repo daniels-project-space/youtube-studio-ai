@@ -91,6 +91,14 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+const MANAGEMENT_OPERATION_BY_CLIENT_PATH: Readonly<Record<string, string>> = {
+  "/client/integration": "integration",
+  "/client/workflows": "workflows",
+  "/client/yue2-jobs": "yue2-jobs",
+  "/client/jobs": "jobs",
+  "/client/jobs/output": "jobs/output",
+};
+
 export function assertRenderEngineR2SignedUrl(value: string): URL {
   let url: URL;
   try {
@@ -108,18 +116,19 @@ export function assertRenderEngineR2SignedUrl(value: string): URL {
 function endpoint(config: RenderEngineYuE2Config, path: string): string {
   let url: URL;
   try { url = new URL(config.baseUrl); } catch { throw new Error("Render Engine URL is invalid"); }
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".convex.site") || url.username || url.password ||
-      url.pathname !== "/" || url.search || url.hash) throw new Error("Render Engine URL must be an HTTPS Convex site origin");
-  if (!PROJECT_NAME.test(config.projectName) || !HEX_SHA256.test(config.projectCapability)) {
+  if (url.protocol !== "https:" || url.hostname !== "render-engine-sable.vercel.app" || url.username || url.password ||
+      url.pathname !== "/" || url.search || url.hash) throw new Error("Render Engine URL must be the canonical HTTPS management API origin");
+  const operation = MANAGEMENT_OPERATION_BY_CLIENT_PATH[path];
+  if (!operation || !PROJECT_NAME.test(config.projectName) || !HEX_SHA256.test(config.projectCapability)) {
     throw new Error("Render Engine YuE2 project capability is invalid");
   }
-  url.pathname = path;
+  url.pathname = `/api/v1/projects/${config.projectName}/${operation}`;
   return url.toString();
 }
 
 async function request(config: RenderEngineYuE2Config, path: string, method: "GET" | "POST", body?: unknown) {
   const url = new URL(endpoint(config, path));
-  if (method === "GET") url.search = new URLSearchParams({ projectName: config.projectName, jobId: String(body) }).toString();
+  if (method === "GET") url.searchParams.set("jobId", String(body));
   const response = await (config.fetchImpl ?? fetch)(url, {
     method,
     headers: {
@@ -140,7 +149,6 @@ async function request(config: RenderEngineYuE2Config, path: string, method: "GE
 
 export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEngineYuE2Config): Promise<void> {
   const url = new URL(endpoint(config, "/client/integration"));
-  url.searchParams.set("projectName", config.projectName);
   const response = await (config.fetchImpl ?? fetch)(url, {
     method: "GET",
     headers: { authorization: `Bearer ${config.projectCapability}`, accept: "application/json" },
@@ -160,7 +168,7 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
   if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
       !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
       typeof payload.output.prefix !== "string" || payload.output.prefix.length === 0 || !record(payload.endpoints) ||
-      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
+      payload.endpoints.yue2MusicJob !== `/api/v1/projects/${config.projectName}/yue2-jobs`) {
     throw new Error("Render Engine project integration handshake returned an invalid project or YuE2 binding");
   }
 }

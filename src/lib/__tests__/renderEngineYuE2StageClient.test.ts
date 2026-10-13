@@ -33,7 +33,7 @@ const request: RenderEngineYuE2Request = {
 };
 const projectName = RENDER_ENGINE_STUDIO_PROJECT_NAME;
 const config: RenderEngineYuE2Config = {
-  baseUrl: "https://jovial-camel-68.convex.site",
+  baseUrl: "https://render-engine-sable.vercel.app",
   projectName,
   projectCapability: "b".repeat(64),
 };
@@ -52,11 +52,11 @@ test("verifies the authenticated project, output binding, and YuE2 route before 
     requestUrl = new URL(String(input));
     authorization = new Headers(init?.headers).get("authorization");
     return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
-      endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+      endpoints: { yue2MusicJob: `/api/v1/projects/${projectName}/yue2-jobs` } });
   };
   await verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl });
-  assert.equal(requestUrl?.pathname, "/client/integration");
-  assert.equal(requestUrl?.searchParams.get("projectName"), projectName);
+  assert.equal(requestUrl?.pathname, `/api/v1/projects/${projectName}/integration`);
+  assert.equal(requestUrl?.searchParams.get("projectName"), null);
   assert.equal(authorization, `Bearer ${config.projectCapability}`);
 });
 
@@ -76,7 +76,7 @@ test("provisions and stages only the pinned Studio YuE2 project workflow", async
     const url = String(input);
     const body = JSON.parse(String(init?.body));
     posted.push({ url, body, authorization: new Headers(init?.headers).get("authorization") });
-    if (url.endsWith("/client/workflows")) return response({ workflowId: jobId, profileRevisionSha256: revision });
+    if (url.endsWith(`/projects/${projectName}/workflows`)) return response({ workflowId: jobId, profileRevisionSha256: revision });
     return response({ jobId, state: "awaiting-final-qualification", manifestSha256: "c".repeat(64), dispatchEnabled: false,
       output: { bucket: "studio-render-output", key: `projects/${projectName}/jobs/${jobId}/audio.wav`, receiptKey: `projects/${projectName}/jobs/${jobId}/yue2.receipt.json` } }, 202);
   };
@@ -86,7 +86,7 @@ test("provisions and stages only the pinned Studio YuE2 project workflow", async
   const staged = await stageRenderEngineYuE2Request({ ...config, ...workflow, fetchImpl, request });
   assert.equal(staged.jobId, jobId);
   assert.equal(staged.dispatchEnabled, false);
-  assert.equal(posted[1]?.url, "https://jovial-camel-68.convex.site/client/yue2-jobs");
+  assert.equal(posted[1]?.url, `https://render-engine-sable.vercel.app/api/v1/projects/${projectName}/yue2-jobs`);
   assert.equal(posted[1]?.authorization, `Bearer ${config.projectCapability}`);
   assert.deepEqual(posted[1]?.body, { projectName: config.projectName, workflowId: jobId, request });
 });
@@ -98,7 +98,7 @@ test("rejects score, profile, cost, and project-scope mismatches before dispatch
   assert.throws(() => RenderEngineYuE2RequestSchema.parse({ ...request, abcSha256: "d".repeat(64) }), /Accepted score digest/);
   await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: jobId, profileRevisionSha256: "d".repeat(64), fetchImpl, request }), /profile revision/);
   await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: "bad", profileRevisionSha256: revision, fetchImpl, request }), /workflow ID/);
-  await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: jobId, profileRevisionSha256: revision, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl, request }), /HTTPS Convex site origin/);
+  await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: jobId, profileRevisionSha256: revision, baseUrl: "http://render-engine-sable.vercel.app", fetchImpl, request }), /canonical HTTPS management API origin/);
   assert.equal(calls, 0);
 });
 
@@ -107,7 +107,7 @@ test("reads only the requesting project's job and verified audio object", async 
   const fetchImpl: typeof fetch = async (input) => {
     const url = new URL(String(input));
     calls.push(url.toString());
-    if (url.pathname.endsWith("/client/jobs")) return response({ jobId, profileId: "yue2", status: "completed" });
+    if (url.pathname.endsWith(`/projects/${projectName}/jobs`)) return response({ jobId, profileId: "yue2", status: "completed" });
     return response({ jobId, bucket: "studio-render-output", key: `projects/${projectName}/jobs/${jobId}/audio.wav`,
       executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/wav", verifiedAt: 1, expiresInSeconds: 3600,
       url: "https://studio-render-output.r2.cloudflarestorage.com/audio.wav", nativeArtifactReads });
@@ -116,7 +116,7 @@ test("reads only the requesting project's job and verified audio object", async 
   assert.equal(status.status, "completed");
   const output = await getRenderEngineYuE2Output({ ...config, fetchImpl }, jobId);
   assert.equal(output.sha256, "e".repeat(64));
-  assert.ok(calls.every((url) => url.includes(`projectName=${config.projectName}`) && url.includes(`jobId=${jobId}`)));
+  assert.ok(calls.every((url) => url.includes(`/projects/${config.projectName}/`) && url.includes(`jobId=${jobId}`)));
   await assert.rejects(getRenderEngineYuE2Job({ ...config, fetchImpl }, "bad"), /job ID/);
 });
 
