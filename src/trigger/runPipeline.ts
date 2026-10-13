@@ -76,6 +76,8 @@ import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
 import { verifyYuE2ResumeSource } from "@/lib/yue2ResumeSource";
 import { isYuE2MusicCandidateVersion } from "@/engine/yue2PipelineSelection";
+import { StudioRenderEngineClient } from "@/lib/studioRenderEngineClient";
+import { assessStudioEngineRouteReadiness } from "@/lib/studioRenderEngineReadiness";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex } from "@/lib/sha256";
@@ -1101,6 +1103,32 @@ export const runPipelineTask = task({
           runId: payload.runId,
           error: automaticRuntimeAdmission.reason,
         };
+      }
+    }
+
+    if (entries.some((entry) => entry.block === "music" && isYuE2MusicCandidateVersion(entry.version))) {
+      try {
+        await bootstrapSecrets(
+          (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
+          { services: ["render-engine"], required: ["RENDER_MANAGEMENT_API_KEY"] },
+        );
+        const readiness = assessStudioEngineRouteReadiness(
+          await new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "").modelStorage(),
+          "yue2",
+          "openrelay",
+        );
+        if (!readiness.ready) {
+          console.log(`[run-pipeline] pinned YuE2 route manual gate for ${payload.runId}: ${readiness.reason}`);
+          return {
+            ok: false,
+            renderEngineBlocked: true,
+            manualGate: true,
+            runId: payload.runId,
+            error: readiness.reason,
+          };
+        }
+      } catch (error) {
+        throwForTaskRetryPolicy(error);
       }
     }
 

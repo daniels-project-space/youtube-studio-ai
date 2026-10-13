@@ -12,6 +12,10 @@ const auditionPanel = readFileSync(join(root, "src/components/MusicAuditionPanel
 assert.match(pipeline, /entry\.block === "music" && entry\.params\?\.provider === "minimax_music3"/u);
 assert.match(pipeline, /entry\.block === "music" && isYuE2MusicCandidateVersion\(entry\.version\)/u,
   "current Engine YuE2 candidate versions must activate the same audition boundary as historical YuE2 candidates");
+const routeGateAt = pipeline.indexOf("assessStudioEngineRouteReadiness(");
+const executionLeaseAt = pipeline.indexOf("claimExecutionLease");
+assert.ok(routeGateAt > 0 && routeGateAt < executionLeaseAt,
+  "an unavailable pinned Render Engine route must stop before execution leasing and any paid block");
 assert.match(pipeline, /stopAfterBlockId: "music"/u);
 assert.match(pipeline, /createMusicAuditionCheckpoint\([\s\S]*musicNativeWavKey: nativeWavKey/u);
 assert.match(pipeline, /musicAuditionCheckpointsApi\.createAwaiting/u);
