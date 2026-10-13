@@ -53,12 +53,25 @@ test("verifies the authenticated project, output binding, and YuE2 route before 
     requestUrl = new URL(String(input));
     authorization = new Headers(init?.headers).get("authorization");
     return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
+      contracts: { yue2MusicJob: "scored-source-abc-v2" },
       endpoints: { yue2MusicJob: `/api/v1/projects/${projectName}/yue2-jobs` } });
   };
   await verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl });
   assert.equal(requestUrl?.pathname, `/api/v1/projects/${projectName}/integration`);
   assert.equal(requestUrl?.searchParams.get("projectName"), null);
   assert.equal(authorization, `Bearer ${config.projectCapability}`);
+});
+
+test("rejects a legacy YuE2 route contract before any workflow write", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
+      contracts: { yue2MusicJob: "legacy-caption-v1" },
+      endpoints: { yue2MusicJob: `/api/v1/projects/${projectName}/yue2-jobs` } });
+  };
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 contract/);
+  assert.equal(calls, 1);
 });
 
 test("fails the integration handshake on unauthorized credentials before workflow creation", async () => {

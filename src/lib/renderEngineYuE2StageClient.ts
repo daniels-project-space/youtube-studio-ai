@@ -180,8 +180,9 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
   if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
       !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
       typeof payload.output.prefix !== "string" || payload.output.prefix.length === 0 || !record(payload.endpoints) ||
+      !record(payload.contracts) || payload.contracts.yue2MusicJob !== "scored-source-abc-v2" ||
       payload.endpoints.yue2MusicJob !== `/api/v1/projects/${config.projectName}/yue2-jobs`) {
-    throw new Error("Render Engine project integration handshake returned an invalid project or YuE2 binding");
+    throw new Error("Render Engine project integration handshake returned an invalid project or unsupported YuE2 contract");
   }
 }
 
