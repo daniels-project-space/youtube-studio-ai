@@ -131,6 +131,8 @@ export interface StyleDNA {
     moodArc: string;
     /** Integrated-loudness master target (LUFS). */
     loudnessLufs: number;
+    /** Optional final body-music gain for this channel. */
+    bodyMusicVol?: number;
     loopable: boolean;
   };
 

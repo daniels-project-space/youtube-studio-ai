@@ -293,6 +293,7 @@ export const music: Block = {
         studioAudioDirection,
       ].filter(Boolean).join(" ") || undefined,
       targetLufs: a?.loudnessLufs,
+      bodyMusicVol: dna?.audio?.bodyMusicVol,
     });
     const channelMusicProgramKey =
       `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${channelMusicProgram.fingerprint}.json`;

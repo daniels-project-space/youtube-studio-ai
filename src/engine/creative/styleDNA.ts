@@ -101,6 +101,7 @@ const dnaSchema = z.object({
     textures: z.array(z.string()),
     moodArc: z.string(),
     loudnessLufs: z.number(),
+    bodyMusicVol: z.number().min(0).max(1).optional(),
     loopable: z.boolean(),
   }),
   narrative: z
@@ -352,7 +353,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `- motionDiscipline: camera/motion rules (e.g. locked tripod, no pans/zooms)`,
     `- visualAvoid: anti-patterns to NEVER render (include the niche's "cheap" tells)`,
     `- thumbnail: {composition (subject-on-third, high-contrast, mobile-legible), textRule (<=3 words/mood-phrase/none), palette (3-4 hex, contrast pushed past the video grade), subject}`,
-    `- audio: {genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), loopable}`,
+    `- audio: {genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), optional bodyMusicVol (0..1 channel mix gain), loopable}`,
     narrated
       ? `- narrative: {scriptStyle, hookStyle, pacing, voiceProfile (timbre/age/pace/warmth), delivery (emotional direction)}`
       : `- narrative: omit (this family has no narration)`,
@@ -466,6 +467,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       textures: clampStrs(raw.audio.textures, 4),
       moodArc: raw.audio.moodArc.trim(),
       loudnessLufs: Number.isFinite(raw.audio.loudnessLufs) ? raw.audio.loudnessLufs : -14,
+      ...(raw.audio.bodyMusicVol === undefined ? {} : { bodyMusicVol: raw.audio.bodyMusicVol }),
       loopable: raw.audio.loopable,
     },
     narrative: raw.narrative
