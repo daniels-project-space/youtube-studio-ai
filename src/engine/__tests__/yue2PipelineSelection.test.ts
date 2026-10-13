@@ -14,8 +14,8 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("pipeline selection cannot dispatch providers"); };
 try {
   for (const [family, playback, role] of [
-    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "meditation_bed"],
-    ["sleep", "once", "meditation_bed"], ["shorts", "once", "short_form_bed"],
+    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "sleep_sound_bed"],
+    ["sleep", "once", "sleep_sound_bed"], ["shorts", "once", "short_form_bed"],
     ["narrated_stock", "once", "narration_bed"],
   ] as const) {
     const opts = { family, nicheKey: family === "music_loop" ? "lofi" : "motivation" };

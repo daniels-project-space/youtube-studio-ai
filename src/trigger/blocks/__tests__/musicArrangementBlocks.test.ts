@@ -189,7 +189,7 @@ async function main() {
     assert.deepEqual(changed.arrangement, arrangement);
   }
 
-  for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
+  for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
     const musicIntent = { role, requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
     const arrangement = { ...flat, ...musicIntent };
     response = { arrangement, duckDb: -15, bedLufs: -20 };

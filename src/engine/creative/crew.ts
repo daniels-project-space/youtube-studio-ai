@@ -351,7 +351,8 @@ export async function briefComposerWithArrangement(
       `a build, drop, climax, motif, or section progression for you. A continuous flat arrangement is valid ` +
       `when requested: its sections are review intervals, not mandatory musical changes, and may have ` +
       `identical energy and instructions with stable texture and no development. ` +
-      `Choose role primary_music, narration_bed, meditation_bed, or short_form_bed from the supplied intent. ` +
+      `Choose role primary_music, narration_bed, meditation_bed, sleep_sound_bed, or short_form_bed from the supplied intent. ` +
+      `sleep_sound_bed is for unattended sleep: stable low arousal, no pulse, melodic arrival, crescendo, or attention-catching event. ` +
       `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +
       `applicable. Explicitly unmetered drones are valid. No vocals or lyrics. ` +
       `requestedDurationSec requests one native source piece, an integer from 10 to 300 seconds; it is ` +

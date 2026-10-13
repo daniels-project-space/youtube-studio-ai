@@ -28,6 +28,7 @@ export const ChannelMusicRoleSchema = z.enum([
   "primary_music",
   "narration_bed",
   "meditation_bed",
+  "sleep_sound_bed",
   "short_form_bed",
 ]);
 export type ChannelMusicRole = z.infer<typeof ChannelMusicRoleSchema>;
@@ -130,7 +131,8 @@ function validateChannelMusicProgramBody(
   if (program.role === "primary_music" && program.mix.bodyMusicVol !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "primary music must remain music-forward at unity body gain" });
   }
-  if (program.role !== "primary_music" && !program.mix.narrationPriority && program.role !== "meditation_bed") {
+  if (program.role !== "primary_music" && !program.mix.narrationPriority &&
+      program.role !== "meditation_bed" && program.role !== "sleep_sound_bed") {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "narrated/short music beds must preserve narration priority" });
   }
   if (program.generation.providerPreference === "minimax_music3") {
@@ -191,9 +193,10 @@ function unique(values: readonly string[] | undefined, fallback: readonly string
 export function musicRoleForRoute(family: string, contentLaneKey: string): ChannelMusicRole {
   const familyRoute = family.toLowerCase();
   const laneRoute = contentLaneKey.toLowerCase();
+  if (/sleep/u.test(`${familyRoute} ${laneRoute}`)) return "sleep_sound_bed";
   const roleFor = (route: string): ChannelMusicRole | undefined => {
     if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
-    if (/meditat|sleep|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
+    if (/meditat|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
     if (/short|quiz|trivia/u.test(route)) return "short_form_bed";
     return undefined;
   };
@@ -235,6 +238,14 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
       { id: "variation", label: "Variation", startFraction: 0.52, endFraction: 0.72, energy: 0.72, instruction: `Turn the motif through a different rhythmic placement or answering phrase, then briefly remove one layer so the return has contrast; never substitute a generic riser. ${shared}` },
       { id: "return", label: "Return", startFraction: 0.72, endFraction: 0.9, energy: 0.58, instruction: `Bring back the original motif in a warmer voicing with the same groove; the listener should recognize the return without a density spike. ${shared}` },
       { id: "outro", label: "Outro", startFraction: 0.9, endFraction: 1, energy: 0.3, instruction: `Strip back to the opening harmony and one final motif fragment, leaving a natural handoff so the later deterministic loop fold is musical. ${shared}` },
+    ];
+  }
+  if (role === "sleep_sound_bed") {
+    return [
+      { id: "settle", label: "Settle", startFraction: 0, endFraction: 0.2, energy: 0.12, instruction: `Arrive as a soft, already-stable texture with no transient, pulse, lead melody, or attention-grabbing entrance. ${shared}` },
+      { id: "steady", label: "Steady", startFraction: 0.2, endFraction: 0.52, energy: 0.12, instruction: `Hold the same low-arousal sound bed; use sustained tones and gentle noise texture without a beat, chord change, or melodic phrase. ${shared}` },
+      { id: "drift", label: "Drift", startFraction: 0.52, endFraction: 0.78, energy: 0.14, instruction: `Make only one extremely gradual timbral or spatial shift, with no swell, new layer attack, or change in perceived loudness. ${shared}` },
+      { id: "rest", label: "Rest", startFraction: 0.78, endFraction: 1, energy: 0.1, instruction: `Return to the opening texture and leave a calm, loop-compatible tail; no cadence, fade cue, climax, or new event. ${shared}` },
     ];
   }
   if (role === "meditation_bed") {
@@ -299,6 +310,7 @@ function structuredCaption(input: {
     primary_music: "music-forward original instrumental for focused repeated listening",
     narration_bed: "restrained cinematic underscore that supports speech without dictating emotion",
     meditation_bed: "stable meditative bed with organic micro-variation and no startling events",
+    sleep_sound_bed: "continuous low-arousal sleep soundscape with no pulse, melodic arrival, or startling events",
     short_form_bed: "compact information-forward underscore with an immediate motif and clean final button",
   };
   // Music3 still needs the explicit metadata/arrangement map below, but its
@@ -324,7 +336,8 @@ function structuredCaption(input: {
   const listeningScenario: Record<ChannelMusicRole, string> = {
     primary_music: "sustained focused work or relaxed repeat listening",
     narration_bed: "a paced narrated story where words remain the foreground",
-    meditation_bed: "quiet reflection, breathwork, or a gradual sleep wind-down",
+    meditation_bed: "quiet reflection or breathwork with a steady, gently responsive pulse",
+    sleep_sound_bed: "unattended overnight listening with stable loudness and no attention-catching events",
     short_form_bed: "a quick editorial insight with a single clear reveal",
   };
   const featuredInstruments = input.instrumentation.slice(0, 3);
@@ -386,6 +399,10 @@ export function instrumentalLyricsControl(
       core: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]"],
       extension: ["[Instrumental]", "[Verse]", "[Bridge]"],
     },
+    sleep_sound_bed: {
+      core: ["[Intro]", "[Instrumental]", "[Instrumental]"],
+      extension: ["[Instrumental]", "[Instrumental]"],
+    },
     short_form_bed: {
       core: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]"],
       extension: ["[Instrumental]", "[Verse]"],
@@ -432,7 +449,13 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       genre: "slow spacious ambient meditation",
       instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
       textures: ["wide calm stereo space", "gentle natural air"],
-      moodArc: "settle into a steady spacious calm, drift through subtle timbral change, and return without a strong melodic arrival",
+      moodArc: "settle into a steady spacious calm, support slow breathing with subtle timbral change, and return without a strong melodic arrival",
+    },
+    sleep_sound_bed: {
+      genre: "continuous low-arousal ambient sleep soundscape",
+      instrumentation: ["soft sustained synth pad", "distant piano harmonics"],
+      textures: ["steady filtered noise bed", "quiet natural room air"],
+      moodArc: "remain stable and unobtrusive for unattended sleep; no pulse, melodic phrase, cadence, crescendo, or attention-catching event",
     },
     short_form_bed: {
       genre: "concise modern instrumental underscore",
@@ -444,7 +467,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);
-  const rawBpm = input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
+  const rawBpm = input.bpmRange ?? (role === "sleep_sound_bed" ? [36, 54] : role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
   const bpmRange: [number, number] = [
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),
     Math.max(30, Math.min(300, Math.floor(rawBpm[1]))),
@@ -457,7 +480,9 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   // Preserve authored direction in full. Existing caption size/word gates
   // reject oversized programs before purchase rather than silently cutting intent.
   const composerDirection = input.composerDirection?.trim().replace(/\s+/gu, " ") ||
-    "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
+    (role === "sleep_sound_bed"
+      ? "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes."
+      : "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.");
   const exclusions = [
     "vocals or intelligible words",
     "hollow preset-only arrangement",
@@ -467,11 +492,12 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     "abrupt key, tempo, or acoustic-space changes",
     "generic trailer booms and risers",
     "melody that masks narration",
+    ...(role === "sleep_sound_bed" ? ["audible beat or pulse", "melodic hook or cadence", "sudden change in loudness or density"] : []),
   ];
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
-  const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "primary_music" ? -16 : -18)));
-  const bodyMusicVol = role === "primary_music"
+  const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
+  const bodyMusicVol = role === "primary_music" || role === "sleep_sound_bed"
     ? 1
     : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" ? 0.25 : 0.1026)));
   const body: ChannelMusicProgramBody = {
@@ -512,7 +538,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       limiterProhibited: true,
     },
     quality: {
-      minimumLraLu: role === "primary_music" ? 3 : role === "meditation_bed" ? 2 : 1.5,
+      minimumLraLu: role === "primary_music" ? 3 : role === "meditation_bed" ? 2 : role === "sleep_sound_bed" ? 1 : 1.5,
       minimumCrestDb: role === "primary_music" ? 8 : 7,
       maximumConsecutiveCeilingSamples: 3,
       maximumClippedSamples: 0,

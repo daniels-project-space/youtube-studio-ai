@@ -13,7 +13,7 @@ export interface YuE2PipelineSelection {
 
 export const YuE2PipelineSelectionSchema = z.object({
   musicIntent: MusicArrangementIntentSchema.and(z.object({
-    playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
+    playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"]),
     requestedDurationSec: z.number().int().min(10).max(300),
   })),
   sourceParams: YuE2SourceConfigSchema,

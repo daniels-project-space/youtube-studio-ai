@@ -20,8 +20,9 @@ export async function admitYuE2LoopSource(ctx: StageContext) {
     throw new Error("YuE2 loop visuals require the sealed YuE2 program, not a legacy provider plan");
   }
   const source = await verifyApprovedYuE2Source(ctx, "repeat");
-  if (source.arrangement.arrangement.role !== "primary_music") {
-    throw new Error("YuE2 loop visuals require the primary-music arrangement");
+  const loopRoles = ["primary_music", "meditation_bed", "sleep_sound_bed"] as const;
+  if (!loopRoles.includes(source.arrangement.arrangement.role as typeof loopRoles[number])) {
+    throw new Error("YuE2 loop visuals require a primary-music, meditation, or sleep-sound arrangement");
   }
   return source;
 }

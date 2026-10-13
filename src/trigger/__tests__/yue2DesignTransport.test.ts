@@ -35,7 +35,7 @@ const fetchBefore = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("design transport must not dispatch or call providers"); };
 try {
   for (const [family, playback, role] of [
-    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "meditation_bed"],
+    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "sleep_sound_bed"],
     ["shorts", "once", "short_form_bed"], ["narrated_stock", "once", "narration_bed"],
   ] as const) {
     const programBrief = createChannelProgramBrief({ family, nicheKey: "educational", locale: "en",

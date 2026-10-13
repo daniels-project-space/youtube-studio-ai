@@ -15,8 +15,9 @@ import {
 const sha = (value: string) => value.repeat(64);
 
 assert.equal(musicRoleForRoute("music_loop", "music_loop"), "primary_music");
-assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "meditation_bed");
-assert.equal(musicRoleForRoute("sleep", "music_loop"), "meditation_bed");
+assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "sleep_sound_bed");
+assert.equal(musicRoleForRoute("sleep", "music_loop"), "sleep_sound_bed");
+assert.equal(musicRoleForRoute("music_loop", "sleep"), "sleep_sound_bed");
 assert.equal(musicRoleForRoute("music_loop", "meditation"), "primary_music");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
@@ -65,7 +66,7 @@ assert.equal(
   "Music3 lyrics control must state its native instrumental mode while keeping structural tags; arrangement prose belongs in the structured caption",
 );
 assert.doesNotMatch(history.generation.lyricsControl, /Establish|Keep the|vocals|spoken/u);
-for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
+for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
   assert.match(
     instrumentalLyricsControl(role),
     /\[Instrumental\]/u,
@@ -114,6 +115,23 @@ assert.match(
   /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*genuine contrast passage[\s\S]*Reintroduce the groove[\s\S]*opening harmony/u,
   "the long primary-music prompt must attach its extra Music3 form to distinct arrangement functions, not a stack of generic depth adjectives",
 );
+
+const sleep = createChannelMusicProgram({
+  channelId: "channel-sleep",
+  channelIdentityFingerprint: sha("c"),
+  family: "sleep",
+  contentLaneKey: "music_loop",
+  topic: "Steady rain through a quiet night",
+  durationSec: 300,
+});
+assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
+assert.equal(sleep.mix.narrationPriority, false);
+assert.equal(sleep.mix.bodyMusicVol, 1, "sleep sound is a primary listening program, not a ducked narration bed");
+assert.equal(sleep.quality.minimumLraLu, 1, "sleep sound permits a deliberately stable dynamic range");
+assert.equal(sleep.generation.sections.length, 4);
+assert.match(sleep.generation.structuredCaption, /unattended overnight listening/u);
+assert.match(sleep.generation.structuredCaption, /no pulse, melodic arrival/u);
+assert.doesNotMatch(sleep.generation.structuredCaption, /call-and-response|late lift|genuine contrast passage/u);
 assert.ok(
   music3StructuredCaptionWordCount(lofi.generation.structuredCaption) >= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS
     && music3StructuredCaptionWordCount(lofi.generation.structuredCaption) <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
@@ -128,7 +146,7 @@ assert.match(
 const longMeditation = createChannelMusicProgram({
   channelId: "channel-calm-water",
   channelIdentityFingerprint: sha("e"),
-  family: "sleep",
+  family: "meditation",
   contentLaneKey: "ambient_guided",
   topic: "Still water at midnight",
   durationSec: 300,

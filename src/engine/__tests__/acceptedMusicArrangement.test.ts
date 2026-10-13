@@ -37,7 +37,7 @@ const digest = (value: unknown) => createHash("sha256").update(canonicalJson(val
 function validation(): void {
   const flat = draft();
   assert.deepEqual(AcceptedMusicArrangementDraftSchema.parse(flat), flat);
-  for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
+  for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
     for (const form of ["continuous", "through_composed", "sectional"] as const) {
       for (const ending of ["seamless_wrap", "natural_cadence"] as const) {
         for (const playback of ["repeat", "once"] as const) {

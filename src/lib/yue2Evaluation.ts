@@ -124,7 +124,7 @@ export type YuE2BoundEvaluationRequest = YuE2EvaluationRequest | YuE2AcceptedArr
 
 function sourceDurationPolicy(accepted: z.infer<typeof AcceptedMusicArrangementSchema>) {
   const arrangement = accepted.arrangement;
-  return arrangement.playback === "repeat" && ["primary_music", "meditation_bed"].includes(arrangement.role)
+  return arrangement.playback === "repeat" && ["primary_music", "meditation_bed", "sleep_sound_bed"].includes(arrangement.role)
     ? "natural_loop" as const : "exact" as const;
 }
 

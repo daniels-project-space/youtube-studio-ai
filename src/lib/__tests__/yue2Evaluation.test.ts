@@ -756,15 +756,15 @@ async function main(): Promise<void> {
         sourceBrief: { symbolicScorePolicy: "instrumental" } }), /requires a symbolic score/);
       assert.throws(() => validateYuE2EvaluationRequest({ ...current, job: { ...current.job, abc: undefined } }), /explicit score/);
     });
-    await test("natural source timing is restricted to repeat-playback primary and meditation music", () => {
-      for (const role of ["primary_music", "meditation_bed", "narration_bed", "short_form_bed"] as const) {
+    await test("natural source timing is restricted to repeat-playback primary, meditation, and sleep music", () => {
+      for (const role of ["primary_music", "meditation_bed", "sleep_sound_bed", "narration_bed", "short_form_bed"] as const) {
         for (const playback of ["once", "repeat"] as const) {
           const accepted = createAcceptedMusicArrangement({ ownerId: arrangement.ownerId, channelId: arrangement.channelId,
             runId: arrangement.runId, topic: arrangement.topic, sourceBrief: {},
             arrangement: { ...arrangement.arrangement, role, playback } });
           const scoped = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
           assert.ok(scoped.job.schema_version === 2);
-          const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed");
+          const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed" || role === "sleep_sound_bed");
           assert.equal(scoped.job.source_duration_policy, natural ? "natural_loop" : "exact");
           assert.deepEqual(validateYuE2EvaluationRequest(scoped), scoped);
           if (!natural) assert.throws(() => validateYuE2EvaluationRequest({ ...scoped,

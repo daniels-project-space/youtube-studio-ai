@@ -162,7 +162,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       { block: "composer_brief", version: composerVersion }, { block: "music_arrangement_plan" },
     ];
     for (const [index, arrangement] of [
-      draft("primary_music"), draft("narration_bed"), draft("meditation_bed"), draft("short_form_bed"),
+      draft("primary_music"), draft("narration_bed"), draft("meditation_bed"), draft("sleep_sound_bed"), draft("short_form_bed"),
       draft("narration_bed", true),
     ].entries()) {
       response = { arrangement, duckDb: -12, bedLufs: -22 };
@@ -210,7 +210,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       assert.equal(createYuE2AcceptedArrangementRequest({ arrangement: artifact, seed: 42, personalCreatorAcknowledged: true }).job.job_id, request.job.job_id);
       accepted.push(artifact);
     }
-    assert.equal(new Set(accepted.map((artifact) => artifact.fingerprint)).size, 5);
+    assert.equal(new Set(accepted.map((artifact) => artifact.fingerprint)).size, 6);
     assert.ok(prompts.slice(0, 5).every((prompt) => prompt.includes("continuous flat arrangement is valid")));
 
     for (const lease of ["missing", "denied"] as const) {
@@ -264,7 +264,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     const client = new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:1", bearerToken: "fixture-token-".padEnd(40, "x") });
     await assert.rejects(client.evaluate({ ...request, acceptedArrangement: changed }, { submit: true }));
     assert.equal(httpCalls, 0, "missing/tampered/unknown section data never reaches worker HTTP");
-    console.log("ACCEPTED MUSIC HANDOFF PASS - five real composer/planner/projection fixtures, strict refusals, typed artifact lineage, unchanged legacy composer; no network");
+    console.log("ACCEPTED MUSIC HANDOFF PASS - six real composer/planner/projection fixtures, strict refusals, typed artifact lineage, unchanged legacy composer; no network");
     return accepted;
   } finally {
     resetBlocks?.();

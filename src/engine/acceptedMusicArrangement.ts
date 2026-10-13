@@ -50,7 +50,7 @@ export const AcceptedMusicArrangementSectionSchema = z.object({
 export type AcceptedMusicArrangementSection = z.infer<typeof AcceptedMusicArrangementSectionSchema>;
 
 const arrangementControls = {
-  role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
+  role: z.enum(["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"]),
   requestedDurationSec: z.number().finite().int().min(10).max(300),
   form: z.enum(["continuous", "through_composed", "sectional"]),
   ending: z.enum(["seamless_wrap", "natural_cadence"]),
