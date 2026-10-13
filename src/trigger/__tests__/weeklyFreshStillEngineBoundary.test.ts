@@ -63,9 +63,7 @@ const producer = readFileSync(fileURLToPath(new URL("../planWeekPreparedImages.t
 const activeTask = producer.slice(producer.indexOf("export const planWeekPreparedImagesTask = task({"));
 assert.match(activeTask, /const staged = await stagePreparedImagesInRenderEngine\(manifest, payload\)/);
 assert.doesNotMatch(activeTask, /\brenderImages\(|\brejectNewNovitaGeneration\(/);
-const retiredBackup = producer.slice(producer.indexOf("export async function retiredLegacyPreparedImageGeneration("), producer.indexOf("export const planWeekPreparedImagesTask = task({"));
-assert.ok(retiredBackup.indexOf("rejectNewNovitaGeneration();") >= 0 &&
-  retiredBackup.indexOf("rejectNewNovitaGeneration();") < retiredBackup.indexOf("const result = await renderImages("),
-  "retained legacy code must always throw before a direct provider call");
+assert.doesNotMatch(producer, /\brenderImages\(|\btoNovitaPhaseProfile\(|\brejectNewNovitaGeneration\(/,
+  "the weekly still producer must not retain a direct legacy render route");
 
 console.log("weekly fresh stills submit only held Engine Final requests with exact prompt and geometry");
