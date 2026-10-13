@@ -92,6 +92,20 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+export function assertRenderEngineR2SignedUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Render Engine artifact URL is invalid");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash ||
+      !/^[a-z0-9-]+\.r2\.cloudflarestorage\.com$/u.test(url.hostname)) {
+    throw new Error("Render Engine artifact URL is not a trusted Cloudflare R2 object URL");
+  }
+  return url;
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -204,8 +218,7 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
   if (value.bucket === "render-engine" || value.key !== `projects/${config.projectName}/jobs/${value.executionJobId}/audio.wav`) {
     throw new Error("Render Engine YuE2 output key is outside the requesting project's native job scope");
   }
-  const url = new URL(value.url);
-  if (url.protocol !== "https:" || url.username || url.password) throw new Error("Render Engine YuE2 output URL must be HTTPS");
+  assertRenderEngineR2SignedUrl(value.url);
   for (const sidecar of NATIVE_SIDECARS) {
     const matches = value.nativeArtifactReads.filter((item) => record(item) && item.name === sidecar.name);
     const item = matches[0];
@@ -220,8 +233,9 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
         !item.readHeaders["If-Match"].length || item.readHeaders["If-Match"].length > 256) {
       throw new Error(`Render Engine YuE2 native sidecar readback is invalid: ${sidecar.name}`);
     }
-    const sidecarUrl = new URL(item.url);
-    if (sidecarUrl.protocol !== "https:" || sidecarUrl.username || sidecarUrl.password) {
+    try {
+      assertRenderEngineR2SignedUrl(item.url);
+    } catch {
       throw new Error(`Render Engine YuE2 native sidecar URL is invalid: ${sidecar.name}`);
     }
   }

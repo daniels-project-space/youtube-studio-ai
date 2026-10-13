@@ -3,7 +3,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes } from "@/lib/storage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { sha256BytesHex } from "@/lib/sha256";
-import type { RenderEngineYuE2Output, RenderEngineYuE2Request } from "@/lib/renderEngineYuE2StageClient";
+import { assertRenderEngineR2SignedUrl, type RenderEngineYuE2Output, type RenderEngineYuE2Request } from "@/lib/renderEngineYuE2StageClient";
 
 const MAX_AUDIO_SECONDS = 300;
 const MAX_WAV_BYTES = MAX_AUDIO_SECONDS * 48_000 * 2 * 4 + 4_096;
@@ -66,6 +66,7 @@ async function fetchVerified(url: string, expected: { bytes: number; sha256: str
   if (!Number.isSafeInteger(expected.bytes) || expected.bytes < 1 || !/^[a-f0-9]{64}$/u.test(expected.sha256)) {
     throw new Error("Render Engine artifact descriptor is invalid");
   }
+  assertRenderEngineR2SignedUrl(url);
   const response = await fetchImpl(url, { redirect: "error", headers: { accept: expected.contentType, ...headers }, signal: AbortSignal.timeout(120_000) });
   if (!response.ok || response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== expected.contentType.toLowerCase() ||
       Number(response.headers.get("content-length")) !== expected.bytes) throw new Error("Render Engine signed artifact response does not match its receipt");
