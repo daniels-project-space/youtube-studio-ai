@@ -134,6 +134,8 @@ assert.equal(sleep.generation.sections.length, 4);
 assert.match(sleep.generation.structuredCaption, /unattended overnight listening/u);
 assert.match(sleep.generation.structuredCaption, /no pulse, melodic arrival/u);
 assert.match(sleep.generation.structuredCaption, /unmetered and beatless/u);
+assert.match(sleep.generation.structuredCaption, /diffuse, sustained background texture/u);
+assert.doesNotMatch(sleep.generation.structuredCaption, /The melodic lead belongs/u);
 assert.match(sleep.generation.structuredCaption, /override any conflicting channel or composer direction/u);
 assert.doesNotMatch(
   sleep.generation.structuredCaption,

@@ -131,6 +131,8 @@ async function main() {
       } },
     });
     assert.match(sleepPrompt, /unmetered and beatless/u);
+    assert.match(sleepPrompt, /diffuse, sustained background texture/u);
+    assert.doesNotMatch(sleepPrompt, /The melodic lead belongs/u);
     assert.match(sleepPrompt, /warm sustained pad/u);
     assert.doesNotMatch(sleepPrompt, /\b120\s*BPM\b|driving orchestral percussion|strong pulse|resolves back to the tonic/iu);
     assert.doesNotMatch(sleepPrompt, /flat dynamics with no section development|abrupt key, tempo|melody that masks narration/u);

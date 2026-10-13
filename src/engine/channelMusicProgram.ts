@@ -359,6 +359,11 @@ function structuredCaption(input: {
       `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. ` +
       `Additional composer direction: ${input.composerDirection}`;
+  const vocalDetails = beatlessSleep
+    ? "Instrumental sleep soundscape only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. " +
+      `Keep ${featuredPalette} as diffuse, sustained background texture; no featured or melodic lead.`
+    : `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
+      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`;
   return [
     "### Creative Foundation",
     `A ${input.moodArc} ${input.genre} instrumental${beatlessSleep ? "" : ` at ${tempo} BPM`}: “${input.topic}”. ` +
@@ -368,8 +373,7 @@ function structuredCaption(input: {
     globalMetadata,
     "",
     "### Vocal Details",
-    `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
-      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`,
+    vocalDetails,
     "",
     "### Arrangement",
     input.sections.map((section) =>
