@@ -182,8 +182,10 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
       !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
       payload.output.bucket === "render-engine" || payload.output.prefix !== `projects/${config.projectName}` ||
       !record(payload.endpoints) ||
-      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
-    throw new Error("Render Engine project integration handshake returned an invalid project output binding or unsupported YuE2 route");
+      payload.endpoints.yue2MusicJob !== "/client/yue2-jobs" ||
+      !record(payload.contracts) ||
+      payload.contracts.yue2MusicJob !== "scored-source-abc-v2") {
+    throw new Error("Render Engine project integration handshake returned an invalid output binding or unsupported YuE2 route contract");
   }
 }
 

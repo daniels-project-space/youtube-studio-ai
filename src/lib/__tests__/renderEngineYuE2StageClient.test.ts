@@ -53,7 +53,8 @@ test("verifies the authenticated project, output binding, and YuE2 route before 
     requestUrl = new URL(String(input));
     authorization = new Headers(init?.headers).get("authorization");
     return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
-      endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+      endpoints: { yue2MusicJob: "/client/yue2-jobs" },
+      contracts: { yue2MusicJob: "scored-source-abc-v2" } });
   };
   await verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl });
   assert.equal(requestUrl?.origin, RENDER_ENGINE_STUDIO_SITE);
@@ -67,10 +68,22 @@ test("rejects a legacy YuE2 route before any workflow write", async () => {
   const fetchImpl: typeof fetch = async () => {
     calls += 1;
     return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
-      endpoints: { yue2MusicJob: "/client/music3-jobs" } });
+      endpoints: { yue2MusicJob: "/client/music3-jobs" },
+      contracts: { yue2MusicJob: "scored-source-abc-v2" } });
   };
-  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route/);
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route contract/);
   assert.equal(calls, 1);
+});
+
+test("rejects an older route that exposes the path but not the scored-source contract", async () => {
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
+      endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+  };
+  await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route contract/);
+  assert.equal(calls, 1, "the handshake refuses the incompatible route before any workflow write");
 });
 
 test("rejects a shared or foreign project output binding before workflow creation", async () => {
@@ -81,9 +94,10 @@ test("rejects a shared or foreign project output binding before workflow creatio
     let calls = 0;
     const fetchImpl: typeof fetch = async () => {
       calls += 1;
-      return response({ projectId: jobId, output, endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+      return response({ projectId: jobId, output, endpoints: { yue2MusicJob: "/client/yue2-jobs" },
+        contracts: { yue2MusicJob: "scored-source-abc-v2" } });
     };
-    await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /invalid project output binding/);
+    await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /invalid output binding/);
     assert.equal(calls, 1);
   }
 });
