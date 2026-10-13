@@ -5,6 +5,7 @@ import { setTimeout } from "node:timers/promises";
 import { studioErnieReferenceComfyProfile, STUDIO_ERNIE_REFERENCE_COMFY } from "../src/engine/studioErnieComfyProfile";
 import { StudioZImageRequestSchema } from "../src/engine/studioZImageRequest";
 import { createHash } from "node:crypto";
+import { bootstrapSecrets } from "../src/lib/bootstrap";
 
 function summarizeProfile(profile: Record<string, unknown>) {
   const summarizeAction = (value: unknown) => {
@@ -42,6 +43,7 @@ async function main() {
   if (extra.length || !["inspect", "prepare-audio", "prepare-zimage", "stage-zimage", "observe", "render-audio", "register-comfy", "prepare-reference-comfy", "import-voice-reference"].includes(command)) {
     throw new Error("Usage: studio-render-engine.ts inspect | prepare-audio MODEL | prepare-zimage | stage-zimage REQUEST_JSON | observe JOB_ID | render-audio REQUEST_JSON | register-comfy SPEC_JSON | prepare-reference-comfy | import-voice-reference SOURCE_JSON");
   }
+  await bootstrapSecrets(() => undefined, { services: ["render-engine"], required: ["RENDER_MANAGEMENT_API_KEY"] });
   const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
   if (command === "prepare-zimage") {
     console.log(JSON.stringify({ project: STUDIO_ENGINE_PROJECT, bucket: STUDIO_ENGINE_BUCKET, ...await client.prepareZImage() }));
