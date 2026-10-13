@@ -178,6 +178,22 @@ function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string
   return issues;
 }
 
+/** Keep the critic anchored to the creator's declared identity, not just research. */
+export function styleDNAIdentityAuditContext(
+  input: Pick<StyleDNAInput, "family" | "name" | "programBrief" | "persona" | "styleGrammar">,
+): string {
+  const program = input.programBrief
+    ? channelProgramBriefPositioningText(input.programBrief)
+    : undefined;
+  return [
+    `Channel name: ${input.name}`,
+    `Family: ${input.family}`,
+    program ? `Declared program:\n${program}` : "",
+    input.persona ? `Creator-declared persona: ${input.persona}` : "",
+    input.styleGrammar ? `Creator-declared style grammar: ${input.styleGrammar}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 /** Families that narrate (so a missing narrative block is a real grounding gap). */
 const NARRATED: ReadonlySet<FamilyKey> = new Set<FamilyKey>([
   "narrated_stock",
@@ -377,6 +393,8 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
             prompt: [
               `Audit this channel's STYLE DNA for GENUINE specificity and fidelity to the research.`,
               `It MUST be custom to THIS channel — generic boilerplate that could describe any channel is a FAILURE.`,
+              `AUTHORITATIVE CHANNEL IDENTITY (must not be displaced by competitor research):\n${styleDNAIdentityAuditContext(input)}`,
+              `Judge identity fit separately from research fidelity. The recurring subject, setting, motifs, audio and narrative voice must express the declared program and persona; research may inform execution and packaging, not replace them.`,
               g.text ? `RESEARCH THE DNA SHOULD REFLECT (reverse-engineered from real top performers):\n${g.text}` : `No external research was available — judge whether the DNA is at least vividly genre-specific.`,
               `DNA DRAFT:\n${JSON.stringify(raw)}`,
               `Score 0..1 — 1.0 = a concrete locked recurring subject + setting, palette/motifs/motion that clearly derive from the research and the niche's real conventions; 0.0 = vague filler.`,
