@@ -6,6 +6,37 @@ import { studioErnieReferenceComfyProfile, STUDIO_ERNIE_REFERENCE_COMFY } from "
 import { StudioZImageRequestSchema } from "../src/engine/studioZImageRequest";
 import { createHash } from "node:crypto";
 
+function summarizeProfile(profile: Record<string, unknown>) {
+  const summarizeAction = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const action = value as Record<string, unknown>;
+    return Object.fromEntries(["owner", "code", "callerAction", "blockers"].flatMap((key) =>
+      Object.hasOwn(action, key) ? [[key, action[key]]] : [],
+    ));
+  };
+  const routes = Array.isArray(profile.sources) ? profile.sources.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const route = value as Record<string, unknown>;
+    return Object.fromEntries([
+      "provider", "state", "dispatchable", "executorReady", "gpuCapacityFree", "blockers",
+      "modelPresent", "runtimeInstalled", "finalQualified", "physicalRuntimeReady", "capacityState",
+    ].flatMap((key) => Object.hasOwn(route, key) ? [[key, route[key]]] : []).concat(
+      summarizeAction(route.nextAction) ? [["nextAction", summarizeAction(route.nextAction)]] : [],
+    ));
+  }).filter(Boolean) : undefined;
+  return {
+    profileId: profile.profileId,
+    acceptsRequests: profile.acceptsRequests,
+    executorReady: profile.executorReady,
+    setupStatus: profile.setupStatus,
+    admissionStatus: profile.admissionStatus,
+    gpuCapacityFree: profile.gpuCapacityFree,
+    routeResolutionOwner: profile.routeResolutionOwner,
+    ...(summarizeAction(profile.nextAction) ? { nextAction: summarizeAction(profile.nextAction) } : {}),
+    ...(routes ? { routes } : {}),
+  };
+}
+
 async function main() {
   const [command, value, ...extra] = process.argv.slice(2);
   if (extra.length || !["inspect", "prepare-audio", "prepare-zimage", "stage-zimage", "observe", "render-audio", "register-comfy", "prepare-reference-comfy", "import-voice-reference"].includes(command)) {
@@ -63,7 +94,15 @@ async function main() {
     console.log(JSON.stringify(receipt));
   } else if (command === "register-comfy") {
     const registered = await client.registerComfy(JSON.parse(await readFile(value, "utf8")));
-    console.log(JSON.stringify(registered));
+    console.log(JSON.stringify({
+      phase: "registered-awaiting-live-dispatch-check",
+      renderQualification: {
+        executionReady: registered.executionReady,
+        modelFilesVerified: registered.readback.modelFilesVerified === true,
+        dispatchNotAttempted: true,
+      },
+      ...registered,
+    }));
   } else if (command === "render-audio") {
     const input = JSON.parse(await readFile(value, "utf8"));
     const recoveryFile = `${value}.engine-admission.json`;
@@ -85,7 +124,18 @@ async function main() {
     console.log(JSON.stringify({ phase: "verified", ...receipt }));
   } else if (command === "prepare-audio") {
     const workflow = await client.prepareAudio(value as StudioEngineAudioModel);
-    console.log(JSON.stringify({ project: STUDIO_ENGINE_PROJECT, bucket: STUDIO_ENGINE_BUCKET, model: value, ...workflow }));
+    const storage = await client.modelStorage() as { profiles?: Record<string, unknown>[] };
+    const profile = storage.profiles?.find((candidate) => candidate.profileId === value);
+    if (!profile) throw new Error(`Engine model-storage has no ${value} profile`);
+    const readiness = summarizeProfile(profile);
+    console.log(JSON.stringify({
+      project: STUDIO_ENGINE_PROJECT,
+      bucket: STUDIO_ENGINE_BUCKET,
+      model: value,
+      phase: profile.executorReady === true ? "workflow-registered-awaiting-live-dispatch-check" : "workflow-registered-executor-not-ready",
+      readiness,
+      ...workflow,
+    }));
   } else if (command === "observe") {
     console.log(JSON.stringify(await client.observe(value)));
   } else {
@@ -95,9 +145,7 @@ async function main() {
     if (!storage || typeof storage !== "object" || !Array.isArray((storage as { profiles?: unknown }).profiles)) {
       throw new Error("Invalid Engine model storage response");
     }
-    const profiles = (storage as { profiles: Record<string, unknown>[] }).profiles.map(profile => ({
-      profileId: profile.profileId, acceptsRequests: profile.acceptsRequests, executorReady: profile.executorReady,
-    }));
+    const profiles = (storage as { profiles: Record<string, unknown>[] }).profiles.map(summarizeProfile);
     console.log(JSON.stringify({ project: STUDIO_ENGINE_PROJECT, bucket: STUDIO_ENGINE_BUCKET,
       authenticated: true, sections: Object.keys(integration), profiles }));
   }
