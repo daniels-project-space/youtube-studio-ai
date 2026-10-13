@@ -1155,9 +1155,13 @@ export function createQaScriptBlock(
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");
     const scriptForRoute = ctx.store["script"] as {
+      narrationText?: unknown;
       programRouteFingerprint?: unknown;
       serializedProgramEpisodeContextFingerprint?: unknown;
     } | undefined;
+    if (scriptForRoute !== undefined && scriptForRoute.narrationText !== narration) {
+      throw new Error("qa_script FAILED: narrationText differs from the script_gen output");
+    }
     if (ctx.store["documentaryEpisodePlan"] !== undefined) {
       if (!programRoute) {
         throw new Error("qa_script FAILED: documentary source episode requires its frozen program route");

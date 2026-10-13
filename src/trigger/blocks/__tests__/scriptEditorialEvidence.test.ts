@@ -37,9 +37,15 @@ async function main() {
         choices: [{ message: { content: JSON.stringify({ pass: true, issues: [] }) } }],
         usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cost: 0.003 } });
     };
+    await assert.rejects(qaScript.run({ ...context, store: {
+      ...context.store,
+      script: { narrationText: "A different narration", hook: "metadata from the other script" },
+    } }), /qa_script FAILED: narrationText differs from the script_gen output/);
+    assert.equal(criticCalls, 0, "a mismatched script handoff fails before buying a critic verdict");
+
     for (const narrationText of ["Seed Atlas recorded a strong second week.",
       claim.replace("35", "350"), "Seed Atlas recorded 20 sprouts in week one. And 35 in week two."]) {
-      const before = criticCalls;
+      const before: number = criticCalls;
       await assert.rejects(createModelUsageScope().run(() => qaScript.run({ ...context,
         store: { ...context.store, narrationText } })), /qa_script FAILED: editorial evidence/);
       assert.equal(criticCalls, before, "missing/changed/split reviewed claims fail before buying a critic verdict");
