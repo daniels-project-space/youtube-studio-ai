@@ -435,16 +435,15 @@ read-only assessment; no provider resource, production alias, schedule, or
 customer pipeline was changed.
 
 - Studio production is still the healthy `5033ba839d1e6fc76a6626d448fbb7d6384f55c5`
-  deployment. The migration branch is 34 commits ahead at
-  `ad698ce10a35106fff719127ad95f69eb42ef68e` and has a READY protected preview.
-  Same-project authenticated preview checks returned `/api/health` `ok: true`
-  with this exact revision and `/channels` HTTP 200; signed-in owner UI
-  acceptance was not performed.
-  The Render Engine YuE2 integration is a
-  READY preview at `fa730d38b212d5287d1eda57cbdb80208eff27c7`; Engine production
-  is `d770f377481eb6cb2422366df3f492d1374d6e60`. The integration branch is three
-  production commits behind and must absorb the current production baseline
-  before it can be considered release-ready.
+  deployment. The migration branch is pushed at `0ea33d03a4c5819b084dffd7c4f3c2720bdfc4aa`;
+  its last runtime preview `ad698ce10a35106fff719127ad95f69eb42ef68e` is READY.
+  Same-project authenticated checks returned `/api/health` `ok: true` for that
+  runtime revision and `/channels` HTTP 200; the docs/test-only push correctly
+  skipped a new Vercel build. Signed-in owner UI acceptance was not performed.
+  The Render Engine integration branch is pushed at `be02a1e9`, with current
+  production base `d770f377481eb6cb2422366df3f492d1374d6e60` merged. Its bounded
+  cross-module suite passes 127/127 and Engine typecheck passes; it is still a
+  preview branch, not a production deployment.
 - The authenticated Engine inspection confirmed the isolated project
   `youtube-studio-render` and output bucket `re-youtube-studio-render-p2w18g596q`.
   H3 and Qwen3 TTS have qualified routes. YuE2 accepts the request contract but
@@ -454,6 +453,10 @@ customer pipeline was changed.
   establish that this project cannot currently submit a qualified YuE2 job.
   Music3, Fish, image/upscale and reconstruction routes likewise include
   model-installed or prepared states that are not final qualification.
+  The source route matrix has no registered RunPod OCI executor for YuE2. The
+  live project summary reports RunPod `dispatchable`, but still reports no
+  physical-runtime readiness or Final qualification; this API/source readiness
+  difference must be reconciled before a paid test.
 - The latest recorded portrait Comfy reference readback (12 October) was
   `executionReady: true` with `modelFilesVerified: false`; it was not re-read
   in this assessment. Registration and an accepting API are not proof of a
@@ -467,19 +470,21 @@ customer pipeline was changed.
 - The module-contract test's static version resolver was corrected to follow
   aliased imported string constants while retaining exact version resolution.
   The test now reaches the real existing failure: `narrated_stock` defaults to
-  a `$3.5282` compiler reservation while its creator floor is `$2`. Neither
-  value nor the assertion was changed. This remains an admission/release gate.
+  a `$3.5282` compiler reservation while its creator floor is `$2`. The cost
+  breakdown confirms `$2.52` even at the family's three-minute standard length.
+  Neither budget nor quality was changed; this remains an admission/release gate.
 - The separately named `studio-render-engine-migration-20261012` Vercel project
   has no Git link, deployments, ignored-build command, or build-queue setting.
   It is not the release target. The existing `youtube-studio-ai` project remains
   Git-linked and has its ignored-build guard and `WAIT_FOR_NAMESPACE_QUEUE`;
   its production alias has not been advanced to this migration.
 
-TypeScript passes. The bounded eight-file Node test run passed 12 of 13 suites;
-the remaining failure is the unchanged `narrated_stock` budget mismatch above.
+Studio TypeScript passes. Its focused Node test run passed 12 of 13 suites; the
+remaining failure is the unchanged `narrated_stock` budget mismatch above.
 The migration is not ready for production or a complete fresh-channel quality
-claim. Keep schedules, publishing and production aliases unchanged. Next, bring
-the Engine integration branch to the current production base, resolve the
-approved storage/runtime qualification for the exact YuE2 route within the
-provider disk cap, then produce and owner-audition one retained new-channel
-output before final deployment qualification.
+claim. Keep schedules, publishing and production aliases unchanged. Next,
+reconcile the YuE2 executor/readiness contract and approved storage/runtime
+qualification within the provider disk cap, resolve the narrated-stock budget
+contract without changing its approved spend floor or quality, then produce and
+owner-audition one retained new-channel output before final deployment
+qualification.
