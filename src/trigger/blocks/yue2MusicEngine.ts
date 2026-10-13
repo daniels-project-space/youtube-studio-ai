@@ -49,7 +49,10 @@ const block: Block & { version: string } = {
       throw new Error("Render Engine YuE2 requires finite run/stage budget and active paid-execution authority");
     }
     if (params.seed > 0xffff_ffff) throw new Error("Render Engine YuE2 seed must fit the pinned uint32 worker contract");
-    await bootstrapSecrets(() => undefined, { services: ["cloudflare"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] });
+    await bootstrapSecrets(() => undefined, {
+      services: ["cloudflare", "render-engine"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "RENDER_ENGINE_PROJECT_TOKEN"],
+    });
     const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
     if (!/^[a-f0-9]{64}$/u.test(projectCapability)) throw new Error("Render Engine Studio project capability is unavailable");
 

@@ -10,6 +10,7 @@ import { hydrateEnv } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
+  "render-engine", // RENDER_ENGINE_PROJECT_TOKEN (Studio project capability)
   // Studio owns its OpenRelay credentials here; the shared provider namespace
   // belongs to other projects and must never shadow the Studio key.
   "youtube", // YOUTUBE_* plus OPENRELAY_API_KEY / OPENRELAY_ORG_ID

@@ -8,6 +8,7 @@ async function main() {
     "BOOTSTRAP_SHARED_FIXTURE", "BOOTSTRAP_RETRY_FIXTURE", "BOOTSTRAP_MISSING_FIXTURE",
     "TELEGRAM_CHAT_ID", "TELEGRAM_ADMIN_CHAT_ID",
     "OPENRELAY_API_KEY", "OPENRELAY_ORG_ID",
+    "RENDER_ENGINE_PROJECT_TOKEN",
   ];
   const savedEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
   const reads = new Map<string, number>();
@@ -38,6 +39,8 @@ async function main() {
         ? { SALAD_API_KEY: secretSentinel, SALAD_ORG: "vault-org", SALAD_PROJECT: "fixture-project" }
         : service === "openrouter"
           ? { BOOTSTRAP_RETRY_FIXTURE: "recovered" }
+        : service === "render-engine"
+          ? { RENDER_ENGINE_PROJECT_TOKEN: "a".repeat(64) }
           : service === "youtube"
             ? { OPENRELAY_API_KEY: secretSentinel, OPENRELAY_ORG_ID: "studio-org" }
             : { BOOTSTRAP_SHARED_FIXTURE: service };
@@ -65,6 +68,12 @@ async function main() {
     assert.equal(process.env.SALAD_API_KEY, secretSentinel);
     assert.deepEqual(await bootstrapSecrets(log, { services: ["salad"] }), []);
     assert.equal(reads.get("salad"), 2, "successful hydration must remain cached");
+
+    await bootstrapSecrets(log, {
+      services: ["render-engine"], required: ["RENDER_ENGINE_PROJECT_TOKEN"],
+    });
+    assert.equal(reads.get("render-engine"), 1, "Render Engine capability is loaded only from its dedicated vault service");
+    assert.match(process.env.RENDER_ENGINE_PROJECT_TOKEN ?? "", /^[a-f0-9]{64}$/u);
 
     const beforeRejectedService = [...reads.entries()];
     await assert.rejects(bootstrapSecrets(log, {
