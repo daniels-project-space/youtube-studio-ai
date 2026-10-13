@@ -3,7 +3,7 @@ import { z } from "zod";
 import { canonicalJson } from "./canonicalJson";
 import { StudioZImageRequestSchema, STUDIO_ZIMAGE_PROFILE_SHA256, type StudioZImageRequest } from "../engine/studioZImageRequest";
 import { StudioYuE2ScoredRequestSchema } from "../engine/studioYuE2EngineSource";
-import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_ZIMAGE_WORKFLOW, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
+import { STUDIO_ENGINE_AUDIO_WORKFLOWS, STUDIO_ENGINE_ERNIE_WORKFLOW, STUDIO_ENGINE_ZIMAGE_WORKFLOW, STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 export { STUDIO_ENGINE_PROJECT, STUDIO_ENGINE_BUCKET } from "./studioRenderEngineWorkflows";
 const BASE = `https://render-engine-sable.vercel.app/api/v1/projects/${STUDIO_ENGINE_PROJECT}`;
 const nativeRoutes = {
@@ -16,6 +16,28 @@ export type StudioEngineAudioModel = keyof typeof nativeRoutes;
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const JobId = z.string().regex(/^[a-z0-9]{32}$/);
 const Workflow = z.object({ workflowId: JobId, profileRevisionSha256: Hash });
+export const STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT = {
+  version: 2, width: 1376, height: 768, steps: 50, cfg: 4, precision: "bf16",
+  promptEnhancer: "ernie-native-v1", modelManifestSha256: STUDIO_ENGINE_ERNIE_WORKFLOW.profileRevisionSha256,
+  workerSha256: "de0e6eed87a1a7568e92a78cb3b12e3f947926145eb418e317bc39ef334d66e7",
+} as const;
+const ErnieCandidate = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),
+  prompt: z.string().trim().min(3).max(20_000), seed: z.number().int().min(0).max(0xffffffff),
+  width: z.literal(1376), height: z.literal(768) }).strict();
+const ErnieImageContract = z.object({ version: z.literal(2), width: z.literal(1376), height: z.literal(768),
+  steps: z.literal(50), cfg: z.literal(4), precision: z.literal("bf16"), promptEnhancer: z.literal("ernie-native-v1"),
+  modelManifestSha256: Hash, workerSha256: Hash }).strict();
+const ErnieRequest = z.object({ version: z.literal(2), idempotencyKey: z.string().regex(/^[A-Za-z0-9:_-]{16,200}$/),
+  sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/), candidates: z.array(ErnieCandidate).min(1).max(16),
+  output: z.object({ contentType: z.literal("image/png") }).strict(), maxCostUsd: z.number().finite().nonnegative(),
+  profileRevisionSha256: Hash, imageContract: ErnieImageContract, imageContractSha256: Hash }).strict();
+const ErnieAdmission = z.object({ jobId: JobId, state: z.string().min(1), manifestSha256: Hash });
+const ErnieStatus = z.object({ jobId: JobId, workflowId: JobId, profileId: z.literal("ernie-image"), requestSha256: Hash,
+  status: z.string().min(1), outputRetired: z.boolean() }).passthrough();
+const ErnieOutputRead = z.object({ candidateId: z.string(), bucket: z.literal(STUDIO_ENGINE_BUCKET), key: z.string(),
+  bytes: z.number().int().positive(), sha256: Hash, contentType: z.literal("image/png"), verifiedAt: z.number().positive(),
+  url: z.string().url(), requiredHeaders: z.object({ "If-Match": z.string().min(1).max(160) }).strict(),
+  expiresInSeconds: z.number().positive() }).strict();
 const NativeArtifact = z.object({ name: z.string(), key: z.string(), bytes: z.number().int().positive(),
   sha256: Hash, contentType: z.string() }).strict();
 const NativeRead = NativeArtifact.extend({ url: z.string().url(),
@@ -183,6 +205,79 @@ export class StudioRenderEngineClient {
       throw new Error("Z-Image staged job identity changed");
     }
     return status;
+  }
+
+  async submitErnieBatch(requestInput: unknown) {
+    const request = ErnieRequest.parse(requestInput);
+    if (request.profileRevisionSha256 !== STUDIO_ENGINE_ERNIE_WORKFLOW.profileRevisionSha256 ||
+        request.imageContract.modelManifestSha256 !== request.profileRevisionSha256 ||
+        request.imageContract.workerSha256 !== STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT.workerSha256 ||
+        request.imageContractSha256 !== createHash("sha256").update(JSON.stringify(request.imageContract)).digest("hex")) {
+      throw new Error("ERNIE request differs from Studio's registered native image contract");
+    }
+    const raw = await this.request("ernie-batches", { workflowId: STUDIO_ENGINE_ERNIE_WORKFLOW.workflowId, request }, true);
+    try {
+      const admission = ErnieAdmission.parse(raw);
+      if (admission.manifestSha256 !== createHash("sha256").update(JSON.stringify(request)).digest("hex")) {
+        throw new Error("ERNIE admission digest changed");
+      }
+      return admission;
+    } catch { throw new StudioEngineError(null, true); }
+  }
+
+  async observeErnieBatch(admission: z.infer<typeof ErnieAdmission>) {
+    const status = ErnieStatus.parse(await this.request(`jobs?jobId=${JobId.parse(admission.jobId)}`));
+    if (status.jobId !== admission.jobId || status.workflowId !== STUDIO_ENGINE_ERNIE_WORKFLOW.workflowId ||
+        status.requestSha256 !== admission.manifestSha256) throw new Error("ERNIE job identity changed");
+    return status;
+  }
+
+  async ernieBatchReadiness(jobId: string) {
+    const result = z.object({ jobId: JobId, state: z.string().min(1), dispatchable: z.boolean().optional(),
+      finalQualified: z.boolean().optional(), blockers: z.array(z.string()).optional() }).passthrough()
+      .parse(await this.request(`ernie-batches/readiness?jobId=${JobId.parse(jobId)}`));
+    if (result.jobId !== jobId) throw new Error("ERNIE readiness job identity changed");
+    return result;
+  }
+
+  async releaseErnieBatch(jobId: string, readiness: { jobId: string; dispatchable?: boolean; finalQualified?: boolean }) {
+    if (readiness.jobId !== jobId || (readiness.dispatchable !== true && readiness.finalQualified !== true)) {
+      throw new Error("ERNIE release requires the same job's current Final dispatch qualification");
+    }
+    const result = z.object({ state: z.string().min(1), released: z.boolean() })
+      .parse(await this.request("ernie-batches/release", { jobId: JobId.parse(jobId) }));
+    return result;
+  }
+
+  async verifiedErnieBatchOutput(admission: z.infer<typeof ErnieAdmission>, candidateId: string) {
+    const result = z.object({ bucket: z.literal(STUDIO_ENGINE_BUCKET), candidates: z.array(ErnieOutputRead).min(1).max(16),
+      imageContract: ErnieImageContract, imageContractSha256: Hash }).passthrough()
+      .parse(await this.request(`ernie-batches/output?jobId=${admission.jobId}`));
+    if (result.candidates.length !== 1 || JSON.stringify(result.imageContract) !== JSON.stringify(STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT) ||
+        result.imageContractSha256 !== createHash("sha256")
+      .update(JSON.stringify(STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT)).digest("hex")) {
+      throw new Error("ERNIE verified output set differs from Studio's single-candidate request");
+    }
+    const receipt = result.candidates[0]!;
+    const expectedKey = `projects/${STUDIO_ENGINE_PROJECT}/workflows/${STUDIO_ENGINE_ERNIE_WORKFLOW.workflowId}/jobs/${admission.jobId}/outputs/candidates/${candidateId}.png`;
+    if (receipt.candidateId !== candidateId || receipt.key !== expectedKey ||
+        receipt.key.split("/").some(part => !part || part === "." || part === "..") || receipt.bytes > 50_000_000) {
+      throw new Error("ERNIE candidate receipt identity or project key changed");
+    }
+    const url = new URL(receipt.url);
+    if (url.protocol !== "https:" || !url.hostname.endsWith(".r2.cloudflarestorage.com") || url.username || url.password || url.hash) {
+      throw new Error("ERNIE signed output URL is outside the owned R2 contract");
+    }
+    const bytes = await this.download(receipt.url, receipt.bytes, receipt.requiredHeaders);
+    const png = Buffer.from(bytes);
+    if (bytes.byteLength !== receipt.bytes || createHash("sha256").update(bytes).digest("hex") !== receipt.sha256 ||
+        bytes.byteLength < 24 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+        png.toString("ascii", 12, 16) !== "IHDR" ||
+        png.readUInt32BE(16) !== STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT.width ||
+        png.readUInt32BE(20) !== STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT.height) {
+      throw new Error("ERNIE PNG bytes, hash, or native dimensions differ from the verified receipt");
+    }
+    return { ...receipt, contentBytes: new Uint8Array(bytes) };
   }
 
   /** Storage import only; casting still owns consent evidence and voice quality. */

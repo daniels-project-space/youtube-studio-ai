@@ -10,6 +10,10 @@ export const STUDIO_ENGINE_ZIMAGE_WORKFLOW = {
   workflowId: "jn739qpstjjme9afp2zw3a07dh8g580s",
   profileRevisionSha256: "c5fa2752adcbefa3f28ac80eba06335e841c05e0d5bd1bb694c414cdd8488b1b",
 } as const;
+export const STUDIO_ENGINE_ERNIE_WORKFLOW = {
+  workflowId: "jn7avb23n9k2kpvtban850y2ts8g60kv",
+  profileRevisionSha256: "64686e89d2d844ea5e4547861afb2a3e99489aa64d523389567ebafc57293cbc",
+} as const;
 export const STUDIO_ENGINE_AUDIO_WORKFLOWS = {
   yue2: {
     workflowId: "jn7317xe2gbj997hcrq91cjsrh8g52n2",

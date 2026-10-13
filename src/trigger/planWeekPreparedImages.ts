@@ -8,6 +8,7 @@ import { stageH3SceneBatchInRenderEngine } from "@/lib/renderEngineH3SceneBatchC
  * fully verified sidecar and never submits the same image wave twice.
  */
 import { task } from "@trigger.dev/sdk";
+import { wait } from "@trigger.dev/sdk/v3";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
@@ -37,12 +38,13 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
-import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
+import type { Shot } from "@/lib/novitaRenderFarm";
+import { StudioRenderEngineClient, STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT } from "@/lib/studioRenderEngineClient";
 import { admitStudioBatchInRenderEngine, bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 import { STUDIO_ENGINE_API_BASE as RENDER_ENGINE_SITE, STUDIO_ENGINE_PROJECT as RENDER_ENGINE_PROJECT_NAME } from "@/lib/studioRenderEngineWorkflows";
+import { STUDIO_ENGINE_ERNIE_WORKFLOW } from "@/lib/studioRenderEngineWorkflows";
 
 export interface PlanWeekPreparedImageShot {
   id: string;
@@ -71,6 +73,31 @@ export interface PlanWeekPreparedImagesArgs {
   negative?: string;
   director?: string;
   maxCostUsd: number;
+}
+
+type ErniePreparedCandidate = Readonly<{ id: string; shotId: string; candidateIndex: number; seed: number; prompt: string }>;
+
+function buildErniePreparedCandidates(payload: PlanWeekPreparedImagesArgs, profile: GenerationProfile, shots: Shot[]): ErniePreparedCandidate[] {
+  return shots.flatMap((shot, shotIndex) => Array.from({ length: shot.candidateCount ?? profile.image.candidates }, (_, candidateIndex) => {
+    const negative = [payload.negative, shot.negative].filter((part) => part?.trim()).join(", ");
+    const prompt = [shot.prompt, payload.style, payload.director, negative ? `Avoid: ${negative}` : ""]
+      .filter((part) => part?.trim()).join(". ");
+    if (prompt.length < 3 || prompt.length > 20_000) throw new Error(`weekly prepared image prompt for ${shot.id} is outside the Engine bound`);
+    return { id: `s${shotIndex}-c${candidateIndex}`, shotId: shot.id, candidateIndex,
+      seed: ((shot.seed ?? 0) + candidateIndex * 10_000) % 4_294_967_296, prompt };
+  }));
+}
+
+function chunks<T>(items: readonly T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+async function mapChunks<T, R>(items: readonly T[], size: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const result: R[] = [];
+  for (const group of chunks(items, size)) result.push(...await Promise.all(group.map(map)));
+  return result;
 }
 
 type PreparedH3Batch = {
@@ -544,9 +571,9 @@ export const planWeekPreparedImagesTask = task({
       const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
       return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
-    rejectNewNovitaGeneration();
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
+    await bootstrapSecrets(() => undefined, { services: ["render-engine"], required: ["RENDER_MANAGEMENT_API_KEY"] });
     const shots: Shot[] = payload.shots.map((shot) => ({
       id: shot.id,
       prompt: shot.prompt,
@@ -560,18 +587,52 @@ export const planWeekPreparedImagesTask = task({
       ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
     }));
     await claimPreparedGeneration("images", manifest, { payload, shots, profile });
-    const result = await renderImages({
-      prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
-      shots,
-      profile: toNovitaPhaseProfile(profile, "image"),
-      ...(payload.style ? { style: payload.style } : {}),
-      ...(payload.negative ? { negative: payload.negative } : {}),
-      ...(payload.director ? { director: payload.director } : {}),
-      maxCostUsd: payload.maxCostUsd,
-      lifecycle: { ownerId: payload.ownerId, channelId: payload.channelId, runId: `plan-week-images-${payload.batchId}-${payload.itemId}`, blockId: "plan_week_prepared_images" },
+    const client = new StudioRenderEngineClient(process.env.RENDER_MANAGEMENT_API_KEY ?? "");
+    const candidateSpecs = buildErniePreparedCandidates(payload, profile, shots);
+    if (!candidateSpecs.length) throw new Error("weekly prepared images require at least one candidate");
+    const imageContractSha256 = sha256Hex(JSON.stringify(STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT));
+    const perCandidateCeilingUsd = payload.maxCostUsd / candidateSpecs.length;
+    const scopeDigest = sha256Hex(canonicalJson({ ownerId: payload.ownerId, channelId: payload.channelId,
+      batchId: payload.batchId, itemId: payload.itemId, manifestSha256: planWeekPreparationManifestSha256(manifest) }));
+    const admissions = await mapChunks(candidateSpecs, 6, async (candidate) => {
+      const request = {
+        version: 2 as const,
+        idempotencyKey: `studio-ernie:${sha256Hex(`${scopeDigest}:${candidate.id}:${STUDIO_ENGINE_ERNIE_WORKFLOW.workflowId}`)}`,
+        sourceId: `studio:${scopeDigest}`,
+        candidates: [{ id: candidate.id, prompt: candidate.prompt, seed: candidate.seed,
+          width: STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT.width, height: STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT.height }],
+        output: { contentType: "image/png" as const }, maxCostUsd: perCandidateCeilingUsd,
+        profileRevisionSha256: STUDIO_ENGINE_ERNIE_WORKFLOW.profileRevisionSha256,
+        imageContract: STUDIO_ENGINE_ERNIE_IMAGE_CONTRACT, imageContractSha256,
+      };
+      const admission = await client.submitErnieBatch(request);
+      return { candidate, admission };
     });
-    const candidates = result.candidates ?? [];
-    const expected = payload.shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile.image.candidates), 0);
+    for (const { admission } of admissions) {
+      if (admission.state === "awaiting-final-qualification" || admission.state === "awaiting-input-qualification") {
+        const readiness = await client.ernieBatchReadiness(admission.jobId);
+        if (readiness.dispatchable !== true && readiness.finalQualified !== true) {
+          throw new Error(`ERNIE ${admission.jobId} is held by Engine qualification: ${(readiness.blockers ?? []).join(",") || admission.state}`);
+        }
+        await client.releaseErnieBatch(admission.jobId, readiness);
+      }
+    }
+    let pending = [...admissions];
+    for (let check = 0; pending.length && check < 24; check++) {
+      await wait.for({ seconds: 120, idempotencyKey: `${scopeDigest}:ernie-observe:${check}` });
+      const observed = await mapChunks(pending, 8, async (entry) => ({
+        ...entry, status: await client.observeErnieBatch(entry.admission),
+      }));
+      const failed = observed.find(({ status }) => status.status === "failed" || status.status === "cancelled" || status.outputRetired);
+      if (failed) throw new Error(`ERNIE ${failed.admission.jobId} ended in ${failed.status.status}; reconcile the original immutable request`);
+      pending = observed.filter(({ status }) => status.status !== "completed");
+    }
+    if (pending.length) throw new Error(`ERNIE completion window exhausted for ${pending.length} existing jobs; retry must observe original admissions`);
+    const candidates = await mapChunks(admissions, 8, async ({ candidate, admission }) => ({
+      shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, outputId: candidate.id,
+      receipt: await client.verifiedErnieBatchOutput(admission, candidate.id),
+    }));
+    const expected = candidateSpecs.length;
     if (candidates.length !== expected) throw new Error(`weekly prepared images returned ${candidates.length} candidates; expected ${expected}`);
     const shotOrder = new Map(payload.shots.map((shot, index) => [shot.id, index]));
     const ordered = [...candidates].sort((a, b) => (shotOrder.get(a.shotId)! - shotOrder.get(b.shotId)!) || (a.candidateIndex - b.candidateIndex));
@@ -582,10 +643,14 @@ export const planWeekPreparedImagesTask = task({
       const identity = `${candidate.shotId}:${candidate.candidateIndex}`;
       if (seen.has(identity)) throw new Error(`weekly prepared images returned duplicate candidate ${identity}`);
       seen.add(identity);
-      const source = await getObjectBytes(candidate.key, undefined, { maxBytes: 50 * 1024 * 1024, timeoutMs: 300_000 });
+      const source = candidate.receipt.contentBytes;
       const stillKey = planWeekPreparedImageKey({ ...canonicalScope(payload), index });
       await persistMediaCreateOnly(stillKey, source);
       const sha256 = sha256BytesHex(source);
+      const retained = await getObjectBytes(stillKey, undefined, { maxBytes: source.byteLength, timeoutMs: 300_000 });
+      if (retained.byteLength !== source.byteLength || sha256BytesHex(retained) !== sha256) {
+        throw new Error(`Studio R2 prepared image differs from its verified Engine receipt: ${stillKey}`);
+      }
       items.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, stillKey, sha256, byteLength: source.byteLength });
       stillItems.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, outputId: candidate.outputId, stillKey });
     }
@@ -614,6 +679,7 @@ export const planWeekPreparedImagesTask = task({
     const body = new TextEncoder().encode(canonicalJson(prepared));
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
     const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prepared);
-    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: null,
+      costCeilingUsd: payload.maxCostUsd, manifestSha256: prepared.manifestSha256 };
   },
 });

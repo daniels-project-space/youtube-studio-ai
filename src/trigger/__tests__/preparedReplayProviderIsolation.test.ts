@@ -55,7 +55,7 @@ const sidecars = new Map<string, Buffer>([
 ]);
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
-const savedEnv = new Map(["OPENROUTER_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"].map(key => [key, process.env[key]]));
+const savedEnv = new Map(["OPENROUTER_API_KEY", "ELEVENLABS_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"].map(key => [key, process.env[key]]));
 const vaultReads: string[] = [], events: string[] = [];
 let missingKey = "", mediaMode: "good" | "changed" | "short" | "timeout" = "good";
 let paidCalls = 0, writes = 0, mediaReads = 0, dispatches = 0;
@@ -190,18 +190,22 @@ async function main() {
     assert.equal(paidCalls, 1, "a lost script result cannot buy another attempt");
     missingKey = planWeekPreparedImagesKey(manifest); events.length = 0;
     for (let replay = 0; replay < 2; replay++) {
-      await assert.rejects(() => tasks[3].run(payload), /Direct Novita generation is retired/);
-      assert.equal(paidCalls, 1, "retired image generation never reaches paid provider work");
+      await assert.rejects(() => tasks[3].run(payload), /CRITICAL keys missing/);
+      assert.equal(paidCalls, 1, "fresh image work never bypasses Engine credential admission");
       assert.equal(writes, 0);
       assert.ok(!events.includes("vault:novita"));
       assert.ok(!events.includes("generation"));
     }
-    assert.equal(claims.size, 1, "retirement happens before a paid image claim");
+    assert.equal(claims.size, 1, "missing Engine credentials are detected before a paid image claim");
+    process.env.ELEVENLABS_API_KEY = "fixture";
     for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)], [2, planWeekPreparedMusicKey(manifest)]] as const) {
       missingKey = key;
-      const fresh = { ...payload, speaker: "fixture-voice" };
+      const fresh = index === 1 ? { ...payload, provider: "elevenlabs" as const, speaker: "fixture-voice" } : payload;
       const before: number = paidCalls;
-      await assert.rejects(() => tasks[index].run(fresh), /stubbed generation boundary/);
+      await assert.rejects(() => tasks[index].run(fresh), error => {
+        assert.match(String(error), /stubbed generation boundary/, `fresh prepared audio task ${index} must reach its guarded generation seam`);
+        return true;
+      });
       assert.equal(paidCalls, before + 1);
       await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
       assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
