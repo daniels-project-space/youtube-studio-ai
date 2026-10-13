@@ -43,8 +43,9 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   }
   const versions = new Map([[composerIndex, composerVersion], [musicIndex, musicVersion], [assemblyIndex, assemblyVersion]]);
   if (source.some(entry => ["scene_planner", "keyframes", "loop_clips"].includes(entry.block))) {
-    if (selected.musicIntent.playback !== "repeat" || selected.musicIntent.role !== "primary_music") {
-      throw new Error("YuE2 loop visuals require repeat primary-music intent");
+    const loopRoles = ["primary_music", "meditation_bed", "sleep_sound_bed"];
+    if (selected.musicIntent.playback !== "repeat" || !loopRoles.includes(selected.musicIntent.role)) {
+      throw new Error("YuE2 loop visuals require repeat primary-music, meditation, or sleep-sound intent");
     }
     const programIndex = indexOfOne(["music_program_plan"]), sceneIndex = indexOfOne(["scene_planner"]);
     const keyframeIndex = indexOfOne(["keyframes"]), clipsIndex = indexOfOne(["loop_clips"]);

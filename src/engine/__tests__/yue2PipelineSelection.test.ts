@@ -14,15 +14,18 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("pipeline selection cannot dispatch providers"); };
 try {
   for (const [family, playback, role] of [
-    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "sleep_sound_bed"],
+    ["music_loop", "repeat", "primary_music"], ["music_loop", "repeat", "meditation_bed"],
+    ["music_loop", "repeat", "sleep_sound_bed"], ["sleep", "repeat", "sleep_sound_bed"],
+    ["sleep", "repeat", "meditation_bed"],
     ["sleep", "once", "sleep_sound_bed"], ["shorts", "once", "short_form_bed"],
     ["narrated_stock", "once", "narration_bed"],
   ] as const) {
     const opts = { family, nicheKey: family === "music_loop" ? "lofi" : "motivation" };
     const baseline = designPipeline(opts), before = structuredClone(baseline.pipeline);
     const chosen = { ...selection, musicIntent: { ...selection.musicIntent, playback, role } };
-    const mismatched = { ...chosen, musicIntent: { ...chosen.musicIntent, role: role === "primary_music" ? "meditation_bed" as const : "primary_music" as const } };
-    assert.throws(() => designPipeline({ ...opts, yue2Music: mismatched }), /YuE2 music route requires the/);
+    const invalidRole = role === "short_form_bed" || role === "narration_bed" ? "sleep_sound_bed" as const : "short_form_bed" as const;
+    const mismatched = { ...chosen, musicIntent: { ...chosen.musicIntent, role: invalidRole } };
+    assert.throws(() => designPipeline({ ...opts, yue2Music: mismatched }), /YuE2 music route requires one of these roles/);
     const result = designPipeline({ ...opts, yue2Music: chosen });
     const preview = designPipelineCore({ ...opts, yue2Music: chosen }, { validateRuntimeRegistry: false });
     assert.deepEqual(preview.pipeline, result.pipeline, "YuE2 read-only projection matches executable graph");
@@ -95,5 +98,5 @@ try {
   assert.throws(() => compilePipeline(validatePipeline(reordered, ["styleDNA", "channelProfile"])), /music\.arrangement\.accepted/);
   const wrong = selected.map(entry => entry.block === "assemble" ? { block: "assemble", params: entry.params } : entry);
   assert.throws(() => compilePipeline(validatePipeline(wrong, ["styleDNA", "channelProfile"])), /musicUrl/, "ordinary assembly cannot consume a private candidate");
-  console.log("YUE2 PIPELINE SELECTION PASS: five real family/playback designs and compilations, exact versions and budgets, legacy parity, rejecting ownership/config cases; no provider calls");
+  console.log("YUE2 PIPELINE SELECTION PASS: eight real family/role/playback designs and compilations, exact versions and budgets, legacy parity, rejecting ownership/config cases; no provider calls");
 } finally { globalThis.fetch = originalFetch; }

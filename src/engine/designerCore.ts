@@ -1310,8 +1310,13 @@ export function designPipelineCore(
       throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
     }
     const expectedRole = musicRoleForRoute(opts.family, manifest.contentLane.key);
-    if (opts.yue2Music.musicIntent.role !== expectedRole) {
-      throw new Error(`YuE2 music route requires the ${expectedRole} role`);
+    const allowedRoles = opts.family === "music_loop"
+      ? new Set(["primary_music", "meditation_bed", "sleep_sound_bed"])
+      : opts.family === "sleep"
+        ? new Set(["sleep_sound_bed", "meditation_bed"])
+        : new Set([expectedRole]);
+    if (!allowedRoles.has(opts.yue2Music.musicIntent.role)) {
+      throw new Error(`YuE2 music route requires one of these roles: ${[...allowedRoles].join(", ")}`);
     }
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
