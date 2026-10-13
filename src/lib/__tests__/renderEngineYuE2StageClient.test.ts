@@ -52,7 +52,7 @@ test("verifies the authenticated project, output binding, and YuE2 route before 
   const fetchImpl: typeof fetch = async (input, init) => {
     requestUrl = new URL(String(input));
     authorization = new Headers(init?.headers).get("authorization");
-    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
+    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
       endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
   };
   await verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl });
@@ -66,11 +66,26 @@ test("rejects a legacy YuE2 route before any workflow write", async () => {
   let calls = 0;
   const fetchImpl: typeof fetch = async () => {
     calls += 1;
-    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}/` },
+    return response({ projectId: jobId, output: { bucket: "studio-render-output", prefix: `projects/${projectName}` },
       endpoints: { yue2MusicJob: "/client/music3-jobs" } });
   };
   await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /unsupported YuE2 route/);
   assert.equal(calls, 1);
+});
+
+test("rejects a shared or foreign project output binding before workflow creation", async () => {
+  for (const output of [
+    { bucket: "render-engine", prefix: `projects/${projectName}` },
+    { bucket: "studio-render-output", prefix: "projects/another-project" },
+  ]) {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1;
+      return response({ projectId: jobId, output, endpoints: { yue2MusicJob: "/client/yue2-jobs" } });
+    };
+    await assert.rejects(verifyRenderEngineYuE2ProjectIntegration({ ...config, fetchImpl }), /invalid project output binding/);
+    assert.equal(calls, 1);
+  }
 });
 
 test("fails the integration handshake on unauthorized credentials before workflow creation", async () => {

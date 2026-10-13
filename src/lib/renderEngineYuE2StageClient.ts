@@ -180,9 +180,10 @@ export async function verifyRenderEngineYuE2ProjectIntegration(config: RenderEng
   }
   if (!record(payload) || typeof payload.projectId !== "string" || !CONVEX_ID.test(payload.projectId) ||
       !record(payload.output) || typeof payload.output.bucket !== "string" || payload.output.bucket.length === 0 ||
-      typeof payload.output.prefix !== "string" || payload.output.prefix.length === 0 || !record(payload.endpoints) ||
+      payload.output.bucket === "render-engine" || payload.output.prefix !== `projects/${config.projectName}` ||
+      !record(payload.endpoints) ||
       payload.endpoints.yue2MusicJob !== "/client/yue2-jobs") {
-    throw new Error("Render Engine project integration handshake returned an invalid project or unsupported YuE2 route");
+    throw new Error("Render Engine project integration handshake returned an invalid project output binding or unsupported YuE2 route");
   }
 }
 
