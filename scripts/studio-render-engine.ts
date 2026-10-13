@@ -40,7 +40,16 @@ async function main() {
       registered.readback.effectiveGraphSha256 !== STUDIO_ERNIE_REFERENCE_COMFY.effectiveGraphSha256) {
       throw new Error("Registered Studio reference profile changed; revise its immutable version explicitly");
     }
-    console.log(JSON.stringify(registered));
+    const modelFilesVerified = registered.readback.modelFilesVerified === true;
+    console.log(JSON.stringify({
+      phase: "registered-awaiting-live-dispatch-check",
+      renderQualification: {
+        executionReady: registered.executionReady,
+        modelFilesVerified,
+        dispatchNotAttempted: true,
+      },
+      ...registered,
+    }));
   } else if (command === "import-voice-reference") {
     const source = JSON.parse(await readFile(value, "utf8"));
     if (!source || source.consentConfirmed !== true || typeof source.audioPath !== "string") {
