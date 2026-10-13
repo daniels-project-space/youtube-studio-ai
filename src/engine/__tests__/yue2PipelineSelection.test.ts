@@ -98,6 +98,14 @@ try {
   const freshNarrated = defaultFreshChannelYuE2Selection({ family: "narrated_stock", routeFingerprint: "c".repeat(64), episodeLengthSeconds: 900 });
   assert.equal(freshNarrated.musicIntent.role, "narration_bed");
   assert.equal(freshNarrated.musicIntent.requestedDurationSec, 300);
+  for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"] as const) {
+    const fresh = defaultFreshChannelYuE2Selection({ family, routeFingerprint: "d".repeat(64), episodeLengthSeconds: 90 });
+    const designed = designPipeline({ family, nicheKey: family === "music_loop" ? "lofi" : "motivation", yue2Music: fresh });
+    assert.equal(designed.compilation!.modules.find(module => module.id === "music")?.version, "4.0.0-yue2-engine-candidate",
+      `${family} fresh-channel intent must compile to the shared Engine music module`);
+    assert.deepEqual(designed.pipeline.find(entry => entry.block === "music")?.params, fresh.sourceParams);
+    assert.equal(designed.productionReady, false, "fresh-channel routing must still await route qualification and music approval");
+  }
   for (const optional of [false, true]) {
     const disconnected = validatePipeline(selected, ["styleDNA", "channelProfile"]);
     const index = disconnected.manifests.findIndex(manifest => manifest.id === "music_arrangement_plan");
