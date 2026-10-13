@@ -70,7 +70,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "pexels", "mureka"],
+    requiresKeys: ["fish-audio", "pexels", "render-engine"],
     defaultThumbnailStyle: "banana",
     // Current standard-episode compiler reservation includes fully batched
     // final visual evidence. Keep the creator floor above that sealed cost.
@@ -85,7 +85,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "lofi-ambient",
     available: true,
     narrated: false,
-    requiresKeys: ["suno", "novita", "openrouter-vision"],
+    requiresKeys: ["render-engine", "novita", "openrouter-vision"],
     // The final cover always uses the universal Nano Banana scene path with
     // deterministic local typography.
     defaultThumbnailStyle: "banana",
@@ -104,7 +104,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // questions AND voice casting — every meditation channel spoke in the
     // fallback default voice while the architect saw a loop-only toolbox.
     narrated: true,
-    requiresKeys: ["mureka", "pexels", "fish-audio"],
+    requiresKeys: ["render-engine", "pexels", "fish-audio"],
     defaultThumbnailStyle: "banana",
     // Narrated ambient masters retain the same complete final-review envelope.
     defaultRunBudgetUsd: 2,
@@ -136,7 +136,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "shorts",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "pexels"],
+    requiresKeys: ["fish-audio", "pexels", "render-engine"],
     defaultThumbnailStyle: "banana",
     // Portrait production includes complete final visual evidence, not a
     // representative sample.
@@ -167,7 +167,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "novita"],
+    requiresKeys: ["fish-audio", "novita", "render-engine"],
     defaultThumbnailStyle: "banana",
     // The authored five-minute board reserves just over $25 once every direct
     // drawing layer and its full final-QA evidence plan are admitted. Keep a
@@ -209,7 +209,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // Wikidata facts, renders locally, and uses an original non-vocal music
     // bed plus a non-Gemini vision QA provider. Legacy Google helpers are
     // unavailable to this production family.
-    requiresKeys: ["mureka", "groq-or-fal-vision"],
+    requiresKeys: ["render-engine", "groq-or-fal-vision"],
     // The video remains local/CC0, but every final thumbnail is intentionally
     // routed through the universal Nano Banana thumbnail module.
     defaultThumbnailStyle: "banana",
@@ -226,7 +226,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "illustrated-explainer",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "mureka"],
+    requiresKeys: ["fish-audio", "render-engine"],
     // The video stays deterministic/local; its final thumbnail uses the shared
     // Nano Banana module so every channel follows one image-quality path.
     defaultThumbnailStyle: "banana",
@@ -243,7 +243,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "children-learning",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "mureka"],
+    requiresKeys: ["fish-audio", "render-engine"],
     defaultThumbnailStyle: "banana",
     // The media renderer is local; this reserves the same audible-quality and
     // final-review envelope as the illustrated explainer. Public/scheduled
@@ -259,7 +259,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "crime-narrative",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "mureka", "novita"],
+    requiresKeys: ["fish-audio", "render-engine", "novita"],
     defaultThumbnailStyle: "banana",
     // The production compiler reserves $154.86 for the current locked
     // Z-Image → QA → H3 chain. Keep a visible buffer so the creator never

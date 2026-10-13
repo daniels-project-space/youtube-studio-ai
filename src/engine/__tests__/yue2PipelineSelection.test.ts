@@ -3,6 +3,7 @@ import { designPipeline, designPipelineCore } from "../designer";
 import { defaultFreshChannelYuE2Selection, isYuE2MusicCandidateVersion, selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
 import { validatePipeline } from "../validate";
 import { compilePipeline } from "../pipelineCompiler";
+import { FAMILIES } from "../families";
 
 const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 0.04,
   executionPolicy: { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
@@ -105,6 +106,14 @@ try {
       `${family} fresh-channel intent must compile to the shared Engine music module`);
     assert.deepEqual(designed.pipeline.find(entry => entry.block === "music")?.params, fresh.sourceParams);
     assert.equal(designed.productionReady, false, "fresh-channel routing must still await route qualification and music approval");
+  }
+  for (const family of Object.keys(FAMILIES) as (keyof typeof FAMILIES)[]) {
+    const baseline = designPipeline({ family, nicheKey: family === "music_loop" ? "lofi" : "motivation" });
+    if (!baseline.pipeline.some(entry => entry.block === "music")) continue;
+    const requirements = FAMILIES[family].requiresKeys;
+    assert.ok(requirements.includes("render-engine"), `${family} must advertise its shared Engine music route`);
+    assert.ok(!requirements.includes("mureka") && !requirements.includes("suno"),
+      `${family} must not require a legacy music-generation credential`);
   }
   for (const optional of [false, true]) {
     const disconnected = validatePipeline(selected, ["styleDNA", "channelProfile"]);
