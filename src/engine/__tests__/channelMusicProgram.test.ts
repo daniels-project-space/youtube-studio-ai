@@ -122,6 +122,8 @@ const sleep = createChannelMusicProgram({
   family: "sleep",
   contentLaneKey: "music_loop",
   topic: "Steady rain through a quiet night",
+  bpmRange: [100, 100],
+  composerDirection: "Use a strong four-on-the-floor groove in G major at 100 BPM.",
   durationSec: 300,
 });
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
@@ -131,6 +133,13 @@ assert.equal(sleep.quality.minimumLraLu, 1, "sleep sound permits a deliberately 
 assert.equal(sleep.generation.sections.length, 4);
 assert.match(sleep.generation.structuredCaption, /unattended overnight listening/u);
 assert.match(sleep.generation.structuredCaption, /no pulse, melodic arrival/u);
+assert.match(sleep.generation.structuredCaption, /unmetered and beatless/u);
+assert.match(sleep.generation.structuredCaption, /override any conflicting channel or composer direction/u);
+assert.doesNotMatch(
+  sleep.generation.structuredCaption,
+  /\b\d{2,3}(?:\s*[–-]\s*\d{2,3})?\s*BPM\b|Key\/scale:/u,
+  "beatless sleep prompts must not simultaneously prescribe a tempo or tonal center, even when supplied by channel DNA/composer direction",
+);
 assert.doesNotMatch(sleep.generation.structuredCaption, /call-and-response|late lift|genuine contrast passage/u);
 assert.ok(
   music3StructuredCaptionWordCount(lofi.generation.structuredCaption) >= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS
@@ -159,6 +168,7 @@ assert.deepEqual(
 assert.equal(longMeditation.identity.genre, "slow spacious ambient meditation");
 assert.deepEqual(longMeditation.identity.instrumentation, ["warm sustained pad", "sparse felt piano", "soft breathy flute"]);
 assert.match(longMeditation.identity.moodArc, /without a strong melodic arrival/u);
+assert.match(longMeditation.generation.structuredCaption, /BPM;.*Key\/scale:/u);
 
 const longNarration = createChannelMusicProgram({
   channelId: "channel-long-history",

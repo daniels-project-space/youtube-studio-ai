@@ -349,17 +349,23 @@ function structuredCaption(input: {
   // The focused opening must not erase a channel's complete declared sound
   // identity. The detailed control section retains it for compatible routes.
   const supportingTimbres = input.instrumentation.slice(1);
-  return [
-    "### Creative Foundation",
-    `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. ` +
-      `Feature ${featuredPalette}.`,
-    "",
-    "### Global Metadata",
-    `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
+  const beatlessSleep = input.role === "sleep_sound_bed";
+  const globalMetadata = beatlessSleep
+    ? `${input.genre}; unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
+      `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
+      `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
+    : `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
       `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
       `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. ` +
-      `Additional composer direction: ${input.composerDirection}`,
+      `Additional composer direction: ${input.composerDirection}`;
+  return [
+    "### Creative Foundation",
+    `A ${input.moodArc} ${input.genre} instrumental${beatlessSleep ? "" : ` at ${tempo} BPM`}: “${input.topic}”. ` +
+    `Feature ${featuredPalette}.`,
+    "",
+    "### Global Metadata",
+    globalMetadata,
     "",
     "### Vocal Details",
     `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
@@ -370,7 +376,10 @@ function structuredCaption(input: {
       `${section.label} (${Math.round(section.startFraction * 100)}–${Math.round(section.endFraction * 100)}%, energy ${section.energy.toFixed(2)}): ${section.instruction}`,
     ).join("\n"),
     `Texture and space: ${input.textures.join(", ") || "natural room depth"}. ` +
-      `Hard exclusions: ${input.exclusions.join("; ")}. Preserve musical causality: every entrance, change, and exit must be audible and motivated.`,
+      `Hard exclusions: ${input.exclusions.join("; ")}. ` +
+      (beatlessSleep
+        ? "For sleep, these beatless/no-tonal-arrival constraints override any conflicting channel or composer direction; preserve an unmetered, stable sound texture."
+        : "Preserve musical causality: every entrance, change, and exit must be audible and motivated."),
   ].join("\n");
 }
 
@@ -472,28 +481,38 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),
     Math.max(30, Math.min(300, Math.floor(rawBpm[1]))),
   ];
-  const moodArc = cleanText(
-    input.moodArc,
-    defaults.moodArc,
-    600,
-  );
-  // Preserve authored direction in full. Existing caption size/word gates
-  // reject oversized programs before purchase rather than silently cutting intent.
-  const composerDirection = input.composerDirection?.trim().replace(/\s+/gu, " ") ||
-    (role === "sleep_sound_bed"
-      ? "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes."
-      : "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.");
-  const exclusions = [
-    "vocals or intelligible words",
-    "hollow preset-only arrangement",
-    "mechanical or broadband artifacts",
-    "brick-wall compression or limiter pumping",
-    "flat dynamics with no section development",
-    "abrupt key, tempo, or acoustic-space changes",
-    "generic trailer booms and risers",
-    "melody that masks narration",
-    ...(role === "sleep_sound_bed" ? ["audible beat or pulse", "melodic hook or cadence", "sudden change in loudness or density"] : []),
-  ];
+  const moodArc = role === "sleep_sound_bed"
+    ? defaults.moodArc
+    : cleanText(input.moodArc, defaults.moodArc, 600);
+  // Other roles preserve authored episode direction in full. Sleep is a
+  // specialized beatless soundscape, so its role contract overrides groove,
+  // meter, and movement directions while retaining the channel sound palette.
+  const composerDirection = role === "sleep_sound_bed"
+    ? "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes."
+    : input.composerDirection?.trim().replace(/\s+/gu, " ") ||
+      "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
+  const exclusions = role === "sleep_sound_bed"
+    ? [
+        "vocals or intelligible words",
+        "mechanical or broadband artifacts",
+        "brick-wall compression or limiter pumping",
+        "unintentional digital silence, clicks, or loop seams",
+        "abrupt spatial or timbral jumps",
+        "generic trailer booms and risers",
+        "metered tempo or audible beat/pulse",
+        "tonal progression, melodic hook, or cadence",
+        "sudden change in loudness or density",
+      ]
+    : [
+        "vocals or intelligible words",
+        "hollow preset-only arrangement",
+        "mechanical or broadband artifacts",
+        "brick-wall compression or limiter pumping",
+        "flat dynamics with no section development",
+        "abrupt key, tempo, or acoustic-space changes",
+        "generic trailer booms and risers",
+        "melody that masks narration",
+      ];
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));

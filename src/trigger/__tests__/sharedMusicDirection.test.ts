@@ -64,6 +64,8 @@ const studio = { ...studioCore, fingerprint: sha256Hex(canonicalJson(studioCore)
 const dna = { audio: { genre: "driving orchestral percussion", instrumentation: ["timpani", "low strings"], textures: ["dry room"], bpmRange: [110, 120], moodArc: "urgent pursuit resolves decisively", loopable: false } };
 const brief = createChannelProgramBrief({ family: "music_loop", nicheKey: "lofi", locale: "en", concept: "Original instrumental sessions with a distinct channel sound." });
 const route = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(brief), programBrief: brief });
+const sleepBrief = createChannelProgramBrief({ family: "sleep", nicheKey: "lifestyle", locale: "en", concept: "A stable, beatless overnight soundscape." });
+const sleepRoute = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(sleepBrief), programBrief: sleepBrief });
 
 async function main() {
   const loadWithProviderFixtures = createRequire(__filename);
@@ -117,6 +119,22 @@ async function main() {
   const flat = "Keep a flat nocturnal pulse with no build, drop, or climax.";
   const active = "Propulsive championship percussion for high energy athletic training.";
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
+    const sleepPrompt = await runtime(provider, "Use a driving 120 BPM groove with a strong pulse.", {
+      channelProgramRoute: sleepRoute,
+      styleDNA: { audio: {
+        genre: "soft nocturnal ambient",
+        instrumentation: ["warm sustained pad", "distant piano harmonics"],
+        textures: ["steady filtered noise", "quiet room air"],
+        bpmRange: [120, 120],
+        moodArc: "A driving 120 BPM groove with a strong pulse.",
+        loopable: true,
+      } },
+    });
+    assert.match(sleepPrompt, /unmetered and beatless/u);
+    assert.match(sleepPrompt, /warm sustained pad/u);
+    assert.doesNotMatch(sleepPrompt, /\b120\s*BPM\b|driving orchestral percussion|strong pulse|resolves back to the tonic/iu);
+    assert.doesNotMatch(sleepPrompt, /flat dynamics with no section development|abrupt key, tempo|melody that masks narration/u);
+
     for (const intent of [flat, active]) {
       const caption = await runtime(provider, intent);
       assert.ok(caption.includes(intent));
@@ -178,7 +196,7 @@ async function main() {
   assert.ok((await weekly(longDirection)).includes("CRITICAL_ENDING_INSTRUCTION"));
   await runtime("minimax_music3", `${"preserve ".repeat(460)}CRITICAL_ENDING_INSTRUCTION`, {}, /450|word/i);
   assert.equal(networkCalls, 0);
-  console.log("SHARED MUSIC DIRECTION PASS: real runtime and weekly boundaries; channel intent, DNA precedence, episode nuance, sealed direction, Studio additions, lossless bounds, no network");
+  console.log("SHARED MUSIC DIRECTION PASS: real runtime and weekly boundaries; channel intent, beatless sleep across providers, DNA precedence, episode nuance, sealed direction, Studio additions, lossless bounds, no network");
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {

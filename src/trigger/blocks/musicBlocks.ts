@@ -438,7 +438,7 @@ export const music: Block = {
         [COST_PATCH_KEY]: 0,
       };
     }
-    const providerPrompt = provider === "minimax_music3"
+    const providerPrompt = provider === "minimax_music3" || channelMusicProgram.role === "sleep_sound_bed"
       ? channelMusicProgram.generation.structuredCaption
       : [
           prompt,
