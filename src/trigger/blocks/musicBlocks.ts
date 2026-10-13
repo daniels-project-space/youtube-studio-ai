@@ -292,7 +292,7 @@ export const music: Block = {
         dnaPrompt ? arcNote : basePrompt,
         studioAudioDirection,
       ].filter(Boolean).join(" ") || undefined,
-      targetLufs: Number(a?.loudnessLufs ?? -16),
+      targetLufs: a?.loudnessLufs,
       bodyMusicVol: 1,
     });
     const channelMusicProgramKey =

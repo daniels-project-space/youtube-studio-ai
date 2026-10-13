@@ -92,6 +92,7 @@ const lofi = createChannelMusicProgram({
 });
 assert.equal(lofi.role, "primary_music");
 assert.equal(lofi.mix.bodyMusicVol, 1, "music-first channels cannot be accidentally ducked by a narrated preset");
+assert.equal(lofi.mix.targetLufs, -16, "music-forward programs retain their role default target");
 assert.equal(lofi.generation.sections.length, 8, "a long Music3 form must map every extended passage to a reviewable arrangement job");
 assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
@@ -129,6 +130,7 @@ const sleep = createChannelMusicProgram({
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
 assert.equal(sleep.mix.narrationPriority, false);
 assert.equal(sleep.mix.bodyMusicVol, 1, "sleep sound is a primary listening program, not a ducked narration bed");
+assert.equal(sleep.mix.targetLufs, -20, "sleep sound uses its quieter standalone target by default");
 assert.equal(sleep.quality.minimumLraLu, 1, "sleep sound permits a deliberately stable dynamic range");
 assert.equal(sleep.generation.sections.length, 4);
 assert.match(sleep.generation.structuredCaption, /unattended overnight listening/u);
@@ -168,6 +170,7 @@ assert.deepEqual(
   "long meditation programs must keep calm variation distinct from an unstructured repeated pad",
 );
 assert.equal(longMeditation.identity.genre, "slow spacious ambient meditation");
+assert.equal(longMeditation.mix.targetLufs, -18, "meditation retains a distinct target from sleep and primary music");
 assert.deepEqual(longMeditation.identity.instrumentation, ["warm sustained pad", "sparse felt piano", "soft breathy flute"]);
 assert.match(longMeditation.identity.moodArc, /without a strong melodic arrival/u);
 assert.match(longMeditation.generation.structuredCaption, /BPM;.*Key\/scale:/u);
@@ -186,6 +189,7 @@ assert.deepEqual(
   "long narration beds must preserve speech space through a distinct reveal-and-recovery passage",
 );
 assert.equal(longNarration.identity.genre, "restrained documentary underscore");
+assert.equal(longNarration.mix.targetLufs, -18, "narration beds retain their role-aware loudness target");
 assert.match(longNarration.identity.moodArc, /without competing with speech/u);
 
 const shortForm = createChannelMusicProgram({

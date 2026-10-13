@@ -130,6 +130,7 @@ async function main() {
         loopable: true,
       } },
     });
+    assert.equal(persisted!.mix.targetLufs, -20, "an unconfigured sleep route must retain the sleep-specific mastering target");
     assert.match(sleepPrompt, /unmetered and beatless/u);
     assert.match(sleepPrompt, /diffuse, sustained background texture/u);
     assert.doesNotMatch(sleepPrompt, /The melodic lead belongs/u);
@@ -139,6 +140,7 @@ async function main() {
 
     for (const intent of [flat, active]) {
       const caption = await runtime(provider, intent);
+      assert.equal(persisted!.mix.targetLufs, -16, "the primary-music default remains music-forward after role-default correction");
       assert.ok(caption.includes(intent));
       assert.ok(persisted!.generation.structuredCaption.includes(intent), "selected prompt is sealed, even for text-only providers");
       assert.ok(!caption.includes(intent === flat ? active : flat));
