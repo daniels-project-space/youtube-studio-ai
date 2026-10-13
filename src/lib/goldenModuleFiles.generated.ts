@@ -395,9 +395,15 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "sound · Channel-scoped multi-track score with bounded provider routing and exact usage accounting",
     "paths": [
+      "src/engine/__tests__/moduleContracts.test.ts",
+      "src/lib/__tests__/deliveryIndexBounds.test.ts",
+      "src/lib/__tests__/pipelineWorkerDeploymentTransport.test.ts",
+      "src/lib/__tests__/yue2Continuation.test.ts",
       "src/trigger/blocks/blockContext.ts",
-      "src/trigger/blocks/lofiBlocks.ts",
-      "src/trigger/blocks/musicBlocks.ts"
+      "src/trigger/blocks/musicArrangementBlocks.ts",
+      "src/trigger/blocks/musicBlocks.ts",
+      "src/trigger/blocks/yue2Music.ts",
+      "src/trigger/blocks/yue2MusicEngine.ts"
     ]
   },
   {

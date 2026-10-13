@@ -4,8 +4,9 @@
  */
 import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
-import { COST_PATCH_KEY, type Block } from "@/engine/types";
-import { getMusicBrief } from "@/engine/creative/brief";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { getMusicBrief, getVisualBrief } from "@/engine/creative/brief";
+import { createOriginalMusicProgramPlan, selectOriginalMusicProvider } from "@/engine/originalMusicProgram";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE } from "@/engine/pricing";
 import {
@@ -29,6 +30,7 @@ import {
 import {
   assertPinnedMiniMaxMusic3Receipt,
   generateMiniMaxMusic3,
+  hasQualifiedMiniMaxMusic3,
   type MiniMaxMusic3Receipt,
 } from "@/lib/minimaxMusic3";
 import {
@@ -47,6 +49,7 @@ import {
   recordAsset,
   channelProgramRouteFromContext,
   musicProgramForCurrentRoute,
+  routeSeedForTopicSelection,
 } from "./blockContext";
 
 // Accepted Mureka/Suno jobs do not expose a durable replay receipt yet. Keep
@@ -54,6 +57,65 @@ import {
 // existing cost-carrying terminal catch instead of the whole-task timeout.
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
 const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Seals one episode's audio identity and the visual intent used by loop consumers. */
+export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
+  dna: import("@/engine/creative/types").StyleDNA | null;
+  niche?: string;
+}): Block {
+  return {
+    id: "music_program_plan",
+    consumes: ["topic"],
+    produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
+    run: async ctx => {
+      const topic = str(ctx, "topic");
+      const route = routeSeedForTopicSelection(ctx);
+      if (!route) throw new Error("music_program_plan: requires a sealed music-loop channel program route");
+      const requestedProvider = ctx.params["provider"];
+      if (sourceProvider && requestedProvider !== undefined && requestedProvider !== sourceProvider) {
+        throw new Error("music_program_plan: explicit provider conflicts with YuE2 source ownership");
+      }
+      if (requestedProvider !== undefined && requestedProvider !== "minimax_music3" && requestedProvider !== "suno" &&
+        requestedProvider !== "mureka" && !(sourceProvider === "yue2" && requestedProvider === "yue2")) {
+        throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
+      }
+      const identity = readIdentity?.(ctx);
+      const dna = identity ? identity.dna
+        : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+      const visual = getVisualBrief(ctx.store);
+      const audio = getMusicBrief(ctx.store);
+      const setting = [visual?.setting, visual?.world, visual?.footageQueries?.[0], ctx.params["setting"] as string | undefined,
+        dna?.setting, identity ? identity.niche : ctx.store["niche"] as string | undefined]
+        .map(value => value?.toString().trim()).find(Boolean);
+      const audioDirection = [
+        `Original instrumental program for “${topic}”.`,
+        dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
+        dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
+        dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
+        audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
+        "No vocals, no lyrics, and a musically resolved seamless loop.",
+      ].filter(Boolean).join(" ");
+      const plan = createOriginalMusicProgramPlan({
+        route,
+        topic,
+        setting,
+        visualStyle: (ctx.params["visualStyle"] as string | undefined) ?? (ctx.store["visualStyle"] as string | undefined) ?? "lofi",
+        motionIntent: sourceProvider === "yue2"
+          ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
+          : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
+        audioDirection,
+        providerPreference: sourceProvider ?? selectOriginalMusicProvider({
+          requestedProvider: requestedProvider === "yue2" ? undefined : requestedProvider,
+          minimaxQualified: hasQualifiedMiniMaxMusic3(),
+        }),
+      });
+      ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
+      return { musicProgramPlan: plan, musicProgramPlanFingerprint: plan.fingerprint };
+    },
+  };
+}
+
+export const musicProgramPlan = createMusicProgramPlanBlock();
 
 export const music: Block = {
   id: "music",
