@@ -214,6 +214,11 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
     /@(?:0\.2|0\.7|1\.5)s[^\n]*narration:/i,
     "intro evidence before the declared narration start must not inherit the nearest spoken cue",
   );
+  assert.doesNotMatch(
+    prompt,
+    /@(?:0\.2|0\.7|1\.5)s[^\n]*visual-lock:/i,
+    "intro evidence before the first timed shot must not inherit that shot's creative lock",
+  );
   console.log("final-master narration/Story Spine visual-review alignment tests passed");
 }
 

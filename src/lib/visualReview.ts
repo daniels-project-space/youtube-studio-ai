@@ -1067,13 +1067,7 @@ function creativeLockForFrame(
   locks: readonly VisualReviewCreativeLock[],
   tSec: number,
 ): VisualReviewCreativeLock | undefined {
-  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec) ??
-    locks.reduce<VisualReviewCreativeLock | undefined>((nearest, lock) => {
-      if (!nearest) return lock;
-      const a = Math.abs((lock.startSec + lock.endSec) / 2 - tSec);
-      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
-      return a < b ? lock : nearest;
-    }, undefined);
+  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec);
 }
 
 function reviewerPrompt(
