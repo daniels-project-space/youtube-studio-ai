@@ -22,7 +22,7 @@ export const YuE2PipelineSelectionSchema = z.object({
 /** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
 export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
   const selected = YuE2PipelineSelectionSchema.parse(input);
-  const musicVersion = "4.0.0-render-engine-yue2", composerVersion = "3.0.0-yue2-score";
+  const musicVersion = "5.0.0-render-engine-yue2-scored-v2", composerVersion = "3.0.0-yue2-score";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
   const sourceParams = selected.sourceParams;

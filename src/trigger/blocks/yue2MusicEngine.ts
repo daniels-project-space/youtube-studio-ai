@@ -7,6 +7,7 @@ import { ExecutionError } from "@/engine/executionErrors";
 import { manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { deriveRenderEngineProjectCapability } from "@/lib/renderEngineProjectCapability";
 import { materializeRenderEngineYuE2Candidate } from "@/lib/renderEngineYuE2Candidate";
 import {
   getRenderEngineYuE2Job,
@@ -19,7 +20,7 @@ import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/
 import { createYuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
 import { musicProgramForCurrentRoute } from "./blockContext";
 
-export const RENDER_ENGINE_YUE2_MUSIC_VERSION = "4.0.0-render-engine-yue2";
+export const RENDER_ENGINE_YUE2_MUSIC_VERSION = "5.0.0-render-engine-yue2-scored-v2";
 
 function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: Render Engine YuE2 ${reason}; recover the same job, never regenerate`,
@@ -49,9 +50,13 @@ const block: Block & { version: string } = {
       throw new Error("Render Engine YuE2 requires finite run/stage budget and active paid-execution authority");
     }
     if (params.seed > 0xffff_ffff) throw new Error("Render Engine YuE2 seed must fit the pinned uint32 worker contract");
-    await bootstrapSecrets(() => undefined, { services: ["cloudflare"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] });
-    const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
-    if (!/^[a-f0-9]{64}$/u.test(projectCapability)) throw new Error("Render Engine Studio project capability is unavailable");
+    await bootstrapSecrets(() => undefined, {
+      services: ["cloudflare", "render-engine"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MANAGEMENT_PROJECT_SECRET"],
+    });
+    const projectCapability = deriveRenderEngineProjectCapability(
+      process.env.MANAGEMENT_PROJECT_SECRET ?? "", RENDER_ENGINE_STUDIO_PROJECT_NAME,
+    );
 
     const source = createYuE2AcceptedArrangementRequest({ arrangement, seed: params.seed, personalCreatorAcknowledged: true });
     const abc = arrangement.symbolicScore;
@@ -61,9 +66,8 @@ const block: Block & { version: string } = {
     let charge: number | undefined;
     try {
       const workflow = await provisionRenderEngineYuE2Workflow(projectConfig);
-      const sourceDurationPolicy = arrangement.arrangement.playback === "repeat" ? "natural_loop" : "exact";
       const request: RenderEngineYuE2Request = {
-        version: 1,
+        version: 2,
         idempotencyKey: source.job.job_id,
         sourceId,
         profileRevisionSha256: workflow.profileRevisionSha256,
@@ -73,14 +77,17 @@ const block: Block & { version: string } = {
         maxAudioSeconds: Math.min(300, Math.max(60, Math.ceil(arrangement.arrangement.requestedDurationSec * 1.5))),
         maxCostUsd: params.maxCostUsd,
         abc,
-        scorePolicy: "instrumental",
-        sourceDurationPolicy,
-        sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090" },
-        output: { contentType: "audio/flac", sampleRateHz: 48_000, channels: 2 },
+        abcSha256: createHash("sha256").update(abc, "utf8").digest("hex"),
+        sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090", maxCostUsd: params.maxCostUsd,
+          maxExecutionSeconds: params.executionPolicy.max_execution_seconds },
+        output: { contentType: "audio/wav", sampleRateHz: 48_000, channels: 2, sampleFormat: "float32" },
       };
       await ctx.assertInlinePaidExecutionLease();
       let stage = await stageRenderEngineYuE2Request({ ...projectConfig, workflowId: workflow.workflowId,
         profileRevisionSha256: workflow.profileRevisionSha256, request });
+      if (!stage.dispatchEnabled) {
+        throw hold("OpenRelay RTX 3090 Final qualification is unavailable; the immutable job is held before provider create");
+      }
       const checks = Math.ceil((params.executionPolicy.max_execution_seconds + params.executionPolicy.termination_grace_seconds) / 120) + 2;
       let status: Record<string, unknown> | undefined;
       for (let index = 0; index <= checks; index++) {
@@ -105,7 +112,7 @@ const block: Block & { version: string } = {
       const readback = await getRenderEngineYuE2Output(projectConfig, stage.jobId);
       const material = await materializeRenderEngineYuE2Candidate({
         scope: { ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId },
-        programFingerprint: arrangement.fingerprint, request, stage, status, readback,
+        programFingerprint: arrangement.fingerprint, acceptedArrangement: arrangement, request, stage, status, readback,
         projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME,
       });
       charge = material.allocationCostUsd;
@@ -133,7 +140,7 @@ export function createRenderEngineYuE2MusicManifest() {
     version: block.version,
     capabilities: ["audio.music_candidate"], requiredCapabilities: ["music.arrangement.accepted"],
     optionalConsumes: ["channelProgramRoute", "musicProgramPlan"],
-    providerProfiles: [{ id: "yue2-openrelay-engine-v1", provider: "openrelay", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "yue2-openrelay-engine-v2", provider: "openrelay", quality: "draft", allowFallback: false }],
     maxCostUsd: 1, maxCostUsdFor: (params) => config.parse(params).maxCostUsd, maxLatencySec: 1800,
     certification: "contract", qualityRequired: true,
     certificationEvidence: "Project-scoped Render Engine dispatch, verified native artifacts and private run-scoped candidate retention; requires separate musical audition and production qualification.",

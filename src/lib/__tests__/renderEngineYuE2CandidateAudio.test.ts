@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { decodeRenderEngineYuE2Flac, inspectRenderEngineYuE2Flac } from "@/lib/renderEngineYuE2Candidate";
+import { decodeRenderEngineYuE2Flac, inspectRenderEngineYuE2Flac, inspectRenderEngineYuE2FloatWav } from "@/lib/renderEngineYuE2Candidate";
 import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
 
 const execFileP = promisify(execFile);
@@ -25,5 +25,20 @@ test("verified Engine FLAC decodes to exact-frame native float WAV", async () =>
     await probeYuE2NativeWav(wavPath, { frames }, wav.byteLength);
     await assert.rejects(Promise.resolve().then(() => inspectRenderEngineYuE2Flac(flac, 0.5)), /outside the pinned/);
     await assert.rejects(Promise.resolve().then(() => inspectRenderEngineYuE2Flac(new Uint8Array([1, 2, 3]), 1)), /not bounded FLAC/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("scored Engine float WAV is retained natively with exact 48 kHz stereo frames", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "studio-yue2-float-wav-test-"));
+  const wavPath = join(directory, "native.wav");
+  try {
+    await execFileP(process.env.FFMPEG_PATH?.trim() || "ffmpeg", ["-v", "error", "-nostdin", "-y", "-f", "lavfi",
+      "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-ac", "2", "-c:a", "pcm_f32le", wavPath],
+    { timeout: 30_000, maxBuffer: 1024 * 1024 });
+    const wav = new Uint8Array(await readFile(wavPath));
+    assert.equal(inspectRenderEngineYuE2FloatWav(wav, 2), 48_000);
+    await probeYuE2NativeWav(wavPath, { frames: 48_000 }, wav.byteLength);
+    assert.throws(() => inspectRenderEngineYuE2FloatWav(wav, 0.5), /duration exceeds/);
+    assert.throws(() => inspectRenderEngineYuE2FloatWav(new Uint8Array([1, 2, 3]), 1), /not a bounded RIFF\/WAVE/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

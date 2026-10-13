@@ -4,11 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes } from "@/lib/storage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { sha256BytesHex } from "@/lib/sha256";
 import { assertRenderEngineR2SignedUrl, type RenderEngineYuE2Output, type RenderEngineYuE2Request } from "@/lib/renderEngineYuE2StageClient";
+import { RenderEngineYuE2RequestSchema } from "@/lib/renderEngineYuE2StageClient";
+import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
+import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 
 const MAX_AUDIO_SECONDS = 300;
 const MAX_WAV_BYTES = MAX_AUDIO_SECONDS * 48_000 * 2 * 4 + 4_096;
@@ -17,15 +22,15 @@ const FILES = ["score.abc", "semantic.npy", "latent.npy", "request.json", "confi
 const execFileP = promisify(execFile);
 
 const EngineCandidateSchema = z.object({
-  version: z.literal("studio-yue2-render-engine-candidate/v1"),
+  version: z.literal("studio-yue2-render-engine-candidate/v2"),
   ownerId: z.string().min(1), channelId: z.string().min(1), runId: z.string().min(1),
   programFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
   studioJobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
-  request: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  request: z.unknown(), acceptedArrangement: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   engineJobId: z.string().regex(/^[a-z0-9]{32}$/u), executionJobId: z.string().regex(/^[a-z0-9]{32}$/u),
   profileRevisionSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   output: z.object({ bucket: z.string().min(3), key: z.string().min(1), bytes: z.number().int().positive(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/u), contentType: z.literal("audio/flac"), verifiedAt: z.number().int().positive() }).strict(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u), contentType: z.literal("audio/wav"), verifiedAt: z.number().int().positive() }).strict(),
   audioKey: z.string().min(1), audioSha256: z.string().regex(/^[a-f0-9]{64}$/u), audioBytes: z.number().int().positive(),
   nativeArtifacts: z.array(z.object({ name: z.enum(FILES), key: z.string().min(1), contentType: z.string().min(1),
     bytes: z.number().int().positive(), sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict()).length(6),
@@ -37,7 +42,99 @@ const EngineCandidateSchema = z.object({
 type Scope = Readonly<{ ownerId: string; channelId: string; runId: string }>;
 function digest(bytes: Uint8Array): string { return sha256BytesHex(bytes); }
 
-function inspectFloatWav(bytes: Uint8Array, maxAudioSeconds: number): number {
+/** Revalidates a retained Engine source for owner audition and later assembly; never approves it. */
+export async function readRenderEngineYuE2Candidate(scope: Scope) {
+  const root = `owner/${scope.ownerId}/runs/${scope.runId}/music/yue2-evaluation/`;
+  let candidateBytes: Uint8Array;
+  try { candidateBytes = await getObjectBytes(`${root}candidate.json`, undefined, { maxBytes: 256_000, timeoutMs: 30_000 }); }
+  catch (error) {
+    const value = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (value?.name === "NoSuchKey" || (value?.name === "NotFound" && value.$metadata?.httpStatusCode === 404)) return null;
+    throw error;
+  }
+  const candidate = EngineCandidateSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(candidateBytes)));
+  const acceptedArrangement = AcceptedMusicArrangementSchema.parse(candidate.acceptedArrangement);
+  const request = RenderEngineYuE2RequestSchema.parse(candidate.request);
+  if (candidate.ownerId !== scope.ownerId || candidate.channelId !== scope.channelId || candidate.runId !== scope.runId ||
+      canonicalJson(candidate) !== new TextDecoder("utf-8", { fatal: true }).decode(candidateBytes) ||
+      candidate.audioKey !== `${root}audio-native-${candidate.audioSha256}.wav` || candidate.audioSha256 !== candidate.output.sha256 ||
+      candidate.audioBytes !== candidate.output.bytes || candidate.programFingerprint !== acceptedArrangement.fingerprint ||
+      acceptedArrangement.ownerId !== scope.ownerId || acceptedArrangement.channelId !== scope.channelId || acceptedArrangement.runId !== scope.runId ||
+      candidate.studioJobId !== request.idempotencyKey || candidate.profileRevisionSha256 !== request.profileRevisionSha256 ||
+      request.abc !== acceptedArrangement.symbolicScore || candidate.nativeFrames < 1 ||
+      candidate.output.key !== `projects/${RENDER_ENGINE_STUDIO_PROJECT_NAME}/jobs/${candidate.executionJobId}/audio.wav` ||
+      candidate.output.bucket === "render-engine" || candidate.allocation.costUsd > request.maxCostUsd) {
+    throw new Error("Render Engine candidate scope, score, output or budget binding mismatch");
+  }
+  const audio = await getObjectBytes(candidate.audioKey, undefined, { maxBytes: candidate.audioBytes, timeoutMs: 120_000 });
+  if (audio.byteLength !== candidate.audioBytes || digest(audio) !== candidate.audioSha256 ||
+      inspectRenderEngineYuE2FloatWav(audio, request.maxAudioSeconds) !== candidate.nativeFrames) {
+    throw new Error("Render Engine candidate audio digest or native WAV contract mismatch");
+  }
+  const sidecarHashes: Record<string, string> = {};
+  let parsedRequest: unknown;
+  let result: Record<string, unknown> | undefined;
+  for (const artifact of candidate.nativeArtifacts) {
+    if (artifact.key !== `${root}engine-native/${artifact.name}` || sidecarHashes[artifact.name]) {
+      throw new Error("Render Engine sidecar escaped its private candidate namespace");
+    }
+    const bytes = await getObjectBytes(artifact.key, undefined, { maxBytes: artifact.bytes, timeoutMs: 30_000 });
+    if (bytes.byteLength !== artifact.bytes || digest(bytes) !== artifact.sha256) throw new Error(`Render Engine sidecar changed: ${artifact.name}`);
+    sidecarHashes[artifact.name] = artifact.sha256;
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    if (artifact.name === "score.abc" && text !== request.abc) throw new Error("Render Engine retained score differs from the accepted arrangement");
+    if (artifact.name === "request.json") parsedRequest = JSON.parse(text);
+    if (artifact.name === "result.json") result = JSON.parse(text) as Record<string, unknown>;
+  }
+  const nativeHashes = result?.nativeArtifactHashes;
+  if (Object.keys(sidecarHashes).length !== FILES.length || !parsedRequest || canonicalJson(parsedRequest) !== canonicalJson(request) ||
+      digest(new TextEncoder().encode(JSON.stringify(parsedRequest))) !== candidate.requestManifestSha256 ||
+      !nativeHashes || typeof nativeHashes !== "object" || Array.isArray(nativeHashes) ||
+      result?.version !== 1 || result.state !== "uploaded" || result.profileId !== "yue2" ||
+      result.manifestSha256 !== request.profileRevisionSha256 || result.format !== "wav" ||
+      result.sampleRate !== 48_000 || result.channels !== 2 || result.bitsPerSample !== 32 ||
+      result.frames !== candidate.nativeFrames || result.durationSeconds !== candidate.nativeFrames / 48_000 ||
+      result.sha256 !== candidate.output.sha256 || result.bytes !== candidate.output.bytes || result.clippedSamples !== 0 ||
+      ["score.abc", "semantic.npy", "latent.npy", "request.json", "config.json", "audio.wav"].some((name) =>
+        (nativeHashes as Record<string, unknown>)[name] !== (name === "audio.wav" ? candidate.output.sha256 : sidecarHashes[name]))) {
+    throw new Error("Render Engine native receipt does not close over the retained candidate");
+  }
+  const directory = await mkdtemp(join(tmpdir(), "studio-yue2-review-"));
+  try {
+    const path = join(directory, "candidate.wav");
+    await writeFile(path, audio, { mode: 0o600, flag: "wx" });
+    await probeYuE2NativeWav(path, { frames: candidate.nativeFrames }, audio.byteLength);
+    const signal = await measureNativeAudioSignal({ path, sampleRateHz: 48_000, channels: 2,
+      expectedFrames: candidate.nativeFrames, measureTruePeak: true });
+    const arrangement = acceptedArrangement.arrangement;
+    const actualDurationSec = candidate.nativeFrames / 48_000;
+    const durationMatches = candidate.nativeFrames === arrangement.requestedDurationSec * 48_000;
+    const naturalLoopDurationAccepted = arrangement.playback === "repeat" && actualDurationSec >= 10 &&
+      actualDurationSec <= request.maxAudioSeconds;
+    const candidateSha256 = digest(candidateBytes);
+    return {
+      candidate: {
+        jobId: candidate.studioJobId, candidateSha256, audioKey: candidate.audioKey, audioSha256: candidate.audioSha256,
+        headroom: undefined, nativeOutput: { sampleRateHz: 48_000 as const, channels: 2 as const,
+          codec: "pcm_f32le" as const, frames: candidate.nativeFrames, durationSec: actualDurationSec },
+        executionAccounting: { allocatedCostUsdMicros: Math.ceil(candidate.allocation.costUsd * 1_000_000), providerBilledCostUsdMicros: null },
+      },
+      candidateSha256, listeningAudioKey: candidate.audioKey,
+      request: { acceptedArrangement },
+      quality: {
+        status: (durationMatches || naturalLoopDurationAccepted) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
+        requestedDurationSec: arrangement.requestedDurationSec, actualDurationSec, durationMatches,
+        nativeDurationMatches: durationMatches, expectedNativeFrames: arrangement.requestedDurationSec * 48_000,
+        sourceDurationPolicy: arrangement.playback === "repeat" ? "natural_loop" as const : "exact" as const,
+        naturalLoopDurationAccepted, nativeFormatVerified: true as const, signal, productionApproved: false as const,
+        unresolved: [...(!durationMatches ? ["exact_delivery_duration"] : []), ...signal.reviewReasons,
+          "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
+      },
+    };
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+
+export function inspectRenderEngineYuE2FloatWav(bytes: Uint8Array, maxAudioSeconds: number): number {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.byteLength < 44 || view.getUint32(0, false) !== 0x52494646 || view.getUint32(8, false) !== 0x57415645) {
     throw new Error("YuE2 Engine audio is not a bounded RIFF/WAVE file");
@@ -46,6 +143,7 @@ function inspectFloatWav(bytes: Uint8Array, maxAudioSeconds: number): number {
   let offset = 12;
   let fmt: { isFloat: boolean; channels: number; rate: number; bits: number } | undefined;
   let dataBytes: number | undefined;
+  let dataOffset: number | undefined;
   while (offset + 8 <= bytes.byteLength) {
     const size = view.getUint32(offset + 4, true);
     const start = offset + 8;
@@ -62,15 +160,24 @@ function inspectFloatWav(bytes: Uint8Array, maxAudioSeconds: number): number {
     } else if (view.getUint32(offset, false) === 0x64617461) {
       if (dataBytes !== undefined) throw new Error("YuE2 Engine WAV has multiple data chunks");
       dataBytes = size;
+      dataOffset = start;
     }
     offset = start + size + (size % 2);
   }
-  if (!fmt || dataBytes === undefined || !fmt.isFloat || fmt.channels !== 2 || fmt.rate !== 48_000 || fmt.bits !== 32 || dataBytes % 8) {
+  if (offset !== bytes.byteLength || !fmt || dataBytes === undefined || dataOffset === undefined || !fmt.isFloat ||
+      fmt.channels !== 2 || fmt.rate !== 48_000 || fmt.bits !== 32 || dataBytes % 8) {
     throw new Error("YuE2 Engine WAV is not stereo 48 kHz float32 PCM");
   }
   const frames = dataBytes / 8;
   const seconds = frames / 48_000;
   if (!frames || seconds > maxAudioSeconds || seconds > MAX_AUDIO_SECONDS) throw new Error("YuE2 Engine source duration exceeds its accepted bound");
+  let peak = 0;
+  for (let sample = dataOffset; sample < dataOffset + dataBytes; sample += 4) {
+    const value = view.getFloat32(sample, true);
+    if (!Number.isFinite(value) || Math.abs(value) >= 1) throw new Error("YuE2 Engine WAV has clipped or non-finite samples");
+    peak = Math.max(peak, Math.abs(value));
+  }
+  if (peak === 0) throw new Error("YuE2 Engine WAV is silent");
   return frames;
 }
 
@@ -112,7 +219,7 @@ export async function decodeRenderEngineYuE2Flac(bytes: Uint8Array, expectedFram
       "-map", "0:a:0", "-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", "-f", "wav", outputPath],
     { timeout: 120_000, maxBuffer: 1024 * 1024 });
     const wav = new Uint8Array(await readFile(outputPath));
-    if (wav.byteLength > MAX_WAV_BYTES || inspectFloatWav(wav, MAX_AUDIO_SECONDS) !== expectedFrames) {
+    if (wav.byteLength > MAX_WAV_BYTES || inspectRenderEngineYuE2FloatWav(wav, MAX_AUDIO_SECONDS) !== expectedFrames) {
       throw new Error("Decoded YuE2 PCM frame count does not match the verified FLAC source");
     }
     return wav;
@@ -147,6 +254,7 @@ function allocationFromStatus(status: Record<string, unknown>, maxCostUsd: numbe
 export async function materializeRenderEngineYuE2Candidate(input: {
   scope: Scope;
   programFingerprint: string;
+  acceptedArrangement: unknown;
   request: RenderEngineYuE2Request;
   stage: { jobId: string; manifestSha256: string; output: { bucket: string; key: string; receiptKey: string } };
   status: Record<string, unknown>;
@@ -165,15 +273,15 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   const statusOutput = status.output as Record<string, unknown>;
   if (statusOutput.bucket !== readback.bucket || statusOutput.key !== readback.key || statusOutput.bytes !== readback.bytes ||
       statusOutput.sha256 !== readback.sha256 || statusOutput.contentType !== readback.contentType ||
-      statusOutput.verifiedAt !== readback.verifiedAt || readback.key !== `projects/${input.projectName}/jobs/${readback.executionJobId}/audio.flac` ||
+      statusOutput.verifiedAt !== readback.verifiedAt || readback.key !== `projects/${input.projectName}/jobs/${readback.executionJobId}/audio.wav` ||
       readback.bucket === "render-engine" || stage.output.bucket !== readback.bucket ||
-      stage.output.key !== `projects/${input.projectName}/jobs/${stage.jobId}/audio.flac` ||
+      stage.output.key !== `projects/${input.projectName}/jobs/${stage.jobId}/audio.wav` ||
       stage.output.receiptKey !== `projects/${input.projectName}/jobs/${stage.jobId}/yue2.receipt.json`) {
     throw new Error("Render Engine YuE2 output, stage and status receipts disagree");
   }
   const allocation = allocationFromStatus(status, request.maxCostUsd);
-  const outputBytes = await fetchVerified(readback.url, { bytes: readback.bytes, sha256: readback.sha256, contentType: "audio/flac" }, {}, input.fetchImpl);
-  const nativeFrames = inspectRenderEngineYuE2Flac(outputBytes, request.maxAudioSeconds);
+  const outputBytes = await fetchVerified(readback.url, { bytes: readback.bytes, sha256: readback.sha256, contentType: "audio/wav" }, {}, input.fetchImpl);
+  const nativeFrames = inspectRenderEngineYuE2FloatWav(outputBytes, request.maxAudioSeconds);
   const root = `owner/${scope.ownerId}/runs/${scope.runId}/music/yue2-evaluation/`;
   const audioKey = `${root}audio-native-${readback.sha256}.wav`;
   const retainedSidecars: Array<{ name: typeof FILES[number]; key: string; contentType: string; bytes: number; sha256: string }> = [];
@@ -203,7 +311,7 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   const nativeHashes = resultValue.nativeArtifactHashes;
   const sidecarHashes = Object.fromEntries(retainedSidecars.map((artifact) => [artifact.name, artifact.sha256]));
   if (!nativeHashes || typeof nativeHashes !== "object" || Array.isArray(nativeHashes) ||
-      (nativeHashes as Record<string, unknown>)["audio.flac"] !== readback.sha256 ||
+      (nativeHashes as Record<string, unknown>)["audio.wav"] !== readback.sha256 ||
       ["score.abc", "semantic.npy", "latent.npy", "request.json", "config.json"].some((name) =>
         (nativeHashes as Record<string, unknown>)[name] !== sidecarHashes[name])) {
     throw new Error("Render Engine YuE2 native sidecar hashes do not close over the accepted request and audio");
@@ -213,23 +321,29 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   const truncated = resultValue.truncated;
   if (resultValue.version !== 1 || resultValue.state !== "uploaded" || resultValue.profileId !== "yue2" ||
       resultValue.manifestSha256 !== request.profileRevisionSha256 || resultValue.requestSha256 !== requestSha256 ||
-      resultValue.format !== "flac" || resultValue.sampleRate !== 48_000 || resultValue.channels !== 2 ||
-      resultValue.bitsPerSample !== 24 || resultValue.frames !== nativeFrames || resultValue.durationSeconds !== nativeFrames / 48_000 ||
+      resultValue.format !== "wav" || resultValue.sampleRate !== 48_000 || resultValue.channels !== 2 ||
+      resultValue.bitsPerSample !== 32 || resultValue.frames !== nativeFrames || resultValue.durationSeconds !== nativeFrames / 48_000 ||
       resultValue.sha256 !== readback.sha256 || resultValue.bytes !== readback.bytes || resultValue.clippedSamples !== 0 ||
       !truncated || typeof truncated !== "object" || Array.isArray(truncated) ||
       (truncated as Record<string, unknown>).abc !== false || (truncated as Record<string, unknown>).semantic !== false) {
-    throw new Error("Render Engine YuE2 native result receipt does not match the verified FLAC and request");
+    throw new Error("Render Engine YuE2 native result receipt does not match the verified float WAV and request");
   }
-  const wavBytes = await decodeRenderEngineYuE2Flac(outputBytes, nativeFrames);
+  const wavBytes = outputBytes;
   const audioSha256 = digest(wavBytes);
   await persistPreparedResult(audioKey, wavBytes, "audio/wav", { "render-engine-yue2-job": stage.jobId,
     "render-engine-yue2-source-sha256": readback.sha256, "render-engine-yue2-sha256": audioSha256 });
   const retainedAudio = await getObjectBytes(audioKey, undefined, { maxBytes: wavBytes.byteLength, timeoutMs: 300_000 });
   if (retainedAudio.byteLength !== wavBytes.byteLength || digest(retainedAudio) !== audioSha256) throw new Error("Studio R2 decoded audio changed after retention");
   const candidateKey = `${root}candidate.json`;
+  const acceptedArrangement = AcceptedMusicArrangementSchema.parse(input.acceptedArrangement);
+  if (acceptedArrangement.fingerprint !== input.programFingerprint || acceptedArrangement.ownerId !== scope.ownerId ||
+      acceptedArrangement.channelId !== scope.channelId || acceptedArrangement.runId !== scope.runId ||
+      acceptedArrangement.symbolicScore !== request.abc) {
+    throw new Error("Render Engine candidate does not match the exact accepted arrangement and score");
+  }
   const candidate = EngineCandidateSchema.parse({
-    version: "studio-yue2-render-engine-candidate/v1", ...scope, programFingerprint: input.programFingerprint,
-    studioJobId: request.idempotencyKey, request, requestManifestSha256: stage.manifestSha256,
+    version: "studio-yue2-render-engine-candidate/v2", ...scope, programFingerprint: input.programFingerprint,
+    studioJobId: request.idempotencyKey, request, acceptedArrangement, requestManifestSha256: stage.manifestSha256,
     engineJobId: stage.jobId, executionJobId: readback.executionJobId, profileRevisionSha256: request.profileRevisionSha256,
     output: { bucket: readback.bucket, key: readback.key, bytes: readback.bytes, sha256: readback.sha256, contentType: readback.contentType, verifiedAt: readback.verifiedAt },
     audioKey, audioSha256, audioBytes: wavBytes.byteLength, nativeArtifacts: retainedSidecars,

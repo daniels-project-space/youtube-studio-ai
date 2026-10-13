@@ -15,6 +15,7 @@ let run: Record<string, unknown> | null = { _id: "review-run", ownerId: "review-
 let channel: Record<string, unknown> | null = { _id: "review-channel", ownerId: "review-owner" };
 let unavailable = false;
 let absent = false;
+let engineAbsent = true;
 const calls: string[] = [];
 let recordedBasis: unknown;
 const material = {
@@ -62,6 +63,13 @@ loader._load = function (id, ...args) {
       return absent ? null : material;
     },
   };
+  if (id.endsWith("/renderEngineYuE2Candidate")) return {
+    readRenderEngineYuE2Candidate: async (scope: unknown) => {
+      calls.push("engine-material");
+      assert.deepEqual(scope, { ownerId: "review-owner", channelId: "review-channel", runId: "review-run" });
+      return engineAbsent ? null : material;
+    },
+  };
   if (id.endsWith("/storage")) return {
     presignDownload: async (key: string, options: unknown) => {
       calls.push("presign");
@@ -97,11 +105,17 @@ async function main() {
   let response = await GET(request());
   assert.deepEqual(await response.json(), { ok: true, review: null });
   assert.ok(!calls.includes("presign"));
+  engineAbsent = false;
+  response = await GET(request());
+  assert.equal(response.status, 200, "Engine-backed candidates enter the same owner review path");
+  assert.ok(calls.includes("engine-material"));
+  engineAbsent = true;
   absent = false; unavailable = true;
+  const presignsBeforeUnavailable = calls.filter((call) => call === "presign").length;
   response = await GET(request());
   assert.equal(response.status, 503);
   assert.doesNotMatch(await response.text(), /private-worker|credential|private-binding-key/);
-  assert.ok(!calls.includes("presign"));
+  assert.equal(calls.filter((call) => call === "presign").length, presignsBeforeUnavailable);
   unavailable = false;
   response = await GET(request());
   assert.equal(response.status, 200);
