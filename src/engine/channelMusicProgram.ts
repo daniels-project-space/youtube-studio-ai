@@ -415,9 +415,35 @@ export function instrumentalLyricsControl(
 
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
   const role = input.role ?? musicRoleForRoute(input.family, input.contentLaneKey);
-  const genre = cleanText(input.genre, role === "primary_music" ? "warm lo-fi instrumental" : "restrained cinematic ambient", 160);
-  const instrumentation = unique(input.instrumentation, ["felt piano", "soft bass", "restrained percussion"], 12);
-  const textures = unique(input.textures, ["natural room depth", "subtle tape warmth"], 8);
+  const defaults = {
+    primary_music: {
+      genre: "warm lo-fi instrumental",
+      instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
+      textures: ["natural room depth", "subtle tape warmth"],
+      moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
+    },
+    narration_bed: {
+      genre: "restrained documentary underscore",
+      instrumentation: ["low strings", "soft piano", "muted low pulse"],
+      textures: ["dry centered dialogue space", "subtle room depth"],
+      moodArc: "quiet uncertainty gathers into restrained tension, then resolves without competing with speech",
+    },
+    meditation_bed: {
+      genre: "slow spacious ambient meditation",
+      instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
+      textures: ["wide calm stereo space", "gentle natural air"],
+      moodArc: "settle into a steady spacious calm, drift through subtle timbral change, and return without a strong melodic arrival",
+    },
+    short_form_bed: {
+      genre: "concise modern instrumental underscore",
+      instrumentation: ["muted bass", "soft compact percussion", "single restrained pluck"],
+      textures: ["tight clean low end", "controlled stereo width"],
+      moodArc: "establish one clear rhythmic idea quickly, add a small lift, and resolve cleanly before the cut",
+    },
+  }[role];
+  const genre = cleanText(input.genre, defaults.genre, 160);
+  const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
+  const textures = unique(input.textures, defaults.textures, 8);
   const rawBpm = input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
   const bpmRange: [number, number] = [
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),
@@ -425,9 +451,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   ];
   const moodArc = cleanText(
     input.moodArc,
-    role === "narration_bed"
-      ? "quiet intrigue develops into restrained tension, then resolves with earned warmth"
-      : "a recognizable motif deepens through real variation and returns with warmer resolution",
+    defaults.moodArc,
     600,
   );
   // Preserve authored direction in full. Existing caption size/word gates

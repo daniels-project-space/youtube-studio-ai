@@ -138,6 +138,9 @@ assert.deepEqual(
   ["arrival", "settle", "open", "drift", "return", "release"],
   "long meditation programs must keep calm variation distinct from an unstructured repeated pad",
 );
+assert.equal(longMeditation.identity.genre, "slow spacious ambient meditation");
+assert.deepEqual(longMeditation.identity.instrumentation, ["warm sustained pad", "sparse felt piano", "soft breathy flute"]);
+assert.match(longMeditation.identity.moodArc, /without a strong melodic arrival/u);
 
 const longNarration = createChannelMusicProgram({
   channelId: "channel-long-history",
@@ -152,6 +155,18 @@ assert.deepEqual(
   ["cold-open", "exposition", "complication", "reveal", "recovery", "resolution", "tail"],
   "long narration beds must preserve speech space through a distinct reveal-and-recovery passage",
 );
+assert.equal(longNarration.identity.genre, "restrained documentary underscore");
+assert.match(longNarration.identity.moodArc, /without competing with speech/u);
+
+const shortForm = createChannelMusicProgram({
+  channelId: "channel-quick-lessons",
+  channelIdentityFingerprint: sha("7"),
+  family: "shorts",
+  contentLaneKey: "short_form",
+  topic: "One useful idea",
+});
+assert.equal(shortForm.identity.genre, "concise modern instrumental underscore");
+assert.match(shortForm.identity.moodArc, /before the cut/u);
 
 const receiptInput = {
   output: {
