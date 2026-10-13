@@ -145,6 +145,18 @@ assert.doesNotMatch(
   "beatless sleep prompts must not simultaneously prescribe a tempo or tonal center, even when supplied by channel DNA/composer direction",
 );
 assert.doesNotMatch(sleep.generation.structuredCaption, /call-and-response|late lift|genuine contrast passage/u);
+const guidedSleep = createChannelMusicProgram({
+  channelId: "channel-guided-sleep",
+  channelIdentityFingerprint: sha("9"),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  topic: "A gentle body scan for rest",
+});
+assert.equal(guidedSleep.role, "sleep_sound_bed", "guided sleep keeps the beatless sleep-source contract");
+assert.equal(guidedSleep.mix.narrationPriority, true, "guided sleep's narration retains foreground priority");
+assert.equal(guidedSleep.mix.bodyMusicVol, 0.1026, "guided sleep defaults to the established narrated-bed gain");
+assert.equal(sleep.mix.narrationPriority, false, "standalone sleep sound remains a primary listening program");
+assert.equal(sleep.mix.bodyMusicVol, 1);
 assert.ok(
   music3StructuredCaptionWordCount(lofi.generation.structuredCaption) >= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS
     && music3StructuredCaptionWordCount(lofi.generation.structuredCaption) <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,

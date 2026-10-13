@@ -131,6 +131,8 @@ async function main() {
       } },
     });
     assert.equal(persisted!.mix.targetLufs, -20, "an unconfigured sleep route must retain the sleep-specific mastering target");
+    assert.equal(persisted!.mix.narrationPriority, true, "the canonical guided-sleep route gives narration foreground priority");
+    assert.equal(persisted!.mix.bodyMusicVol, 0.1026, "the canonical guided-sleep route defaults to narrated-bed gain");
     assert.match(sleepPrompt, /unmetered and beatless/u);
     assert.match(sleepPrompt, /diffuse, sustained background texture/u);
     assert.doesNotMatch(sleepPrompt, /The melodic lead belongs/u);

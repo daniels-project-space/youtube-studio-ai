@@ -520,7 +520,8 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
-  const bodyMusicVol = role === "primary_music" || role === "sleep_sound_bed"
+  const narratedSleepRoute = role === "sleep_sound_bed" && input.contentLaneKey.toLowerCase() === "ambient_guided";
+  const bodyMusicVol = role === "primary_music" || (role === "sleep_sound_bed" && !narratedSleepRoute)
     ? 1
     : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" ? 0.25 : 0.1026)));
   const body: ChannelMusicProgramBody = {
@@ -555,7 +556,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       targetLufs,
       truePeakMaxDbtp: -1,
       bodyMusicVol,
-      narrationPriority: role === "narration_bed" || role === "short_form_bed",
+      narrationPriority: role === "narration_bed" || role === "short_form_bed" || narratedSleepRoute,
       transparentConstantGainOnly: true,
       compressorProhibited: true,
       limiterProhibited: true,
