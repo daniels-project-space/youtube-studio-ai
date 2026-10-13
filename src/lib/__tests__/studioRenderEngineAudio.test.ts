@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { StudioRenderEngineClient, STUDIO_ENGINE_BUCKET, STUDIO_ENGINE_PROJECT } from "../studioRenderEngineClient";
-import { executeStudioEngineAudio, type StudioEngineAudioRecovery } from "../studioRenderEngineAudio";
+import { executeStudioEngineAudio, StudioEngineAudioInput, type StudioEngineAudioRecovery } from "../studioRenderEngineAudio";
 import { STUDIO_ENGINE_AUDIO_WORKFLOWS } from "../studioRenderEngineWorkflows";
 
 const jobId = "a".repeat(32), workflowId = STUDIO_ENGINE_AUDIO_WORKFLOWS["qwen3-tts"].workflowId, hash = "c".repeat(64);
@@ -13,6 +13,19 @@ const bytes = Buffer.from("exact native fixture");
 const output = { bucket: STUDIO_ENGINE_BUCKET, key: `projects/${STUDIO_ENGINE_PROJECT}/outputs/audio.wav`, bytes: bytes.length,
   sha256: createHash("sha256").update(bytes).digest("hex"), contentType: "audio/wav", verifiedAt: 123 };
 const admission = { jobId, state: "queued", manifestSha256: hash };
+const yue2Input = { model: "yue2" as const, workflowId: STUDIO_ENGINE_AUDIO_WORKFLOWS.yue2.workflowId,
+  request: { idempotencyKey: "studio:yue2:immutable:001", profileRevisionSha256: STUDIO_ENGINE_AUDIO_WORKFLOWS.yue2.profileRevisionSha256,
+    version: 2, sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090" }, output: { contentType: "audio/wav" } } };
+
+test("YuE2 shared Engine submissions are pinned to the requested OpenRelay RTX 3090 route", () => {
+  assert.deepEqual(StudioEngineAudioInput.parse(yue2Input), yue2Input);
+  assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
+    request: { ...yue2Input.request, sourceConstraints: { provider: "hyper", gpuModel: "RTX 5090" } } }), /pinned to OpenRelay RTX 3090/);
+  assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
+    request: { ...yue2Input.request, sourceConstraints: undefined } }), /pinned to OpenRelay RTX 3090/);
+  assert.throws(() => StudioEngineAudioInput.parse({ ...yue2Input,
+    request: { ...yue2Input.request, version: 1 } }), /pinned to OpenRelay RTX 3090/);
+});
 
 function fixture(options: { retire?: boolean; wrongWorkflow?: boolean; waiting?: boolean; held?: boolean } = {}) {
   let submits = 0, observations = 0, held = options.held ?? false;

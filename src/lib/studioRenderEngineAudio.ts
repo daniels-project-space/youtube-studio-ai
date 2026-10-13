@@ -15,7 +15,16 @@ export const StudioEngineAudioInput = z.object({
       ctx.addIssue({ code: "custom", message: "A frozen audio output contract is required before submission" });
     }
   }),
-}).strict();
+}).strict().superRefine((input, ctx) => {
+  if (input.model !== "yue2") return;
+  const pin = z.object({ version: z.literal(2), sourceConstraints: z.object({
+    provider: z.literal("openrelay"), gpuModel: z.literal("RTX 3090"),
+  }).passthrough() }).passthrough();
+  if (!pin.safeParse(input.request).success) {
+    ctx.addIssue({ code: "custom", path: ["request", "sourceConstraints"],
+      message: "YuE2 submissions must remain pinned to OpenRelay RTX 3090" });
+  }
+});
 export type StudioEngineAudioInput = z.infer<typeof StudioEngineAudioInput>;
 export type StudioEngineAudioRecovery = { inputSha256: string; admission: StudioEngineAdmission };
 
