@@ -29,7 +29,7 @@ try {
     assert.equal(result.productionReady, false, "source selection is not automatic production qualification");
     assert.ok(result.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const modules = result.compilation!.modules;
-    assert.equal(modules.find(module => module.id === "music")?.version, "3.0.0-yue2-candidate");
+    assert.equal(modules.find(module => module.id === "music")?.version, "4.0.0-render-engine-yue2");
     assert.equal(modules.find(module => module.id === "composer_brief")?.version, "3.0.0-yue2-score");
     assert.equal(modules.find(module => module.id === (family === "music_loop" ? "assemble" : "timeline_assemble"))?.version,
       playback === "once" ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop");

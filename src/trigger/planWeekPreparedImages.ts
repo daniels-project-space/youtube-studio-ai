@@ -32,6 +32,7 @@ import {
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
@@ -40,8 +41,8 @@ import type { Shot } from "@/lib/novitaRenderFarm";
 import { admitStudioBatchInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 import { STUDIO_ZIMAGE_TURBO_PROFILE, provisionStudioZImageWorkflowInRenderEngine, stageStudioZImageRequestInRenderEngine, type RenderEngineStudioZImageRequest } from "@/lib/renderEngineStudioZImageStageClient";
 
-const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
-const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
+const RENDER_ENGINE_SITE = RENDER_ENGINE_STUDIO_SITE;
+const RENDER_ENGINE_PROJECT_NAME = RENDER_ENGINE_STUDIO_PROJECT_NAME;
 
 export interface PlanWeekPreparedImageShot {
   id: string;
