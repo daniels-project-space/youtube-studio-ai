@@ -9,6 +9,7 @@ import { getObjectBytes } from "@/lib/storage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { sha256BytesHex } from "@/lib/sha256";
 import { assertRenderEngineR2SignedUrl, type RenderEngineYuE2Output, type RenderEngineYuE2Request } from "@/lib/renderEngineYuE2StageClient";
+import { YUE2_ARRANGEMENT_EVALUATION_VERSION, validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
 
 const MAX_AUDIO_SECONDS = 300;
 const MAX_WAV_BYTES = MAX_AUDIO_SECONDS * 48_000 * 2 * 4 + 4_096;
@@ -17,11 +18,11 @@ const FILES = ["score.abc", "semantic.npy", "latent.npy", "request.json", "confi
 const execFileP = promisify(execFile);
 
 const EngineCandidateSchema = z.object({
-  version: z.literal("studio-yue2-render-engine-candidate/v1"),
+  version: z.literal("studio-yue2-render-engine-candidate/v2"),
   ownerId: z.string().min(1), channelId: z.string().min(1), runId: z.string().min(1),
   programFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
   studioJobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
-  request: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  request: z.unknown(), acceptedArrangementRequest: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   engineJobId: z.string().regex(/^[a-z0-9]{32}$/u), executionJobId: z.string().regex(/^[a-z0-9]{32}$/u),
   profileRevisionSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   output: z.object({ bucket: z.string().min(3), key: z.string().min(1), bytes: z.number().int().positive(),
@@ -148,6 +149,7 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   scope: Scope;
   programFingerprint: string;
   request: RenderEngineYuE2Request;
+  acceptedArrangementRequest: unknown;
   stage: { jobId: string; manifestSha256: string; output: { bucket: string; key: string; receiptKey: string } };
   status: Record<string, unknown>;
   readback: RenderEngineYuE2Output;
@@ -155,6 +157,19 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   fetchImpl?: typeof fetch;
 }): Promise<Readonly<{ candidateKey: string; candidateSha256: string; audioKey: string; audioSha256: string; audioBytes: number; nativeFrames: number; allocationCostUsd: number }>> {
   const { scope, request, stage, status, readback } = input;
+  const acceptedArrangementRequest = validateYuE2EvaluationRequest(input.acceptedArrangementRequest);
+  if (acceptedArrangementRequest.version !== YUE2_ARRANGEMENT_EVALUATION_VERSION ||
+      acceptedArrangementRequest.programFingerprint !== input.programFingerprint ||
+      acceptedArrangementRequest.acceptedArrangement.ownerId !== scope.ownerId ||
+      acceptedArrangementRequest.acceptedArrangement.channelId !== scope.channelId ||
+      acceptedArrangementRequest.acceptedArrangement.runId !== scope.runId ||
+      acceptedArrangementRequest.job.job_id !== request.idempotencyKey ||
+      acceptedArrangementRequest.job.schema_version !== 2 ||
+      acceptedArrangementRequest.job.abc !== request.abc || acceptedArrangementRequest.job.style !== request.style ||
+      acceptedArrangementRequest.job.seed !== request.seed ||
+      acceptedArrangementRequest.job.source_duration_policy !== request.sourceDurationPolicy) {
+    throw new Error("Render Engine request is not bound to the accepted Studio arrangement and intent");
+  }
   const safeScope = [scope.ownerId, scope.channelId, scope.runId].every((value) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value));
   if (!safeScope || status.jobId !== stage.jobId || status.executionJobId !== readback.executionJobId ||
       status.profileId !== "yue2" || status.status !== "completed" || status.outputRetired !== false ||
@@ -228,8 +243,8 @@ export async function materializeRenderEngineYuE2Candidate(input: {
   if (retainedAudio.byteLength !== wavBytes.byteLength || digest(retainedAudio) !== audioSha256) throw new Error("Studio R2 decoded audio changed after retention");
   const candidateKey = `${root}candidate.json`;
   const candidate = EngineCandidateSchema.parse({
-    version: "studio-yue2-render-engine-candidate/v1", ...scope, programFingerprint: input.programFingerprint,
-    studioJobId: request.idempotencyKey, request, requestManifestSha256: stage.manifestSha256,
+    version: "studio-yue2-render-engine-candidate/v2", ...scope, programFingerprint: input.programFingerprint,
+    studioJobId: request.idempotencyKey, request, acceptedArrangementRequest, requestManifestSha256: stage.manifestSha256,
     engineJobId: stage.jobId, executionJobId: readback.executionJobId, profileRevisionSha256: request.profileRevisionSha256,
     output: { bucket: readback.bucket, key: readback.key, bytes: readback.bytes, sha256: readback.sha256, contentType: readback.contentType, verifiedAt: readback.verifiedAt },
     audioKey, audioSha256, audioBytes: wavBytes.byteLength, nativeArtifacts: retainedSidecars,

@@ -108,7 +108,7 @@ const block: Block & { version: string } = {
       const readback = await getRenderEngineYuE2Output(projectConfig, stage.jobId);
       const material = await materializeRenderEngineYuE2Candidate({
         scope: { ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId },
-        programFingerprint: arrangement.fingerprint, request, stage, status, readback,
+        programFingerprint: arrangement.fingerprint, request, acceptedArrangementRequest: source, stage, status, readback,
         projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME,
       });
       charge = material.allocationCostUsd;
