@@ -511,6 +511,15 @@ export async function POST(request: Request) {
           }, { status: 409 });
         }
       }
+      if (!reviewedDataStoryIntake && design.yue2Music !== undefined) {
+        return NextResponse.json({
+          error: "YuE2 music is not qualified for automatic channel creation yet; use its supervised review route until the production Render Engine contract and output qualification are complete",
+          runtimeBlockers: [
+            "Render Engine production does not yet advertise the scored-source YuE2 contract.",
+            "No accepted RTX 3090 render has completed independent output and shutdown qualification.",
+          ],
+        }, { status: 409 });
+      }
       // This authenticated route is the only place the wizard's explicit
       // confirmations become their separate external-action authorities.
       const approvedForSetupSpend = design.approveSetupSpend === true;
