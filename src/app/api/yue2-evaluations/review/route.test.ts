@@ -62,6 +62,7 @@ loader._load = function (id, ...args) {
       return absent ? null : material;
     },
   };
+  if (id.endsWith("/renderEngineYuE2Candidate")) return { readRenderEngineYuE2Candidate: async () => null };
   if (id.endsWith("/storage")) return {
     presignDownload: async (key: string, options: unknown) => {
       calls.push("presign");

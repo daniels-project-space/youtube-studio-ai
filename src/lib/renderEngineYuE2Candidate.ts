@@ -10,6 +10,8 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { sha256BytesHex } from "@/lib/sha256";
 import { assertRenderEngineR2SignedUrl, type RenderEngineYuE2Output, type RenderEngineYuE2Request } from "@/lib/renderEngineYuE2StageClient";
 import { YUE2_ARRANGEMENT_EVALUATION_VERSION, validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
+import { probeYuE2NativeWav } from "@/lib/yue2NativeAudio";
+import { measureNativeAudioSignal } from "@/lib/nativeAudioSignal";
 
 const MAX_AUDIO_SECONDS = 300;
 const MAX_WAV_BYTES = MAX_AUDIO_SECONDS * 48_000 * 2 * 4 + 4_096;
@@ -22,7 +24,13 @@ const EngineCandidateSchema = z.object({
   ownerId: z.string().min(1), channelId: z.string().min(1), runId: z.string().min(1),
   programFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
   studioJobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
-  request: z.unknown(), acceptedArrangementRequest: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  request: z.object({ version: z.literal(1), idempotencyKey: z.string().min(1), sourceId: z.string().min(1),
+    profileRevisionSha256: z.string().regex(/^[a-f0-9]{64}$/u), lyrics: z.string(), style: z.string().min(1),
+    seed: z.number().int().nonnegative(), maxAudioSeconds: z.number().positive(), maxCostUsd: z.number().positive(),
+    abc: z.string().min(1), scorePolicy: z.literal("instrumental"), sourceDurationPolicy: z.enum(["exact", "natural_loop"]),
+    sourceConstraints: z.object({ provider: z.literal("openrelay"), gpuModel: z.literal("RTX 3090") }).strict(),
+    output: z.object({ contentType: z.literal("audio/flac"), sampleRateHz: z.literal(48_000), channels: z.literal(2) }).strict() }).strict(),
+  acceptedArrangementRequest: z.unknown(), requestManifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   engineJobId: z.string().regex(/^[a-z0-9]{32}$/u), executionJobId: z.string().regex(/^[a-z0-9]{32}$/u),
   profileRevisionSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   output: z.object({ bucket: z.string().min(3), key: z.string().min(1), bytes: z.number().int().positive(),
@@ -34,6 +42,109 @@ const EngineCandidateSchema = z.object({
   allocation: z.object({ costUsd: z.number().finite().positive().max(1), gpuSeconds: z.number().int().positive(),
     costBasis: z.literal("engine-reservation-debit"), providerInvoiceVerified: z.literal(false) }).strict(),
 }).strict();
+
+/** Read-only Engine candidate verification for owner audition; it never qualifies production output. */
+export async function readRenderEngineYuE2Candidate(scope: Scope) {
+  const root = `owner/${scope.ownerId}/runs/${scope.runId}/music/yue2-evaluation/`;
+  const candidateKey = `${root}candidate.json`;
+  let candidateBytes: Uint8Array;
+  try { candidateBytes = await getObjectBytes(candidateKey, undefined, { maxBytes: 256_000, timeoutMs: 30_000 }); }
+  catch (error) {
+    const value = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (value?.name === "NoSuchKey" || (value?.name === "NotFound" && value.$metadata?.httpStatusCode === 404)) return null;
+    throw error;
+  }
+  const candidate = EngineCandidateSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(candidateBytes)));
+  if (candidate.ownerId !== scope.ownerId || candidate.channelId !== scope.channelId || candidate.runId !== scope.runId ||
+      candidate.audioKey !== `${root}audio-native-${candidate.audioSha256}.wav` ||
+      canonicalJson(candidate) !== new TextDecoder("utf-8", { fatal: true }).decode(candidateBytes)) {
+    throw new Error("Render Engine candidate scope or canonical receipt mismatch");
+  }
+  const engineRequest = candidate.request;
+  const request = validateYuE2EvaluationRequest(candidate.acceptedArrangementRequest);
+  if (request.version !== YUE2_ARRANGEMENT_EVALUATION_VERSION || request.job.schema_version !== 2 || request.programFingerprint !== candidate.programFingerprint ||
+      request.acceptedArrangement.ownerId !== scope.ownerId || request.acceptedArrangement.channelId !== scope.channelId ||
+      request.acceptedArrangement.runId !== scope.runId || request.job.job_id !== candidate.studioJobId ||
+      request.job.abc !== engineRequest.abc || request.job.style !== engineRequest.style ||
+      request.job.seed !== engineRequest.seed || request.job.source_duration_policy !== engineRequest.sourceDurationPolicy ||
+      engineRequest.idempotencyKey !== candidate.studioJobId || engineRequest.profileRevisionSha256 !== candidate.profileRevisionSha256 ||
+      engineRequest.profileRevisionSha256 !== candidate.request.profileRevisionSha256) {
+    throw new Error("Render Engine candidate is not bound to its accepted arrangement and pinned request");
+  }
+  const audio = await getObjectBytes(candidate.audioKey, undefined, { maxBytes: candidate.audioBytes, timeoutMs: 120_000 });
+  if (audio.byteLength !== candidate.audioBytes || digest(audio) !== candidate.audioSha256) throw new Error("Render Engine candidate audio digest mismatch");
+  const sidecarHashes: Record<string, string> = {};
+  const sidecarValues: Record<string, unknown> = {};
+  for (const artifact of candidate.nativeArtifacts) {
+    if (artifact.key !== `${root}engine-native/${artifact.name}` || sidecarHashes[artifact.name] ||
+        (artifact.name === "request.json" && artifact.contentType !== "application/json") ||
+        (artifact.name === "result.json" && artifact.contentType !== "application/json") ||
+        (artifact.name === "score.abc" && artifact.contentType !== "text/vnd.abc")) {
+      throw new Error("Render Engine sidecar reference is outside its private candidate namespace");
+    }
+    const bytes = await getObjectBytes(artifact.key, undefined, { maxBytes: artifact.bytes, timeoutMs: 30_000 });
+    if (bytes.byteLength !== artifact.bytes || digest(bytes) !== artifact.sha256) throw new Error(`Render Engine retained sidecar mismatch: ${artifact.name}`);
+    sidecarHashes[artifact.name] = artifact.sha256;
+    if (artifact.name === "score.abc" && new TextDecoder("utf-8", { fatal: true }).decode(bytes) !== engineRequest.abc) {
+      throw new Error("Render Engine retained score differs from the accepted arrangement");
+    }
+    if (artifact.name === "request.json" || artifact.name === "result.json") {
+      sidecarValues[artifact.name] = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    }
+  }
+  if (Object.keys(sidecarHashes).length !== FILES.length || canonicalJson(sidecarValues["request.json"]) !== canonicalJson(engineRequest)) {
+    throw new Error("Render Engine candidate has incomplete native receipt closure");
+  }
+  const nativeResult = sidecarValues["result.json"] as Record<string, unknown> | undefined;
+  const nativeHashes = nativeResult?.nativeArtifactHashes;
+  if (!nativeResult || !nativeHashes || typeof nativeHashes !== "object" || Array.isArray(nativeHashes) ||
+      nativeResult.version !== 1 || nativeResult.state !== "uploaded" || nativeResult.profileId !== "yue2" ||
+      nativeResult.manifestSha256 !== candidate.profileRevisionSha256 || nativeResult.format !== "flac" ||
+      nativeResult.sampleRate !== 48_000 || nativeResult.channels !== 2 || nativeResult.bitsPerSample !== 24 ||
+      nativeResult.frames !== candidate.nativeFrames || nativeResult.sha256 !== candidate.output.sha256 ||
+      nativeResult.bytes !== candidate.output.bytes || nativeResult.durationSeconds !== candidate.nativeFrames / 48_000 ||
+      nativeResult.clippedSamples !== 0 ||
+      Object.entries({ "score.abc": sidecarHashes["score.abc"], "semantic.npy": sidecarHashes["semantic.npy"],
+        "latent.npy": sidecarHashes["latent.npy"], "request.json": sidecarHashes["request.json"],
+        "config.json": sidecarHashes["config.json"], "audio.flac": candidate.output.sha256 })
+        .some(([name, value]) => (nativeHashes as Record<string, unknown>)[name] !== value)) {
+    throw new Error("Render Engine native result receipt does not close over the retained candidate");
+  }
+  const directory = await mkdtemp(join(tmpdir(), "studio-yue2-review-"));
+  try {
+    const path = join(directory, "candidate.wav");
+    await writeFile(path, audio, { mode: 0o600, flag: "wx" });
+    await probeYuE2NativeWav(path, { frames: candidate.nativeFrames }, audio.byteLength);
+    const signal = await measureNativeAudioSignal({ path, sampleRateHz: 48_000, channels: 2, expectedFrames: candidate.nativeFrames, measureTruePeak: true });
+    const requestedDurationSec = request.acceptedArrangement.arrangement.requestedDurationSec;
+    const actualDurationSec = candidate.nativeFrames / 48_000;
+    const naturalLoopDurationAccepted = engineRequest.sourceDurationPolicy === "natural_loop" &&
+      candidate.nativeFrames >= 10 * 48_000 && candidate.nativeFrames <= engineRequest.maxAudioSeconds * 48_000;
+    const durationMatches = candidate.nativeFrames === requestedDurationSec * 48_000;
+    const candidateSha256 = digest(candidateBytes);
+    return {
+      candidate: {
+        jobId: candidate.studioJobId, candidateSha256, audioKey: candidate.audioKey, audioSha256: candidate.audioSha256,
+        audioBytes: candidate.audioBytes, nativeFrames: candidate.nativeFrames,
+        headroom: undefined,
+        nativeOutput: { sampleRateHz: 48_000 as const, channels: 2 as const, codec: "pcm_f32le" as const,
+          frames: candidate.nativeFrames, durationSec: actualDurationSec },
+        executionAccounting: { allocatedCostUsdMicros: Math.ceil(candidate.allocation.costUsd * 1_000_000),
+          providerBilledCostUsdMicros: null },
+      },
+      candidateSha256, request, listeningAudioKey: candidate.audioKey,
+      quality: {
+        status: (durationMatches || naturalLoopDurationAccepted) && !signal.reviewReasons.length ? "needs_audition" as const : "blocked" as const,
+        requestedDurationSec, actualDurationSec, durationMatches, nativeDurationMatches: false,
+        expectedNativeFrames: requestedDurationSec * 48_000, sourceDurationPolicy: engineRequest.sourceDurationPolicy,
+        naturalLoopDurationAccepted, nativeFormatVerified: true as const, signal,
+        productionApproved: false as const,
+        unresolved: [...(!durationMatches ? ["exact_delivery_duration"] : []), ...signal.reviewReasons,
+          "perceptual_artifacts", "instrumental_only", "channel_personality_fit", "arrangement_fidelity", "repetition", "ending", "listening_quality"],
+      },
+    };
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
 
 type Scope = Readonly<{ ownerId: string; channelId: string; runId: string }>;
 function digest(bytes: Uint8Array): string { return sha256BytesHex(bytes); }

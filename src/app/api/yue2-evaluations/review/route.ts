@@ -7,11 +7,13 @@ import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { presignDownload } from "@/lib/storage";
 import { getStudioPrivateBucket } from "@/lib/studioPrivateStorage";
 import { readDurableYuE2Candidate } from "@/lib/yue2DurableEvaluation";
+import { readRenderEngineYuE2Candidate } from "@/lib/renderEngineYuE2Candidate";
 import type { YuE2CandidateReview } from "@/lib/yue2ReviewTypes";
 import { validateYuE2Audition, YuE2AuditionSubmissionSchema, type YuE2AuditionRecord } from "@/engine/yue2Audition";
 import { YuE2SourceApprovalBasisSchema } from "@/engine/yue2SourceApproval";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import type { YuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
 
 const auditionApi = (api as unknown as { yue2Auditions: { latest: never; record: never } }).yue2Auditions;
 
@@ -19,7 +21,12 @@ export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
 const runIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
 
-function sourceApprovalBasis(material: NonNullable<Awaited<ReturnType<typeof readDurableYuE2Candidate>>>,
+function sourceApprovalBasis(material: {
+  candidate: { jobId: string; nativeOutput: { frames: number; sampleRateHz: 48000; channels: 2 };
+    audioSha256: string; headroom?: { audioSha256: string }; executionAccounting: { allocatedCostUsdMicros: number } };
+  candidateSha256: string; listeningAudioKey: string; request: YuE2AcceptedArrangementRequest;
+  quality: { status: "needs_audition" | "blocked" };
+},
   run: { _id: string; channelId: string; pipelineInvocationSha256?: string }, ownerId: string) {
   return YuE2SourceApprovalBasisSchema.safeParse({ ownerId, channelId: run.channelId, runId: run._id,
     invocationSha256: run.pipelineInvocationSha256, candidateSha256: material.candidateSha256,
@@ -76,7 +83,8 @@ export async function GET(request: Request) {
     if (!channel || channel.ownerId !== actor.ownerId || channel._id !== run.channelId) {
       return NextResponse.json({ ok: false, error: "Run not found" }, { status: 404, headers });
     }
-    const material = await readDurableYuE2Candidate({ ownerId: actor.ownerId, channelId: run.channelId, runId: run._id });
+    const scope = { ownerId: actor.ownerId, channelId: run.channelId, runId: run._id };
+    const material = await readDurableYuE2Candidate(scope) ?? await readRenderEngineYuE2Candidate(scope);
     if (!material) return NextResponse.json({ ok: true, review: null }, { headers });
     const { candidate, candidateSha256, quality } = material;
     const basis = sourceApprovalBasis(material, run, actor.ownerId);
@@ -127,7 +135,8 @@ export async function POST(request: Request) {
     if (!channel || channel.ownerId !== actor.ownerId || channel._id !== run.channelId) {
       return NextResponse.json({ ok: false, error: "Run not found" }, { status: 404, headers });
     }
-    const material = await readDurableYuE2Candidate({ ownerId: actor.ownerId, channelId: run.channelId, runId: run._id });
+    const scope = { ownerId: actor.ownerId, channelId: run.channelId, runId: run._id };
+    const material = await readDurableYuE2Candidate(scope) ?? await readRenderEngineYuE2Candidate(scope);
     if (!material) return NextResponse.json({ ok: false, error: "Candidate unavailable" }, { status: 409, headers });
     let submission, sourceBasis;
     try {
