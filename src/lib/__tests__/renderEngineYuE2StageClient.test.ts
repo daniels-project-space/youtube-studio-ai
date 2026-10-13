@@ -15,7 +15,7 @@ const jobId = "jd75yszsg3yt0nrgr2g43brtdd8f6f6t";
 const revision = "a".repeat(64);
 const score = "X:1\nT:Night Rain\nM:4/4\nL:1/8\nK:C\nCDEF GABc|";
 const request: RenderEngineYuE2Request = {
-  version: 2,
+  version: 1,
   idempotencyKey: "youtube-studio:channel-1:run-1:music",
   sourceId: "channel-1:run-1:music",
   profileRevisionSha256: revision,
@@ -25,9 +25,10 @@ const request: RenderEngineYuE2Request = {
   maxAudioSeconds: 240,
   maxCostUsd: 0.9,
   abc: score,
-  abcSha256: createHash("sha256").update(score).digest("hex"),
-  sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090", maxCostUsd: 0.9, maxExecutionSeconds: 900 },
-  output: { contentType: "audio/wav", sampleRateHz: 48_000, channels: 2, sampleFormat: "float32" },
+  scorePolicy: "instrumental",
+  sourceDurationPolicy: "natural_loop",
+  sourceConstraints: { provider: "openrelay", gpuModel: "RTX 3090" },
+  output: { contentType: "audio/flac", sampleRateHz: 48_000, channels: 2 },
 };
 const config: RenderEngineYuE2Config = {
   baseUrl: "https://jovial-camel-68.convex.site",
@@ -50,7 +51,7 @@ test("provisions and stages only the pinned Studio YuE2 project workflow", async
     posted.push({ url, body, authorization: new Headers(init?.headers).get("authorization") });
     if (url.endsWith("/client/workflows")) return response({ workflowId: jobId, profileRevisionSha256: revision });
     return response({ jobId, state: "awaiting-final-qualification", manifestSha256: "c".repeat(64), dispatchEnabled: false,
-      output: { bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.wav`, receiptKey: `projects/youtube-studio-ai/jobs/${jobId}/yue2.receipt.json` } }, 202);
+      output: { bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.flac`, receiptKey: `projects/youtube-studio-ai/jobs/${jobId}/yue2.receipt.json` } }, 202);
   };
   const workflow = await provisionRenderEngineYuE2Workflow({ ...config, fetchImpl });
   assert.deepEqual(posted[0]?.body, { projectName: config.projectName, workflowName: "youtube-studio-yue2-native-source-v1", profileId: "yue2" });
@@ -66,7 +67,7 @@ test("provisions and stages only the pinned Studio YuE2 project workflow", async
 test("rejects score, profile, cost, and project-scope mismatches before dispatch", async () => {
   let calls = 0;
   const fetchImpl: typeof fetch = async () => { calls += 1; return response({}); };
-  assert.throws(() => RenderEngineYuE2RequestSchema.parse({ ...request, abcSha256: "f".repeat(64) }), /Score digest mismatch/);
+  assert.throws(() => RenderEngineYuE2RequestSchema.parse({ ...request, lyrics: "unexpected lyrics" }), /Instrumental score jobs cannot include lyrics/);
   await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: jobId, profileRevisionSha256: "d".repeat(64), fetchImpl, request }), /profile revision/);
   await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: "bad", profileRevisionSha256: revision, fetchImpl, request }), /workflow ID/);
   await assert.rejects(stageRenderEngineYuE2Request({ ...config, workflowId: jobId, profileRevisionSha256: revision, baseUrl: "http://jovial-camel-68.convex.site", fetchImpl, request }), /HTTPS Convex site origin/);
@@ -79,8 +80,8 @@ test("reads only the requesting project's job and verified audio object", async 
     const url = new URL(String(input));
     calls.push(url.toString());
     if (url.pathname.endsWith("/client/jobs")) return response({ jobId, profileId: "yue2", status: "completed" });
-    return response({ jobId, bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.wav`,
-      executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/wav", verifiedAt: 1, expiresInSeconds: 3600,
+    return response({ jobId, bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.flac`,
+      executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/flac", verifiedAt: 1, expiresInSeconds: 3600,
       url: "https://youtube-studio-ai.r2.cloudflarestorage.com/audio.wav", nativeArtifactReads });
   };
   const status = await getRenderEngineYuE2Job({ ...config, fetchImpl }, jobId);
@@ -92,8 +93,8 @@ test("reads only the requesting project's job and verified audio object", async 
 });
 
 test("rejects non-R2 artifact hosts before following signed URLs", async () => {
-  const base = { jobId, bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.wav`,
-      executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/wav", verifiedAt: 1, expiresInSeconds: 3600,
+  const base = { jobId, bucket: "youtube-studio-ai", key: `projects/youtube-studio-ai/jobs/${jobId}/audio.flac`,
+      executionJobId: jobId, bytes: 48, sha256: "e".repeat(64), contentType: "audio/flac", verifiedAt: 1, expiresInSeconds: 3600,
       url: "https://youtube-studio-ai.r2.cloudflarestorage.com/audio.wav", nativeArtifactReads };
   const responses = [
     { ...base, url: "https://169.254.169.254/latest/meta-data/" },

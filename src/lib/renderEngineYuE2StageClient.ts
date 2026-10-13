@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 const CONVEX_ID = /^[a-z0-9]{32}$/u;
@@ -6,7 +5,7 @@ const HEX_SHA256 = /^[a-f0-9]{64}$/u;
 const PROJECT_NAME = /^[a-z][a-z0-9-]{2,63}$/u;
 
 export const RenderEngineYuE2RequestSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(1),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9:_-]{16,200}$/u),
   sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/u),
   profileRevisionSha256: z.string().regex(HEX_SHA256),
@@ -14,28 +13,18 @@ export const RenderEngineYuE2RequestSchema = z.object({
   style: z.string().min(1).max(12_000),
   seed: z.number().int().min(0).max(0xffff_ffff),
   maxAudioSeconds: z.number().int().min(1).max(300),
-  maxCostUsd: z.number().finite().min(0).max(1),
-  abc: z.string().min(1).max(48_000),
-  abcSha256: z.string().regex(HEX_SHA256),
-  sourceConstraints: z.object({
-    provider: z.literal("openrelay"),
-    gpuModel: z.literal("RTX 3090"),
-    maxCostUsd: z.number().finite().gt(0).max(1),
-    maxExecutionSeconds: z.number().int().min(30).max(1200),
-  }).strict(),
+  maxCostUsd: z.number().finite().gt(0).max(1),
+  abc: z.string().min(1).max(32_000),
+  scorePolicy: z.literal("instrumental"),
+  sourceDurationPolicy: z.enum(["exact", "natural_loop"]),
+  sourceConstraints: z.object({ provider: z.literal("openrelay"), gpuModel: z.literal("RTX 3090") }).strict(),
   output: z.object({
-    contentType: z.literal("audio/wav"),
+    contentType: z.literal("audio/flac"),
     sampleRateHz: z.literal(48_000),
     channels: z.literal(2),
-    sampleFormat: z.literal("float32"),
   }).strict(),
 }).strict().superRefine((request, ctx) => {
-  if (request.abcSha256 !== sha256(request.abc)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["abcSha256"], message: "Score digest mismatch" });
-  }
-  if (request.maxCostUsd > request.sourceConstraints.maxCostUsd) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maxCostUsd"], message: "Request cost exceeds source cap" });
-  }
+  if (request.lyrics !== "") ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lyrics"], message: "Instrumental score jobs cannot include lyrics" });
 });
 
 export type RenderEngineYuE2Request = z.infer<typeof RenderEngineYuE2RequestSchema>;
@@ -71,7 +60,7 @@ export type RenderEngineYuE2Output = Readonly<{
   key: string;
   bytes: number;
   sha256: string;
-  contentType: "audio/wav";
+  contentType: "audio/flac";
   verifiedAt: number;
   url: string;
   expiresInSeconds: number;
@@ -104,10 +93,6 @@ export function assertRenderEngineR2SignedUrl(value: string): URL {
     throw new Error("Render Engine artifact URL is not a trusted Cloudflare R2 object URL");
   }
   return url;
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function endpoint(config: RenderEngineYuE2Config, path: string): string {
@@ -178,7 +163,7 @@ export async function stageRenderEngineYuE2Request(config: RenderEngineYuE2Confi
       typeof value.jobId !== "string" || !CONVEX_ID.test(value.jobId) || typeof value.state !== "string" ||
       typeof value.manifestSha256 !== "string" || !HEX_SHA256.test(value.manifestSha256) ||
       typeof value.dispatchEnabled !== "boolean" || typeof value.output.bucket !== "string" || value.output.bucket === "render-engine" ||
-      value.output.key !== `projects/${config.projectName}/jobs/${value.jobId}/audio.wav` ||
+      value.output.key !== `projects/${config.projectName}/jobs/${value.jobId}/audio.flac` ||
       value.output.receiptKey !== `projects/${config.projectName}/jobs/${value.jobId}/yue2.receipt.json`) {
     throw new Error(`Render Engine YuE2 staging returned an invalid receipt (HTTP ${result.status})`);
   }
@@ -207,7 +192,7 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
   if (result.status !== 200 || !record(value) || value.jobId !== jobId ||
       typeof value.bucket !== "string" || typeof value.key !== "string" ||
       typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 1 ||
-      typeof value.sha256 !== "string" || !HEX_SHA256.test(value.sha256) || value.contentType !== "audio/wav" ||
+      typeof value.sha256 !== "string" || !HEX_SHA256.test(value.sha256) || value.contentType !== "audio/flac" ||
       typeof value.url !== "string" || typeof value.executionJobId !== "string" || !CONVEX_ID.test(value.executionJobId) ||
       typeof value.verifiedAt !== "number" || !Number.isSafeInteger(value.verifiedAt) ||
       typeof value.expiresInSeconds !== "number" || !Number.isSafeInteger(value.expiresInSeconds) ||
@@ -215,7 +200,7 @@ export async function getRenderEngineYuE2Output(config: RenderEngineYuE2Config, 
       value.nativeArtifactReads.length !== NATIVE_SIDECARS.length) {
     throw new Error(`Render Engine YuE2 output readback returned an invalid verified receipt (HTTP ${result.status})`);
   }
-  if (value.bucket === "render-engine" || value.key !== `projects/${config.projectName}/jobs/${value.executionJobId}/audio.wav`) {
+  if (value.bucket === "render-engine" || value.key !== `projects/${config.projectName}/jobs/${value.executionJobId}/audio.flac`) {
     throw new Error("Render Engine YuE2 output key is outside the requesting project's native job scope");
   }
   assertRenderEngineR2SignedUrl(value.url);
