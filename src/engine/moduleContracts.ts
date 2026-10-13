@@ -383,6 +383,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     providerProfiles: [local],
     qualityRequired: true,
   }),
+  music_intent_arrangement: contract(["music.arrangement.accepted"], {
+    requiredConsumes: ["topic"],
+    optionalConsumes: ["channelName"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
   scene_planner: contract(["visuals.planned"], {
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an

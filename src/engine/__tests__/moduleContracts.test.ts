@@ -923,7 +923,7 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 92, "all 92 executable blocks must have manifests");
+  assert.equal(manifests.length, 93, "all 93 executable blocks must have manifests");
   assert.ok(getManifest("music_arrangement_plan")?.produces.acceptedMusicArrangement);
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),

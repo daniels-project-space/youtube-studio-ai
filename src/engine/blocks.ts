@@ -5,7 +5,12 @@
  */
 import { register, registerManifestVersion, getManifest, _clear } from "./registry";
 import { createComposerAwareAssemblyManifest } from "@/trigger/blocks/composerAwareAssembly";
-import { createArrangementComposerManifest, musicArrangementPlan } from "@/trigger/blocks/musicArrangementBlocks";
+import {
+  createArrangementComposerManifest,
+  createMusicIntentArrangementManifest,
+  musicArrangementPlan,
+  musicIntentArrangementPlan,
+} from "@/trigger/blocks/musicArrangementBlocks";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { createGroundedScenePlannerManifest } from "@/trigger/blocks/groundedScenePlanner";
 import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@/trigger/blocks/boundLoopVisuals";
@@ -105,6 +110,8 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createArrangementComposerManifest(getManifest("composer_brief")!));
   registerManifestVersion(createArrangementComposerManifest(getManifest("composer_brief")!, true));
   register(musicArrangementPlan);
+  register(musicIntentArrangementPlan);
+  registerManifestVersion(createMusicIntentArrangementManifest());
   // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
   for (const b of STORY_SPINE_BLOCKS) register(b);
   // Provider-free Story Spine → causal Episode Graph → Scene Manifest bridge.

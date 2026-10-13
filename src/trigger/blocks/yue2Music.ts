@@ -28,7 +28,7 @@ function currentArrangement(ctx: Parameters<Block["run"]>[0]) {
 }
 const block: Block & { version: string } = {
   id: "music", version: YUE2_MUSIC_CANDIDATE_VERSION,
-  consumes: ["topic", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate"], paid: true,
+  consumes: ["topic", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate", "musicKey"], paid: true,
   run: async ctx => {
     const params = YuE2EngineSourceConfigSchema.parse(ctx.params), arrangement = currentArrangement(ctx);
     if (!Number.isFinite(ctx.budgetUsd) || ctx.budgetUsd < params.maxCostUsd ||
@@ -47,7 +47,7 @@ const block: Block & { version: string } = {
         nativeFrames: c.nativeOutput.frames, sampleRateHz: 48000, channels: 2, technicalStatus: material.quality.status,
         costUsd: c.usage.costUsd, gpuSeconds: c.usage.gpuSeconds, costBasis: c.usage.costBasis ?? "engine-reported-usage", providerInvoiceVerified: false, productionApproved: false });
       ctx.log(`music: retained Engine source (${material.quality.status}); ${c.usage.costBasis} $${c.usage.costUsd.toFixed(6)}, provider invoice not independently verified`);
-      return { yue2MusicCandidate, [COST_PATCH_KEY]: c.usage.costUsd };
+      return { yue2MusicCandidate, musicKey: material.listeningAudioKey, [COST_PATCH_KEY]: c.usage.costUsd };
     } catch (error) {
       if (error instanceof ExecutionError) throw error;
       throw hold("Engine generation or retained evidence requires reconciliation", (error as { additionalObservedCostUsd?: number }).additionalObservedCostUsd);

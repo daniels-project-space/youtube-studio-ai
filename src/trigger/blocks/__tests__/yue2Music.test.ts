@@ -35,7 +35,7 @@ async function main() {
       store: { topic: arrangement.topic, acceptedMusicArrangement: arrangement }, log: () => {},
       assertInlinePaidExecutionLease: async () => { authorityCalls++; } };
     assert.equal(current.version, "4.0.0-yue2-engine-candidate");
-    assert.deepEqual(Object.keys(current.produces), ["yue2MusicCandidate"]);
+    assert.deepEqual(Object.keys(current.produces), ["yue2MusicCandidate", "musicKey"]);
     for (const patch of [{ ownerId: "foreign" }, { channelId: "foreign" }, { runId: "foreign" },
       { budgetUsd: 0 }, { stageBudgetUsd: undefined }, { stageBudgetUsd: .5 }, { assertInlinePaidExecutionLease: undefined }]) {
       await assert.rejects(current.execute({ ...context, ...patch } as StageContext));
@@ -44,6 +44,7 @@ async function main() {
     const output = await current.execute(context);
     assert.equal(sourceCalls, 1); assert.equal(authorityCalls, 1);
     assert.equal(output[COST_PATCH_KEY], .02);
+    assert.equal(output.musicKey, nativeMaterial.listeningAudioKey, "only the Engine route exports its private retained audio key to the declared mux owner");
     const candidate = output.yue2MusicCandidate as { version: string; costBasis: string; providerInvoiceVerified: boolean; productionApproved: boolean };
     assert.equal(candidate.version, "shared-yue2-music-candidate/v2"); assert.equal(candidate.costBasis, "engine-reported-usage");
     assert.equal(candidate.providerInvoiceVerified, false); assert.equal(candidate.productionApproved, false);
@@ -58,6 +59,7 @@ async function main() {
     const historical = { ...context, params: { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: .04, executionPolicy: policy } };
     const restored = await legacy.execute(historical);
     assert.equal((restored.yue2MusicCandidate as { version: string }).version, "shared-yue2-music-candidate/v1");
+    assert.equal("musicKey" in restored, false, "historical candidate restoration never creates a new audio handoff");
     const before = sourceCalls; missingLegacy = true;
     await assert.rejects(legacy.execute(historical), /legacy generation is retired/);
     assert.equal(sourceCalls, before, "historical restoration never becomes a new Engine request");

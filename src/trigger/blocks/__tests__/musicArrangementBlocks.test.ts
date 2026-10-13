@@ -96,10 +96,23 @@ async function main() {
   const { validatePipeline } = load("@/engine/validate") as typeof import("@/engine/validate");
   const { validateArtifact } = load("@/engine/artifactSchemas") as typeof import("@/engine/artifactSchemas");
   const { composerBriefBlock } = load("../crewBlocks") as typeof import("../crewBlocks");
-  const { ARRANGEMENT_COMPOSER_VERSION, SCORED_ARRANGEMENT_COMPOSER_VERSION, musicArrangementPlan } = load("../musicArrangementBlocks") as typeof import("../musicArrangementBlocks");
+  const { ARRANGEMENT_COMPOSER_VERSION, SCORED_ARRANGEMENT_COMPOSER_VERSION, musicArrangementPlan, musicIntentArrangementPlan } = load("../musicArrangementBlocks") as typeof import("../musicArrangementBlocks");
   const { ComposerBriefWithArrangementSchema } = load("@/engine/creative/crew") as typeof import("@/engine/creative/crew");
   _resetBlocks();
   registerAllBlocks();
+  const intentResult = await musicIntentArrangementPlan.run({
+    ...stageContext({ ...seedStore, topic: "Ancient navigation", channelName: "Quick Quiz" }),
+    params: { musicIntent: { role: "narration_bed", requestedDurationSec: 30, playback: "repeat" },
+      direction: "Bright modern game-show instrumental, warm marimba and light percussion, no vocals." },
+  });
+  const intentAccepted = AcceptedMusicArrangementSchema.parse(intentResult.acceptedMusicArrangement);
+  assert.equal(intentAccepted.musicIntent?.playback, "repeat");
+  assert.equal(intentAccepted.reviewContext?.channelName, "Quick Quiz");
+  assert.equal(intentAccepted.reviewContext?.topic, "Ancient navigation");
+  assert.equal(intentAccepted.symbolicScorePolicy, "instrumental");
+  assert.match(intentAccepted.symbolicScore ?? "", /^X:1\nT:Bright QuizYear Instrumental/m);
+  assert.equal(intentAccepted.arrangement.sections.length, 4);
+  assert.equal("productionApproved" in intentAccepted, false, "typed intent handoff never grants release approval");
   const legacy = registry.getManifest("composer_brief")!;
   const selected = registry.getManifest("composer_brief", ARRANGEMENT_COMPOSER_VERSION)!;
   assert.equal(legacy.block, composerBriefBlock);

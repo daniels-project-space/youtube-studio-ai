@@ -893,7 +893,7 @@ export const quizYear: Block = {
   id: "quiz_year",
   // A certified run receives the matching planner and safety receipt here;
   // pipeline order alone is not a safety boundary.
-  consumes: ["quizPlan", "quizSafety"],
+  consumes: ["quizPlan", "quizSafety", "musicKey"],
   produces: [
     "videoKey",
     "videoLocalPath",
