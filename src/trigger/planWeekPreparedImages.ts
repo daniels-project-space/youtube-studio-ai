@@ -37,13 +37,15 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { deriveRenderEngineProjectCapability } from "@/lib/renderEngineProjectCapability";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
 import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 import { bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
-const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
-const RENDER_ENGINE_PROJECT_NAME = "youtube-studio-ai";
+const RENDER_ENGINE_SITE = RENDER_ENGINE_STUDIO_SITE;
+const RENDER_ENGINE_PROJECT_NAME = RENDER_ENGINE_STUDIO_PROJECT_NAME;
 
 export interface PlanWeekPreparedImageShot {
   id: string;
@@ -418,9 +420,8 @@ export async function dispatchPreparedFootage(manifest: PlanWeekPreparationManif
 }): Promise<readonly string[] | undefined> {
     if (!hasGeneratedFootageStage(manifest))
         return undefined;
-    const projectCapability = process.env.RENDER_ENGINE_PROJECT_TOKEN?.trim() ?? "";
-    if (!/^[a-f0-9]{64}$/.test(projectCapability))
-        throw new Error("weekly H3 Engine project capability is not configured");
+    await bootstrapSecrets(() => undefined, { services: ["render-engine"], required: ["MANAGEMENT_PROJECT_SECRET"] });
+    const projectCapability = deriveRenderEngineProjectCapability(process.env.MANAGEMENT_PROJECT_SECRET ?? "", RENDER_ENGINE_PROJECT_NAME);
     // Engine's Final H3 admission protects a full billable GPU-hour at the
     // agreed $1.20/hour cap. Keep a small rounding margin by default.
     const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "1.25");

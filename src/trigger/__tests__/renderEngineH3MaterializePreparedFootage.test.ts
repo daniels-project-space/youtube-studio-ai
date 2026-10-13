@@ -45,7 +45,7 @@ const objects = new Map<string, Uint8Array>([
     batchId: scope.batchId,
     itemId: scope.itemId,
     requestKey: manifest.requestKey,
-    engine: { site: "https://jovial-camel-68.convex.site", projectName: "youtube-studio-ai", workflowId: "workflow123", profileRevisionSha256: "a".repeat(64) },
+    engine: { site: "https://jovial-camel-68.convex.site", projectName: "youtube-studio-render", workflowId: "workflow123", profileRevisionSha256: "a".repeat(64) },
     jobs: [{
       sceneId: "shot-1",
       engineJobId: "enginejob123",
@@ -53,7 +53,7 @@ const objects = new Map<string, Uint8Array>([
       prompt: "An archival room, no text.",
       seed: 812,
       studioFirstFrame: { r2Key: firstFrameKey, sha256: "c".repeat(64) },
-      engineFirstFrame: { r2Key: `projects/youtube-studio-ai/inputs/sha256/${"c".repeat(64)}.png`, sha256: "c".repeat(64) },
+      engineFirstFrame: { r2Key: `projects/youtube-studio-render/inputs/sha256/${"c".repeat(64)}.png`, sha256: "c".repeat(64) },
       output: { r2Key: clipKey },
       maxCostUsd: 1.25,
     }],
@@ -85,24 +85,24 @@ loader._load = function (name, ...args) {
       statusReads++;
       if (jobId === pendingJobId) return { jobId, status: "running", progress: "rendering", completedAt: null, outputRetired: false, output: null };
       return { jobId, status: "completed", progress: "report-ready", completedAt: 2_000, outputRetired: false,
-        output: { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
+        output: { bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/youtube-studio-render/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999 } };
     },
     getVerifiedH3OutputReadbackInRenderEngine: async (_engine: unknown, jobId: string) => {
       signedReads++;
-      return { bucket: "render-engine-output", key: `projects/youtube-studio-ai/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
+      return { bucket: "re-youtube-studio-render-p2w18g596q", key: `projects/youtube-studio-render/jobs/${jobId}/output.mp4`, bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1_999, url: `https://example.test/${jobId}.mp4`, expiresInSeconds: 3_600 };
     },
   };
   if (name === "@/lib/renderEngineH3SceneBatchClient") return {
-    getH3SceneBatchStatusInRenderEngine: async () => ({ manifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64), scenes: [{ sceneId: "shot-1", ordinal: 0, requestManifestSha256: "b".repeat(64), state: "verified", output: { jobId: "enginejob789", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, verifiedAt: 1999 } }] }),
-    getH3SceneOutputInRenderEngine: async () => ({ bucket: "render-engine-output", key: "projects/youtube-studio-ai/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1999, url: "https://example.test/enginejob789.mp4", expiresInSeconds: 3600 }),
+    getH3SceneBatchStatusInRenderEngine: async () => ({ manifestSha256: "e".repeat(64), sceneManifestSha256: "f".repeat(64), scenes: [{ sceneId: "shot-1", ordinal: 0, requestManifestSha256: "b".repeat(64), state: "verified", output: { jobId: "enginejob789", key: "projects/youtube-studio-render/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, verifiedAt: 1999 } }] }),
+    getH3SceneOutputInRenderEngine: async () => ({ bucket: "re-youtube-studio-render-p2w18g596q", key: "projects/youtube-studio-render/jobs/enginejob789/output.mp4", bytes: outputBytes.byteLength, sha256: outputSha256, contentType: "video/mp4", verifiedAt: 1999, url: "https://example.test/enginejob789.mp4", expiresInSeconds: 3600 }),
   };
   return originalLoad.call(this, name, ...args);
 };
 
 async function main() {
   const originalFetch = globalThis.fetch;
-  const previousToken = process.env.RENDER_ENGINE_PROJECT_TOKEN;
-  process.env.RENDER_ENGINE_PROJECT_TOKEN = "d".repeat(64);
+  const previousProjectSecret = process.env.MANAGEMENT_PROJECT_SECRET;
+  process.env.MANAGEMENT_PROJECT_SECRET = "fixture-management-project-secret".padEnd(64, "x");
   globalThis.fetch = async (url) => {
     videoFetches++;
     assert.match(String(url), /^https:\/\/example\.test\/enginejob\d+\.mp4$/);
@@ -146,8 +146,8 @@ async function main() {
 
   } finally {
     globalThis.fetch = originalFetch;
-    if (previousToken === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
-    else process.env.RENDER_ENGINE_PROJECT_TOKEN = previousToken;
+    if (previousProjectSecret === undefined) delete process.env.MANAGEMENT_PROJECT_SECRET;
+    else process.env.MANAGEMENT_PROJECT_SECRET = previousProjectSecret;
   }
   console.log("render Engine H3 materializer copies only a verified receipt into the canonical Studio R2 path");
 }

@@ -11,6 +11,7 @@
  * LTX adapter remains available only for explicitly retained legacy receipts.
  */
 import type { Block } from "@/engine/types";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 import { join } from "node:path";
 import {
@@ -276,7 +277,7 @@ export interface ResolvedGeneratedFootageScenePlan {
  */
 export type GeneratedFootageRenderer =
   | { kind: "minimax-h3"; provider: MiniMaxH3Provider; execution: MiniMaxH3Execution; runtimeId: typeof MINIMAX_H3_RUNTIME_ID; profileId: typeof MINIMAX_H3_PROFILE.id; modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256 }
-  | { kind: "render-engine-h3"; projectName: "youtube-studio-ai"; workflowId: string; profileRevisionSha256: string }
+  | { kind: "render-engine-h3"; projectName: typeof RENDER_ENGINE_STUDIO_PROJECT_NAME; workflowId: string; profileRevisionSha256: string }
   | { kind: "source-proof" };
 
 /** Prompts that ask for baked-in lettering fight the engine's own no-text clause. */
@@ -1243,7 +1244,7 @@ export const genFootage: Block = {
             durationSec: scene.durationSec,
           }))),
           footageRenderer: preparedFootage.renderer.kind === "render-engine-h3"
-            ? { kind: "render-engine-h3" as const, projectName: "youtube-studio-ai" as const,
+            ? { kind: "render-engine-h3" as const, projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME,
               workflowId: preparedFootage.renderer.workflowId, profileRevisionSha256: preparedFootage.renderer.profileRevisionSha256 }
             : { kind: "minimax-h3" as const, provider: preparedFootage.renderer.provider,
               execution: preparedFootage.renderer.execution, runtimeId: MINIMAX_H3_RUNTIME_ID,
