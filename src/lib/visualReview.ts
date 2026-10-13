@@ -1036,7 +1036,12 @@ async function extractFrames(
   return extracted;
 }
 
-function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): string | undefined {
+const MAX_NEAREST_NARRATION_CUE_GAP_SEC = 1;
+
+export function narrationCueForVisualFrame(
+  cues: readonly VisualReviewTranscriptCue[],
+  tSec: number,
+): string | undefined {
   // Intro/outro frames live outside the narrated source window. Nearest-cue
   // fallback is useful only for small pauses *inside* narration; applying it
   // before the first word or after the last one falsely tells the reviewer an
@@ -1044,13 +1049,17 @@ function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): 
   const narrationStartSec = cues.reduce((earliest, cue) => Math.min(earliest, cue.startSec), Number.POSITIVE_INFINITY);
   const narrationEndSec = cues.reduce((latest, cue) => Math.max(latest, cue.endSec), Number.NEGATIVE_INFINITY);
   if (tSec < narrationStartSec || tSec > narrationEndSec) return undefined;
-  const cue = cues.find((item) => item.startSec <= tSec && item.endSec >= tSec) ??
-    cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
-      if (!nearest) return item;
-      const a = Math.abs((item.startSec + item.endSec) / 2 - tSec);
-      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
-      return a < b ? item : nearest;
-    }, undefined);
+  const activeCue = cues.find((item) => item.startSec <= tSec && item.endSec >= tSec);
+  const cue = activeCue ?? cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
+    if (!nearest) return item;
+    const distanceToInterval = (candidate: VisualReviewTranscriptCue) =>
+      tSec < candidate.startSec ? candidate.startSec - tSec : Math.max(0, tSec - candidate.endSec);
+    return distanceToInterval(item) < distanceToInterval(nearest) ? item : nearest;
+  }, undefined);
+  if (cue && !activeCue) {
+    const gapSec = tSec < cue.startSec ? cue.startSec - tSec : tSec - cue.endSec;
+    if (gapSec > MAX_NEAREST_NARRATION_CUE_GAP_SEC) return undefined;
+  }
   return cue?.text?.replace(/\s+/g, " ").trim().slice(0, 180) || undefined;
 }
 
@@ -1075,7 +1084,7 @@ function reviewerPrompt(
   collectBroadQualityScore: boolean,
 ): string {
   const timeline = frames.map((frame) => {
-    const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
+    const transcript = narrationCueForVisualFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
     const creativeLock = creativeLockForFrame(intent.creativeLocks ?? [], frame.descriptor.tSec);
     const reasons = frame.descriptor.selectionReasons.join(",");
     const lockText = creativeLock
