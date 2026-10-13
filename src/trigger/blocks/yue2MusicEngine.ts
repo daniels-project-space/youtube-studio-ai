@@ -16,6 +16,7 @@ import {
   provisionRenderEngineYuE2Workflow,
   stageRenderEngineYuE2Request,
   verifyRenderEngineYuE2ProjectIntegration,
+  type RenderEngineYuE2Stage,
   type RenderEngineYuE2Request,
 } from "@/lib/renderEngineYuE2StageClient";
 import { RENDER_ENGINE_MANAGEMENT_API_BASE_URL, RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
@@ -28,6 +29,17 @@ function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: Render Engine YuE2 ${reason}; recover the same job, never regenerate`,
     { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false }),
   charge === undefined ? {} : { additionalObservedCostUsd: charge });
+}
+
+export function assertRenderEngineYuE2DispatchEnabled(stage: RenderEngineYuE2Stage): void {
+  if (stage.dispatchEnabled) return;
+  if (stage.state !== "awaiting-final-qualification") {
+    throw hold(`job ${stage.jobId} has dispatch disabled in unexpected state ${stage.state}`);
+  }
+  throw new ExecutionError(
+    `RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING: Engine job ${stage.jobId} is durably staged but was not dispatched; retry the identical request only after final qualification is enabled`,
+    { code: "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING", retryable: false },
+  );
 }
 
 const block: Block & { version: string } = {
@@ -89,8 +101,9 @@ const block: Block & { version: string } = {
       let stage = await stageRenderEngineYuE2Request({ ...projectConfig, workflowId: workflow.workflowId,
         profileRevisionSha256: workflow.profileRevisionSha256, request });
       if (!stage.dispatchEnabled) {
-        ctx.log(`music: Render Engine YuE2 job ${stage.jobId} is awaiting OpenRelay RTX 3090 qualification; observing the same request`);
+        ctx.log(`music: Render Engine YuE2 job ${stage.jobId} is awaiting OpenRelay RTX 3090 qualification; preserving it without polling`);
       }
+      assertRenderEngineYuE2DispatchEnabled(stage);
       const checks = Math.ceil((params.executionPolicy.max_execution_seconds + params.executionPolicy.termination_grace_seconds) / 120) + 2;
       let status: Record<string, unknown> | undefined;
       for (let index = 0; index <= checks; index++) {
