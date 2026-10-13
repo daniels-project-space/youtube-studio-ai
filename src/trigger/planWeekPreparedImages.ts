@@ -454,7 +454,10 @@ export function buildStudioZImageStageRequests(payload: PlanWeekPreparedImagesAr
     const negativePrompt = [payload.negative, shot.negative].filter((part) => part && part.trim()).join(", ");
     const candidates = Array.from({ length: image.candidates }, (_, candidateIndex) => ({
       id: `scene-${String(shotIndex + 1).padStart(3, "0")}-c${String(candidateIndex + 1).padStart(2, "0")}`,
-      prompt, negativePrompt, seed: (shot.seed ?? 0) + candidateIndex * 10_000,
+      prompt, negativePrompt,
+      seed: shot.seed === undefined
+        ? 100_000 + outputIndex + candidateIndex
+        : shot.seed + candidateIndex * 10_000,
       width: image.width as 1920 | 2048, height: image.height as 1088 | 1152,
     }));
     if (candidates.some((candidate) => !Number.isSafeInteger(candidate.seed) || candidate.seed < 0 || candidate.seed > 0xffff_ffff)) {

@@ -39,6 +39,25 @@ const [hero] = buildStudioZImageStageRequests(payload, generationProfile("hero")
 assert.equal(hero?.request.candidates.length, 2);
 assert.equal(hero?.request.candidates[1]?.seed, 10_042);
 assert.equal(hero?.request.candidates[1]?.negativePrompt, "No watermarks, No labels");
+const unseeded = buildStudioZImageStageRequests({
+  ...payload,
+  shots: [
+    { id: "shot-a", prompt: "A quiet forest path" },
+    { id: "shot-b", prompt: "A distant mountain range" },
+  ],
+}, generationProfile("production"));
+assert.deepEqual(unseeded.map(({ request }) => request.candidates[0]?.seed), [100_000, 100_001]);
+assert.deepEqual(
+  unseeded.map(({ request }) => request.candidates[0]?.seed),
+  buildStudioZImageStageRequests({
+    ...payload,
+    shots: [
+      { id: "shot-a", prompt: "A quiet forest path" },
+      { id: "shot-b", prompt: "A distant mountain range" },
+    ],
+  }, generationProfile("production")).map(({ request }) => request.candidates[0]?.seed),
+  "retries must preserve request-local seed assignments",
+);
 
 const producer = readFileSync(fileURLToPath(new URL("../planWeekPreparedImages.ts", import.meta.url)), "utf8");
 const activeTask = producer.slice(producer.indexOf("export const planWeekPreparedImagesTask = task({"));
