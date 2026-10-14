@@ -16,6 +16,7 @@ const opening = "At 1:23 a.m., engineers disabled the alarm in Reactor Four. Wit
 let judgeMode: "known_failure" | "unknown" = "known_failure";
 let generatorCalls = 0;
 let judgeCalls = 0;
+const generationPrompts: string[] = [];
 
 const originalLoad = (Module as unknown as { _load: (...args: unknown[]) => unknown })._load;
 (Module as unknown as { _load: (...args: unknown[]) => unknown })._load = function patched(
@@ -28,8 +29,9 @@ const originalLoad = (Module as unknown as { _load: (...args: unknown[]) => unkn
   return {
     ...resolved,
     hasCreativeTextKey: () => true,
-    creativeTextJsonPro: async () => {
+    creativeTextJsonPro: async (input: { prompt: string }) => {
       generatorCalls++;
+      generationPrompts.push(input.prompt);
       return { candidates: [{ device: "result_first", hook, opening, loop: "Why the ignored test changed the night." }] };
     },
     creativeTextJson: async () => {
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
       topic: "Chernobyl's ignored safety test",
       title: "Chernobyl's Ignored Safety Test",
       sourceGrounding: "Chernobyl's ignored safety test failed in 1986. Engineers disabled the alarm in Reactor Four at 1:23 a.m.",
+      narrative: { pacing: "Measured, with a deliberate pause before each reveal." },
       log: () => {},
     };
 
@@ -59,6 +62,8 @@ async function main(): Promise<void> {
     );
     assert.equal(judgeCalls, 2, "production retries the complete cold-open slate exactly once");
     assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
+    assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
+      "a pacing-only channel identity must shape its cold open as well as the body script and critic");
 
     const draftFailure = await craftHook({ ...args, qualityProfile: "draft" });
     assert.equal(draftFailure.verdict.judged, false, "an explicit draft may retain a truthful lint-only preview");

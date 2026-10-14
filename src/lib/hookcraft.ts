@@ -542,10 +542,13 @@ function passes(v: HookVerdict): boolean {
 }
 
 function registerClause(a: HookCraftArgs): string {
-  const reg = a.narrative && (a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.delivery)
+  const reg = a.narrative && (
+    a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.pacing || a.narrative.delivery
+  )
     ? `LOCKED CHANNEL REGISTER (write inside it — it outranks the archetype below): ${[
         a.narrative.scriptStyle ? `style: ${a.narrative.scriptStyle}` : "",
         a.narrative.hookStyle ? `hook style: ${a.narrative.hookStyle}` : "",
+        a.narrative.pacing ? `pacing: ${a.narrative.pacing}` : "",
         a.narrative.delivery ? `delivery: ${a.narrative.delivery}` : "",
       ].filter(Boolean).join(" | ")}`
     : "";
