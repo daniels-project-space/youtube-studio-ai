@@ -147,11 +147,14 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
         "No vocals, no lyrics, and a musically resolved seamless loop.",
       ].filter(Boolean).join(" ");
+      const visualStyle = (ctx.params["visualStyle"] as string | undefined) ??
+        (ctx.store["visualStyle"] as string | undefined) ?? visual?.promptStyle ?? dna?.colorGrade ??
+        "channel-native ambient";
       const plan = createOriginalMusicProgramPlan({
         route,
         topic,
         setting,
-        visualStyle: (ctx.params["visualStyle"] as string | undefined) ?? (ctx.store["visualStyle"] as string | undefined) ?? "lofi",
+        visualStyle,
         motionIntent: sourceProvider === "yue2"
           ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
           : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",

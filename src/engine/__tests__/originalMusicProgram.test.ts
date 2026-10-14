@@ -62,6 +62,7 @@ const minimaxPlan = createOriginalMusicProgramPlan({
   topic: "Rainy city focus after midnight",
   providerPreference: "minimax_music3",
 });
+assert.equal(minimaxPlan.visual.visualStyle, "channel-native ambient");
 assert.equal(
   minimaxPlan.audio.providerPreference,
   "minimax_music3",

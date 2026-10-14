@@ -136,7 +136,7 @@ export function createOriginalMusicProgramPlan(
   if (!topic || topic === "Untitled music program") {
     throw new Error("original music program requires a non-empty topic");
   }
-  const visualStyle = normalizedText(input.visualStyle, "lofi ambient", 120);
+  const visualStyle = normalizedText(input.visualStyle, "channel-native ambient", 120);
   const setting = normalizedText(input.setting, topic, 320);
   const motionIntent = normalizedText(
     input.motionIntent,

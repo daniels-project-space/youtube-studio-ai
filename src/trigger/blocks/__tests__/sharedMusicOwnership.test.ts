@@ -28,6 +28,11 @@ async function main(): Promise<void> {
     undefined,
     "the legacy LoFi composition must not override its route-sealed music provider",
   );
+  assert.equal(
+    (LOFI_PIPELINE.find((entry) => entry.block === "music_program_plan")?.params as Record<string, unknown> | undefined)?.visualStyle,
+    "lofi ambient",
+    "LoFi must pass its style intent explicitly instead of relying on a shared-module default",
+  );
   const musicOwnerPaths = lockableModule("music")?.paths ?? [];
   assert.ok(musicOwnerPaths.includes("src/trigger/blocks/blockContext.ts") &&
     musicOwnerPaths.includes("src/trigger/blocks/musicBlocks.ts"),

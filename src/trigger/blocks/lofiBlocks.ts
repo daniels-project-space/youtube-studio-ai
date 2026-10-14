@@ -3520,7 +3520,7 @@ export const lofiBlocks: Block[] = [
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
-  { block: "music_program_plan" },
+  { block: "music_program_plan", params: { visualStyle: "lofi ambient" } },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
   { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },

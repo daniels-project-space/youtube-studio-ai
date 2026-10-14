@@ -146,7 +146,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const sealed = planned.musicProgramPlan as {
     fingerprint: string;
     audio: { direction: string; providerPreference: string };
-    visual: { motionIntent: string };
+    visual: { motionIntent: string; visualStyle: string };
   };
   assert.match(sealed.fingerprint, /^[a-f0-9]{64}$/iu);
   assert.match(sealed.audio.direction, /Original instrumental program/u);
@@ -156,6 +156,45 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   assert.match(sealed.audio.direction, /soft vinyl noise/u);
   assert.match(sealed.audio.direction, /settle into focus, then resolve with quiet optimism/u);
   assert.equal(sealed.audio.providerPreference, "minimax_music3");
+  assert.equal(sealed.visual.visualStyle, "lofi");
+
+  const sleepBrief = brief({
+    family: "music_loop",
+    nicheKey: "lofi",
+    concept: "Soft nocturnal sound beds for uninterrupted sleep.",
+  });
+  const sleepPlan = await musicProgramPlan(stageContext({
+    store: {
+      channelProgramRoute: channelProgramRouteRunSeed({
+        route: resolveChannelProgramRoute(sleepBrief),
+        programBrief: sleepBrief,
+      }),
+      topic: "Rain over a quiet glasshouse",
+      visualBrief: {
+        promptStyle: "soft moonlit watercolor with restrained silver highlights",
+        footageQueries: [], palette: [], motion: "still", avoid: [],
+      },
+      styleDNA: {
+        audio: {
+          genre: "slow ambient drone",
+          bpmRange: [42, 52],
+          instrumentation: ["felted piano"],
+          textures: ["distant rain"],
+          moodArc: "settle gradually into an even, restful bed",
+          loudnessLufs: -20,
+          loopable: true,
+        },
+      },
+    },
+  }));
+  const sleepProgram = sleepPlan.musicProgramPlan as {
+    audio: { direction: string };
+    visual: { visualStyle: string };
+  };
+  assert.equal(sleepProgram.visual.visualStyle, "soft moonlit watercolor with restrained silver highlights");
+  assert.doesNotMatch(sleepProgram.visual.visualStyle, /lofi/iu);
+  assert.match(sleepProgram.audio.direction, /slow ambient drone/u);
+  assert.match(sleepProgram.audio.direction, /42-52 BPM/u);
 
   const scenes = await scenePlanner(stageContext({
     params: { visualStyle: "lofi" },
@@ -524,7 +563,7 @@ async function documentaryScriptsUseOnlyTheReviewedEpisodePlan(): Promise<void> 
         script: { ...(generated.script as Record<string, unknown>), narrationText: `${episodePlan.narrationText} Unreviewed addition.` },
       },
     })),
-    /narration differs from its reviewed documentary source plan/,
+    /narrationText does not match the hook and ordered sections/,
     "script QA must reject altered narration before an external critic can approve it",
   );
   await assert.rejects(
@@ -543,7 +582,7 @@ async function serializedReuseRequiresTheExactEpisodeReceipt(): Promise<void> {
   const reuseScript = {
     hook: "The first answer is not the first question.",
     sections: [{ heading: "Start", narration: "Start with the question beneath the answer." }],
-    narrationText: "The first answer is not the first question. Start with the question beneath the answer.",
+    narrationText: "The first answer is not the first question.\n\nStart with the question beneath the answer.",
     estDurationSec: 12,
     programRouteFingerprint: serializedNarratedSeed.routeFingerprint,
   };
