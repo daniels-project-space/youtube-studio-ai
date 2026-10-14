@@ -20,6 +20,8 @@ import * as invocationSnapshots from "@/lib/pipelineInvocationSnapshot";
 import * as convexUsage from "@/lib/convexUsage";
 import * as imageUsage from "@/lib/imageUsage";
 import * as modelUsage from "@/lib/modelUsage";
+import * as moduleCritiqueEvidence from "@/lib/moduleCritiqueEvidence";
+import { produceAndCritique } from "@/engine/critiqueLoop";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { admitFrozenRemoteChildStage, reconstructFrozenRemoteChildPipeline } from "@/lib/remoteChildBudgetAdmission";
 import { selectRehydrationSubset } from "@/lib/rehydrate";
@@ -109,6 +111,12 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       if (ctx.imageUsageAccounting?.().calls !== 1) {
         throw new Error("remote module did not receive its image usage accounting scope");
       }
+      await produceAndCritique({
+        label: "remote:quality-probe",
+        maxIters: 1,
+        produce: async () => ({ output: "fixture" }),
+        critique: async () => ({ score: 0.87, pass: true, issues: [] }),
+      });
       await ctx.checkpointVisualArtifactAttempts!([createVisualArtifactAttempt({
         adapterId: "remote_reuse_test", scopeFingerprint: "a".repeat(64),
         attemptId: "render-attempt-1", ordinal: 1,
@@ -270,6 +278,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "@/lib/convexUsage": convexUsage,
     "@/lib/imageUsage": imageUsage,
     "@/lib/modelUsage": modelUsage,
+    "@/lib/moduleCritiqueEvidence": moduleCritiqueEvidence,
     "@/engine/blocks": { registerAllBlocks() {} },
     "@/engine/convexSink": { makeConvexSink: () => sink },
     "@/engine/artifactSchemas": artifactSchemas,
@@ -310,7 +319,12 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
   const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{
     patch: Record<string, unknown>;
     convexUsage: convexUsage.ConvexUsageCounts | null;
-    moduleUsage: { providerCalls: number; inputTokens: number; outputTokens: number } | null;
+    moduleUsage: {
+      providerCalls: number;
+      inputTokens: number;
+      outputTokens: number;
+      critiqueEvidence: moduleCritiqueEvidence.ModuleCritiqueReceipt[];
+    } | null;
   }> } };
   new Function("require", "module", "exports", "process", compiledRunner)(
     (name: string) => {
@@ -354,8 +368,21 @@ async function main() {
   assert.equal(result.patch.__costUsd, 0.2);
   assert.deepEqual(result.convexUsage, { reads: 1, writes: 1, actions: 1 },
     "child reports only Convex calls made inside the module execution scope");
-  assert.deepEqual(result.moduleUsage, { providerCalls: 2, inputTokens: 17, outputTokens: 9 },
-    "child reports exact model/image calls and model tokens to the parent scorecard");
+  assert.deepEqual(result.moduleUsage, {
+    providerCalls: 2,
+    inputTokens: 17,
+    outputTokens: 9,
+    critiqueEvidence: [{
+      label: "remote:quality-probe",
+      scores: [0.87],
+      passes: [true],
+      fatalIterations: [false],
+      issueCounts: [0],
+      accepted: true,
+      fatal: false,
+      completed: true,
+    }],
+  }, "child reports measured provider usage and its real module critique result");
   assert.equal(unchanged.calls.paid, 1);
   assert.equal(unchanged.calls.begin, 1);
   assert.equal(unchanged.calls.finish, 1);

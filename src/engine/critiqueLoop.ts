@@ -22,6 +22,7 @@
  * (the legacy Gemini/creative-text helpers); a later phase can back them with Mastra agents (and a
  * Mastra workflow can wrap this loop) without changing any chunk.
  */
+import { recordModuleCritique } from "@/lib/moduleCritiqueEvidence";
 
 export interface Critique {
   /** 0..1 quality. */
@@ -221,6 +222,19 @@ export async function produceAndCritique<T>(
   const history: Critique[] = [];
   let priorIssues: string[] = [];
   let best: { value: T; critique: Critique } | null = null;
+  const record = (result: LoopResult<T>, completed: boolean): LoopResult<T> => {
+    recordModuleCritique({
+      label,
+      scores: history.map((item) => item.score),
+      passes: history.map((item) => item.pass),
+      fatalIterations: history.map((item) => item.fatal === true),
+      issueCounts: history.map((item) => item.issues.length),
+      accepted: result.accepted,
+      fatal: result.fatal === true,
+      completed,
+    });
+    return result;
+  };
 
   if (o.channel?.criticDoctrine || o.channel?.contentLaneKey) {
     log(
@@ -229,62 +243,76 @@ export async function produceAndCritique<T>(
   }
 
   let lastValue: T | undefined;
-  for (let iter = 1; iter <= maxIters; iter++) {
-    const value = await o.produce(priorIssues, iter);
-    lastValue = value;
-    const admission = validateCritiqueResponse(await o.critique(value, iter));
-    if (!admission.pass || !admission.critique) {
-      throw new Error(
-        `${label}: malformed critique response — ${admission.issues.join("; ")}`,
+  try {
+    for (let iter = 1; iter <= maxIters; iter++) {
+      const value = await o.produce(priorIssues, iter);
+      lastValue = value;
+      const admission = validateCritiqueResponse(await o.critique(value, iter));
+      if (!admission.pass || !admission.critique) {
+        throw new Error(
+          `${label}: malformed critique response — ${admission.issues.join("; ")}`,
+        );
+      }
+      const critique = admission.critique;
+      history.push(critique);
+      log(
+        `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,
+        { issues: critique.issues.slice(0, 4) },
       );
+
+      // A fatal candidate is never eligible as "best": returning the highest
+      // score among unusable outputs is how a caught defect ships anyway.
+      if (!critique.fatal && (!best || critique.score > best.critique.score)) {
+        best = { value, critique };
+      }
+      if (critique.fatal) {
+        log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
+      }
+
+      const accepted = critique.pass && critique.score >= threshold;
+      if (accepted) {
+        return record({ value, critique, iterations: iter, accepted: true, history }, true);
+      }
+      priorIssues = critique.issues;
     }
-    const critique = admission.critique;
-    history.push(critique);
+
+    // None cleared the bar. Prefer the best NON-FATAL attempt; if every candidate
+    // was fatal there is nothing safe to return, so the last one comes back
+    // flagged and the caller owns the fail-closed decision.
+    if (!best) {
+      const lastCritique = history[history.length - 1]!;
+      log(`${label}: exhausted ${maxIters} iters and EVERY candidate carried a fatal defect`);
+      return record({
+        value: lastValue as T,
+        critique: lastCritique,
+        iterations: maxIters,
+        accepted: false,
+        fatal: true,
+        history,
+      }, true);
+    }
+    const b = best;
     log(
-      `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,
-      { issues: critique.issues.slice(0, 4) },
+      `${label}: exhausted ${maxIters} iters — returning best (score=${b.critique.score.toFixed(2)})`,
     );
-
-    // A fatal candidate is never eligible as "best": returning the highest
-    // score among unusable outputs is how a caught defect ships anyway.
-    if (!critique.fatal && (!best || critique.score > best.critique.score)) {
-      best = { value, critique };
-    }
-    if (critique.fatal) {
-      log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
-    }
-
-    const accepted = critique.pass && critique.score >= threshold;
-    if (accepted) {
-      return { value, critique, iterations: iter, accepted: true, history };
-    }
-    priorIssues = critique.issues;
-  }
-
-  // None cleared the bar. Prefer the best NON-FATAL attempt; if every candidate
-  // was fatal there is nothing safe to return, so the last one comes back
-  // flagged and the caller owns the fail-closed decision.
-  if (!best) {
-    const lastCritique = history[history.length - 1]!;
-    log(`${label}: exhausted ${maxIters} iters and EVERY candidate carried a fatal defect`);
-    return {
-      value: lastValue as T,
-      critique: lastCritique,
+    return record({
+      value: b.value,
+      critique: b.critique,
       iterations: maxIters,
       accepted: false,
-      fatal: true,
       history,
-    };
+    }, true);
+  } catch (error) {
+    recordModuleCritique({
+      label,
+      scores: history.map((item) => item.score),
+      passes: history.map((item) => item.pass),
+      fatalIterations: history.map((item) => item.fatal === true),
+      issueCounts: history.map((item) => item.issues.length),
+      accepted: false,
+      fatal: false,
+      completed: false,
+    });
+    throw error;
   }
-  const b = best;
-  log(
-    `${label}: exhausted ${maxIters} iters — returning best (score=${b.critique.score.toFixed(2)})`,
-  );
-  return {
-    value: b.value,
-    critique: b.critique,
-    iterations: maxIters,
-    accepted: false,
-    history,
-  };
 }

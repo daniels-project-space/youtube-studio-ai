@@ -18,6 +18,16 @@ const base = {
   providerCalls: 2,
   inputTokens: 80,
   outputTokens: 30,
+  critiqueEvidence: [{
+    label: "script:hook",
+    scores: [0.61, 0.86],
+    passes: [false, true],
+    fatalIterations: [false, false],
+    issueCounts: [2, 0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }],
   triggerRuns: null,
   triggerWaits: null,
   convexReads: null,
@@ -49,6 +59,10 @@ const current = createModuleScorecard({
   providerCalls: 1,
   inputTokens: 50,
   outputTokens: 20,
+  critiqueEvidence: [{
+    ...base.critiqueEvidence[0]!,
+    scores: [0.61, 0.9],
+  }],
   estimatedCostUsd: 0.01,
   capturedAt: base.capturedAt + 1,
 });
@@ -58,6 +72,7 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   providerCalls: -1,
   inputTokens: -30,
   outputTokens: -10,
+  critiqueEvidenceChanged: true,
   triggerRuns: null,
   triggerWaits: null,
   convexReads: null,
@@ -82,6 +97,28 @@ assert.deepEqual(
   [unknownUsageDelta.providerCalls, unknownUsageDelta.inputTokens, unknownUsageDelta.outputTokens],
   [null, null, null],
   "a usage delta is unknown if either scorecard lacks complete usage evidence",
+);
+const unknownRemoteEvidence = createModuleScorecard({ ...base, critiqueEvidence: null });
+assert.equal(
+  compareModuleScorecards(scorecard, unknownRemoteEvidence).critiqueEvidenceChanged,
+  null,
+  "a missing child receipt is unknown, not evidence that critique behavior changed",
+);
+assert.throws(
+  () => createModuleScorecard({
+    ...base,
+    critiqueEvidence: [{
+      label: "bad-pass",
+      scores: [0.4],
+      passes: [false],
+      fatalIterations: [false],
+      issueCounts: [1],
+      accepted: true,
+      fatal: false,
+      completed: true,
+    }],
+  }),
+  /critique outcome is invalid/,
 );
 const measuredDelta = compareModuleScorecards(
   createModuleScorecard({

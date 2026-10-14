@@ -37,6 +37,7 @@ import {
   type ModelUsageSummary,
 } from "@/lib/modelUsage";
 import { createModuleScorecard } from "@/lib/moduleScorecard";
+import { createModuleCritiqueScope, type ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
@@ -109,7 +110,12 @@ export type RemoteBlockResult = {
   /** Missing on older child deployments; null when attempt history is incomplete. */
   convexUsage?: ConvexUsageCounts | null;
   /** Compact child usage; omitted by older tasks and unknown after a retry. */
-  moduleUsage?: { providerCalls: number; inputTokens: number; outputTokens: number } | null;
+  moduleUsage?: {
+    providerCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    critiqueEvidence?: ModuleCritiqueReceipt[] | null;
+  } | null;
 };
 
 /**
@@ -1272,6 +1278,7 @@ export async function runPipeline(
     const usageScope = createModelUsageScope();
     const imageUsageScope = createImageUsageScope();
     const convexUsageScope = createConvexUsageScope();
+    const critiqueScope = createModuleCritiqueScope();
     const ctx: Omit<StageContext, "store"> = {
       ownerId: opts.ownerId,
       runId: opts.runId,
@@ -1368,12 +1375,12 @@ export async function runPipeline(
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
         patch = await checkpointCostScope.run(() =>
-          convexUsageScope.run(() => usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => {
+          convexUsageScope.run(() => usageScope.run(() => imageUsageScope.run(() => critiqueScope.run(() => runBlockWithRetry(block, () => {
             // Snapshot after input rehydration, and start every retry from the
             // producer's artifacts rather than a failed attempt's local edits.
             executedStore = declaredArtifactStore(manifest, store, optionalFallbacks, log);
             return { ...ctx, store: executedStore };
-          }, retries, log)))),
+          }, retries, log))))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
@@ -1440,6 +1447,9 @@ export async function runPipeline(
         outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
           ? remoteModuleUsage?.outputTokens ?? null
           : modelUsage.outputTokens,
+        critiqueEvidence: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.critiqueEvidence ?? null
+          : critiqueScope.snapshot(),
         triggerRuns: null,
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
@@ -1513,6 +1523,9 @@ export async function runPipeline(
         outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
           ? remoteModuleUsage?.outputTokens ?? null
           : failureModelUsage.outputTokens,
+        critiqueEvidence: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.critiqueEvidence ?? null
+          : critiqueScope.snapshot(),
         triggerRuns: null,
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,

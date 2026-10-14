@@ -50,6 +50,7 @@ import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTranspor
 import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import { createImageUsageScope } from "@/lib/imageUsage";
 import { createModelUsageScope, trackedCostForKinds, trackedUsageForKinds } from "@/lib/modelUsage";
+import { createModuleCritiqueScope, type ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 import {
   assertRestoredStageOutputs,
   assertStageReuseReceipt,
@@ -182,7 +183,12 @@ export async function executeRenderBlock(
 ): Promise<{
   patch: Record<string, unknown>;
   convexUsage: ConvexUsageCounts | null;
-  moduleUsage: { providerCalls: number; inputTokens: number; outputTokens: number } | null;
+  moduleUsage: {
+    providerCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    critiqueEvidence: ModuleCritiqueReceipt[];
+  } | null;
 }> {
   const { taskLabel, machineClass } = options;
 
@@ -461,6 +467,7 @@ export async function executeRenderBlock(
   const modelUsageScope = createModelUsageScope();
   const imageUsageScope = createImageUsageScope();
   const convexUsageScope = createConvexUsageScope();
+  const critiqueScope = createModuleCritiqueScope();
   const ctx: StageContext = {
     ownerId: payload.ownerId,
     runId: payload.runId,
@@ -529,7 +536,7 @@ export async function executeRenderBlock(
       paid: manifest.costAndLatency.paid,
       priorCostUsd: persistedStages.find((row) => row.block === payload.blockId)?.cost ?? 0,
       checkpointCostReceipts: persistedStages.find((row) => row.block === payload.blockId)?.checkpointCostReceipts ?? [],
-      execute: () => convexUsageScope.run(() => modelUsageScope.run(() => imageUsageScope.run(() => block.run(ctx)))),
+      execute: () => convexUsageScope.run(() => modelUsageScope.run(() => imageUsageScope.run(() => critiqueScope.run(() => block.run(ctx))))),
       transport: {
         begin: () => convex.mutation(api.remoteChildCosts.begin, costIdentity),
         finish: (result) => convex.mutation(api.remoteChildCosts.finish, { ...costIdentity, ...result }),
@@ -543,6 +550,7 @@ export async function executeRenderBlock(
             providerCalls: modelUsageScope.snapshot().calls + imageUsageScope.snapshot().calls,
             inputTokens: modelUsageScope.snapshot().inputTokens,
             outputTokens: modelUsageScope.snapshot().outputTokens,
+            critiqueEvidence: critiqueScope.snapshot(),
           }
         : null,
       // Trigger retries can follow a failed attempt that already made module

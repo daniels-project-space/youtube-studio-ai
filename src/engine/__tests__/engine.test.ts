@@ -27,6 +27,7 @@ import { allManifests } from "@/engine/registry";
 import { configuredMaxCostUsd, manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 import { recordConvexHttpRequest } from "@/lib/convexUsage";
+import { produceAndCritique } from "@/engine/critiqueLoop";
 
 interface Recorded {
   block: string;
@@ -66,6 +67,12 @@ async function positive(): Promise<void> {
     run: async () => {
       recordConvexHttpRequest("https://studio.convex.cloud/api/query");
       recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
+      await produceAndCritique({
+        label: "local:quality-probe",
+        maxIters: 1,
+        produce: async () => "fixture",
+        critique: async () => ({ score: 0.82, pass: true, issues: [] }),
+      });
       return { convexUsageProbeOutput: true };
     },
   };
@@ -99,7 +106,21 @@ async function positive(): Promise<void> {
     remoteBlocks: new Set([remoteUsageProbe.id]),
     runRemoteBlock: async () => ({
       patch: { remoteUsageProbeOutput: true },
-      moduleUsage: { providerCalls: 5, inputTokens: 17, outputTokens: 9 },
+      moduleUsage: {
+        providerCalls: 5,
+        inputTokens: 17,
+        outputTokens: 9,
+        critiqueEvidence: [{
+          label: "remote:quality-probe",
+          scores: [0.87],
+          passes: [true],
+          fatalIterations: [false],
+          issueCounts: [0],
+          accepted: true,
+          fatal: false,
+          completed: true,
+        }],
+      },
       convexUsage: { reads: 4, writes: 2, actions: 1 },
     }),
     sink,
@@ -128,6 +149,7 @@ async function positive(): Promise<void> {
       providerCalls: number | null;
       inputTokens: number | null;
       outputTokens: number | null;
+      critiqueEvidence: Array<{ label: string; accepted: boolean }> | null;
     });
   assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe", "remote_usage_probe"]);
   assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed", "passed"]);
@@ -147,6 +169,26 @@ async function positive(): Promise<void> {
     [5, 17, 9],
     "remote module scorecard receives child model/image usage",
   );
+  assert.deepEqual(scorecards[3].critiqueEvidence, [{
+    label: "remote:quality-probe",
+    scores: [0.87],
+    passes: [true],
+    fatalIterations: [false],
+    issueCounts: [0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }], "remote module scorecard preserves critic outcomes without calling them oracle scores");
+  assert.deepEqual(scorecards[2].critiqueEvidence, [{
+    label: "local:quality-probe",
+    scores: [0.82],
+    passes: [true],
+    fatalIterations: [false],
+    issueCounts: [0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }], "local module scorecard captures the shared critique loop's actual outcome");
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }
 
