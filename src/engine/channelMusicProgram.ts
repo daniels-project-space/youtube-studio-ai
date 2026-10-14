@@ -289,6 +289,7 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
 }
 
 function structuredCaption(input: {
+  channelIdentityFingerprint: string;
   topic: string;
   role: ChannelMusicRole;
   genre: string;
@@ -315,16 +316,15 @@ function structuredCaption(input: {
   // memorable musical reason for the later section map without replacing the
   // channel-owned identity or adding an unbounded list of instruments.
   const tempo = Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2);
-  // Music3's Global Metadata explicitly calls for a key and scale. Keep that
-  // control stable for a channel sound rather than choosing it per episode:
-  // changing the tonal centre just because a title changes is one easy way to
-  // make a playlist feel like unrelated stock cues. This is prompt guidance,
-  // not a claim that the generator can guarantee symbolic harmony.
+  // Music3's Global Metadata explicitly calls for a key and scale. Derive it
+  // from the stable channel identity, not episode mood, so a changing brief
+  // does not make one channel's playlist feel tonally unrelated. This is prompt
+  // guidance, not a claim that the generator can guarantee symbolic harmony.
   const tonalPalette = [
     "D minor", "E minor", "A minor", "C minor", "G minor", "B minor",
     "C major", "D major", "E-flat major", "F major", "G major", "A-flat major",
   ] as const;
-  const tonalSource = `${input.genre}|${input.instrumentation.join("|")}|${input.moodArc}`;
+  const tonalSource = input.channelIdentityFingerprint;
   const tonalIndex = Number.parseInt(sha256Hex(tonalSource).slice(0, 8), 16) % tonalPalette.length;
   const tonalCenter = tonalPalette[tonalIndex]!;
   const listeningScenario: Record<ChannelMusicRole, string> = {
@@ -534,6 +534,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       durationSec,
       instrumental: true,
       structuredCaption: structuredCaption({
+        channelIdentityFingerprint: input.channelIdentityFingerprint,
         topic: input.topic,
         role,
         genre,

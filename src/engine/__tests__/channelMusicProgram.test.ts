@@ -82,6 +82,25 @@ assert.match(
 );
 assert.match(history.generation.structuredCaption, /^### Global Metadata/mu);
 assert.match(history.generation.structuredCaption, /Key\/scale: [A-G](?:-flat)? (?:minor|major);/u);
+const historyTonalCenter = history.generation.structuredCaption.match(/Key\/scale: ([^;]+);/u)?.[1];
+const nextHistoryEpisode = createChannelMusicProgram({
+  channelId: "channel-stoic-history",
+  channelIdentityFingerprint: sha("a"),
+  family: "narrated",
+  contentLaneKey: "documentary",
+  topic: "The thaw after the long winter",
+  providerPreference: "minimax_music3",
+  genre: "restrained chamber documentary score",
+  instrumentation: ["felt piano", "low strings", "soft frame drum"],
+  textures: ["dry close room", "subtle analogue warmth"],
+  bpmRange: [58, 72],
+  moodArc: "measured relief gradually replaces uncertainty and resolves with quiet dignity",
+});
+assert.equal(
+  nextHistoryEpisode.generation.structuredCaption.match(/Key\/scale: ([^;]+);/u)?.[1],
+  historyTonalCenter,
+  "episode-specific topic and mood changes must not change the channel's stable tonal center",
+);
 assert.match(history.generation.structuredCaption, /scenario: a paced narrated story/u);
 assert.match(history.generation.structuredCaption, /### Vocal Details/mu);
 assert.match(history.generation.structuredCaption, /### Arrangement/mu);
