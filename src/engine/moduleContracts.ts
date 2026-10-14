@@ -453,9 +453,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     {
       deferredConsumes: ["finalMasterReleaseCertificate"],
       optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicNativeWavKey", "musicQualityReceiptKey", "musicQualityReviewStatus",
+        // Music is absent on non-music routes; when present, retain its source
+        // identity and audition evidence through the final upload package.
+        "channelMusicProgramKey", "channelMusicProgramFingerprint", "musicProvider", "musicKey",
+        "musicAuditionSourceKey", "musicAuditionWavKey", "musicRuntimeReceiptKey", "musicNativeWavKey",
+        "musicQualityReceiptKey", "musicQualityReviewStatus", "finalMasterReleaseCertificate",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
         // Last-hop package-art verification for a current fictional scenario.
         "topic", "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure",
@@ -702,7 +704,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
-      "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
+      "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays", "narrationStartSec",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
       // Explicit renderer provenance lets assembly keep native MiniMax H3
       // footage out of the legacy LTX film-finish branch.
