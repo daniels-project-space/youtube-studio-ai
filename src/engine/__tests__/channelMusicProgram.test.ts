@@ -18,7 +18,8 @@ assert.equal(musicRoleForRoute("music_loop", "music_loop"), "primary_music");
 assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "sleep_sound_bed");
 assert.equal(musicRoleForRoute("sleep", "music_loop"), "sleep_sound_bed");
 assert.equal(musicRoleForRoute("music_loop", "sleep"), "sleep_sound_bed");
-assert.equal(musicRoleForRoute("music_loop", "meditation"), "primary_music");
+assert.equal(musicRoleForRoute("music_loop", "meditation"), "meditation_bed");
+assert.equal(musicRoleForRoute("music_loop", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
 
@@ -33,6 +34,19 @@ assert.equal(unclassified.role, "narration_bed");
 assert.equal(unclassified.mix.narrationPriority, true);
 assert.equal(unclassified.mix.bodyMusicVol, 0.1026,
   "an unknown route must not be mislabeled as a full-volume music-loop program");
+
+const meditation = createChannelMusicProgram({
+  channelId: "channel-meditation",
+  channelIdentityFingerprint: sha("c"),
+  family: "music_loop",
+  contentLaneKey: "meditation",
+  topic: "A slow return to steady breathing",
+});
+assert.equal(meditation.role, "meditation_bed");
+assert.equal(meditation.mix.bodyMusicVol, 0.25,
+  "a specific meditation lane must not inherit primary-music full volume from its broad family");
+assert.equal(meditation.mix.narrationPriority, false);
+assert.equal(meditation.quality.minimumLraLu, 2);
 
 const history = createChannelMusicProgram({
   channelId: "channel-stoic-history",
