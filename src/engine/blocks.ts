@@ -12,7 +12,7 @@ import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@
 import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2KeyframesManifest } from "@/trigger/blocks/yue2LoopVisuals";
 import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifest } from "@/trigger/blocks/reviewedLoopMotion";
 import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAwareMetadata";
-import { music } from "@/trigger/blocks/musicBlocks";
+import { music, musicProgramPlan } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
 import { createRenderEngineYuE2MusicManifest } from "@/trigger/blocks/yue2MusicEngine";
@@ -62,6 +62,8 @@ let registered = false;
 /** Idempotently register all blocks. Safe to call multiple times. */
 export function registerAllBlocks(): void {
   if (registered) return;
+  // Register the shared planner before constructing its versioned YuE2 wrappers.
+  register(musicProgramPlan);
   // Template C (Lofi) blocks. metadata + thumbnail_gen come from the
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);

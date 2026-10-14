@@ -18,8 +18,13 @@ async function main(): Promise<void> {
     assert.doesNotMatch(source, /(?:from\s*|import\s*\()\s*["'][^"']*lofiBlocks/,
       `${moduleName} must not depend on LoFi to execute shared music`);
   }
+  const lofiSource = readFileSync(new URL("../lofiBlocks.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(lofiSource, /(?:from\s*|import\s*\()\s*["'][^"']*musicBlocks/,
+    "LoFi must provide route intent without importing shared Music implementations");
   assert.ok(!lofiBlocks.some((block) => block.id === "music"),
     "LoFi must not own or register the shared music block");
+  assert.ok(!lofiBlocks.some((block) => block.id === "music_program_plan"),
+    "LoFi must not own or register the shared music planner");
   const lofiMusicParams = LOFI_PIPELINE.find((entry) => entry.block === "music")?.params as
     | Record<string, unknown>
     | undefined;
@@ -70,7 +75,9 @@ async function main(): Promise<void> {
     registerAllBlocks();
     assert.equal(require_("music"), music, "the real registry must resolve the shared implementation");
     assert.equal(require_("music_program_plan"), musicProgramPlan,
-      "the shared Music module must own the program planner registered into LoFi pipelines");
+      "the central registry must resolve the planner from the shared Music module");
+    assert.equal(all().filter((block) => block.id === "music_program_plan").length, 1,
+      "the shared Music planner must be registered exactly once");
     assert.equal(getManifest("music")?.block, music);
     const plannedMusicEntry = LOFI_PIPELINE.find((entry) => entry.block === "music");
     assert.equal(plannedMusicEntry?.version, MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,

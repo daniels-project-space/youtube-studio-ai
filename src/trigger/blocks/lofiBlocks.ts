@@ -144,7 +144,6 @@ import { getNarrativeSeriesPlanRecord } from "@/lib/narrativeSeriesStateRuntime"
 import { createNarrativeShortOrigin, type NarrativeShortOrigin } from "@/lib/narrativeShortOrigin";
 import { z } from "zod";
 import { convex, str, recordAsset, routeSeedForTopicSelection, musicProgramForCurrentRoute } from "./blockContext";
-import { musicProgramPlan } from "./musicBlocks";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./providerAwareMusic";
 
 /**
@@ -3487,7 +3486,6 @@ export const shortsSpinoff: Block = {
 
 export const lofiBlocks: Block[] = [
   topicSelect,
-  musicProgramPlan,
   scenePlanner,
   keyframes,
   loopClips,
