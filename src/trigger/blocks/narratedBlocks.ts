@@ -673,6 +673,17 @@ function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
   };
 }
 
+function assertReusableScriptLanguagePolicy(script: Script, ctx: StageContext, source: string): void {
+  const matches = findChannelBannedWords(script.narrationText, readChannelBannedWords(ctx.store["bannedWords"]));
+  if (matches.length) {
+    throw new Error(`script_gen: ${source} violates channel language policy: ${matches.slice(0, 8).join(", ")}`);
+  }
+  if (script.closingLine !== undefined) {
+    const issue = scriptClosingLineIssue(script.closingLine);
+    if (issue) throw new Error(`script_gen: ${source} has an invalid closing line: ${issue}`);
+  }
+}
+
 export const scriptGen: Block = {
   id: "script_gen",
   consumes: ["topic"],
@@ -757,6 +768,7 @@ export const scriptGen: Block = {
       ) {
         throw new Error("script_gen: serialized-episode-bound prepared weekly script cannot run without its immutable context");
       }
+      assertReusableScriptLanguagePolicy(preparedScript, ctx, "prepared weekly script");
       ctx.log(`script_gen: consumed prepared weekly script (${preparedScript.sections.length} sections; no text-generation spend)`);
       return { script: preparedScript, narrationText: preparedScript.narrationText };
     }
@@ -790,6 +802,7 @@ export const scriptGen: Block = {
         programRoute,
         serializedEpisodeContext?.fingerprint,
       );
+      assertReusableScriptLanguagePolicy(translated, ctx, "reused script");
       ctx.log(`script_gen: reused + translated base script → ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
     }

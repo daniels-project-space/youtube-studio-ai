@@ -423,6 +423,19 @@ async function reusedScriptsRetainTheirRouteBinding(): Promise<void> {
     /reused script does not match the frozen channel program route/,
     "a language sibling must not translate a script from another program route",
   );
+  await assert.rejects(
+    scriptGen(stageContext({
+      params: { language: "en" },
+      store: {
+        channelProgramRoute: narratedSeed,
+        topic: "How one river bent an old empire’s trade routes",
+        bannedWords: ["old map"],
+        reuseScript,
+      },
+    })),
+    /reused script violates channel language policy: old map/,
+    "a same-language reuse must still enforce the current channel language policy",
+  );
 }
 
 async function preparedWeeklyScriptsSkipCreativeTextGeneration(): Promise<void> {
@@ -446,6 +459,19 @@ async function preparedWeeklyScriptsSkipCreativeTextGeneration(): Promise<void> 
   }));
   assert.equal(result.script, preparedScript, "the prepared weekly script is retained verbatim");
   assert.equal(result.narrationText, preparedScript.narrationText);
+  await assert.rejects(
+    scriptGen(stageContext({
+      params: { language: "es" },
+      store: {
+        channelProgramRoute: narratedSeed,
+        topic: "How one hinge rewrote the archive",
+        bannedWords: ["overlooked hinge"],
+        preparedScript,
+      },
+    })),
+    /prepared weekly script violates channel language policy: overlooked hinge/,
+    "prepared narration must be checked against the current channel language policy before TTS",
+  );
   await assert.rejects(
     scriptGen(stageContext({
       store: {
