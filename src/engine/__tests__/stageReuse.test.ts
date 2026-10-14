@@ -3,7 +3,7 @@ import { artifactContract } from "@/engine/artifactSchemas";
 import { manifestFromBlock, type ModuleManifest } from "@/engine/moduleManifest";
 import {
   assertRestoredStageOutputs, assertStageReuseReceipt, sealStageReuseReceipt,
-  stageInvocationHash, stageReuseHash, type StageReuseInvocation,
+  stageContentFingerprint, stageInvocationHash, stageReuseHash, type StageReuseInvocation,
 } from "@/engine/stageReuse";
 import { StageReuseReceiptSchema } from "@/engine/stageReuseContract";
 import type { ArtifactRef } from "@/engine/types";
@@ -62,6 +62,7 @@ function invocation(): StageReuseInvocation {
 
 const input = invocation();
 const invocationHash = stageInvocationHash(input);
+const contentFingerprint = stageContentFingerprint(input);
 const refs = Object.entries(outputs).map(([key, value]) => ref(key, value, input.manifest.id));
 const receipt = sealStageReuseReceipt(invocationHash, outputs, refs);
 let passed = 0;
@@ -89,6 +90,18 @@ test("object order is irrelevant to invocation and output identity", () => {
   next.manifest = { ...next.manifest, consumes: Object.fromEntries(Object.entries(next.manifest.consumes).reverse()) };
   assert.equal(stageInvocationHash(next), invocationHash);
   assert.deepEqual(assertStageReuseReceipt(receipt, invocationHash, Object.fromEntries(Object.entries(outputs).reverse())), receipt);
+});
+
+test("cross-run content fingerprint ignores execution scope and artifact IDs", () => {
+  const next = invocation();
+  next.ownerId = "owner-two";
+  next.runId = "run-two";
+  next.channelId = "channel-two";
+  next.keyPrefix = "owners/other/channels/channel-two/runs/run-two/";
+  next.inputRefs = Object.fromEntries(Object.entries(next.inputRefs).map(([key, value]) => [key, { ...value, artifactId: `other:${key}` }]));
+  assert.equal(stageContentFingerprint(next), contentFingerprint);
+  next.store = { ...next.store, topic: "A different source" };
+  assert.notEqual(stageContentFingerprint(next), contentFingerprint);
 });
 
 test("JSON omission of undefined and sparse arrays is stable", () => {

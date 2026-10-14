@@ -3,7 +3,7 @@ import { sha256Hex } from "@/lib/sha256";
 import type { ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 
 /** Versioned, append-only measurement emitted for every executed module stage. */
-export const MODULE_SCORECARD_VERSION = "module-scorecard/v5" as const;
+export const MODULE_SCORECARD_VERSION = "module-scorecard/v6" as const;
 
 export type ModuleScorecardStatus = "passed" | "failed";
 
@@ -22,6 +22,8 @@ export type ModuleScorecard = {
   moduleId: string;
   status: ModuleScorecardStatus;
   outputValid: boolean;
+  moduleVersion: string;
+  inputFingerprint: string;
   /** Exact durable outputs measured by this stage; hashes only, never payloads. */
   outputArtifacts: ModuleScorecardArtifact[];
   /** The independent oracle may run later; null never means a passing score. */
@@ -159,6 +161,8 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
     moduleId,
     status: input.status,
     outputValid: input.outputValid,
+    moduleVersion: requiredId(input.moduleVersion, "module version"),
+    inputFingerprint: requiredId(input.inputFingerprint, "input fingerprint"),
     outputArtifacts: outputArtifacts(input.outputArtifacts, runId, moduleId),
     oracleScore: nullableScore(input.oracleScore),
     falsePasses: nullableNonNegative(input.falsePasses, "false passes"),
@@ -181,6 +185,9 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
   }
   if (typeof body.outputValid !== "boolean") {
     throw new Error("module scorecard output validity is invalid");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(body.inputFingerprint)) {
+    throw new Error("module scorecard input fingerprint is invalid");
   }
   if (body.status === "passed" && !body.outputValid) {
     throw new Error("a passed module scorecard cannot claim invalid output");
@@ -222,6 +229,8 @@ export type ModuleScorecardDelta = {
   convexWrites: number | null;
   convexActions: number | null;
   estimatedCostUsd: number;
+  moduleVersionChanged: boolean;
+  inputFingerprintChanged: boolean;
   outputValidityChanged: boolean;
   outputArtifactsChanged: boolean;
 };
@@ -269,6 +278,8 @@ export function compareModuleScorecards(
     convexWrites: nullableDelta(baseline.convexWrites, current.convexWrites),
     convexActions: nullableDelta(baseline.convexActions, current.convexActions),
     estimatedCostUsd: Number((current.estimatedCostUsd - baseline.estimatedCostUsd).toFixed(6)),
+    moduleVersionChanged: current.moduleVersion !== baseline.moduleVersion,
+    inputFingerprintChanged: current.inputFingerprint !== baseline.inputFingerprint,
     outputValidityChanged: current.outputValid !== baseline.outputValid,
     outputArtifactsChanged: outputArtifactMeasurements(baseline.outputArtifacts) !== outputArtifactMeasurements(current.outputArtifacts),
   };

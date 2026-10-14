@@ -11,6 +11,8 @@ const base = {
   moduleId: "title_module",
   status: "passed" as const,
   outputValid: true,
+  moduleVersion: "3.0.0",
+  inputFingerprint: "c".repeat(64),
   outputArtifacts: [{
     key: "titleDecision",
     artifactId: `run-scorecard-test:title_module:titleDecision:${"a".repeat(16)}`,
@@ -90,6 +92,8 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   convexWrites: null,
   convexActions: null,
   estimatedCostUsd: -0.0023,
+  moduleVersionChanged: false,
+  inputFingerprintChanged: false,
   outputValidityChanged: false,
   outputArtifactsChanged: false,
 });
@@ -172,6 +176,9 @@ const changedOutput = createModuleScorecard({
 });
 assert.equal(compareModuleScorecards(scorecard, changedOutput).outputArtifactsChanged, true,
   "module comparisons must expose when they measured different durable outputs");
+const changedInputs = createModuleScorecard({ ...base, inputFingerprint: "d".repeat(64), moduleVersion: "4.0.0" });
+assert.equal(compareModuleScorecards(scorecard, changedInputs).inputFingerprintChanged, true);
+assert.equal(compareModuleScorecards(scorecard, changedInputs).moduleVersionChanged, true);
 const sameOutputDifferentRun = createModuleScorecard({
   ...base,
   runId: "run-scorecard-other",

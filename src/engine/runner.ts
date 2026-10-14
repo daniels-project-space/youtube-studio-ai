@@ -43,7 +43,7 @@ import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage"
 import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
-import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageReuseHash } from "./stageReuse";
+import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageContentFingerprint, stageInvocationHash, stageReuseHash } from "./stageReuse";
 import { STAGE_REUSE_RECONCILIATION_MARKER, type StageReuseReceipt, type StageReuseOutputIdentity } from "./stageReuseContract";
 
 export interface RunPipelineOptions {
@@ -870,11 +870,14 @@ export async function runPipeline(
       Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
     );
     let invocationHash: string;
+    let inputFingerprint: string;
     try {
-      invocationHash = stageInvocationHash({
+      const invocation = {
         ownerId: opts.ownerId, runId: opts.runId, channelId: opts.channelId, keyPrefix: opts.keyPrefix,
         manifest, params, store, inputRefs, inputIdentities: artifactIdentities,
-      });
+      };
+      invocationHash = stageInvocationHash(invocation);
+      inputFingerprint = stageContentFingerprint(invocation);
     } catch (error) {
       return await refuseUnverifiedReuse(error instanceof Error ? error.message : "invalid input identity");
     }
@@ -1378,6 +1381,8 @@ export async function runPipeline(
         moduleId: block.id,
         status: "passed",
         outputValid: true,
+        moduleVersion: manifest.version,
+        inputFingerprint,
         outputArtifacts: scorecardArtifacts,
         oracleScore: null,
         falsePasses: null,
@@ -1455,6 +1460,8 @@ export async function runPipeline(
         moduleId: block.id,
         status: "failed",
         outputValid: false,
+        moduleVersion: manifest.version,
+        inputFingerprint,
         outputArtifacts: scorecardArtifacts,
         oracleScore: null,
         falsePasses: null,
