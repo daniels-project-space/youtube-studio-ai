@@ -90,6 +90,7 @@ import {
 import {
   channelCritiqueBrief,
   produceAndCritique,
+  validateCritiqueResponse,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
 import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channelLanguagePolicy";
@@ -1006,8 +1007,8 @@ export const hookCraft: Block = {
     //   - Deterministic defects (empty, too long, markdown, or just the
     //     narration's first line echoed back) are computed in code — they cost
     //     nothing and can drive a retry with no critic at all.
-    //   - A critic OUTAGE accepts the current draft instead of blind-spending
-    //     another draft that would be equally ungraded.
+    //   - A critic outage fails the stage closed instead of accepting an
+    //     unreviewed promise or blind-spending another draft.
     //   - Cap 2 (one informed retry), the established convention here.
     const hookChannel = channelCritiqueContext(ctx);
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
@@ -1128,14 +1129,20 @@ export const hookCraft: Block = {
             temperature: 0.3,
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
-          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          const rejected = verdict.pass === false;
+          const admission = validateCritiqueResponse(verdict);
+          if (!admission.pass || !admission.critique) {
+            throw new Error(`malformed hook critique — ${admission.issues.join("; ")}`);
+          }
+          const critique = admission.critique;
+          if (critique.issues.length > 4 || critique.issues.some((issue) => issue.length > 140)) {
+            throw new Error("malformed hook critique — issues must contain at most 4 strings under 140 characters");
+          }
+          const issues = critique.issues.slice(0, 4);
+          const rejected = !critique.pass;
           const rejectionIssues = issues.length
             ? issues
             : ["independent hook critic rejected the line without usable remediation"];
-          const score = Number.isFinite(verdict.score)
-            ? Math.max(0, Math.min(1, Number(verdict.score)))
-            : rejected ? 0.4 : 1;
+          const score = critique.score;
           if (rejected) {
             ctx.log(
               `hook_craft: candidate ${iter} rejected by the critic` +
@@ -1146,7 +1153,7 @@ export const hookCraft: Block = {
           // The +0.01*iter tiebreak keeps the INFORMED retry when it merely ties
           // the first draft (produceAndCritique picks the best by strict >).
           return rejected
-            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
+            ? { score: Math.min(1, Math.min(0.99, score) + 0.01 * iter), pass: false, issues: rejectionIssues }
             : { score, pass: true, issues: [] };
         } catch (e) {
           // Preserve the exact ambiguous provider boundary for the retry
