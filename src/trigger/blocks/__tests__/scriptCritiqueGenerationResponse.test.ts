@@ -4,6 +4,7 @@ import { runPipeline } from "@/engine/runner";
 import { validatePipeline } from "@/engine/validate";
 import type { Script } from "@/lib/scriptGen";
 import { OPENROUTER_MODELS } from "@/lib/openRouter";
+import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 
 // Transport fixtures only: the registered script_gen, synthScript, craftHook,
 // hook lint/judge, provider decoder and produceAndCritique loop are all real.
@@ -31,6 +32,11 @@ const malformed: Array<[string, unknown]> = [
 interface RecordedRequest { kind: "candidates" | "judge" | "script" | "critic"; prompt: string }
 
 async function main(): Promise<void> {
+  const normalizedBans = readChannelBannedWords(["  forbidden   phrase ", "FORBIDDEN PHRASE"]);
+  assert.deepEqual(normalizedBans, ["forbidden phrase"]);
+  assert.deepEqual(findChannelBannedWords("A FORBIDDEN\n phrase appeared.", normalizedBans), ["forbidden phrase"]);
+  assert.deepEqual(findChannelBannedWords("Secrets are not the singular word.", ["secret"]), [],
+    "literal policy does not reject partial-word matches");
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.OPENROUTER_API_KEY;
   let requests: RecordedRequest[] = [];
@@ -50,6 +56,7 @@ async function main(): Promise<void> {
       let value: unknown;
       if (prompt.startsWith("You are the cold-open director.")) {
         kind = "candidates";
+        if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         assert.equal(body.max_tokens, 3200);
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
@@ -64,9 +71,10 @@ async function main(): Promise<void> {
       } else if (prompt.startsWith("Write a YouTube narration script about:")) {
         kind = "script";
         assert.equal(body.max_tokens, 13000);
+        if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         const attempt = requests.filter((request) => request.kind === "script").length + 1;
         value = { sections: sections.map((section) => ({ ...section,
-          narration: `${section.narration}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
+          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
           closing_line: "Follow the small clue and restore what gives life." };
       } else if (prompt.startsWith("Critique this YouTube narration draft for quality")) {
         kind = "critic";
@@ -84,14 +92,14 @@ async function main(): Promise<void> {
         usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130, cost: 0.003 } });
     };
 
-    async function run(label: string, values: unknown[]) {
+    async function run(label: string, values: unknown[], bannedWords: string[] = []) {
       currentLabel = label; verdicts = values; requests = [];
       const stages: Array<{ block: string; status: string }> = [];
       const logs: string[] = [];
       const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 45, style: "shorts" } }], ["topic", "niche"]), {
         ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
-        seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction" },
+        seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords },
         sink: { async upsert(row) { stages.push({ block: row.block, status: row.status }); } },
         log: (message) => { logs.push(message); },
       });
@@ -113,6 +121,12 @@ async function main(): Promise<void> {
     assert.ok(script.narrationText.includes(sections[2].narration));
     assert.equal(good.result.store.narrationText, script.narrationText);
     assert.ok(good.logs.some((line) => /1 iter, accepted/.test(line)));
+
+    const bannedRetry = await run("banned-word-retry", [{ pass: true, issues: [] }], ["forbidden phrase"]);
+    assert.equal(bannedRetry.result.ok, true, bannedRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "deterministic policy catches the first draft before critic spend and retries once");
+    assert.doesNotMatch((bannedRetry.result.store.script as Script).narrationText, /forbidden phrase/i);
 
     const repaired = await run("false-then-true", [{ pass: false, issues: [remediation] }, { pass: true, issues: [] }]);
     assert.equal(repaired.result.ok, true, repaired.result.error);

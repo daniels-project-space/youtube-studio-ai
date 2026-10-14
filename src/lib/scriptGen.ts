@@ -9,6 +9,7 @@ import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/gol
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 
 export interface ScriptSection {
   heading: string;
@@ -156,6 +157,8 @@ export interface ScriptRequest {
    * script must be written in (beats the generic per-archetype tone).
    */
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
+  /** Frozen channel identity language the narration must not contain. */
+  bannedWords?: string[];
   /**
    * The channel renders spoken numbers as on-screen motion graphics
   * (visual_inserts) — the script must SPEAK concrete, attributable figures.
@@ -391,7 +394,8 @@ function styleGuidance(req: ScriptRequest): string {
   const weeklyPreparation = req.weeklyPreparationBrief?.trim()
     ? `\n\nFROZEN WEEKLY PREPARATION (follow this episode-specific brief; do not quote it): ${req.weeklyPreparationBrief.trim()}`
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
+  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) +
+    channelBannedWordsDirective(req.bannedWords ?? []) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 
 /**
@@ -926,6 +930,7 @@ export async function synthScript(
   const crafted = req.precraftedHook ?? await craftHook({
     topic: req.topic,
     channelName: req.channelName,
+    bannedWords: req.bannedWords,
     niche: req.niche,
     persona: req.persona,
     narrative: req.narrative,

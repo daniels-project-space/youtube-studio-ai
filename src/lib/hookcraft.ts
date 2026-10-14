@@ -24,6 +24,7 @@ import {
   OpenRouterGenerationOutcomeUnknownError,
 } from "@/lib/creativeText";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
+import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 
 export function hasHookcraft(): boolean {
@@ -444,6 +445,8 @@ export interface HookCraftArgs {
   /** The video's (working) title — the cold open must confirm the clicked promise. */
   title?: string;
   channelName?: string;
+  /** Frozen channel language policy for the spoken cold open. */
+  bannedWords?: string[];
   niche?: string;
   persona?: string;
   /** Style-DNA narrative register (beats generic tone). */
@@ -617,6 +620,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
         registerClause(a),
+        channelBannedWordsDirective(a.bannedWords ?? []),
         a.playbookDigest ?? "",
         a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
         a.seriesNote

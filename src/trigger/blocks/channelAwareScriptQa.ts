@@ -9,6 +9,7 @@ import { createQaScriptBlock } from "./narratedBlocks";
 
 const scriptContextSchema = z.object({
   channelName: z.string().optional(), persona: z.string().optional(), criticDoctrine: z.string().optional(),
+  bannedWords: z.array(z.string().min(1).max(160)).max(32).optional(),
   styleDNA: z.object({ narrative: z.object({
     scriptStyle: z.string().optional(), hookStyle: z.string().optional(),
     pacing: z.string().optional(), delivery: z.string().optional(),
@@ -18,9 +19,11 @@ const scriptContextSchema = z.object({
 function scriptCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
   // Visual grammar and acoustic casting are owned by other modules.
   const parsed = scriptContextSchema.parse({ channelName: ctx.store["channelName"],
-    persona: ctx.store["persona"], criticDoctrine: ctx.store["criticDoctrine"], styleDNA: ctx.store["styleDNA"] });
+    persona: ctx.store["persona"], criticDoctrine: ctx.store["criticDoctrine"],
+    bannedWords: ctx.store["bannedWords"], styleDNA: ctx.store["styleDNA"] });
   const lane = ctx.store["contentLane"] as { key?: unknown } | null | undefined;
   return { channelName: parsed.channelName, persona: parsed.persona, criticDoctrine: parsed.criticDoctrine,
+    bannedWords: parsed.bannedWords,
     narrative: parsed.styleDNA?.narrative,
     ...(typeof lane?.key === "string" ? { contentLaneKey: lane.key } : {}),
     laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis };
@@ -37,7 +40,7 @@ export function createChannelAwareScriptQaManifest(legacy: ModuleManifest): Modu
     consumes: { ...legacy.consumes, channelName: artifactContract("channelName") },
     optionalConsumes: { ...legacy.optionalConsumes,
       styleDNA: artifactContract("styleDNA"), criticDoctrine: artifactContract("criticDoctrine"),
-      contentLane: artifactContract("contentLane") },
+      contentLane: artifactContract("contentLane"), bannedWords: artifactContract("bannedWords") },
     certification: { status: "contract",
       evidence: "Opt-in channel-conditioned critic policy; requires real-output evaluation before production qualification." },
     block, execute: block.run,

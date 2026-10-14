@@ -19,6 +19,7 @@ async function main() {
         hookStyle: "A quiet arrival rather than suspense.", pacing: "Spacious pauses.",
         delivery: "Reassuring, without force.", voiceProfile: "Acoustic voice timbre is owned by narration." } },
       criticDoctrine: "Never force a suspense hook or an argumentative thesis into guided relaxation.",
+      bannedWords: ["forbidden phrase"],
       narrationText: "Notice the support beneath you. Let the next breath arrive without effort." } };
   try {
     process.env.OPENROUTER_API_KEY = "synthetic-only-no-provider-access";
@@ -43,6 +44,8 @@ async function main() {
     assert.match(baseline, /verify a deliberate MIDPOINT RE-HOOK exists/);
     assert.doesNotMatch(baseline, /Gentle invitations|Never force a suspense hook/,
       "baseline reproduces the dropped channel-specific standards");
+    assert.doesNotMatch(baseline, /forbidden phrase|Forbidden channel wording/,
+      "legacy prompt remains unchanged though deterministic QA still enforces language policy");
     const selectedOnlyKeys = new Set(["channelName", "contentLane", "criticDoctrine", "styleGrammar", "styleDNA"]);
     await invoke(legacy, { ...context, store: new Proxy(context.store, {
       get(target, key) {
@@ -75,10 +78,15 @@ async function main() {
         "visual styling and acoustic voice casting must not become prose-quality requirements");
       assert.doesNotMatch(prompt, /require a genuine, specific POINT OF VIEW|verify a deliberate MIDPOINT RE-HOOK exists/);
       assert.match(prompt, /Channel personality cannot waive the sealed route/);
+      assert.match(prompt, /forbidden phrase/);
       if (store.script) assert.match(prompt, /Why did the second seed survive/);
     }
     await invoke(legacy);
     assert.equal(prompts.at(-1), baseline, "legacy prompt remains byte-for-byte unchanged after selecting the new revision");
+    const beforeBannedText = prompts.length;
+    await assert.rejects(invoke(selected, { ...context, store: { ...context.store,
+      narrationText: "The forbidden phrase appeared despite the channel policy." } }), /channel-banned wording/);
+    assert.equal(prompts.length, beforeBannedText, "deterministic wording policy rejects before critic spend");
     assert.deepEqual(await invoke(selected, { ...context, store: new Proxy({
       narrationText: context.store.narrationText, channelName: "Narrative only", styleDNA: context.store.styleDNA,
     }, { get(target, key) {

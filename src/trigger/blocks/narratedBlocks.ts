@@ -92,6 +92,7 @@ import {
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
+import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import type { HealClass } from "@/engine/healer";
 import {
   assessProductionEditorialAcceptance,
@@ -796,6 +797,7 @@ export const scriptGen: Block = {
       topic,
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
+      bannedWords: readChannelBannedWords(ctx.store["bannedWords"]),
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
@@ -840,7 +842,10 @@ export const scriptGen: Block = {
     // an unreviewed script.
     const critiqueEnabled = hasCreativeTextKey();
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
-    const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
+    const scriptChannel: ChannelCritiqueContext = {
+      ...channelCritiqueContext(ctx),
+      bannedWords: req.bannedWords,
+    };
 
     let precraftedHook: Script["crafted"] | undefined;
     const loop = await produceAndCritique<Script>({
@@ -866,6 +871,13 @@ export const scriptGen: Block = {
         return draft;
       },
       critique: async (draft, iter) => {
+        const bannedMatches = findChannelBannedWords(draft.narrationText, req.bannedWords ?? []);
+        if (bannedMatches.length) {
+          return {
+            score: 0, pass: false, fatal: true,
+            issues: [`Channel language policy forbids: ${bannedMatches.slice(0, 8).join(", ")}`],
+          };
+        }
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
           const crit = parseScriptCritique(await creativeTextJson<unknown>({
@@ -916,6 +928,9 @@ export const scriptGen: Block = {
         }
       },
     });
+    if (loop.fatal) {
+      throw new Error(`script_gen FAILED: channel-banned wording remains after the informed retry — ${loop.critique.issues.join("; ")}`);
+    }
     if (critiqueEnabled) {
       assertScriptCritiqueAccepted({
         accepted: loop.accepted,
@@ -1152,6 +1167,13 @@ export function createQaScriptBlock(
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const bannedMatches = findChannelBannedWords(
+      narration,
+      readChannelBannedWords(ctx.store["bannedWords"]),
+    );
+    if (bannedMatches.length) {
+      throw new Error(`qa_script FAILED: narration contains channel-banned wording (${bannedMatches.slice(0, 8).join(", ")})`);
+    }
     const programRoute = programRouteForNarratedBlock(ctx, "qa_script");
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");

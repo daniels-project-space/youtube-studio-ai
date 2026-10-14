@@ -32,5 +32,8 @@ export function channelPipelineValidationSeedKeys(
   if (pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) {
     keys.push("channelName");
   }
+  if (pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script")) {
+    keys.push("bannedWords");
+  }
   return keys;
 }

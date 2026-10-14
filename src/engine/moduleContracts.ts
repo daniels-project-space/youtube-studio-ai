@@ -607,6 +607,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation", "preparedScript",
+      "bannedWords",
       "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan",
     ],
   }),
@@ -621,7 +622,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
-      "documentaryEpisodePlan", "editorialEvidencePacket"],
+      "documentaryEpisodePlan", "editorialEvidencePacket", "bannedWords"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {

@@ -131,6 +131,8 @@ export interface ChannelCritiqueContext {
   laneEmphasis?: readonly string[];
   /** Channel QualityBar dimension ids the operator actually cares about. */
   qualityDimensions?: readonly string[];
+  /** Literal spoken wording forbidden by this channel's frozen identity. */
+  bannedWords?: readonly string[];
 }
 
 function compact(value: string | undefined, max: number): string | undefined {
@@ -154,6 +156,9 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
       return value ? `Narrative ${field}: ${value}` : "";
     }),
     compact(channel.contentLaneKey, 60) ? `Content lane: ${compact(channel.contentLaneKey, 60)}` : "",
+    channel.bannedWords?.length
+      ? `Forbidden channel wording (reject any occurrence in narration): ${JSON.stringify(channel.bannedWords.slice(0, 32))}`
+      : "",
     (channel.qualityDimensions ?? []).length
       ? `Operator quality priorities: ${(channel.qualityDimensions ?? []).slice(0, 8).join(", ")}`
       : "",
