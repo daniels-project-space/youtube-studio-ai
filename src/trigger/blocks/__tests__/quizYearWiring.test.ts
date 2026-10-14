@@ -389,6 +389,30 @@ async function main(): Promise<void> {
     ]),
     [],
   );
+  const malformedOptions = q("Q8", "1781", "In what year was the event?");
+  malformedOptions.options.pop();
+  assert.ok(
+    quizSetDefects([malformedOptions]).some((defect) => defect.includes("exactly four choices")),
+    "a quiz card with fewer than four options must not pass the unified round gate",
+  );
+  const duplicateOptions = q("Q9", "1781", "In what year was the event?");
+  duplicateOptions.options[1] = { ...duplicateOptions.options[1]!, label: " 1781 " };
+  assert.ok(
+    quizSetDefects([duplicateOptions]).some((defect) => defect.includes("duplicate choice labels")),
+    "duplicate visible choices must fail even when the correct-option count is one",
+  );
+  const emptyOption = q("Q11", "1781", "In what year was the event?");
+  emptyOption.options[2] = { ...emptyOption.options[2]!, label: "   " };
+  assert.ok(
+    quizSetDefects([emptyOption]).some((defect) => defect.includes("empty choice label")),
+    "a blank visible choice must fail instead of rendering as a missing option",
+  );
+  const mismatchedAnswer = q("Q10", "1781", "In what year was the event?");
+  mismatchedAnswer.options[0] = { ...mismatchedAnswer.options[0]!, label: "1782" };
+  assert.ok(
+    quizSetDefects([mismatchedAnswer]).some((defect) => defect.includes("does not match the answer label")),
+    "the revealed answer label must be the choice marked correct",
+  );
   assert.ok(
     quizSetDefects([
       q("Q1", "1781", "In what year was A discovered?"),

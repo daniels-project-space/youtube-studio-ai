@@ -492,8 +492,19 @@ export function quizSetDefects(rounds: readonly PlannedRound[]): string[] {
     if (seenSubject.has(r.subjectId)) defects.push(`duplicate subject ${r.subjectId}`);
     seenSubject.add(r.subjectId);
     seenAnswer.add(`${r.category}:${r.answerLabel}`);
+    const optionLabels = r.options.map((option) => option.label.replace(/\s+/g, " ").trim());
+    if (optionLabels.length !== 4) defects.push(`${r.subjectId}: expected exactly four choices`);
+    if (optionLabels.some((label) => !label)) defects.push(`${r.subjectId}: empty choice label`);
+    if (new Set(optionLabels.map((label) => label.toLocaleLowerCase())).size !== optionLabels.length) {
+      defects.push(`${r.subjectId}: duplicate choice labels`);
+    }
     const correct = r.options.filter((o) => o.isCorrect);
     if (correct.length !== 1) defects.push(`${r.subjectId}: ${correct.length} correct options`);
+    if (correct.length === 1 &&
+        correct[0]!.label.replace(/\s+/g, " ").trim().toLocaleLowerCase() !==
+        r.answerLabel.replace(/\s+/g, " ").trim().toLocaleLowerCase()) {
+      defects.push(`${r.subjectId}: correct choice does not match the answer label`);
+    }
   }
   // A set whose answers are all identical is a bad quiz even when every
   // individual answer is correct.
