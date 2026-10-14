@@ -3,9 +3,18 @@ import { sha256Hex } from "@/lib/sha256";
 import type { ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 
 /** Versioned, append-only measurement emitted for every executed module stage. */
-export const MODULE_SCORECARD_VERSION = "module-scorecard/v4" as const;
+export const MODULE_SCORECARD_VERSION = "module-scorecard/v5" as const;
 
 export type ModuleScorecardStatus = "passed" | "failed";
+
+export type ModuleScorecardArtifact = {
+  key: string;
+  artifactId: string;
+  type: string;
+  schemaVersion: string;
+  producerVersion: string;
+  payloadSha256: string;
+};
 
 export type ModuleScorecard = {
   version: typeof MODULE_SCORECARD_VERSION;
@@ -13,6 +22,8 @@ export type ModuleScorecard = {
   moduleId: string;
   status: ModuleScorecardStatus;
   outputValid: boolean;
+  /** Exact durable outputs measured by this stage; hashes only, never payloads. */
+  outputArtifacts: ModuleScorecardArtifact[];
   /** The independent oracle may run later; null never means a passing score. */
   oracleScore: number | null;
   falsePasses: number | null;
@@ -60,6 +71,36 @@ function nullableScore(value: unknown): number | null {
     throw new Error("module scorecard oracle score is invalid");
   }
   return value;
+}
+
+function outputArtifacts(value: unknown, runId: string, moduleId: string): ModuleScorecardArtifact[] {
+  if (!Array.isArray(value) || value.length > 128) {
+    throw new Error("module scorecard output artifacts are invalid");
+  }
+  const artifacts = value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error("module scorecard output artifact is invalid");
+    }
+    const artifact = item as Partial<ModuleScorecardArtifact>;
+    const key = requiredId(artifact.key, "artifact key");
+    const artifactId = requiredId(artifact.artifactId, "artifact id");
+    const type = requiredId(artifact.type, "artifact type");
+    const schemaVersion = requiredId(artifact.schemaVersion, "artifact schema version");
+    const producerVersion = requiredId(artifact.producerVersion, "artifact producer version");
+    const payloadSha256 = requiredId(artifact.payloadSha256, "artifact payload hash");
+    const artifactPrefix = `${runId}:${moduleId}:${key}:`;
+    if (artifactId.length > 1024 || type.length > 120 || schemaVersion.length > 120 ||
+      producerVersion.length > 120 || !/^[a-f0-9]{64}$/u.test(payloadSha256) ||
+      !artifactId.startsWith(artifactPrefix) || !/^[a-f0-9]{16}$/u.test(artifactId.slice(artifactPrefix.length))) {
+      throw new Error("module scorecard output artifact identity is invalid");
+    }
+    return { key, artifactId, type, schemaVersion, producerVersion, payloadSha256 };
+  }).sort((a, b) => a.key.localeCompare(b.key));
+  if (new Set(artifacts.map((artifact) => artifact.key)).size !== artifacts.length ||
+    new Set(artifacts.map((artifact) => artifact.artifactId)).size !== artifacts.length) {
+    throw new Error("module scorecard output artifact identities must be unique");
+  }
+  return artifacts;
 }
 
 function critiqueEvidence(value: unknown): ModuleCritiqueReceipt[] | null {
@@ -110,12 +151,15 @@ function critiqueEvidence(value: unknown): ModuleCritiqueReceipt[] | null {
 
 /** Create a canonical scorecard; no unavailable metric is silently coerced to zero. */
 export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorecard {
+  const runId = requiredId(input.runId, "run id");
+  const moduleId = requiredId(input.moduleId, "module id");
   const body = {
     version: MODULE_SCORECARD_VERSION,
-    runId: requiredId(input.runId, "run id"),
-    moduleId: requiredId(input.moduleId, "module id"),
+    runId,
+    moduleId,
     status: input.status,
     outputValid: input.outputValid,
+    outputArtifacts: outputArtifacts(input.outputArtifacts, runId, moduleId),
     oracleScore: nullableScore(input.oracleScore),
     falsePasses: nullableNonNegative(input.falsePasses, "false passes"),
     falseRejects: nullableNonNegative(input.falseRejects, "false rejects"),
@@ -179,6 +223,7 @@ export type ModuleScorecardDelta = {
   convexActions: number | null;
   estimatedCostUsd: number;
   outputValidityChanged: boolean;
+  outputArtifactsChanged: boolean;
 };
 
 function nullableDelta(baseline: number | null, current: number | null): number | null {
@@ -188,6 +233,12 @@ function nullableDelta(baseline: number | null, current: number | null): number 
 function nullableScoreDelta(baseline: number | null, current: number | null): number | null {
   const delta = nullableDelta(baseline, current);
   return delta === null ? null : Number(delta.toFixed(6));
+}
+
+function outputArtifactMeasurements(artifacts: readonly ModuleScorecardArtifact[]): string {
+  return canonicalJson(artifacts.map(({ key, type, schemaVersion, producerVersion, payloadSha256 }) =>
+    ({ key, type, schemaVersion, producerVersion, payloadSha256 }),
+  ));
 }
 
 /** Compare a current run to an exact same-module baseline without comparing unrelated modules. */
@@ -219,5 +270,6 @@ export function compareModuleScorecards(
     convexActions: nullableDelta(baseline.convexActions, current.convexActions),
     estimatedCostUsd: Number((current.estimatedCostUsd - baseline.estimatedCostUsd).toFixed(6)),
     outputValidityChanged: current.outputValid !== baseline.outputValid,
+    outputArtifactsChanged: outputArtifactMeasurements(baseline.outputArtifacts) !== outputArtifactMeasurements(current.outputArtifacts),
   };
 }

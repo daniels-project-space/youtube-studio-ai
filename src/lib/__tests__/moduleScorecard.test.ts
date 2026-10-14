@@ -11,6 +11,14 @@ const base = {
   moduleId: "title_module",
   status: "passed" as const,
   outputValid: true,
+  outputArtifacts: [{
+    key: "titleDecision",
+    artifactId: `run-scorecard-test:title_module:titleDecision:${"a".repeat(16)}`,
+    type: "title-decision",
+    schemaVersion: "v2",
+    producerVersion: "3.0.0",
+    payloadSha256: "a".repeat(64),
+  }],
   oracleScore: null,
   falsePasses: null,
   falseRejects: null,
@@ -83,6 +91,7 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   convexActions: null,
   estimatedCostUsd: -0.0023,
   outputValidityChanged: false,
+  outputArtifactsChanged: false,
 });
 const unknownProviderUsage = createModuleScorecard({
   ...base,
@@ -157,8 +166,29 @@ assert.deepEqual(
   [1, 2, 5, 1, 2],
   "measured Trigger/Convex consumption must remain visible in module deltas",
 );
+const changedOutput = createModuleScorecard({
+  ...base,
+  outputArtifacts: [{ ...base.outputArtifacts[0]!, payloadSha256: "b".repeat(64) }],
+});
+assert.equal(compareModuleScorecards(scorecard, changedOutput).outputArtifactsChanged, true,
+  "module comparisons must expose when they measured different durable outputs");
+const sameOutputDifferentRun = createModuleScorecard({
+  ...base,
+  runId: "run-scorecard-other",
+  outputArtifacts: [{ ...base.outputArtifacts[0]!, artifactId: `run-scorecard-other:title_module:titleDecision:${"a".repeat(16)}` }],
+});
+assert.equal(compareModuleScorecards(scorecard, sameOutputDifferentRun).outputArtifactsChanged, false,
+  "stable content must compare equal across runs despite run-scoped artifact IDs");
 assert.throws(
-  () => compareModuleScorecards(scorecard, createModuleScorecard({ ...base, moduleId: "script_module" })),
+  () => createModuleScorecard({ ...base, outputArtifacts: [{ ...base.outputArtifacts[0]!, payloadSha256: "bad" }] }),
+  /artifact identity is invalid/,
+);
+assert.throws(
+  () => compareModuleScorecards(scorecard, createModuleScorecard({
+    ...base,
+    moduleId: "script_module",
+    outputArtifacts: [{ ...base.outputArtifacts[0]!, artifactId: `run-scorecard-test:script_module:titleDecision:${"a".repeat(16)}` }],
+  })),
   /same module/,
 );
 

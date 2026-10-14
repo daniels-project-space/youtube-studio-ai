@@ -143,6 +143,14 @@ async function positive(): Promise<void> {
       moduleId: string;
       status: string;
       fingerprint: string;
+      outputArtifacts: Array<{
+        key: string;
+        artifactId: string;
+        type: string;
+        schemaVersion: string;
+        producerVersion: string;
+        payloadSha256: string;
+      }>;
       convexReads: number | null;
       convexWrites: number | null;
       convexActions: number | null;
@@ -154,6 +162,10 @@ async function positive(): Promise<void> {
   assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe", "remote_usage_probe"]);
   assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed", "passed"]);
   assert(scorecards.every((card) => /^[0-9a-f]{64}$/.test(card.fingerprint)), "scorecards are fingerprinted");
+  assert.deepEqual(scorecards[0].outputArtifacts.map((artifact) => artifact.key), ["topic"]);
+  assert.match(scorecards[0].outputArtifacts[0]!.artifactId, /^run_test_pos:echo_seed:topic:[0-9a-f]{16}$/);
+  assert.match(scorecards[0].outputArtifacts[0]!.payloadSha256, /^[0-9a-f]{64}$/);
+  assert.equal(scorecards[0].outputArtifacts[0]!.producerVersion, "1.0.0-migration");
   assert.deepEqual(
     [scorecards[2].convexReads, scorecards[2].convexWrites, scorecards[2].convexActions],
     [1, 1, 0],

@@ -37,7 +37,7 @@ import {
   trackedUsageForKinds,
   type ModelUsageSummary,
 } from "@/lib/modelUsage";
-import { createModuleScorecard } from "@/lib/moduleScorecard";
+import { createModuleScorecard, type ModuleScorecardArtifact } from "@/lib/moduleScorecard";
 import { createModuleCritiqueScope, type ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
@@ -1214,6 +1214,7 @@ export async function runPipeline(
     const imageUsageScope = createImageUsageScope();
     const convexUsageScope = createConvexUsageScope();
     const critiqueScope = createModuleCritiqueScope();
+    let scorecardArtifacts: ModuleScorecardArtifact[] = [];
     const ctx: Omit<StageContext, "store"> = {
       ownerId: opts.ownerId,
       runId: opts.runId,
@@ -1355,6 +1356,14 @@ export async function runPipeline(
       }, invocationHash);
       assertProduced(manifest, patch);
       const producedRefs = await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
+      scorecardArtifacts = producedRefs.map((artifact) => ({
+        key: artifact.key,
+        artifactId: artifact.artifactId,
+        type: artifact.type,
+        schemaVersion: artifact.schemaVersion,
+        producerVersion: artifact.producerVersion,
+        payloadSha256: artifact.payloadHash,
+      }));
       Object.assign(store, patch);
 
       // Publish-grade receipts can be intentionally complete enough for R2
@@ -1369,6 +1378,7 @@ export async function runPipeline(
         moduleId: block.id,
         status: "passed",
         outputValid: true,
+        outputArtifacts: scorecardArtifacts,
         oracleScore: null,
         falsePasses: null,
         falseRejects: null,
@@ -1445,6 +1455,7 @@ export async function runPipeline(
         moduleId: block.id,
         status: "failed",
         outputValid: false,
+        outputArtifacts: scorecardArtifacts,
         oracleScore: null,
         falsePasses: null,
         falseRejects: null,
