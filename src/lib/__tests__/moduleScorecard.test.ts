@@ -22,6 +22,7 @@ const base = {
   triggerWaits: null,
   convexReads: null,
   convexWrites: null,
+  convexActions: null,
   estimatedCostUsd: 0.0123,
   capturedAt: 1_700_000_000_000,
 };
@@ -61,6 +62,7 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   triggerWaits: null,
   convexReads: null,
   convexWrites: null,
+  convexActions: null,
   estimatedCostUsd: -0.0023,
   outputValidityChanged: false,
 });
@@ -71,6 +73,7 @@ const measuredDelta = compareModuleScorecards(
     triggerWaits: 3,
     convexReads: 8,
     convexWrites: 1,
+    convexActions: 1,
   }),
   createModuleScorecard({
     ...base,
@@ -78,11 +81,12 @@ const measuredDelta = compareModuleScorecards(
     triggerWaits: 5,
     convexReads: 13,
     convexWrites: 2,
+    convexActions: 3,
   }),
 );
 assert.deepEqual(
-  [measuredDelta.triggerRuns, measuredDelta.triggerWaits, measuredDelta.convexReads, measuredDelta.convexWrites],
-  [1, 2, 5, 1],
+  [measuredDelta.triggerRuns, measuredDelta.triggerWaits, measuredDelta.convexReads, measuredDelta.convexWrites, measuredDelta.convexActions],
+  [1, 2, 5, 1, 2],
   "measured Trigger/Convex consumption must remain visible in module deltas",
 );
 assert.throws(

@@ -1446,6 +1446,7 @@ export async function runPipeline(
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
         convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: cost,
         capturedAt: Date.now(),
       });
@@ -1512,6 +1513,7 @@ export async function runPipeline(
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
         convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: observedCost,
         capturedAt: Date.now(),
       });

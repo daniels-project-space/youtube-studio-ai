@@ -110,14 +110,15 @@ async function positive(): Promise<void> {
       fingerprint: string;
       convexReads: number | null;
       convexWrites: number | null;
+      convexActions: number | null;
     });
   assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe"]);
   assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed"]);
   assert(scorecards.every((card) => /^[0-9a-f]{64}$/.test(card.fingerprint)), "scorecards are fingerprinted");
   assert.deepEqual(
-    [scorecards[2].convexReads, scorecards[2].convexWrites],
-    [1, 1],
-    "per-module scorecard records observed Convex query/mutation calls",
+    [scorecards[2].convexReads, scorecards[2].convexWrites, scorecards[2].convexActions],
+    [1, 1, 0],
+    "per-module scorecard records observed Convex query/mutation/action calls",
   );
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }

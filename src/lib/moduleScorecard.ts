@@ -2,7 +2,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 /** Versioned, append-only measurement emitted for every executed module stage. */
-export const MODULE_SCORECARD_VERSION = "module-scorecard/v1" as const;
+export const MODULE_SCORECARD_VERSION = "module-scorecard/v2" as const;
 
 export type ModuleScorecardStatus = "passed" | "failed";
 
@@ -25,6 +25,7 @@ export type ModuleScorecard = {
   triggerWaits: number | null;
   convexReads: number | null;
   convexWrites: number | null;
+  convexActions: number | null;
   estimatedCostUsd: number;
   capturedAt: number;
   fingerprint: string;
@@ -77,6 +78,7 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
     triggerWaits: nullableNonNegative(input.triggerWaits, "Trigger waits"),
     convexReads: nullableNonNegative(input.convexReads, "Convex reads"),
     convexWrites: nullableNonNegative(input.convexWrites, "Convex writes"),
+    convexActions: nullableNonNegative(input.convexActions, "Convex actions"),
     estimatedCostUsd: nonNegative(input.estimatedCostUsd, "estimated cost"),
     capturedAt: nonNegative(input.capturedAt, "capture timestamp"),
   } satisfies Omit<ModuleScorecard, "fingerprint">;
@@ -120,6 +122,7 @@ export type ModuleScorecardDelta = {
   triggerWaits: number | null;
   convexReads: number | null;
   convexWrites: number | null;
+  convexActions: number | null;
   estimatedCostUsd: number;
   outputValidityChanged: boolean;
 };
@@ -148,6 +151,7 @@ export function compareModuleScorecards(
     triggerWaits: nullableDelta(baseline.triggerWaits, current.triggerWaits),
     convexReads: nullableDelta(baseline.convexReads, current.convexReads),
     convexWrites: nullableDelta(baseline.convexWrites, current.convexWrites),
+    convexActions: nullableDelta(baseline.convexActions, current.convexActions),
     estimatedCostUsd: Number((current.estimatedCostUsd - baseline.estimatedCostUsd).toFixed(6)),
     outputValidityChanged: current.outputValid !== baseline.outputValid,
   };

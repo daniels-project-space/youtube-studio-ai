@@ -29,8 +29,8 @@ async function main(): Promise<void> {
   releaseFirst();
   await firstRun;
 
-  assert.deepEqual(first.snapshot(), { reads: 1, writes: 1 });
-  assert.deepEqual(second.snapshot(), { reads: 2, writes: 1 });
+  assert.deepEqual(first.snapshot(), { reads: 1, writes: 1, actions: 0 });
+  assert.deepEqual(second.snapshot(), { reads: 2, writes: 1, actions: 1 });
 
   const clientScope = createConvexUsageScope();
   const paths: string[] = [];
@@ -44,9 +44,10 @@ async function main(): Promise<void> {
   await clientScope.run(async () => {
     await client.query("usageFixture:read" as never, {});
     await client.mutation("usageFixture:write" as never, {});
+    await client.action("usageFixture:action" as never, {});
   });
-  assert.deepEqual(paths, ["/api/query", "/api/mutation"]);
-  assert.deepEqual(clientScope.snapshot(), { reads: 1, writes: 1 });
+  assert.deepEqual(paths, ["/api/query", "/api/mutation", "/api/action"]);
+  assert.deepEqual(clientScope.snapshot(), { reads: 1, writes: 1, actions: 1 });
 
   console.log("Convex per-module usage scope tests passed");
 }
