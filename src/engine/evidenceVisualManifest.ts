@@ -8,6 +8,7 @@
  * planner, provider, renderer, or admission decision.
  */
 import { sha256Hex } from "@/lib/sha256";
+import { numericMentions } from "@/lib/numericClaims";
 import { z } from "zod";
 
 export const EVIDENCE_VISUAL_MANIFEST_VERSION = "evidence-visual-manifest/v1" as const;
@@ -125,6 +126,7 @@ export type EvidenceVisualIssueCode =
   | "anchor_source_mismatch"
   | "missing_unit"
   | "value_not_spoken"
+  | "display_value_mismatch"
   | "missing_required_attribution"
   | "attribution_source_mismatch"
   | "chart_shape_invalid"
@@ -165,6 +167,20 @@ function compact(value: string): string {
 
 function containsVerbatim(haystack: string, needle: string): boolean {
   return compact(haystack).includes(compact(needle));
+}
+
+function plainNumericLiteral(value: number): string {
+  const literal = String(value);
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/iu.exec(literal);
+  if (!match || match[4] === undefined) return literal;
+  const sign = match[1] ?? "";
+  const whole = match[2]!;
+  const fraction = match[3] ?? "";
+  const digits = whole + fraction;
+  const point = whole.length + Number(match[4]);
+  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 export function evidenceVisualManifestFingerprint(
@@ -225,6 +241,12 @@ export function evaluateEvidenceVisualManifest(
     }
     if (!containsVerbatim(anchor.spokenText, visualValue.display)) {
       issues.push({ code: "value_not_spoken", message: `value ${visualValue.id} display is absent from its narration anchor` });
+    }
+    const displayedQuantities = numericMentions(visualValue.display);
+    const plottedQuantities = numericMentions(plainNumericLiteral(visualValue.value));
+    if (displayedQuantities.length !== 1 || plottedQuantities.length !== 1 ||
+        displayedQuantities[0]?.key !== plottedQuantities[0]?.key) {
+      issues.push({ code: "display_value_mismatch", message: `value ${visualValue.id} display does not encode its exact plotted quantity` });
     }
     if (visualValue.xValueId) {
       const x = manifest.values.find((candidate) => candidate.id === visualValue.xValueId);

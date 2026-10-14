@@ -88,6 +88,30 @@ async function main() {
   const capturedPilot = JSON.parse(readFileSync('test-fixtures/insert-evidence-binding/planner-after.json', 'utf8'));
   const capturedPlan = JSON.parse(capturedPilot.transport[0].response.choices[0].message.content).inserts[0];
   await run('unchanged successful live-planner response', capturedPlan, true);
+  const mismatchedGeometryBase = {
+    ...base,
+    values: base.values.map((value) => value.id === 'value-before' ? { ...value, value: 4 } : value),
+  };
+  const mismatchedGeometryManifest: EvidenceVisualManifest = {
+    ...mismatchedGeometryBase,
+    review: {
+      decision: 'approved', reviewerId: 'test-reviewer', reviewId: 'test-geometry-mismatch',
+      reviewedAt: new Date().toISOString(),
+      reviewedManifestFingerprint: evidenceVisualManifestFingerprint(mismatchedGeometryBase),
+    },
+  };
+  plan = line; rendered = []; stored = []; prompts = [];
+  await assert.rejects(visualInserts.run({
+    ownerId: 'fixture-owner', runId: 'fixture-binding', channelId: 'fixture-channel', keyPrefix: 'fixture/evidence/',
+    params: { insertTypes: ['big_stat', 'bar_compare', 'line_chart', 'annotated_line'], maxInserts: 1, minGapSec: 0,
+      dataStoryContract: DATA_STORY_CONTRACT_VERSION, requireNamedSource: true, requireSpokenNumericAnchor: true },
+    store: { sentenceTimings: timings, dataStorySourceLedger, evidenceVisualManifests: [mismatchedGeometryManifest] },
+    log: () => {},
+  } as never), /display_value_mismatch/u);
+  assert.equal(prompts.length, 0, 'inconsistent reviewed geometry is rejected before the planner call');
+  assert.equal(rendered.length, 0, 'inconsistent reviewed geometry never reaches the renderer');
+  assert.equal(stored.length, 0, 'inconsistent reviewed geometry never writes an asset');
+  cases++;
   for (const title of ['Output increased by 4 dollars', '4% growth and 4 dollars', 'Output increased by four dollars', '$4%', '4%%', '4% million']) await run('title quantity laundering', { ...stat, title }, false);
   for (const item of [null, 4, { ...stat, title: { claim: 'garbage' } }, { ...stat, title: 4 }]) await run('malformed top-level entry or title', item as unknown as InsertPlanItem, false);
   // The former membership oracle accepts all these numbers. Prove its blind
