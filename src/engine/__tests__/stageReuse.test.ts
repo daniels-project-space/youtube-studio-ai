@@ -92,14 +92,16 @@ test("object order is irrelevant to invocation and output identity", () => {
   assert.deepEqual(assertStageReuseReceipt(receipt, invocationHash, Object.fromEntries(Object.entries(outputs).reverse())), receipt);
 });
 
-test("cross-run content fingerprint ignores execution scope and artifact IDs", () => {
+test("cross-run content fingerprint keeps channel identity but ignores run scope and artifact IDs", () => {
   const next = invocation();
   next.ownerId = "owner-two";
   next.runId = "run-two";
-  next.channelId = "channel-two";
   next.keyPrefix = "owners/other/channels/channel-two/runs/run-two/";
   next.inputRefs = Object.fromEntries(Object.entries(next.inputRefs).map(([key, value]) => [key, { ...value, artifactId: `other:${key}` }]));
   assert.equal(stageContentFingerprint(next), contentFingerprint);
+  next.channelId = "channel-two";
+  assert.notEqual(stageContentFingerprint(next), contentFingerprint);
+  next.channelId = "channel-one";
   next.store = { ...next.store, topic: "A different source" };
   assert.notEqual(stageContentFingerprint(next), contentFingerprint);
 });
