@@ -244,8 +244,8 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
     return [
       { id: "settle", label: "Settle", startFraction: 0, endFraction: 0.2, energy: 0.12, instruction: `Arrive as a soft, already-stable texture with no transient, pulse, lead melody, or attention-grabbing entrance. ${shared}` },
       { id: "steady", label: "Steady", startFraction: 0.2, endFraction: 0.52, energy: 0.12, instruction: `Hold the same low-arousal sound bed; use sustained tones and gentle noise texture without a beat, chord change, or melodic phrase. ${shared}` },
-      { id: "drift", label: "Drift", startFraction: 0.52, endFraction: 0.78, energy: 0.14, instruction: `Make only one extremely gradual timbral or spatial shift, with no swell, new layer attack, or change in perceived loudness. ${shared}` },
-      { id: "rest", label: "Rest", startFraction: 0.78, endFraction: 1, energy: 0.1, instruction: `Return to the opening texture and leave a calm, loop-compatible tail; no cadence, fade cue, climax, or new event. ${shared}` },
+      { id: "drift", label: "Drift", startFraction: 0.52, endFraction: 0.78, energy: 0.12, instruction: `Make only one extremely gradual timbral or spatial shift, with no swell, new layer attack, or change in perceived loudness. ${shared}` },
+      { id: "rest", label: "Rest", startFraction: 0.78, endFraction: 1, energy: 0.12, instruction: `Return to the opening texture and leave a calm, loop-compatible tail; no cadence, fade cue, climax, or new event. ${shared}` },
     ];
   }
   if (role === "meditation_bed") {

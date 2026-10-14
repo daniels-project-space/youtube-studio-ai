@@ -145,6 +145,11 @@ assert.equal(sleep.mix.bodyMusicVol, 1, "sleep sound is a primary listening prog
 assert.equal(sleep.mix.targetLufs, -20, "sleep sound uses its quieter standalone target by default");
 assert.equal(sleep.quality.minimumLraLu, 1, "sleep sound permits a deliberately stable dynamic range");
 assert.equal(sleep.generation.sections.length, 4);
+assert.deepEqual(
+  sleep.generation.sections.map((section) => section.energy),
+  [0.12, 0.12, 0.12, 0.12],
+  "sleep sound must not encode an energy rise or fall after declaring stable loudness",
+);
 assert.match(sleep.generation.structuredCaption, /unattended overnight listening/u);
 assert.match(sleep.generation.structuredCaption, /no pulse, melodic arrival/u);
 assert.match(sleep.generation.structuredCaption, /unmetered and beatless/u);
