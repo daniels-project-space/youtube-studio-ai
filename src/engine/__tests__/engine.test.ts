@@ -26,6 +26,7 @@ import { runPipeline } from "@/engine/runner";
 import { allManifests } from "@/engine/registry";
 import { configuredMaxCostUsd, manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
+import { recordConvexHttpRequest } from "@/lib/convexUsage";
 
 interface Recorded {
   block: string;
@@ -58,10 +59,22 @@ async function positive(): Promise<void> {
   registerAllBlocks();
   register(echoSeed);
   register(echoSink);
+  const convexUsageProbe: Block = {
+    id: "convex_usage_probe",
+    consumes: [],
+    produces: ["convexUsageProbeOutput"],
+    run: async () => {
+      recordConvexHttpRequest("https://studio.convex.cloud/api/query");
+      recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
+      return { convexUsageProbeOutput: true };
+    },
+  };
+  register(convexUsageProbe);
 
   const entries = [
     { block: "echo_seed", params: { topic: "rainy night jazz" } },
     { block: "echo_sink" },
+    { block: "convex_usage_probe" },
   ];
   const resolved = validatePipeline(entries);
   preflight(resolved, { budgetUsd: 0 }); // no paid blocks → 0 budget is fine
@@ -86,15 +99,26 @@ async function positive(): Promise<void> {
     "seen:rainy night jazz@run_test_pos",
     "echo_sink consumed topic and wrote a real marker",
   );
-  // Stage transitions persisted: running+ok for each of the two blocks.
+  // Stage transitions persisted: running+ok for each block.
   const okStages = rows.filter((r) => r.status === "ok").map((r) => r.block);
-  assert.deepEqual(okStages, ["echo_seed", "echo_sink"], "both blocks marked ok");
+  assert.deepEqual(okStages, ["echo_seed", "echo_sink", "convex_usage_probe"], "all blocks marked ok");
   const scorecards = logs
     .filter((entry) => entry.message.startsWith("module scorecard:"))
-    .map((entry) => entry.extra?.scorecard as { moduleId: string; status: string; fingerprint: string });
-  assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink"]);
-  assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed"]);
+    .map((entry) => entry.extra?.scorecard as {
+      moduleId: string;
+      status: string;
+      fingerprint: string;
+      convexReads: number | null;
+      convexWrites: number | null;
+    });
+  assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe"]);
+  assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed"]);
   assert(scorecards.every((card) => /^[0-9a-f]{64}$/.test(card.fingerprint)), "scorecards are fingerprinted");
+  assert.deepEqual(
+    [scorecards[2].convexReads, scorecards[2].convexWrites],
+    [1, 1],
+    "per-module scorecard records observed Convex query/mutation calls",
+  );
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }
 

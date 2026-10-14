@@ -34,6 +34,7 @@ import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createModuleScorecard } from "@/lib/moduleScorecard";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
+import { createConvexUsageScope } from "@/lib/convexUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageReuseHash } from "./stageReuse";
@@ -1283,6 +1284,7 @@ export async function runPipeline(
     };
     const usageScope = createModelUsageScope();
     const imageUsageScope = createImageUsageScope();
+    const convexUsageScope = createConvexUsageScope();
     const ctx: Omit<StageContext, "store"> = {
       ownerId: opts.ownerId,
       runId: opts.runId,
@@ -1374,12 +1376,12 @@ export async function runPipeline(
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
         patch = await checkpointCostScope.run(() =>
-          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => {
+          convexUsageScope.run(() => usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => {
             // Snapshot after input rehydration, and start every retry from the
             // producer's artifacts rather than a failed attempt's local edits.
             executedStore = declaredArtifactStore(manifest, store, optionalFallbacks, log);
             return { ...ctx, store: executedStore };
-          }, retries, log))),
+          }, retries, log)))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
@@ -1442,8 +1444,8 @@ export async function runPipeline(
         outputTokens: modelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: null,
-        convexWrites: null,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
         estimatedCostUsd: cost,
         capturedAt: Date.now(),
       });
@@ -1508,8 +1510,8 @@ export async function runPipeline(
         outputTokens: failureModelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: null,
-        convexWrites: null,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
         estimatedCostUsd: observedCost,
         capturedAt: Date.now(),
       });
