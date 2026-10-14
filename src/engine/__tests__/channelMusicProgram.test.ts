@@ -22,6 +22,18 @@ assert.equal(musicRoleForRoute("music_loop", "meditation"), "primary_music");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
 
+const unclassified = createChannelMusicProgram({
+  channelId: "channel-unclassified",
+  channelIdentityFingerprint: sha("d"),
+  topic: "A quiet reflection",
+});
+assert.equal(unclassified.family, "unclassified");
+assert.equal(unclassified.contentLaneKey, "unclassified");
+assert.equal(unclassified.role, "narration_bed");
+assert.equal(unclassified.mix.narrationPriority, true);
+assert.equal(unclassified.mix.bodyMusicVol, 0.1026,
+  "an unknown route must not be mislabeled as a full-volume music-loop program");
+
 const history = createChannelMusicProgram({
   channelId: "channel-stoic-history",
   channelIdentityFingerprint: sha("a"),

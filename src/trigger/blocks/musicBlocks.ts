@@ -275,8 +275,8 @@ export const music: Block = {
     const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
-      family: route?.family ?? "music_loop",
-      contentLaneKey: route?.contentLaneKey ?? "music_loop",
+      family: route?.family,
+      contentLaneKey: route?.contentLaneKey,
       topic,
       role: composerBrief?.musicIntent?.role,
       providerPreference: provider,

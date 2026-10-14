@@ -75,10 +75,19 @@ async function main() {
   };
   async function runtime(provider: Provider, prompt: string, store: Record<string, unknown> = {}, error?: RegExp) {
     dispatched = []; persisted = undefined;
+    const runtimeStore: Record<string, unknown> = { topic, channelProgramRoute: route, ...store };
+    if (runtimeStore.channelProgramRoute === route && runtimeStore.musicProgramPlan === undefined) {
+      runtimeStore.musicProgramPlan = createOriginalMusicProgramPlan({
+        route,
+        topic,
+        audioDirection: "An original loopable Music Loop score.",
+        providerPreference: provider,
+      });
+    }
     const ctx: StageContext = {
       ownerId: "owner-direction", channelId: "channel-direction", runId: "run-direction",
       keyPrefix: "owner/direction/channel/music/", budgetUsd: 5, log: () => {},
-      params: { provider, prompt }, store: { topic, ...store },
+      params: { provider, prompt }, store: runtimeStore,
     };
     if (error) {
       await assert.rejects(music.run(ctx), error);
@@ -165,6 +174,12 @@ async function main() {
     assert.ok(sealed.includes(sealedDirection));
     assert.ok(sealed.includes(flat));
   }
+  await runtime("suno", "A safe background score.", { channelProgramRoute: undefined });
+  assert.equal(persisted!.family, "unclassified");
+  assert.equal(persisted!.contentLaneKey, "unclassified");
+  assert.equal(persisted!.role, "narration_bed");
+  assert.equal(persisted!.mix.bodyMusicVol, 0.1026,
+    "legacy runs without a route must not inherit LoFi's primary-music gain");
   for (const intent of [flat, active]) assert.ok((await weekly(intent)).includes(intent));
   const composer = "Let this episode's motif dissolve into glass harmonics.";
   const weeklyDna = await weekly("IGNORED_EXPLICIT_GENRE", { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });

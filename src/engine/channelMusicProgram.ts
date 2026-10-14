@@ -165,8 +165,8 @@ export type ChannelMusicProgram = z.infer<typeof ChannelMusicProgramSchema>;
 export interface CreateChannelMusicProgramInput {
   readonly channelId: string;
   readonly channelIdentityFingerprint: string;
-  readonly family: string;
-  readonly contentLaneKey: string;
+  readonly family?: string;
+  readonly contentLaneKey?: string;
   readonly topic: string;
   readonly role?: ChannelMusicRole;
   readonly providerPreference?: ChannelMusicProvider;
@@ -444,7 +444,9 @@ export function instrumentalLyricsControl(
 }
 
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
-  const role = input.role ?? musicRoleForRoute(input.family, input.contentLaneKey);
+  const family = input.family?.trim() || "unclassified";
+  const contentLaneKey = input.contentLaneKey?.trim() || "unclassified";
+  const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
   const defaults = {
     primary_music: {
       genre: "warm lo-fi instrumental",
@@ -520,7 +522,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
-  const narratedSleepRoute = role === "sleep_sound_bed" && input.contentLaneKey.toLowerCase() === "ambient_guided";
+  const narratedSleepRoute = role === "sleep_sound_bed" && contentLaneKey.toLowerCase() === "ambient_guided";
   const bodyMusicVol = role === "primary_music" || (role === "sleep_sound_bed" && !narratedSleepRoute)
     ? 1
     : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" ? 0.25 : 0.1026)));
@@ -528,8 +530,8 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     version: CHANNEL_MUSIC_PROGRAM_VERSION,
     channelId: input.channelId,
     channelIdentityFingerprint: input.channelIdentityFingerprint,
-    family: input.family,
-    contentLaneKey: input.contentLaneKey,
+    family,
+    contentLaneKey,
     topic: input.topic,
     role,
     identity: { genre, instrumentation, textures, bpmRange, moodArc, exclusions },
