@@ -1377,7 +1377,7 @@ export const narrationTts: Block = {
     const baseGap = Number(ctx.params["sentenceGapSec"] ?? physics.sentenceGap ?? 0.85);
     const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
     // SPEAKING RATE — param > Style-DNA pacing > archetype physics > native.
-    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
+    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { voiceProfile?: string; pacing?: string; delivery?: string } } | null)
       ?.narrative;
     const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
     const dnaSpeed =
@@ -1422,6 +1422,7 @@ export const narrationTts: Block = {
       ? composeQwenNarrationInstruction({
           explicit: ctx.params["qwenInstruction"],
           editorialBrief: weeklyNarrationBrief,
+          voiceProfile: dnaPacing?.voiceProfile,
           delivery: dnaPacing?.delivery,
           pacing: dnaPacing?.pacing,
           archetype: physics.archetype,

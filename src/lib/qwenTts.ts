@@ -578,12 +578,13 @@ export function qwenTtsInstruction(instruction: string | undefined, speed: numbe
 export function composeQwenNarrationInstruction(args: {
   explicit?: unknown;
   editorialBrief?: unknown;
+  voiceProfile?: unknown;
   delivery?: unknown;
   pacing?: unknown;
   archetype?: unknown;
 }): string {
   const text = (value: unknown): string => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-  const directions = [args.explicit, args.editorialBrief, args.delivery, args.pacing, args.archetype]
+  const directions = [args.explicit, args.editorialBrief, args.voiceProfile, args.delivery, args.pacing, args.archetype]
     .map(text)
     .filter(Boolean);
   const seen = new Set<string>();

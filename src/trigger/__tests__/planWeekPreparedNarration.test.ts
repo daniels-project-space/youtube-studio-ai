@@ -88,7 +88,7 @@ const source = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPrepared
 const rateGateAt = source.indexOf("assertNarrationDeliveryRate({");
 const persistAt = source.indexOf("await persistPreparedResult(audioKey");
 assert.ok(rateGateAt >= 0 && persistAt > rateGateAt, "prepared narration must clear the measured pace gate before retained audio is written");
-assert.match(source, /composeQwenNarrationInstruction\([\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
-  "weekly Qwen direction must include frozen Style DNA when no explicit module instruction exists");
+assert.match(source, /composeQwenNarrationInstruction\([\s\S]*voiceProfile: dnaNarrative\?\.voiceProfile[\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
+  "weekly Qwen direction must include frozen voice identity and delivery Style DNA when no explicit module instruction exists");
 
 console.log("weekly prepared narration producer contract passed");

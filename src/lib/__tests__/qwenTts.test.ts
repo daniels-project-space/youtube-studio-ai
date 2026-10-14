@@ -92,12 +92,13 @@ async function main(): Promise<void> {
     composeQwenNarrationInstruction({
       explicit: "Use a close, intimate delivery.",
       editorialBrief: "This must not replace the channel's explicit direction.",
+      voiceProfile: "Mature low register with a lightly textured timbre",
       delivery: "warm and patient",
       pacing: "measured",
       archetype: "documentary",
     }),
-    "Use a close, intimate delivery. This must not replace the channel's explicit direction. warm and patient. measured. documentary.",
-    "an explicit instruction must stay first without deleting frozen editorial and channel delivery controls",
+    "Use a close, intimate delivery. This must not replace the channel's explicit direction. Mature low register with a lightly textured timbre. warm and patient. measured. documentary.",
+    "explicit and editorial directions must retain channel voice profile, delivery, and pacing controls",
   );
   assert.equal(
     composeQwenNarrationInstruction({

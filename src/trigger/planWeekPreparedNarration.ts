@@ -314,12 +314,13 @@ export const planWeekPreparedNarrationTask = task({
     const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
     const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
     const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
-      ? (seed.styleDNA as { narrative?: { pacing?: unknown; delivery?: unknown } }).narrative
+      ? (seed.styleDNA as { narrative?: { voiceProfile?: unknown; pacing?: unknown; delivery?: unknown } }).narrative
       : undefined;
     const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
     const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
       explicit: config.qwenInstruction,
       editorialBrief: manifest.prompts.narration,
+      voiceProfile: dnaNarrative?.voiceProfile,
       delivery: dnaNarrative?.delivery,
       pacing: dnaNarrative?.pacing,
       archetype: physics.archetype,
