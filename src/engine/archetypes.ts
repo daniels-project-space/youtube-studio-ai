@@ -25,7 +25,7 @@ export interface Archetype {
 
 // Lofi (Template C) — 100% CLOUD engine (fal.ai stills + i2v, no local CLI):
 // scene → reviewed Novita still → two 15s LTX FLF2V segments → Topaz
-// upscale of the loop unit → Suno music → deblur-title assemble (stream_loop the
+// upscale of the loop unit → route-sealed music program → deblur-title assemble (stream_loop the
 // unit under looped music). No narration, no separate intro card (the deblur
 // title IS the intro). durationSec is the only knob to scale length.
 const LOFI: PipelineEntry[] = [
@@ -37,7 +37,7 @@ const LOFI: PipelineEntry[] = [
   // distilled LTX loop does not condition on it, but the ordering gives the
   // future open-weight audio-to-video benchmark the exact mastered source
   // without re-generating audio or creating a hidden dependency.
-  { block: "music", params: { provider: "suno" } },
+  { block: "music" },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   // Two independently attested 15s FLF2V segments share the exact reviewed
   // start/end anchor. Their internal join and wraparound seam are measured

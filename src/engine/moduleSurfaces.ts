@@ -151,7 +151,7 @@ const MUSIC_MODULE: ModuleCard = {
       { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },
       { id: "generationDurationSec", type: "number", range: [10, 300], default: 300, describes: "native channel-score duration before deterministic looping", servesStyles: ["lofi", "ambient", "documentary"] },
     ],
-    presets: { lofi: { provider: "suno", trackCount: 4 } },
+    presets: { lofi: { trackCount: 4 } },
   },
 };
 

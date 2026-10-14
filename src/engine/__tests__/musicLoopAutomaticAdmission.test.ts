@@ -48,6 +48,11 @@ const assemble = indexOf(design.pipeline, "assemble");
 const qa = indexOf(design.pipeline, "qa_visual");
 const upload = indexOf(design.pipeline, "upload_draft");
 assert.ok(program < scenes && program < music, "the sealed original-music plan must precede both paid branches");
+assert.equal(
+  design.pipeline[music]?.params?.provider,
+  undefined,
+  "the downstream music block must consume the provider sealed by music_program_plan instead of pinning a competing default",
+);
 assert.ok(
   scenes < loop && music < loop && loop < assemble && music < assemble && assemble < qa && qa < upload,
   "the sealed mastered track must exist before the loop stage, including any future open-weight A2V candidate",

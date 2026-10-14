@@ -3470,7 +3470,7 @@ export const LOFI_PIPELINE = [
   { block: "topic_select" },
   { block: "music_program_plan" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
-  { block: "music", params: { provider: "suno" } },
+  { block: "music" },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },

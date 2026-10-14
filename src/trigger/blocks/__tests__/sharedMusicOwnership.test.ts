@@ -7,7 +7,7 @@ import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine
 import { all, getManifest, require_ } from "@/engine/registry";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
-import { lofiBlocks } from "../lofiBlocks";
+import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
 import { music, musicProgramPlan } from "../musicBlocks";
 
 async function main(): Promise<void> {
@@ -18,6 +18,14 @@ async function main(): Promise<void> {
   }
   assert.ok(!lofiBlocks.some((block) => block.id === "music"),
     "LoFi must not own or register the shared music block");
+  const lofiMusicParams = LOFI_PIPELINE.find((entry) => entry.block === "music")?.params as
+    | Record<string, unknown>
+    | undefined;
+  assert.equal(
+    lofiMusicParams?.provider,
+    undefined,
+    "the legacy LoFi composition must not override its route-sealed music provider",
+  );
   const musicOwnerPaths = lockableModule("music")?.paths ?? [];
   assert.ok(musicOwnerPaths.includes("src/trigger/blocks/blockContext.ts") &&
     musicOwnerPaths.includes("src/trigger/blocks/musicBlocks.ts"),
