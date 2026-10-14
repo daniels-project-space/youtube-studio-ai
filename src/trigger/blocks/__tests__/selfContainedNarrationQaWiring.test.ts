@@ -73,6 +73,16 @@ assert.match(
 );
 assert.match(
   qaVisual,
+  /const narrationStartSec = resolveFinalMasterNarrationStartSec\(\{[\s\S]{0,320}finalMasterDurationSec: videoSec,/,
+  "burned-in captions must use the same renderer-declared narration clock as final QA and SRT",
+);
+assert.match(
+  qaVisual,
+  /captionCuesFromTimings\(capTimings, narrationStartSec\)/,
+  "burned-in caption cues must be shifted by the resolved narration start",
+);
+assert.match(
+  qaVisual,
   /narrationStartResolution\.source === "intro"[\s\S]{0,180}using the \$\{fallbackClock\}/,
   "draft diagnostics must name the actual fallback clock rather than claiming an intro offset was used",
 );

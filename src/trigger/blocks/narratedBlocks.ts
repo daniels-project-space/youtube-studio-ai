@@ -4052,6 +4052,13 @@ async function finishFromComposed(
     const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
     if (capTimings && capTimings.length > 0) {
       try {
+        const narrationStartSec = resolveFinalMasterNarrationStartSec({
+          narrationStartSec: ctx.store["narrationStartSec"],
+          introApplied: ctx.store["introApplied"],
+          introSec: ctx.store["introSec"] ?? introSec,
+          finalMasterDurationSec: videoSec,
+          productionQa: ctx.params["qaProfile"] !== "draft",
+        }).startSec;
         const pad = 0.2;
         const qWindows = quotes.map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
         // Captions must hide under EVERY overlay that draws in their region —
@@ -4070,7 +4077,7 @@ async function finishFromComposed(
           .map((w) => [w.start + preGap - 0.3, Math.max(w.start + preGap, w.end - postGap) + 0.3] as [number, number])
           .filter(([a, b]) => b > a);
         const blocked = [...qWindows, ...iWindows, ...cWindows];
-        const cues = captionCuesFromTimings(capTimings, introSec).filter(
+        const cues = captionCuesFromTimings(capTimings, narrationStartSec).filter(
           (c) => !blocked.some(([a, b]) => c.endSec > a && c.startSec < b),
         );
         cueCount = cues.length;
