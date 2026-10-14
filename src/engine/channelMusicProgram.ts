@@ -440,7 +440,13 @@ export function instrumentalLyricsControl(
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
   const family = input.family?.trim() || "unclassified";
   const contentLaneKey = input.contentLaneKey?.trim() || "unclassified";
-  const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
+  const routeRole = musicRoleForRoute(family, contentLaneKey);
+  const specializedRouteRole = routeRole === "sleep_sound_bed" || routeRole === "meditation_bed" ||
+    routeRole === "short_form_bed";
+  if (specializedRouteRole && input.role !== undefined && input.role !== routeRole) {
+    throw new Error(`music role ${input.role} conflicts with specialized route role ${routeRole}`);
+  }
+  const role = input.role ?? routeRole;
   const defaults = {
     primary_music: {
       genre: "warm lo-fi instrumental",

@@ -19,7 +19,8 @@ const program = createChannelMusicProgram({
 const master = Buffer.alloc(1000, 7);
 const prepared = { ownerId: ctx.ownerId, channelId: ctx.channelId, topic: "Quiet evening", musicProgram: program,
   provider: "mureka",
-  audioByteLength: master.length, audioSha256: sha256BytesHex(master), musicDurationSec: 10, musicKey: "prepared-master.mp3" };
+  audioByteLength: master.length, audioSha256: sha256BytesHex(master), musicDurationSec: 10,
+  musicKey: `${ctx.keyPrefix}runs/${ctx.runId}/audio/prepared-master.mp3` };
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
 let storageCalls = 0, networkCalls = 0;
@@ -53,8 +54,17 @@ loader._load = function (id, ...args) {
   };
   if (id === "./blockContext") return { ...originalLoad.call(this, id, ...args) as object, recordAsset: async () => {} };
   // This test checks transfer admission, not audio decoding or musical quality.
-  if (id === "@/lib/files") return { makeRunTempDir: async () => "/tmp/fixture", writeBytes: async (path: string) => path };
-  if (id === "@/lib/ffmpeg") return { probe: async () => ({ durationSec: 10 }) };
+  if (id === "@/lib/files") return {
+    makeRunTempDir: async () => "/tmp/fixture",
+    writeBytes: async (path: string) => path,
+    readBytes: async () => Buffer.alloc(44),
+  };
+  if (id === "@/lib/ffmpeg") return {
+    probe: async () => ({ durationSec: 10 }),
+    decodeMusicAuditionPcmWav: async (_input: string, output: string, durationSec: number) => ({
+      durationSec, byteLength: 44, output,
+    }),
+  };
   return originalLoad.call(this, id, ...args);
 };
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };

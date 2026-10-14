@@ -47,6 +47,14 @@ assert.equal(meditation.mix.bodyMusicVol, 0.25,
   "a specific meditation lane must not inherit primary-music full volume from its broad family");
 assert.equal(meditation.mix.narrationPriority, false);
 assert.equal(meditation.quality.minimumLraLu, 2);
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-meditation-conflict",
+  channelIdentityFingerprint: sha("d"),
+  family: "music_loop",
+  contentLaneKey: "meditation",
+  topic: "A slow return to steady breathing",
+  role: "primary_music",
+}), /conflicts with specialized route role meditation_bed/u);
 
 const history = createChannelMusicProgram({
   channelId: "channel-stoic-history",
