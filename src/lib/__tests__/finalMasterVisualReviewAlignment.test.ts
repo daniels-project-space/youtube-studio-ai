@@ -92,6 +92,30 @@ assert.throws(
   "a cue map that does not fit the final master must fail before review",
 );
 assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: [
+      { text: "First cue", start: 0, end: 2 },
+      { text: "Overlapping cue", start: 1.5, end: 3 },
+    ],
+    narrationStartSec: 0,
+    finalMasterDurationSec: 10,
+  }),
+  /out of order or overlaps/i,
+  "overlapping cues must not make the reviewer associate a frame with ambiguous speech",
+);
+assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: [
+      { text: "Later cue", start: 2, end: 3 },
+      { text: "Earlier cue", start: 0, end: 1 },
+    ],
+    narrationStartSec: 0,
+    finalMasterDurationSec: 10,
+  }),
+  /out of order or overlaps/i,
+  "out-of-order cues must not poison the visual review timeline",
+);
+assert.throws(
   () => storySpineVisualReviewLocks({
     storySpine,
     expectedStorySpineFingerprint: storySpineFingerprint(storySpine),

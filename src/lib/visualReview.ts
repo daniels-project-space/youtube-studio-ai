@@ -152,6 +152,7 @@ export function finalMasterTranscriptCues(input: {
   if (!Number.isFinite(input.finalMasterDurationSec) || input.finalMasterDurationSec <= 0) {
     throw new Error("final-master visual review requires a valid master duration");
   }
+  let previousEnd = Number.NEGATIVE_INFINITY;
   return Object.freeze(input.sentenceTimings.map((rawCue, index) => {
     if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) {
       throw new Error(`final-master visual review narration cue ${index} is malformed`);
@@ -160,14 +161,18 @@ export function finalMasterTranscriptCues(input: {
     const start = Number(cue["start"]);
     const end = Number(cue["end"]);
     const text = typeof cue["text"] === "string" ? cue["text"].trim() : "";
-    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
       throw new Error(`final-master visual review narration cue ${index} is invalid`);
+    }
+    if (start < previousEnd) {
+      throw new Error(`final-master visual review narration cue ${index} is out of order or overlaps its predecessor`);
     }
     const startSec = Number((input.narrationStartSec + start).toFixed(3));
     const endSec = Number((input.narrationStartSec + end).toFixed(3));
     if (endSec > input.finalMasterDurationSec + 0.75) {
       throw new Error(`final-master visual review narration cue ${index} extends beyond the master`);
     }
+    previousEnd = end;
     return { text, startSec, endSec };
   }));
 }
