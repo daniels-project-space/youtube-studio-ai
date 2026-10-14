@@ -75,6 +75,7 @@ export interface VisualReviewTranscriptCue {
 
 export interface FinalMasterNarrationStartResolution {
   readonly startSec: number;
+  readonly source: "declared" | "intro" | "master_start";
   readonly rejectedDeclaredStart: boolean;
   readonly rejectedIntroOffset: boolean;
 }
@@ -103,6 +104,7 @@ export function resolveFinalMasterNarrationStartSec(input: {
   if (declaredStart !== undefined) {
     return {
       startSec: declaredStart,
+      source: "declared",
       rejectedDeclaredStart: false,
       rejectedIntroOffset: false,
     };
@@ -111,7 +113,7 @@ export function resolveFinalMasterNarrationStartSec(input: {
     throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
   }
   if (input.introApplied !== true) {
-    return { startSec: 0, rejectedDeclaredStart, rejectedIntroOffset: false };
+    return { startSec: 0, source: "master_start", rejectedDeclaredStart, rejectedIntroOffset: false };
   }
 
   const introOffset = parseOffset(input.introSec);
@@ -119,10 +121,11 @@ export function resolveFinalMasterNarrationStartSec(input: {
     if (input.productionQa) {
       throw new Error("qa_visual: applied intro lacks a valid narration offset within the final master duration");
     }
-    return { startSec: 0, rejectedDeclaredStart, rejectedIntroOffset: true };
+    return { startSec: 0, source: "master_start", rejectedDeclaredStart, rejectedIntroOffset: true };
   }
   return {
     startSec: introOffset,
+    source: "intro",
     rejectedDeclaredStart,
     rejectedIntroOffset: false,
   };

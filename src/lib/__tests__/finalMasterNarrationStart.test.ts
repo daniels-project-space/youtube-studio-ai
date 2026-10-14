@@ -11,6 +11,7 @@ const base = {
 
 assert.deepEqual(resolveFinalMasterNarrationStartSec({ ...base, narrationStartSec: 2.5 }), {
   startSec: 2.5,
+  source: "declared",
   rejectedDeclaredStart: false,
   rejectedIntroOffset: false,
 });
@@ -20,6 +21,7 @@ assert.deepEqual(resolveFinalMasterNarrationStartSec({
   introSec: 1.25,
 }), {
   startSec: 1.25,
+  source: "intro",
   rejectedDeclaredStart: false,
   rejectedIntroOffset: false,
 });
@@ -52,6 +54,7 @@ const draftFallback = resolveFinalMasterNarrationStartSec({
 });
 assert.deepEqual(draftFallback, {
   startSec: 3,
+  source: "intro",
   rejectedDeclaredStart: true,
   rejectedIntroOffset: false,
 });
@@ -62,6 +65,7 @@ assert.deepEqual(resolveFinalMasterNarrationStartSec({
   productionQa: false,
 }), {
   startSec: 0,
+  source: "master_start",
   rejectedDeclaredStart: false,
   rejectedIntroOffset: true,
 });
@@ -69,5 +73,10 @@ assert.equal(resolveFinalMasterNarrationStartSec({
   ...base,
   introSec: Number.NaN,
 }).startSec, 0, "an unused intro offset does not affect a no-intro route");
+assert.equal(resolveFinalMasterNarrationStartSec({
+  ...base,
+  narrationStartSec: Number.NaN,
+  productionQa: false,
+}).source, "master_start", "a malformed draft offset without an intro falls back to the master start");
 
 console.log("FINAL-MASTER NARRATION START PASS: explicit and intro clocks are bounded; production rejects unknown timing");

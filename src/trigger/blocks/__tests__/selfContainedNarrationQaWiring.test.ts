@@ -72,6 +72,11 @@ assert.match(
   "QA must resolve the renderer-declared offset through the shared clock contract",
 );
 assert.match(
+  qaVisual,
+  /narrationStartResolution\.source === "intro"[\s\S]{0,180}using the \$\{fallbackClock\}/,
+  "draft diagnostics must name the actual fallback clock rather than claiming an intro offset was used",
+);
+assert.match(
   visualReview,
   /narration start evidence is malformed or outside the final master duration/,
   "QA must fail closed rather than trusting an invalid renderer-declared narration offset",

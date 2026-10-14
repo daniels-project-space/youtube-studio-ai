@@ -4692,7 +4692,8 @@ export const qaVisual: Block = {
       productionQa,
     });
     if (narrationStartResolution.rejectedDeclaredStart) {
-      ctx.log("qa_visual: malformed draft narration start ignored; using the declared intro offset");
+      const fallbackClock = narrationStartResolution.source === "intro" ? "declared intro offset" : "master start";
+      ctx.log(`qa_visual: malformed draft narration start ignored; using the ${fallbackClock}`);
     }
     if (narrationStartResolution.rejectedIntroOffset) {
       ctx.log("qa_visual: malformed draft intro offset ignored; using the master start");
