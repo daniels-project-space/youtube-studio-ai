@@ -2,7 +2,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 /** Versioned, append-only measurement emitted for every executed module stage. */
-export const MODULE_SCORECARD_VERSION = "module-scorecard/v2" as const;
+export const MODULE_SCORECARD_VERSION = "module-scorecard/v3" as const;
 
 export type ModuleScorecardStatus = "passed" | "failed";
 
@@ -17,9 +17,9 @@ export type ModuleScorecard = {
   falsePasses: number | null;
   falseRejects: number | null;
   wallTimeMs: number;
-  providerCalls: number;
-  inputTokens: number;
-  outputTokens: number;
+  providerCalls: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
   /** These are deliberately nullable until an outer orchestration layer observes them. */
   triggerRuns: number | null;
   triggerWaits: number | null;
@@ -71,9 +71,9 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
     falsePasses: nullableNonNegative(input.falsePasses, "false passes"),
     falseRejects: nullableNonNegative(input.falseRejects, "false rejects"),
     wallTimeMs: nonNegative(input.wallTimeMs, "wall time"),
-    providerCalls: nonNegative(input.providerCalls, "provider calls"),
-    inputTokens: nonNegative(input.inputTokens, "input tokens"),
-    outputTokens: nonNegative(input.outputTokens, "output tokens"),
+    providerCalls: nullableNonNegative(input.providerCalls, "provider calls"),
+    inputTokens: nullableNonNegative(input.inputTokens, "input tokens"),
+    outputTokens: nullableNonNegative(input.outputTokens, "output tokens"),
     triggerRuns: nullableNonNegative(input.triggerRuns, "Trigger runs"),
     triggerWaits: nullableNonNegative(input.triggerWaits, "Trigger waits"),
     convexReads: nullableNonNegative(input.convexReads, "Convex reads"),
@@ -115,9 +115,9 @@ export function assertModuleScorecard(value: unknown): ModuleScorecard {
 export type ModuleScorecardDelta = {
   moduleId: string;
   wallTimeMs: number;
-  providerCalls: number;
-  inputTokens: number;
-  outputTokens: number;
+  providerCalls: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
   triggerRuns: number | null;
   triggerWaits: number | null;
   convexReads: number | null;
@@ -144,9 +144,9 @@ export function compareModuleScorecards(
   return {
     moduleId: current.moduleId,
     wallTimeMs: current.wallTimeMs - baseline.wallTimeMs,
-    providerCalls: current.providerCalls - baseline.providerCalls,
-    inputTokens: current.inputTokens - baseline.inputTokens,
-    outputTokens: current.outputTokens - baseline.outputTokens,
+    providerCalls: nullableDelta(baseline.providerCalls, current.providerCalls),
+    inputTokens: nullableDelta(baseline.inputTokens, current.inputTokens),
+    outputTokens: nullableDelta(baseline.outputTokens, current.outputTokens),
     triggerRuns: nullableDelta(baseline.triggerRuns, current.triggerRuns),
     triggerWaits: nullableDelta(baseline.triggerWaits, current.triggerWaits),
     convexReads: nullableDelta(baseline.convexReads, current.convexReads),

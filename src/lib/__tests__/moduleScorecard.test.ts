@@ -32,7 +32,7 @@ assert.equal(scorecard.version, MODULE_SCORECARD_VERSION);
 assert.match(scorecard.fingerprint, /^[0-9a-f]{64}$/);
 assert.deepEqual(assertModuleScorecard(scorecard), scorecard);
 
-const tampered = { ...scorecard, outputTokens: scorecard.outputTokens + 1 };
+const tampered = { ...scorecard, outputTokens: scorecard.outputTokens! + 1 };
 assert.throws(() => assertModuleScorecard(tampered), /fingerprint mismatch/);
 assert.throws(
   () => createModuleScorecard({ ...base, status: "failed", outputValid: true }),
@@ -66,6 +66,23 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   estimatedCostUsd: -0.0023,
   outputValidityChanged: false,
 });
+const unknownProviderUsage = createModuleScorecard({
+  ...base,
+  providerCalls: null,
+  inputTokens: null,
+  outputTokens: null,
+});
+assert.deepEqual(
+  [unknownProviderUsage.providerCalls, unknownProviderUsage.inputTokens, unknownProviderUsage.outputTokens],
+  [null, null, null],
+  "unobserved child usage must not be represented as zero",
+);
+const unknownUsageDelta = compareModuleScorecards(scorecard, unknownProviderUsage);
+assert.deepEqual(
+  [unknownUsageDelta.providerCalls, unknownUsageDelta.inputTokens, unknownUsageDelta.outputTokens],
+  [null, null, null],
+  "a usage delta is unknown if either scorecard lacks complete usage evidence",
+);
 const measuredDelta = compareModuleScorecards(
   createModuleScorecard({
     ...base,

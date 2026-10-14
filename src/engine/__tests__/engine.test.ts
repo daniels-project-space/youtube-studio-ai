@@ -99,6 +99,7 @@ async function positive(): Promise<void> {
     remoteBlocks: new Set([remoteUsageProbe.id]),
     runRemoteBlock: async () => ({
       patch: { remoteUsageProbeOutput: true },
+      moduleUsage: { providerCalls: 5, inputTokens: 17, outputTokens: 9 },
       convexUsage: { reads: 4, writes: 2, actions: 1 },
     }),
     sink,
@@ -124,6 +125,9 @@ async function positive(): Promise<void> {
       convexReads: number | null;
       convexWrites: number | null;
       convexActions: number | null;
+      providerCalls: number | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
     });
   assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe", "remote_usage_probe"]);
   assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed", "passed"]);
@@ -137,6 +141,11 @@ async function positive(): Promise<void> {
     [scorecards[3].convexReads, scorecards[3].convexWrites, scorecards[3].convexActions],
     [4, 2, 1],
     "remote module scorecard receives Convex usage measured by its child",
+  );
+  assert.deepEqual(
+    [scorecards[3].providerCalls, scorecards[3].inputTokens, scorecards[3].outputTokens],
+    [5, 17, 9],
+    "remote module scorecard receives child model/image usage",
   );
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }

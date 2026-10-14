@@ -18,6 +18,8 @@ import { createVisualArtifactAttempt } from "@/engine/visualArtifactAttemptLedge
 import * as renderAdmission from "@/lib/renderBlockAdmission";
 import * as invocationSnapshots from "@/lib/pipelineInvocationSnapshot";
 import * as convexUsage from "@/lib/convexUsage";
+import * as imageUsage from "@/lib/imageUsage";
+import * as modelUsage from "@/lib/modelUsage";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { admitFrozenRemoteChildStage, reconstructFrozenRemoteChildPipeline } from "@/lib/remoteChildBudgetAdmission";
 import { selectRehydrationSubset } from "@/lib/rehydrate";
@@ -93,6 +95,20 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/query");
       convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
       convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/action");
+      modelUsage.recordModelUsage({
+        provider: "fixture", model: "fixture-text", kind: "text",
+        inputTokens: 17, outputTokens: 9, reportedCostUsd: 0.01,
+      });
+      imageUsage.recordImageUsage({
+        provider: "fixture", model: "fixture-image", route: "fixture-route",
+        images: 1, width: 64, height: 64, costUsd: 0.02,
+      });
+      if (ctx.modelUsageAccounting?.(["text"]).calls !== 1 || ctx.modelUsageCostUsd?.(["text"]) !== 0.01) {
+        throw new Error("remote module did not receive its model usage accounting scope");
+      }
+      if (ctx.imageUsageAccounting?.().calls !== 1) {
+        throw new Error("remote module did not receive its image usage accounting scope");
+      }
       await ctx.checkpointVisualArtifactAttempts!([createVisualArtifactAttempt({
         adapterId: "remote_reuse_test", scopeFingerprint: "a".repeat(64),
         attemptId: "render-attempt-1", ordinal: 1,
@@ -252,6 +268,8 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "@trigger.dev/sdk/v3": { logger: { info() {}, warn() {}, error() {} } },
     "@/lib/studioConvexHttpClient": { StudioConvexHttpClient: Client },
     "@/lib/convexUsage": convexUsage,
+    "@/lib/imageUsage": imageUsage,
+    "@/lib/modelUsage": modelUsage,
     "@/engine/blocks": { registerAllBlocks() {} },
     "@/engine/convexSink": { makeConvexSink: () => sink },
     "@/engine/artifactSchemas": artifactSchemas,
@@ -289,7 +307,11 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "@/lib/renderChildLease": { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS: 60_000 },
     "@/trigger/remoteChildCostTransport": costTransport,
   };
-  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{ patch: Record<string, unknown>; convexUsage: convexUsage.ConvexUsageCounts | null }> } };
+  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{
+    patch: Record<string, unknown>;
+    convexUsage: convexUsage.ConvexUsageCounts | null;
+    moduleUsage: { providerCalls: number; inputTokens: number; outputTokens: number } | null;
+  }> } };
   new Function("require", "module", "exports", "process", compiledRunner)(
     (name: string) => {
       assert.ok(Object.hasOwn(modules, name), `unisolated remote worker import: ${name}`);
@@ -332,6 +354,8 @@ async function main() {
   assert.equal(result.patch.__costUsd, 0.2);
   assert.deepEqual(result.convexUsage, { reads: 1, writes: 1, actions: 1 },
     "child reports only Convex calls made inside the module execution scope");
+  assert.deepEqual(result.moduleUsage, { providerCalls: 2, inputTokens: 17, outputTokens: 9 },
+    "child reports exact model/image calls and model tokens to the parent scorecard");
   assert.equal(unchanged.calls.paid, 1);
   assert.equal(unchanged.calls.begin, 1);
   assert.equal(unchanged.calls.finish, 1);
@@ -363,6 +387,9 @@ async function main() {
   const retried = harness();
   assert.equal((await retried.run(2)).convexUsage, null,
     "a retried Trigger task does not undercount earlier failed-attempt module calls");
+  const retriedUsage = await harness().run(2);
+  assert.equal(retriedUsage.moduleUsage, null,
+    "a retried Trigger task does not undercount earlier failed-attempt model/image calls");
 
   for (const mutation of ["seed", "output", "missing-receipt", "params", "module", "restoration", "missing-second-receipt", "missing-outputs", "missing-stage", "failed-stage"] as const) {
     const candidate = harness(mutation);

@@ -15,7 +15,6 @@ import {
   type ArtifactRef,
   type Block,
   type CostModelUsageKind,
-  type ModelUsageCostSnapshot,
   type ResumeRehydrationRequest,
   type RunStageSink,
   type StageContext,
@@ -31,7 +30,12 @@ import {
   type ExecutionRetryScope,
 } from "./executionErrors";
 import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
-import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
+import {
+  createModelUsageScope,
+  trackedCostForKinds,
+  trackedUsageForKinds,
+  type ModelUsageSummary,
+} from "@/lib/modelUsage";
 import { createModuleScorecard } from "@/lib/moduleScorecard";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
@@ -104,6 +108,8 @@ export type RemoteBlockResult = {
   patch: Record<string, unknown>;
   /** Missing on older child deployments; null when attempt history is incomplete. */
   convexUsage?: ConvexUsageCounts | null;
+  /** Compact child usage; omitted by older tasks and unknown after a retry. */
+  moduleUsage?: { providerCalls: number; inputTokens: number; outputTokens: number } | null;
 };
 
 /**
@@ -204,31 +210,6 @@ function visualRepairFromError(error: unknown): VisualRepairSignal[] | undefined
     ),
   );
   return signals.length ? signals : undefined;
-}
-
-function trackedUsageForKinds(
-  summary: ModelUsageSummary,
-  kinds?: ReadonlySet<CostModelUsageKind>,
-): ModelUsageCostSnapshot {
-  return summary.groups.reduce<ModelUsageCostSnapshot>(
-    (total, group) => {
-      if (kinds && !kinds.has(group.kind)) return total;
-      return {
-        calls: total.calls + group.calls,
-        cacheHits: total.cacheHits + group.cacheHits,
-        costUsd: total.costUsd + group.costUsd,
-        unpricedCalls: total.unpricedCalls + group.unpricedCalls,
-      };
-    },
-    { calls: 0, cacheHits: 0, costUsd: 0, unpricedCalls: 0 },
-  );
-}
-
-function trackedCostForKinds(
-  summary: ModelUsageSummary,
-  kinds: ReadonlySet<CostModelUsageKind>,
-): number {
-  return trackedUsageForKinds(summary, kinds).costUsd;
 }
 
 /**
@@ -1323,6 +1304,7 @@ export async function runPipeline(
     let checkpointAdjustedCost = 0;
     let costAccounted = false;
     let remoteConvexUsage: ConvexUsageCounts | null = null;
+    let remoteModuleUsage: RemoteBlockResult["moduleUsage"] = null;
     let usageReported = false;
     let imageUsageReported = false;
     let executedStore: Readonly<Record<string, unknown>> | undefined;
@@ -1366,6 +1348,7 @@ export async function runPipeline(
         const remoteResult = await opts.runRemoteBlock(block.id, params);
         patch = remoteResult.patch;
         remoteConvexUsage = remoteResult.convexUsage ?? null;
+        remoteModuleUsage = remoteResult.moduleUsage ?? null;
         // The child uploaded its outputs to R2 and returned R2 keys; materialize
         // local paths so downstream blocks on THIS worker can consume them. Take
         // the BEST-EFFORT restored outputs even when rehydrate reports ok:false:
@@ -1448,9 +1431,15 @@ export async function runPipeline(
         falsePasses: null,
         falseRejects: null,
         wallTimeMs: Date.now() - stageStartedAt,
-        providerCalls: modelUsage.calls + imageUsage.calls,
-        inputTokens: modelUsage.inputTokens,
-        outputTokens: modelUsage.outputTokens,
+        providerCalls: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.providerCalls ?? null
+          : modelUsage.calls + imageUsage.calls,
+        inputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.inputTokens ?? null
+          : modelUsage.inputTokens,
+        outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.outputTokens ?? null
+          : modelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
@@ -1515,9 +1504,15 @@ export async function runPipeline(
         falsePasses: null,
         falseRejects: null,
         wallTimeMs: Date.now() - stageStartedAt,
-        providerCalls: failureModelUsage.calls + failureImageUsage.calls,
-        inputTokens: failureModelUsage.inputTokens,
-        outputTokens: failureModelUsage.outputTokens,
+        providerCalls: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.providerCalls ?? null
+          : failureModelUsage.calls + failureImageUsage.calls,
+        inputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.inputTokens ?? null
+          : failureModelUsage.inputTokens,
+        outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.outputTokens ?? null
+          : failureModelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
         convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
