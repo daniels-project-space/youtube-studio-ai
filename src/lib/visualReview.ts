@@ -73,6 +73,61 @@ export interface VisualReviewTranscriptCue {
   endSec: number;
 }
 
+export interface FinalMasterNarrationStartResolution {
+  readonly startSec: number;
+  readonly rejectedDeclaredStart: boolean;
+  readonly rejectedIntroOffset: boolean;
+}
+
+export function resolveFinalMasterNarrationStartSec(input: {
+  readonly narrationStartSec: unknown;
+  readonly introApplied: unknown;
+  readonly introSec: unknown;
+  readonly finalMasterDurationSec: number;
+  readonly productionQa: boolean;
+}): FinalMasterNarrationStartResolution {
+  const duration = input.finalMasterDurationSec;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("final-master visual review requires a valid master duration");
+  }
+  const parseOffset = (value: unknown): number | undefined => {
+    if (typeof value !== "number" && (typeof value !== "string" || value.trim() === "")) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= duration ? parsed : undefined;
+  };
+  const declaredStart = input.narrationStartSec === undefined
+    ? undefined
+    : parseOffset(input.narrationStartSec);
+  const rejectedDeclaredStart = input.narrationStartSec !== undefined &&
+    declaredStart === undefined;
+  if (declaredStart !== undefined) {
+    return {
+      startSec: declaredStart,
+      rejectedDeclaredStart: false,
+      rejectedIntroOffset: false,
+    };
+  }
+  if (rejectedDeclaredStart && input.productionQa) {
+    throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
+  }
+  if (input.introApplied !== true) {
+    return { startSec: 0, rejectedDeclaredStart, rejectedIntroOffset: false };
+  }
+
+  const introOffset = parseOffset(input.introSec);
+  if (introOffset === undefined) {
+    if (input.productionQa) {
+      throw new Error("qa_visual: applied intro lacks a valid narration offset within the final master duration");
+    }
+    return { startSec: 0, rejectedDeclaredStart, rejectedIntroOffset: true };
+  }
+  return {
+    startSec: introOffset,
+    rejectedDeclaredStart,
+    rejectedIntroOffset: false,
+  };
+}
+
 /**
  * Maps renderer-local narration timings onto the released master's clock.
  * Final visual review reads frames from the master, so passing raw TTS-local

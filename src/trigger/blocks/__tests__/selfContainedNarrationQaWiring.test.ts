@@ -10,6 +10,7 @@ const whiteboardEngine = read("lib", "whiteboardSync.ts");
 const comicBlock = read("trigger", "blocks", "motionComicBlocks.ts");
 const whiteboardBlock = read("trigger", "blocks", "whiteboardScribeBlocks.ts");
 const qaVisual = read("trigger", "blocks", "narratedBlocks.ts");
+const visualReview = read("lib", "visualReview.ts");
 
 for (const [label, source] of [
   ["motion comic", comicBlock],
@@ -67,23 +68,28 @@ assert.match(
 
 assert.match(
   qaVisual,
-  /const rawNarrationStartSec = ctx\.store\["narrationStartSec"\]/,
-  "QA must accept a renderer-declared narration offset",
+  /resolveFinalMasterNarrationStartSec\(\{[\s\S]{0,180}narrationStartSec: ctx\.store\["narrationStartSec"\]/,
+  "QA must resolve the renderer-declared offset through the shared clock contract",
 );
 assert.match(
-  qaVisual,
+  visualReview,
   /narration start evidence is malformed or outside the final master duration/,
   "QA must fail closed rather than trusting an invalid renderer-declared narration offset",
 );
 assert.match(
-  qaVisual,
-  /declaredNarrationStartSec[\s\S]{0,500}\? declaredNarrationStartSec[\s\S]{0,500}: ctx\.store\["introApplied"\]/,
+  visualReview,
+  /if \(declaredStart !== undefined\)[\s\S]{0,180}startSec: declaredStart/,
   "a valid renderer-declared offset must take precedence over the legacy intro-card fallback",
 );
 assert.match(
   qaVisual,
   /finalMasterTranscriptCues\(\{[\s\S]{0,260}sentenceTimings:[\s\S]{0,180}narrationStartSec,[\s\S]{0,180}finalMasterDurationSec:/,
   "the visual reviewer must receive narration cues shifted onto the released master's clock",
+);
+assert.match(
+  qaVisual,
+  /selfContainedStoryVisualReviewPlanFromReceipt\(\{[\s\S]{0,500}narrationStartSec,[\s\S]{0,120}whiteboardRenderSchedule/,
+  "self-contained visual locks must use the same resolved master clock as the transcript cues",
 );
 
 assert.match(
@@ -98,8 +104,8 @@ assert.match(
 );
 assert.match(
   qaVisual,
-  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]{0,650}sentenceTimings:[\s\S]{0,240}narrationStartSec:[\s\S]{0,240}whiteboardRenderSchedule:/,
-  "QA must derive plan-bound final-master locks and exact whiteboard evidence from the sealed receipt and renderer schedule",
+  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]{0,650}sentenceTimings: ctx\.store\["sentenceTimings"\][\s\S]{0,240}narrationStartSec,[\s\S]{0,240}whiteboardRenderSchedule:/,
+  "QA must derive plan-bound final-master locks and exact whiteboard evidence from the sealed receipt and resolved renderer clock",
 );
 assert.match(
   qaVisual,

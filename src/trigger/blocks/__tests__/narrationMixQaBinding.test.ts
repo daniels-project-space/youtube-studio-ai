@@ -84,6 +84,21 @@ assert.match(
 );
 assert.match(
   source,
+  /resolveFinalMasterNarrationStartSec\(\{/,
+  "final QA must use the shared validated narration-to-master clock resolver",
+);
+assert.match(
+  source,
+  /selfContainedStoryVisualReviewPlanFromReceipt\(\{[\s\S]{0,500}narrationStartSec,[\s\S]{0,120}whiteboardRenderSchedule/,
+  "self-contained visual locks must use the same resolved clock as transcript and Story Spine evidence",
+);
+assert.doesNotMatch(
+  source,
+  /selfContainedStoryVisualReviewPlanFromReceipt\(\{[\s\S]{0,500}narrationStartSec:\s*Number\(ctx\.store/,
+  "self-contained visual locks must not re-read an absent raw narration offset as NaN",
+);
+assert.match(
+  source,
   /narrationCueEvaluator=faster-whisper-small\.en\/timestamped-source/,
   "quality evidence must retain the scope of the source-backed cue-timing proof",
 );

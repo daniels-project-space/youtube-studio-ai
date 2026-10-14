@@ -290,6 +290,7 @@ import {
 import {
   channelVisualReviewProfile,
   finalMasterTranscriptCues,
+  resolveFinalMasterNarrationStartSec,
   reviewRender,
   visualRepairSignals,
   visualReviewFailureMessage,
@@ -4683,27 +4684,20 @@ export const qaVisual: Block = {
     // the two clocks before constructing any cue or Story Spine visual lock.
     // Without this offset, an intro/preroll pairs spoken evidence with an
     // earlier, unrelated frame and can both invent and miss sync defects.
-    const rawNarrationStartSec = ctx.store["narrationStartSec"];
-    const declaredNarrationStartSec = rawNarrationStartSec === undefined
-      ? undefined
-      : Number(rawNarrationStartSec);
-    if (
-      rawNarrationStartSec !== undefined &&
-      (!Number.isFinite(declaredNarrationStartSec) || declaredNarrationStartSec! < 0 || declaredNarrationStartSec! > p.durationSec)
-    ) {
-      if (productionQa) {
-        throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
-      }
+    const narrationStartResolution = resolveFinalMasterNarrationStartSec({
+      narrationStartSec: ctx.store["narrationStartSec"],
+      introApplied: ctx.store["introApplied"],
+      introSec: ctx.store["introSec"],
+      finalMasterDurationSec: p.durationSec,
+      productionQa,
+    });
+    if (narrationStartResolution.rejectedDeclaredStart) {
       ctx.log("qa_visual: malformed draft narration start ignored; using the declared intro offset");
     }
-    const narrationStartSec = declaredNarrationStartSec !== undefined &&
-      Number.isFinite(declaredNarrationStartSec) &&
-      declaredNarrationStartSec >= 0 &&
-      declaredNarrationStartSec <= p.durationSec
-      ? declaredNarrationStartSec
-      : ctx.store["introApplied"] === true
-        ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
-        : 0;
+    if (narrationStartResolution.rejectedIntroOffset) {
+      ctx.log("qa_visual: malformed draft intro offset ignored; using the master start");
+    }
+    const narrationStartSec = narrationStartResolution.startSec;
 
     // Detect the cinematic route before final visual review. A partial
     // cinematic handoff must not be able to hide behind qaProfile=draft and
@@ -4924,7 +4918,7 @@ export const qaVisual: Block = {
           topic,
           contentLaneKey: contentLane.key,
           sentenceTimings: ctx.store["sentenceTimings"],
-          narrationStartSec: Number(ctx.store["narrationStartSec"]),
+          narrationStartSec,
           whiteboardRenderSchedule: ctx.store["whiteboardRenderSchedule"],
         });
       } catch (error) {
