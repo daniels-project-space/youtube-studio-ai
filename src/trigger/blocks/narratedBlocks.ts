@@ -4328,11 +4328,10 @@ export function createCaptionsBlock(writeObject: typeof putObject = putObject): 
       // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
       // external poll-until-done service that could time out) — we already know the
       // exact words and their timing. No external dependency, instant, never flaky.
-      let captionsKey = "";
       const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
       if (!capTimings?.length) {
         ctx.log("captions: no sentenceTimings — chapters only");
-        return { captionsKey, chaptersText };
+        return { chaptersText };
       }
       const fitted = captionCuesWithinMaster(
         captionCuesFromTimings(capTimings, introSec),
@@ -4351,7 +4350,7 @@ export function createCaptionsBlock(writeObject: typeof putObject = putObject): 
         return `${p(Math.floor(ms / 3600000))}:${p(Math.floor((ms % 3600000) / 60000))}:${p(Math.floor((ms % 60000) / 1000))},${p(ms % 1000, 3)}`;
       };
       const srt = cues.map((c, i) => `${i + 1}\n${toTs(c.startSec)} --> ${toTs(c.endSec)}\n${c.text}`).join("\n\n") + "\n";
-      captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
+      const captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
       await writeObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
       await recordAsset(ctx, "captions", captionsKey, { cues: cues.length });
       ctx.log(`captions: SRT ${cues.length} cues from ground-truth timings → ${captionsKey}`);

@@ -21,7 +21,7 @@ async function main() {
   });
 
   const chaptersOnly = await block.run(base);
-  assert.equal(chaptersOnly.captionsKey, "");
+  assert.equal("captionsKey" in chaptersOnly, false);
   assert.equal(writes, 0, "missing timings keeps the explicit chapters-only path");
 
   await assert.rejects(block.run({ ...base, store: {
