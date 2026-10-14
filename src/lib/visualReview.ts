@@ -803,10 +803,10 @@ const MAX_REFERENCE_CRITERIA = 12;
 
 const REASON_PRIORITY: Record<EvidenceReason, number> = {
   focus: 100,
+  scene: 95,
   overlay: 90,
   intro: 80,
   outro: 80,
-  scene: 55,
   cue: 45,
   uniform: 25,
 };
@@ -835,6 +835,15 @@ function priority(candidate: FrameCandidate): number {
 function evenlyPick<T>(values: readonly T[], count: number): T[] {
   if (values.length <= count) return [...values];
   return Array.from({ length: count }, (_, index) => values[Math.floor((index * values.length) / count)]);
+}
+
+function evenlyPickAcrossSpan<T>(values: readonly T[], count: number): T[] {
+  if (values.length <= count) return [...values];
+  if (count <= 0) return [];
+  if (count === 1) return [values[Math.floor((values.length - 1) / 2)]!];
+  return Array.from({ length: count }, (_, index) =>
+    values[Math.round((index * (values.length - 1)) / (count - 1))]!,
+  );
 }
 
 /**
@@ -975,11 +984,18 @@ export function planVisualReviewEvidence(input: {
     .map(([, candidate]) => candidate)
     .sort((a, b) => a.tSec - b.tSec);
   const remainingCapacity = Math.max(0, maxFrames - reserved.length);
-  const semantic = [...candidates.entries()]
+  const semanticCandidates = [...candidates.entries()]
     .filter(([key, candidate]) => !coverageKeys.has(key) && [...candidate.reasons].some((reason) => reason !== "uniform"))
     .map(([, candidate]) => candidate)
-    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec)
-    .slice(0, remainingCapacity);
+    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec);
+  const semantic: FrameCandidate[] = [];
+  const priorityTiers = [...new Set(semanticCandidates.map(priority))].sort((a, b) => b - a);
+  for (const tierPriority of priorityTiers) {
+    const tier = semanticCandidates.filter((candidate) => priority(candidate) === tierPriority);
+    const slots = remainingCapacity - semantic.length;
+    if (slots <= 0) break;
+    semantic.push(...(tier.length > slots ? evenlyPickAcrossSpan(tier, slots) : tier));
+  }
   const supplementalUniform = [...candidates.entries()]
     .filter(([key, candidate]) => !coverageKeys.has(key) && candidate.reasons.size === 1 && candidate.reasons.has("uniform"))
     .map(([, candidate]) => candidate)

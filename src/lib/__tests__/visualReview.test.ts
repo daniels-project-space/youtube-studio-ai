@@ -565,7 +565,7 @@ async function main(): Promise<void> {
   assert(planned.filter((frame) => frame.selectionReasons.includes("focus")).length >= 4, "repair windows must receive dense evidence");
 
   // Temporal anchors are reserved before high-priority scene/cue/focus frames,
-  // so a long master cannot silently lose its middle to priority truncation.
+  // so a long master cannot silently lose its middle to semantic sampling.
   const longDurationSec = 3_600;
   const longPlanned = planVisualReviewEvidence({
     durationSec: longDurationSec,
@@ -583,6 +583,28 @@ async function main(): Promise<void> {
   assert(
     plannedMaxGapSec(longPlanned, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
     "priority frames must not create an unreviewed long-duration middle",
+  );
+  const longLockedPlan = planVisualReviewEvidence({
+    durationSec: longDurationSec,
+    creativeLocks: Array.from({ length: 12 }, (_, index) => {
+      const midpoint = 200 + index * 280;
+      return {
+        shotId: `character-lock-${index + 1}`,
+        startSec: midpoint - 5,
+        endSec: midpoint + 5,
+        expected: `character appearance lock ${index + 1}`,
+        acceptanceCriteria: [`appearance remains consistent for lock ${index + 1}`],
+      };
+    }),
+    maxFrames: 48,
+  });
+  const selectedLockFrames = longLockedPlan.filter((frame) => frame.selectionReasons.includes("scene"));
+  assert.equal(selectedLockFrames.length, 8, "declared story locks must claim capped semantic samples before redundant endpoint frames");
+  assert(selectedLockFrames[0]!.tSec <= 200, "a constrained lock sample must include the early timeline");
+  assert(selectedLockFrames.at(-1)!.tSec >= 3_000, "constrained lock samples must span through the late timeline");
+  assert(
+    plannedMaxGapSec(longLockedPlan, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
+    "prioritizing story locks must preserve the independent temporal coverage gate",
   );
 
   // A real provider used this common phrase during the live comic proof. It
