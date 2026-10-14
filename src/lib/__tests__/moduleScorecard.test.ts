@@ -37,6 +37,10 @@ assert.throws(
   () => createModuleScorecard({ ...base, status: "failed", outputValid: true }),
   /cannot claim valid output/,
 );
+assert.throws(
+  () => createModuleScorecard({ ...base, status: "passed", outputValid: false }),
+  /cannot claim invalid output/,
+);
 
 const current = createModuleScorecard({
   ...base,

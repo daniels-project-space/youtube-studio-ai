@@ -86,6 +86,9 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
   if (typeof body.outputValid !== "boolean") {
     throw new Error("module scorecard output validity is invalid");
   }
+  if (body.status === "passed" && !body.outputValid) {
+    throw new Error("a passed module scorecard cannot claim invalid output");
+  }
   if (body.status === "failed" && body.outputValid) {
     throw new Error("a failed module scorecard cannot claim valid output");
   }
