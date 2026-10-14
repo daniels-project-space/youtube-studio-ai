@@ -52,6 +52,7 @@ import {
   assertMusicProgramQualityReceipt,
 } from "@/engine/channelMusicProgram";
 import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
+import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
 import {
@@ -580,15 +581,14 @@ async function appendMusicGenerationDisclosure(
  * degradation or has musical depth. The review workflow supplies this durable
  * receipt after actual section-by-section audition — never fabricated here.
  */
-async function assertMiniMaxMusicQualityForPublish(ctx: StageContext): Promise<void> {
-  if (ctx.store["musicProvider"] !== "minimax_music3") return;
+async function assertMusicQualityForPublish(ctx: StageContext): Promise<void> {
+  const provider = ctx.store["musicProvider"];
+  if (provider === undefined && ctx.store["musicKey"] === undefined) return;
   const reviewStatus = ctx.store["musicQualityReviewStatus"];
-  if (
-    reviewStatus !== "awaiting-human-audition" &&
-    reviewStatus !== "passed-prepared-weekly-audition"
-  ) {
-    throw new Error("upload_draft: MiniMax music review status is missing or invalid — refusing to upload");
+  if (!isMusicReviewStatusCompatible(provider, reviewStatus)) {
+    throw new Error("upload_draft: music provider review state is missing or invalid — refusing to upload");
   }
+  if (provider !== "minimax_music3") return;
   const programKey = str(ctx, "channelMusicProgramKey");
   const runtimeReceiptKey = str(ctx, "musicRuntimeReceiptKey");
   const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");
@@ -2739,7 +2739,7 @@ export const uploadDraft: Block = {
         `upload_draft: final quality evidence did not clear its hard gates — ${quality.data.release.blockers.join("; ")}`,
       );
     }
-    await assertMiniMaxMusicQualityForPublish(ctx);
+    await assertMusicQualityForPublish(ctx);
     const lane = resolveContentLane({ stored: ctx.store["contentLane"], pipeline: [] });
     if (
       quality.data.episode.lane.key !== lane.key ||

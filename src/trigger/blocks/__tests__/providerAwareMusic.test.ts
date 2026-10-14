@@ -6,7 +6,11 @@ import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type RunStageSink, type StageContext } from "@/engine/types";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { music } from "../musicBlocks";
-import { createProviderAwareMusicManifest, MUSIC_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
+import {
+  createProviderAwareMusicManifest,
+  isMusicReviewStatusCompatible,
+  MUSIC_PROVIDER_OUTPUTS_VERSION,
+} from "../providerAwareMusic";
 
 type Row = Awaited<ReturnType<NonNullable<RunStageSink["getResumeState"]>>>[number];
 function localSink() {
@@ -36,6 +40,12 @@ const context: StageContext = {
 };
 
 async function main() {
+  assert.equal(isMusicReviewStatusCompatible("mureka", "not-required-provider-route"), true);
+  assert.equal(isMusicReviewStatusCompatible("suno", "awaiting-human-audition"), false);
+  assert.equal(isMusicReviewStatusCompatible("minimax_music3", "awaiting-human-audition"), true);
+  assert.equal(isMusicReviewStatusCompatible("minimax_music3", "not-required-provider-route"), false);
+  assert.equal(isMusicReviewStatusCompatible("reuse", "not-required-reused-master"), true);
+  assert.equal(isMusicReviewStatusCompatible("unknown", "not-required-provider-route"), false);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("provider contract test forbids network"); };
   try {

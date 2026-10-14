@@ -53,8 +53,8 @@ assert.match(
 );
 assert.match(
   lofi,
-  /const reviewStatus = ctx\.store\["musicQualityReviewStatus"\][\s\S]*?reviewStatus !== "awaiting-human-audition"[\s\S]*?reviewStatus !== "passed-prepared-weekly-audition"[\s\S]*?MiniMax music review status is missing or invalid/u,
-  "the upload boundary must consume the paid music module's review-state handoff and fail closed on invalid states",
+  /isMusicReviewStatusCompatible\(provider, reviewStatus\)[\s\S]*?music provider review state is missing or invalid[\s\S]*?provider !== "minimax_music3"/u,
+  "the upload boundary must validate every provider's review-state handoff and fail closed on unknown or inconsistent routes",
 );
 assert.match(
   panel,

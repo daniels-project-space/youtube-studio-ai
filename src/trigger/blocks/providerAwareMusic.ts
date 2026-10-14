@@ -6,6 +6,16 @@ import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 export const MUSIC_PROVIDER_OUTPUTS_VERSION = "2.0.0-provider-outputs";
 const receiptKeys = ["musicRuntimeReceiptKey", "musicNativeWavKey"] as const;
 const nonblank = z.string().refine((value) => value.trim().length > 0, "nonblank output required");
+
+export function isMusicReviewStatusCompatible(provider: unknown, status: unknown): boolean {
+  if (provider === "minimax_music3") {
+    return status === "awaiting-human-audition" || status === "passed-prepared-weekly-audition";
+  }
+  if (provider === "mureka" || provider === "suno") return status === "not-required-provider-route";
+  if (provider === "reuse") return status === "not-required-reused-master";
+  return false;
+}
+
 const output = z.object({
   musicKey: nonblank,
   musicProvider: z.enum(["mureka", "suno", "minimax_music3"]),
@@ -19,12 +29,15 @@ const output = z.object({
   ]),
   [COST_PATCH_KEY]: z.number().finite().nonnegative(),
 }).passthrough().superRefine((value, ctx) => {
+  if (!isMusicReviewStatusCompatible(value.musicProvider, value.musicQualityReviewStatus)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "music review state is incompatible with its provider route" });
+  }
   if (value.musicProvider === "minimax_music3") {
-    if (receiptKeys.some((key) => value[key] === undefined) || value.musicQualityReviewStatus === "not-required-provider-route") {
+    if (receiptKeys.some((key) => value[key] === undefined)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "MiniMax requires native/runtime receipts and its audition state" });
     }
-  } else if (receiptKeys.some((key) => value[key] !== undefined) || value.musicQualityReviewStatus !== "not-required-provider-route") {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "provider output cannot claim another provider's receipts or approval" });
+  } else if (receiptKeys.some((key) => value[key] !== undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "provider output cannot claim another provider's receipts" });
   }
 });
 
