@@ -224,6 +224,33 @@ function main(): void {
     "value",
     "recognising number words must not admit numbers that were never said",
   );
+  assert.equal(
+    offender({ value: "10.9%" }, "Returns are ten point two percent."),
+    "value",
+    "a nearby decimal must not pass because its integer part matches a spoken decimal",
+  );
+  assert.ok(
+    clean({ value: "10.2%" }, "Returns are ten point two percent."),
+    "the exact spoken decimal remains admissible",
+  );
+  assert.equal(
+    offender({ value: "$2.9 million" }, "The bank held two million dollars."),
+    "value",
+    "a nearby magnitude must not pass because its leading digit and scale were spoken",
+  );
+  assert.ok(
+    clean({ value: "$2 million" }, "The bank held two million dollars."),
+    "the exact spoken magnitude remains admissible",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The change was two percent."),
+    "value",
+    "a rendered negative must not pass when narration states only a positive magnitude",
+  );
+  assert.ok(
+    clean({ value: "-2%" }, "The change was negative two percent."),
+    "an explicitly spoken negative remains admissible",
+  );
 
   // ---- quantity is pinned to its sentence; frame may cite the script -------
   const script =
