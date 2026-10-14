@@ -1187,6 +1187,8 @@ export function createQaScriptBlock(
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const script = ctx.store["script"];
+    if (script !== undefined) assertScriptNarrationConsistent(script, "qa_script");
     const bannedMatches = findChannelBannedWords(
       narration,
       readChannelBannedWords(ctx.store["bannedWords"]),

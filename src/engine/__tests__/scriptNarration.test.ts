@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { assertScriptNarrationConsistent, assembleScriptNarration } from "@/engine/scriptNarration";
 import type { StageContext } from "@/engine/types";
-import { narrationTts } from "@/trigger/blocks/narratedBlocks";
+import { createQaScriptBlock, narrationTts } from "@/trigger/blocks/narratedBlocks";
 
 const script = {
   hook: "The first clue was hiding in plain sight.",
@@ -32,6 +32,17 @@ const context = (value: unknown, flatText: string): StageContext => ({
 });
 
 async function main(): Promise<void> {
+  let criticDispatchStarted = false;
+  const qaScript = createQaScriptBlock(undefined, async () => {
+    criticDispatchStarted = true;
+  });
+  await assert.rejects(
+    qaScript.run(context({ ...script, narrationText: "Different words." }, "Different words.")),
+    /qa_script: narrationText does not match/,
+    "the script critic rejects structured/flat narration drift before paid review",
+  );
+  assert.equal(criticDispatchStarted, false, "inconsistent script never reaches independent-critic dispatch");
+
   await assert.rejects(
     narrationTts.run(context({ ...script, narrationText: "Different words." }, "Different words.")),
     /narrationText does not match/,
