@@ -141,9 +141,19 @@ async function main() {
   await run('unbound x labels', { ...line, xLabels: ['2', '4'] }, false);
   await run('unreviewed annotation', { ...line, kind: 'annotated_line', events: [{ idx: 1, label: 'Policy caused growth' }] }, false);
   await run('reviewed annotation', { ...line, kind: 'annotated_line', events: [{ idx: 1, label: 'After' }] }, true);
-  const mixedBase = { ...base, values: base.values.map((value) => value.id === 'value-after' ? { ...value, unit: 'percentage points' } : value) };
+  const mixedSentence = 'According to the Example Statistics Office, output moved from 2% to 4 percentage points over 5 years.';
+  const mixedTimings = [{ ...timings[0], text: mixedSentence }, ...timings.slice(1)];
+  const mixedBase = {
+    ...base,
+    narrationAnchors: base.narrationAnchors.map((anchor) => anchor.id === 'anchor-output'
+      ? { ...anchor, spokenText: mixedSentence }
+      : anchor),
+    values: base.values.map((value) => value.id === 'value-after'
+      ? { ...value, unit: 'percentage points', display: '4 percentage points' }
+      : value),
+  };
   const mixed = { ...mixedBase, review: { ...manifest.review, reviewedManifestFingerprint: evidenceVisualManifestFingerprint(mixedBase) } };
-  await run('different reviewed units on one scale', line, false, mixed);
+  await run('different reviewed units on one scale', line, false, mixed, mixedTimings);
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 50, end: 60 }).ok, false, 'Identical sentence at a different time cannot borrow this anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 8, end: 4 }).ok, false, 'Inverted overlapping timing is not a valid anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: 'output', start: 0, end: 12 }).ok, false, 'A short fragment must not match a longer approved sentence backwards');

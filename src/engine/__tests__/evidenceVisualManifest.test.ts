@@ -110,6 +110,24 @@ assert.ok(displayGeometryMismatch.issues.some((issue) => issue.code === "display
 assert.throws(() => assertEvidenceVisualManifestCollection([displayGeometryMismatchManifest]), /display_value_mismatch/u,
   "the insert module's semantic manifest admission must reject an internally inconsistent value before planning");
 
+const declaredUnitMismatchBase = {
+  ...chartBase,
+  values: chartBase.values.map((value) => ({ ...value, unit: "dollars" })),
+};
+const declaredUnitMismatchManifest = {
+  ...declaredUnitMismatchBase,
+  review: {
+    ...chart.review,
+    reviewedManifestFingerprint: evidenceVisualManifestFingerprint(declaredUnitMismatchBase),
+  },
+};
+const declaredUnitMismatch = evaluateEvidenceVisualManifest(declaredUnitMismatchManifest, {
+  sceneId: "scene-labour-trend", narrationSentenceIds: ["sentence-labour-trend"], now,
+});
+assert.equal(declaredUnitMismatch.safe, false);
+assert.ok(declaredUnitMismatch.issues.some((issue) => issue.code === "unit_mismatch"),
+  "a percentage chart cannot declare dollars as its axis unit when neither display nor narration supports it");
+
 const magnitudeDisplayBase = {
   ...chartBase,
   narrationAnchors: chartBase.narrationAnchors.map((anchor) => ({

@@ -125,6 +125,7 @@ export type EvidenceVisualIssueCode =
   | "unknown_anchor"
   | "anchor_source_mismatch"
   | "missing_unit"
+  | "unit_mismatch"
   | "value_not_spoken"
   | "display_value_mismatch"
   | "missing_required_attribution"
@@ -167,6 +168,49 @@ function compact(value: string): string {
 
 function containsVerbatim(haystack: string, needle: string): boolean {
   return compact(haystack).includes(compact(needle));
+}
+
+const UNIT_FAMILIES = [
+  { id: "percent", names: ["percent", "percentage"], aliases: ["percent", "percentage", "%"] },
+  { id: "percentage-points", names: ["percentage point", "percentage points"], aliases: ["percentage point", "percentage points", "pp"] },
+  { id: "currency", names: ["dollar", "dollars", "usd", "us dollar", "us dollars"], aliases: ["dollar", "dollars", "USD", "US dollar", "US dollars", "$"] },
+  { id: "euro", names: ["euro", "euros", "eur"], aliases: ["euro", "euros", "EUR", "€"] },
+  { id: "pound", names: ["pound", "pounds", "gbp", "pound sterling"], aliases: ["pound", "pounds", "GBP", "£"] },
+  { id: "year", names: ["year", "years", "yr", "yrs"], aliases: ["year", "years", "yr", "yrs"] },
+  { id: "day", names: ["day", "days"], aliases: ["day", "days"] },
+  { id: "seed", names: ["seed", "seeds"], aliases: ["seed", "seeds"] },
+  { id: "milliwatt", names: ["milliwatt", "milliwatts"], aliases: ["milliwatt", "milliwatts", "mW"] },
+  { id: "megawatt", names: ["megawatt", "megawatts"], aliases: ["megawatt", "megawatts", "MW"] },
+  { id: "latitude", names: ["degree north", "degrees north", "degree south", "degrees south"], aliases: ["degree north", "degrees north", "degree south", "degrees south"] },
+  { id: "longitude", names: ["degree east", "degrees east", "degree west", "degrees west"], aliases: ["degree east", "degrees east", "degree west", "degrees west"] },
+] as const;
+
+function containsUnitAlias(text: string, alias: string): boolean {
+  if (["%", "$", "€", "£", "mW", "MW"].includes(alias)) return text.includes(alias);
+  if (alias === "percentage" && /\bpercentage\s+points?\b/iu.test(text)) return false;
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
+function unitMatchesEvidence(value: EvidenceVisualValue, spokenText: string): boolean {
+  const unitKey = compact(value.unit);
+  const family = UNIT_FAMILIES.find((candidate) => candidate.names.some((name) => compact(name) === unitKey));
+  const displayedFamilies = UNIT_FAMILIES.filter((candidate) =>
+    candidate.aliases.some((alias) => containsUnitAlias(value.display, alias)),
+  );
+  if (!family) {
+    if (displayedFamilies.length > 0 && !containsUnitAlias(value.display, value.unit)) return false;
+    return containsUnitAlias(value.display, value.unit) || containsUnitAlias(spokenText, value.unit);
+  }
+  if (family.id === "latitude" || family.id === "longitude") {
+    return value.role === family.id && displayedFamilies.every((candidate) => candidate.id === family.id);
+  }
+  if (displayedFamilies.some((candidate) => candidate.id !== family.id)) return false;
+  if (family.id === "year" && value.role === "x" && Number.isInteger(value.value) &&
+      value.value >= 1_000 && value.value <= 9_999) return true;
+  return family.aliases.some((alias) =>
+    containsUnitAlias(value.display, alias) || containsUnitAlias(spokenText, alias),
+  );
 }
 
 function plainNumericLiteral(value: number): string {
@@ -238,6 +282,9 @@ export function evaluateEvidenceVisualManifest(
     }
     if (!visualValue.unit.trim()) {
       issues.push({ code: "missing_unit", message: `value ${visualValue.id} has no explicit unit` });
+    }
+    if (!unitMatchesEvidence(visualValue, anchor.spokenText)) {
+      issues.push({ code: "unit_mismatch", message: `value ${visualValue.id} unit is not supported by its spoken or displayed evidence` });
     }
     if (!containsVerbatim(anchor.spokenText, visualValue.display)) {
       issues.push({ code: "value_not_spoken", message: `value ${visualValue.id} display is absent from its narration anchor` });
