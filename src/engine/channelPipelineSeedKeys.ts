@@ -1,4 +1,5 @@
 import { childrenShowBibleSeedKeys } from "./childrenShowBible";
+import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "./channelAwareScriptQaSelection";
 import { parseChannelProgramRouteRunSeed } from "./channelProgramRoute";
 import type { ContentLane } from "./contentLane";
 import type { PipelineEntry } from "./types";
@@ -27,6 +28,9 @@ export function channelPipelineValidationSeedKeys(
       throw new Error("pipeline validation route seed does not match its admitted content lane");
     }
     keys.push("channelProgramRoute");
+  }
+  if (pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) {
+    keys.push("channelName");
   }
   return keys;
 }

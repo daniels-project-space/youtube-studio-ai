@@ -259,7 +259,7 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
     ]).has(entry.block),
   );
   const compilation = compilePipeline(
-    validatePipeline(privateProbe),
+    validatePipeline(privateProbe, ["channelName"]),
     PRIVATE_PROBE_CONTRACT_POLICY,
   );
   assert.equal(compilation.policyId, "private-probe-contract");
@@ -276,7 +276,7 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
     assert(compilation.capabilities.includes(capability), `private probe must retain ${capability}`);
   }
   assert.throws(
-    () => compilePipeline(validatePipeline(privateProbe)),
+    () => compilePipeline(validatePipeline(privateProbe, ["channelName"])),
     /publish\.connector_bound/,
     "the ordinary production policy must continue to reject a non-uploading pipeline",
   );
@@ -358,9 +358,10 @@ function crewRemovalAndOrderFail(): void {
     lengthMinutes: 3,
     publishMode: "draft",
   });
+  const seeds = ["channelName"];
   const withoutDirector = design.pipeline.filter((entry) => entry.block !== "director_brief");
   assert.throws(
-    () => compilePipeline(validatePipeline(withoutDirector)),
+    () => compilePipeline(validatePipeline(withoutDirector, seeds)),
     (error) => error instanceof PipelinePolicyError && /director_treatment|structure/.test(error.message),
   );
 
@@ -370,7 +371,7 @@ function crewRemovalAndOrderFail(): void {
   const stockIndex = reordered.findIndex((entry) => entry.block === "stock_footage");
   reordered.splice(stockIndex + 1, 0, dp);
   assert.throws(
-    () => compilePipeline(validatePipeline(reordered)),
+    () => compilePipeline(validatePipeline(reordered, seeds)),
     (error) => error instanceof PipelinePolicyError && /visualBrief.*before/.test(error.message),
   );
 }
@@ -392,10 +393,8 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
       publishMode: "draft",
     });
     if (!design.available) continue;
-    const resolved = validatePipeline(
-      design.pipeline,
-      channelPipelineValidationSeedKeys(design.contentLane),
-    );
+    const seedKeys = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
+    const resolved = validatePipeline(design.pipeline, seedKeys);
     const producers = new Map<string, { index: number; block: string }>();
     resolved.manifests.forEach((manifest, index) => {
       for (const artifact of [
@@ -412,7 +411,7 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
         edges++;
         const withoutProducer = design.pipeline.filter((_, index) => index !== producer.index);
         assert.throws(
-          () => validatePipeline(withoutProducer),
+          () => validatePipeline(withoutProducer, seedKeys),
           /consumes .*not produced|requires upstream capability|requires downstream capability/,
           `${family}: removing ${producer.block} must break ${consumer.id}.${artifact}`,
         );
@@ -422,7 +421,7 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
         const adjustedConsumerIndex = consumerIndex - (producer.index < consumerIndex ? 1 : 0);
         reordered.splice(adjustedConsumerIndex + 1, 0, entry);
         assert.throws(
-          () => validatePipeline(reordered),
+          () => validatePipeline(reordered, seedKeys),
           /consumes .*not produced|requires upstream capability|requires downstream capability/,
           `${family}: moving ${producer.block} behind ${consumer.id} must break ${artifact}`,
         );
@@ -450,7 +449,7 @@ function wholePipelineMutationGuards(): void {
     });
     if (!design.available || design.pipeline.length < 3) continue;
     coveredFamilies++;
-    const seeds = channelPipelineValidationSeedKeys(design.contentLane);
+    const seeds = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
     const valid = validatePipeline(design.pipeline, seeds);
 
     assert.throws(

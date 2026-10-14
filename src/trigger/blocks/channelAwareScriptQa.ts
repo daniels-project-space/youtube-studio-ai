@@ -1,6 +1,7 @@
 import { artifactContract } from "@/engine/artifactSchemas";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { z } from "zod";
+import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import type { ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import type { StageContext } from "@/engine/types";
@@ -25,7 +26,7 @@ function scriptCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
     laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis };
 }
 
-export const CHANNEL_AWARE_SCRIPT_QA_VERSION = "2.0.0-channel-aware";
+export { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 
 /** Explicit revision: existing pipelines retain their original critic policy. */
 export function createChannelAwareScriptQaManifest(legacy: ModuleManifest): ModuleManifest {

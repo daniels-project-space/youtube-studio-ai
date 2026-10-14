@@ -91,6 +91,7 @@ import {
 import type { GenerationProfileId } from "./runtimeCapability";
 import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
 import { selectComposerMixAssembly } from "./composerMixPipelineSelection";
+import { selectChannelAwareScriptQa } from "./channelAwareScriptQaSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -1323,6 +1324,7 @@ export function designPipelineCore(
   } else {
     pipeline = selectComposerMixAssembly(pipeline);
   }
+  pipeline = selectChannelAwareScriptQa(pipeline);
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);
   }
