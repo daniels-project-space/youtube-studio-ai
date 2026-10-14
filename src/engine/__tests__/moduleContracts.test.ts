@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
-import { allManifests, getManifest } from "@/engine/registry";
+import { allManifests, get as getBlock, getManifest } from "@/engine/registry";
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { designPipeline } from "@/engine/designer";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
@@ -208,6 +208,25 @@ function contractInputDeclarationsAreUnambiguous(): void {
       `captions must declare its optional ${key} clock evidence for runner admission`,
     );
   }
+}
+
+function contractOverridesPreserveBlockInputs(): void {
+  const dropped: string[] = [];
+  for (const [blockId, contract] of Object.entries(MODULE_CONTRACTS)) {
+    if (!contract.requiredConsumes) continue;
+    const block = getBlock(blockId);
+    if (!block) continue;
+    const required = new Set(contract.requiredConsumes);
+    const optional = new Set(contract.optionalConsumes ?? []);
+    for (const key of block.consumes) {
+      if (!required.has(key) && !optional.has(key)) dropped.push(`${blockId}.${key}`);
+    }
+  }
+  assert.deepEqual(
+    dropped.sort(),
+    [],
+    "contract overrides must keep every block-declared input required or explicitly optional",
+  );
 }
 
 function compileRepresentativeFamilies(): void {
@@ -937,6 +956,7 @@ function main(): void {
   );
   calibratedDirectContractAudit();
   contractInputDeclarationsAreUnambiguous();
+  contractOverridesPreserveBlockInputs();
   compileRepresentativeFamilies();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
