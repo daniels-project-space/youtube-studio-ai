@@ -34,7 +34,7 @@ import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createModuleScorecard } from "@/lib/moduleScorecard";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
-import { createConvexUsageScope } from "@/lib/convexUsage";
+import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageReuseHash } from "./stageReuse";
@@ -89,7 +89,7 @@ export interface RunPipelineOptions {
   runRemoteBlock?: (
     blockId: string,
     params: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
+  ) => Promise<RemoteBlockResult>;
   /**
    * Optional non-failure execution boundary. Once this exact sequential block
    * has written its durable `ok` stage, the runner returns `awaiting_review`
@@ -99,6 +99,12 @@ export interface RunPipelineOptions {
    */
   stopAfterBlockId?: string;
 }
+
+export type RemoteBlockResult = {
+  patch: Record<string, unknown>;
+  /** Missing on older child deployments; null when attempt history is incomplete. */
+  convexUsage?: ConvexUsageCounts | null;
+};
 
 /**
  * Durable error marker shared with remote-child dispatch. A stage carrying it
@@ -1316,6 +1322,7 @@ export async function runPipeline(
     let observedCost = 0;
     let checkpointAdjustedCost = 0;
     let costAccounted = false;
+    let remoteConvexUsage: ConvexUsageCounts | null = null;
     let usageReported = false;
     let imageUsageReported = false;
     let executedStore: Readonly<Record<string, unknown>> | undefined;
@@ -1356,7 +1363,9 @@ export async function runPipeline(
       if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {
         // Dispatch to a child task (large-2x render). Orchestrator suspends here.
         log(`block remote-dispatch: ${block.id}`);
-        patch = await opts.runRemoteBlock(block.id, params);
+        const remoteResult = await opts.runRemoteBlock(block.id, params);
+        patch = remoteResult.patch;
+        remoteConvexUsage = remoteResult.convexUsage ?? null;
         // The child uploaded its outputs to R2 and returned R2 keys; materialize
         // local paths so downstream blocks on THIS worker can consume them. Take
         // the BEST-EFFORT restored outputs even when rehydrate reports ok:false:
@@ -1444,9 +1453,9 @@ export async function runPipeline(
         outputTokens: modelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
-        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
-        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().actions,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.writes ?? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.actions ?? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: cost,
         capturedAt: Date.now(),
       });
@@ -1511,9 +1520,9 @@ export async function runPipeline(
         outputTokens: failureModelUsage.outputTokens,
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().reads,
-        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().writes,
-        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? null : convexUsageScope.snapshot().actions,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.writes ?? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.actions ?? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: observedCost,
         capturedAt: Date.now(),
       });

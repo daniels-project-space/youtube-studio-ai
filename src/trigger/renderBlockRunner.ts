@@ -42,6 +42,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 import { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS } from "@/lib/renderChildLease";
 import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTransport";
+import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import {
   assertRestoredStageOutputs,
   assertStageReuseReceipt,
@@ -171,7 +172,7 @@ function makeVisualArtifactAttemptCheckpoint(args: {
 export async function executeRenderBlock(
   payload: RenderBlockInput,
   options: RenderBlockRunnerOptions,
-): Promise<{ patch: Record<string, unknown> }> {
+): Promise<{ patch: Record<string, unknown>; convexUsage: ConvexUsageCounts | null }> {
   const { taskLabel, machineClass } = options;
 
   registerAllBlocks();
@@ -498,18 +499,24 @@ export async function executeRenderBlock(
       taskRunId: options.taskRunId,
       attemptNumber: options.attemptNumber,
     };
+    const convexUsageScope = createConvexUsageScope();
     const patch = await executeRemoteCostTrackedBlock({
       paid: manifest.costAndLatency.paid,
       priorCostUsd: persistedStages.find((row) => row.block === payload.blockId)?.cost ?? 0,
       checkpointCostReceipts: persistedStages.find((row) => row.block === payload.blockId)?.checkpointCostReceipts ?? [],
-      execute: () => block.run(ctx),
+      execute: () => convexUsageScope.run(() => block.run(ctx)),
       transport: {
         begin: () => convex.mutation(api.remoteChildCosts.begin, costIdentity),
         finish: (result) => convex.mutation(api.remoteChildCosts.finish, { ...costIdentity, ...result }),
       },
     });
     assertStageInvocationUnchanged(executionIdentity, executionInputHash);
-    return { patch };
+    return {
+      patch,
+      // Trigger retries can follow a failed attempt that already made module
+      // requests; this successful attempt alone is not a complete total.
+      convexUsage: options.attemptNumber === 1 ? convexUsageScope.snapshot() : null,
+    };
   } catch (error) {
     const taskError = taskErrorForRetryPolicy(error);
     const { classification } = taskError;

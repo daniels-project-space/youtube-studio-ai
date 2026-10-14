@@ -17,6 +17,7 @@ import * as stageReuseContract from "@/engine/stageReuseContract";
 import { createVisualArtifactAttempt } from "@/engine/visualArtifactAttemptLedger";
 import * as renderAdmission from "@/lib/renderBlockAdmission";
 import * as invocationSnapshots from "@/lib/pipelineInvocationSnapshot";
+import * as convexUsage from "@/lib/convexUsage";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { admitFrozenRemoteChildStage, reconstructFrozenRemoteChildPipeline } from "@/lib/remoteChildBudgetAdmission";
 import { selectRehydrationSubset } from "@/lib/rehydrate";
@@ -89,6 +90,9 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       calls.paid++;
       observedStageBudget = ctx.stageBudgetUsd;
       observedStore = structuredClone(ctx.store);
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/query");
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/action");
       await ctx.checkpointVisualArtifactAttempts!([createVisualArtifactAttempt({
         adapterId: "remote_reuse_test", scopeFingerprint: "a".repeat(64),
         attemptId: "render-attempt-1", ordinal: 1,
@@ -247,6 +251,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "node:crypto": crypto,
     "@trigger.dev/sdk/v3": { logger: { info() {}, warn() {}, error() {} } },
     "@/lib/studioConvexHttpClient": { StudioConvexHttpClient: Client },
+    "@/lib/convexUsage": convexUsage,
     "@/engine/blocks": { registerAllBlocks() {} },
     "@/engine/convexSink": { makeConvexSink: () => sink },
     "@/engine/artifactSchemas": artifactSchemas,
@@ -284,14 +289,14 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "@/lib/renderChildLease": { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS: 60_000 },
     "@/trigger/remoteChildCostTransport": costTransport,
   };
-  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{ patch: Record<string, unknown> }> } };
+  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{ patch: Record<string, unknown>; convexUsage: convexUsage.ConvexUsageCounts | null }> } };
   new Function("require", "module", "exports", "process", compiledRunner)(
     (name: string) => {
       assert.ok(Object.hasOwn(modules, name), `unisolated remote worker import: ${name}`);
       return modules[name];
     }, loaded, loaded.exports, { env: { NEXT_PUBLIC_CONVEX_URL: "https://never-used.invalid" } },
   );
-  const run = async () => {
+  const run = async (attemptNumber = options.attemptNumber) => {
     const ctx = structuredClone(receiverContext);
     const worker = { id: "worker_fixture", version: workerVersion, contentHash: "fixture" };
     if (workerMutation === "wrong-version") {
@@ -310,7 +315,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       return await loaded.exports.executeRenderBlock({
         ...scope, leaseOwner: "parent", executionLeaseToken: 1, dispatchKey: "child-dispatch",
         blockId: renderer.id, params: entries[2]!.params ?? {}, budgetUsd: snapshot.budgetUsd, seedStore: snapshot.seedStore,
-      }, { ...options, ...(remoteId ? { machineClass: "offloaded" as const } : {}),
+      }, { ...options, attemptNumber, ...(remoteId ? { machineClass: "offloaded" as const } : {}),
         ...(versionCase && versionCase !== "historical-v1" && workerMutation !== "missing-context"
         ? { workerContext: ctx } : {}) });
     } finally {
@@ -325,6 +330,8 @@ async function main() {
   const unchanged = harness();
   const result = await unchanged.run();
   assert.equal(result.patch.__costUsd, 0.2);
+  assert.deepEqual(result.convexUsage, { reads: 1, writes: 1, actions: 1 },
+    "child reports only Convex calls made inside the module execution scope");
   assert.equal(unchanged.calls.paid, 1);
   assert.equal(unchanged.calls.begin, 1);
   assert.equal(unchanged.calls.finish, 1);
@@ -353,6 +360,9 @@ async function main() {
   assert.equal(unchanged.writtenArtifacts.length, 1);
   assert.deepEqual(unchanged.writtenArtifacts[0]!.artifacts[0]!.inputArtifactIds, unchanged.expectedLineage,
     "real checkpoint writer binds original selected refs after temp paths move");
+  const retried = harness();
+  assert.equal((await retried.run(2)).convexUsage, null,
+    "a retried Trigger task does not undercount earlier failed-attempt module calls");
 
   for (const mutation of ["seed", "output", "missing-receipt", "params", "module", "restoration", "missing-second-receipt", "missing-outputs", "missing-stage", "failed-stage"] as const) {
     const candidate = harness(mutation);

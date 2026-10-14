@@ -63,6 +63,7 @@ import { assertFrozenUploadQaEvidence } from "@/engine/frozenPipelineQaAdmission
 import {
   PAID_STAGE_RECONCILIATION_MARKER,
   runPipeline as runEngine,
+  type RemoteBlockResult,
 } from "@/engine/runner";
 import { ExecutionError } from "@/engine/executionErrors";
 import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
@@ -2519,7 +2520,7 @@ export const runPipelineTask = task({
             }
           };
           let res:
-            | { ok: true; output: { patch: Record<string, unknown> } }
+            | { ok: true; output: RemoteBlockResult }
             | { ok: false; error: unknown }
             | undefined;
           let postDispatchFailure: unknown;
@@ -2580,7 +2581,7 @@ export const runPipelineTask = task({
             const childFailure = `${child.id} child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`;
             throw await failureWithRecordedCost(childFailure);
           }
-          return (res.output as { patch: Record<string, unknown> }).patch;
+          return res.output;
         },
       };
       await convex.mutation(api.runs.heartbeatExecutionLease, {

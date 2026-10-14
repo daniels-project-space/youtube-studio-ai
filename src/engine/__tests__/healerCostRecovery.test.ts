@@ -159,7 +159,7 @@ async function remoteReattachmentIsNotAnotherCharge() {
     runRemoteBlock: async () => {
       childAttachments++;
       equalCost(state.rows.get(block.id)?.costBeforeExecution, 0.3, "pre-heal spend is durable before dispatch");
-      return { remoteArtifact: "same-durable-child-result", [COST_PATCH_KEY]: 0.2 };
+      return { patch: { remoteArtifact: "same-durable-child-result", [COST_PATCH_KEY]: 0.2 } };
     },
   };
   state.rejectNextSuccessfulWrite();
@@ -196,7 +196,7 @@ async function legacyRemoteAndUnknownCharges() {
   const state = durableSink([{ block: block.id, status: "failed", cost: 0.2 }]);
   const remoteOptions = {
     ...options, sink: state.sink, budgetUsd: 0.2, remoteBlocks: new Set([block.id]),
-    runRemoteBlock: async () => { attachments++; return { remoteArtifact: "legacy", [COST_PATCH_KEY]: 0.2 }; },
+    runRemoteBlock: async () => { attachments++; return { patch: { remoteArtifact: "legacy", [COST_PATCH_KEY]: 0.2 } }; },
   };
   const legacy = await runPipeline(pipeline, remoteOptions);
   assert.equal(legacy.ok, true);
