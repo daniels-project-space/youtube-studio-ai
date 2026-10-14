@@ -4305,35 +4305,35 @@ export function captionCuesWithinMaster(
   };
 }
 
-export const captions: Block = {
-  id: "captions",
-  consumes: ["narrationDurationSec", "videoDurationSec"],
-  produces: ["captionsKey", "chaptersText"],
-  run: async (ctx) => {
-    const introSec = Number(ctx.store["introSec"] ?? 0);
-    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
-    const script = ctx.store["script"] as
-      | { sections?: { heading?: string; text?: string; narration?: string }[] }
-      | undefined;
-    const sections = script?.sections ?? [];
+export function createCaptionsBlock(writeObject: typeof putObject = putObject): Block {
+  return {
+    id: "captions",
+    consumes: ["narrationDurationSec", "videoDurationSec"],
+    produces: ["captionsKey", "chaptersText"],
+    run: async (ctx) => {
+      const introSec = Number(ctx.store["introSec"] ?? 0);
+      const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
+      const script = ctx.store["script"] as
+        | { sections?: { heading?: string; text?: string; narration?: string }[] }
+        | undefined;
+      const sections = script?.sections ?? [];
 
-    // Chapters: derived from script sections + narration timing + intro offset.
-    // No external dependency — works today (lands in the video description).
-    const chaptersText = buildChapters(sections, narrationSec, introSec);
-    if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
+      // Chapters: derived from script sections + narration timing + intro offset.
+      // No external dependency — works today (lands in the video description).
+      const chaptersText = buildChapters(sections, narrationSec, introSec);
+      if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
 
-    // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
-    // we already produced in narration_tts (chunked to short cues, shifted by the
-    // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
-    // external poll-until-done service that could time out) — we already know the
-    // exact words and their timing. No external dependency, instant, never flaky.
-    let captionsKey = "";
-    const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
-    if (!capTimings?.length) {
-      ctx.log("captions: no sentenceTimings — chapters only");
-      return { captionsKey, chaptersText };
-    }
-    try {
+      // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
+      // we already produced in narration_tts (chunked to short cues, shifted by the
+      // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
+      // external poll-until-done service that could time out) — we already know the
+      // exact words and their timing. No external dependency, instant, never flaky.
+      let captionsKey = "";
+      const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
+      if (!capTimings?.length) {
+        ctx.log("captions: no sentenceTimings — chapters only");
+        return { captionsKey, chaptersText };
+      }
       const fitted = captionCuesWithinMaster(
         captionCuesFromTimings(capTimings, introSec),
         Number(ctx.store["videoDurationSec"] ?? 0),
@@ -4352,15 +4352,15 @@ export const captions: Block = {
       };
       const srt = cues.map((c, i) => `${i + 1}\n${toTs(c.startSec)} --> ${toTs(c.endSec)}\n${c.text}`).join("\n\n") + "\n";
       captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
-      await putObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
+      await writeObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
       await recordAsset(ctx, "captions", captionsKey, { cues: cues.length });
       ctx.log(`captions: SRT ${cues.length} cues from ground-truth timings → ${captionsKey}`);
-    } catch (e) {
-      ctx.log(`captions: SRT build failed (continuing, chapters only): ${e instanceof Error ? e.message : e}`);
-    }
-    return { captionsKey, chaptersText };
-  },
-};
+      return { captionsKey, chaptersText };
+    },
+  };
+}
+
+export const captions: Block = createCaptionsBlock();
 
 const QA_VISUAL_STAGE_DEFECT_LIMIT = 128;
 const QA_VISUAL_STAGE_SUMMARY_MAX_CHARS = 4_000;
