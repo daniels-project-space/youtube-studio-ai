@@ -715,7 +715,9 @@ export const music: Block = {
       runtimeReceiptKey: musicRuntimeReceiptKey,
       generatedContentDisclosure: usedProvider === "minimax_music3",
       uiAttribution: minimaxReceipt?.license.uiAttribution,
-      trackHumanAuditionStatus: "pending_private_draft_review",
+      trackHumanAuditionStatus: usedProvider === "minimax_music3"
+        ? "pending_private_draft_review"
+        : "not-required-provider-route",
     });
 
     // Downstream consumers (assemble/timeline_assemble) PREFER musicKey — the
