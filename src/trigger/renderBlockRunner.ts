@@ -19,6 +19,7 @@ import { assertFrozenPipelineWorkerDeployment } from "./pipelineWorkerRuntime";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { makeConvexSink } from "@/engine/convexSink";
 import { artifactContract, validateArtifact } from "@/engine/artifactSchemas";
 import { rehydrateOutputs, selectRehydrationSubset } from "@/lib/rehydrate";
@@ -464,6 +465,12 @@ export async function executeRenderBlock(
     store, inputRefs: artifactRefs, inputIdentities: artifactIdentities,
   };
   const executionInputHash = stageInvocationHash(executionIdentity);
+  const moduleStore = declaredArtifactStore(
+    manifest,
+    store,
+    new Set<string>(),
+    (message) => logger.info(`[${taskLabel}] ${message}`),
+  );
   const modelUsageScope = createModelUsageScope();
   const imageUsageScope = createImageUsageScope();
   const convexUsageScope = createConvexUsageScope();
@@ -475,7 +482,7 @@ export async function executeRenderBlock(
     executionLease,
     keyPrefix: frozenInvocation.keyPrefix,
     params: frozenEntry.params ?? {},
-    store,
+    store: moduleStore,
     artifactRefs: await loadInputArtifactRefs(),
     budgetUsd: frozenInvocation.budgetUsd,
     ...(budgetAdmission.stageBudgetUsd === undefined

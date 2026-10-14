@@ -15,7 +15,7 @@ import {
   PRIVATE_PROBE_CONTRACT_POLICY,
   PipelinePolicyError,
 } from "@/engine/pipelineCompiler";
-import { declaredArtifactStore } from "@/engine/runner";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   CATALOG_EXECUTION_BINDINGS,

@@ -31,7 +31,7 @@ import assert from "node:assert/strict";
 
 import { registerAllBlocks } from "@/engine/blocks";
 import { getManifest } from "@/engine/registry";
-import { declaredArtifactStore } from "@/engine/runner";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 
 registerAllBlocks();
 
