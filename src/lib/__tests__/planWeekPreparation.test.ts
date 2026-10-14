@@ -176,7 +176,7 @@ const preparedScript = {
   script: {
     hook: "The old lock was never meant to open.",
     sections: [{ heading: "The mechanism", narration: "One missing pin changed the kingdom.", role: "outro" as const }],
-    narrationText: "The old lock was never meant to open. One missing pin changed the kingdom.",
+    narrationText: "The old lock was never meant to open.\n\nOne missing pin changed the kingdom.",
     estDurationSec: 14,
     programRouteFingerprint: "a".repeat(64),
     crafted: {
@@ -434,6 +434,14 @@ assert.throws(
   }),
   /binding mismatch/,
   "a receipt cannot name a different script than the one it carries",
+);
+const inconsistentPreparedScript = structuredClone(preparedScript);
+inconsistentPreparedScript.script.narrationText = "A different version of the narration.";
+inconsistentPreparedScript.scriptSha256 = sha256Hex(canonicalJson(inconsistentPreparedScript.script));
+assert.throws(
+  () => assertPlanWeekPreparedScriptBinding({ prepared: inconsistentPreparedScript, manifest }),
+  /narrationText does not match the hook and ordered sections/,
+  "a correctly re-hashed weekly receipt still rejects narration that diverges from its structured script",
 );
 const preparedNarration = {
   version: PLAN_WEEK_PREPARED_NARRATION_VERSION,

@@ -1,4 +1,5 @@
 import { canonicalJson } from "@/lib/canonicalJson";
+import { assertScriptNarrationConsistent } from "@/engine/scriptNarration";
 import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
@@ -548,6 +549,7 @@ function normalizedScript(value: unknown): Script {
   if (normalized.hook.length + normalized.narrationText.length > 210_000) {
     throw new Error("plan-week prepared script is too large");
   }
+  assertScriptNarrationConsistent(normalized, "plan-week prepared script");
   return normalized;
 }
 

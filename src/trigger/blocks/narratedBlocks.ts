@@ -119,6 +119,7 @@ import {
   cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
+import { assertScriptNarrationConsistent } from "@/engine/scriptNarration";
 import { StorySpineSchema, storySpineVisualReviewLocks } from "@/engine/storySpine";
 import {
   assertCinematicAssemblyRoute,
@@ -1368,6 +1369,13 @@ export const narrationTts: Block = {
   ],
   paid: true,
   run: async (ctx) => {
+    const script = ctx.store["script"];
+    if (script !== undefined) {
+      assertScriptNarrationConsistent(script, "narration_tts");
+      if ((script as { narrationText: string }).narrationText !== str(ctx, "narrationText")) {
+        throw new Error("narration_tts: flat narrationText differs from the bound script");
+      }
+    }
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // Unknown providers must fail before spend; they must never inherit the

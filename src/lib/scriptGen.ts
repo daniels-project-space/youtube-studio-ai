@@ -9,6 +9,7 @@ import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/gol
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { assembleScriptNarration } from "@/engine/scriptNarration";
 import {
   channelBannedWordsDirective,
   findChannelBannedWords,
@@ -362,10 +363,7 @@ function cleanHeading(h: string): string {
 }
 
 function assemble(hook: string, sections: ScriptSection[]): string {
-  return [hook, ...sections.map((s) => s.narration)]
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .join("\n\n");
+  return assembleScriptNarration(hook, sections);
 }
 
 // CRAFT_RULES targets <15-word sentences; ~14 is the observed mean.
