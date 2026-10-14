@@ -4312,31 +4312,41 @@ export function createCaptionsBlock(writeObject: typeof putObject = putObject): 
     consumes: ["narrationDurationSec", "videoDurationSec"],
     produces: ["captionsKey", "chaptersText"],
     run: async (ctx) => {
-      const introSec = Number(ctx.store["introSec"] ?? 0);
       const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
+      const masterDurationSec = Number(ctx.store["videoDurationSec"] ?? 0);
       const script = ctx.store["script"] as
         | { sections?: { heading?: string; text?: string; narration?: string }[] }
         | undefined;
       const sections = script?.sections ?? [];
+      const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
+      const hasNarration = narrationSec > 0 || Boolean(capTimings?.length);
+      const narrationStartSec = hasNarration
+        ? resolveFinalMasterNarrationStartSec({
+            narrationStartSec: ctx.store["narrationStartSec"],
+            introApplied: ctx.store["introApplied"],
+            introSec: ctx.store["introSec"],
+            finalMasterDurationSec: masterDurationSec,
+            productionQa: ctx.params["qaProfile"] !== "draft",
+          }).startSec
+        : 0;
 
-      // Chapters: derived from script sections + narration timing + intro offset.
+      // Chapters use the same resolved narration-to-master clock as final QA.
       // No external dependency — works today (lands in the video description).
-      const chaptersText = buildChapters(sections, narrationSec, introSec);
+      const chaptersText = buildChapters(sections, narrationSec, narrationStartSec);
       if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
 
       // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
-      // we already produced in narration_tts (chunked to short cues, shifted by the
-      // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
+      // produced in narration_tts, shifted onto the released master's resolved clock.
+      // No more re-transcribing our OWN TTS audio via AssemblyAI (an
       // external poll-until-done service that could time out) — we already know the
       // exact words and their timing. No external dependency, instant, never flaky.
-      const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
       if (!capTimings?.length) {
         ctx.log("captions: no sentenceTimings — chapters only");
         return { chaptersText };
       }
       const fitted = captionCuesWithinMaster(
-        captionCuesFromTimings(capTimings, introSec),
-        Number(ctx.store["videoDurationSec"] ?? 0),
+        captionCuesFromTimings(capTimings, narrationStartSec),
+        masterDurationSec,
       );
       const cues = fitted.cues;
       if (fitted.overrunSec > 0) {

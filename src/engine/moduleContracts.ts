@@ -727,7 +727,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // No chapterPlan. It is read by assembly, inserts and the retention
     // analyst; captions builds its chapter list from the script's own sections
     // and never touched it. Found by scripts/audit-inert-consumes.ts.
-    optionalConsumes: ["script", "sentenceTimings", "introSec"],
+    optionalConsumes: ["script", "sentenceTimings", "introSec", "introApplied", "narrationStartSec"],
     optionalProduces: ["captionsKey"],
   }),
   qa_visual: contract(["master.quality_passed"], {

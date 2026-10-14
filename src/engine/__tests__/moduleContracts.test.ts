@@ -202,6 +202,12 @@ function contractInputDeclarationsAreUnambiguous(): void {
     [],
     "every module must declare each input as required or optional, never both",
   );
+  for (const key of ["introApplied", "narrationStartSec"]) {
+    assert.ok(
+      MODULE_CONTRACTS.captions.optionalConsumes?.includes(key),
+      `captions must declare its optional ${key} clock evidence for runner admission`,
+    );
+  }
 }
 
 function compileRepresentativeFamilies(): void {
