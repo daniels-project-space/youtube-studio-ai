@@ -68,6 +68,9 @@ const current = createModuleScorecard({
 });
 assert.deepEqual(compareModuleScorecards(scorecard, current), {
   moduleId: "title_module",
+  oracleScoreDelta: null,
+  falsePassesDelta: null,
+  falseRejectsDelta: null,
   wallTimeMs: -30,
   providerCalls: -1,
   inputTokens: -30,
@@ -123,6 +126,9 @@ assert.throws(
 const measuredDelta = compareModuleScorecards(
   createModuleScorecard({
     ...base,
+    oracleScore: 7.2,
+    falsePasses: 3,
+    falseRejects: 2,
     triggerRuns: 2,
     triggerWaits: 3,
     convexReads: 8,
@@ -131,12 +137,20 @@ const measuredDelta = compareModuleScorecards(
   }),
   createModuleScorecard({
     ...base,
+    oracleScore: 8.1,
+    falsePasses: 1,
+    falseRejects: 4,
     triggerRuns: 3,
     triggerWaits: 5,
     convexReads: 13,
     convexWrites: 2,
     convexActions: 3,
   }),
+);
+assert.deepEqual(
+  [measuredDelta.oracleScoreDelta, measuredDelta.falsePassesDelta, measuredDelta.falseRejectsDelta],
+  [0.9, -2, 2],
+  "independent quality-oracle changes must remain visible in module deltas",
 );
 assert.deepEqual(
   [measuredDelta.triggerRuns, measuredDelta.triggerWaits, measuredDelta.convexReads, measuredDelta.convexWrites, measuredDelta.convexActions],

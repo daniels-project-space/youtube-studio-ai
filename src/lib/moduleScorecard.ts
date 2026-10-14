@@ -164,6 +164,9 @@ export function assertModuleScorecard(value: unknown): ModuleScorecard {
 
 export type ModuleScorecardDelta = {
   moduleId: string;
+  oracleScoreDelta: number | null;
+  falsePassesDelta: number | null;
+  falseRejectsDelta: number | null;
   wallTimeMs: number;
   providerCalls: number | null;
   inputTokens: number | null;
@@ -182,6 +185,11 @@ function nullableDelta(baseline: number | null, current: number | null): number 
   return baseline === null || current === null ? null : current - baseline;
 }
 
+function nullableScoreDelta(baseline: number | null, current: number | null): number | null {
+  const delta = nullableDelta(baseline, current);
+  return delta === null ? null : Number(delta.toFixed(6));
+}
+
 /** Compare a current run to an exact same-module baseline without comparing unrelated modules. */
 export function compareModuleScorecards(
   baseline: ModuleScorecard,
@@ -194,6 +202,9 @@ export function compareModuleScorecards(
   }
   return {
     moduleId: current.moduleId,
+    oracleScoreDelta: nullableScoreDelta(baseline.oracleScore, current.oracleScore),
+    falsePassesDelta: nullableDelta(baseline.falsePasses, current.falsePasses),
+    falseRejectsDelta: nullableDelta(baseline.falseRejects, current.falseRejects),
     wallTimeMs: current.wallTimeMs - baseline.wallTimeMs,
     providerCalls: nullableDelta(baseline.providerCalls, current.providerCalls),
     inputTokens: nullableDelta(baseline.inputTokens, current.inputTokens),
