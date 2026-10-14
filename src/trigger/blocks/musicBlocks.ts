@@ -14,6 +14,8 @@ import {
   createChannelMusicProgram,
   ChannelMusicProgramSchema,
   ChannelMusicProviderSchema,
+  musicRoleForRoute,
+  type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
@@ -172,6 +174,25 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
 
 export const musicProgramPlan = createMusicProgramPlanBlock();
 
+export function musicFallbackPromptForRoute(input: {
+  family?: string;
+  contentLaneKey?: string;
+  role?: ChannelMusicRole;
+  topic: string;
+  channelIdentitySeed: string;
+}): string {
+  const family = input.family?.toLowerCase() ?? "";
+  const contentLaneKey = input.contentLaneKey?.toLowerCase() ?? "";
+  const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
+  if (role === "primary_music" && family === "music_loop" && contentLaneKey === "music_loop") {
+    return `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${input.topic}". ` +
+      "mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, " +
+      "calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly";
+  }
+  return `${spreadDefault(input.channelIdentitySeed, FALLBACK_UNDERSCORE_BRIEFS)}, ` +
+    `evoking "${input.topic}", no vocals, no lyrics`;
+}
+
 export const music: Block = {
   id: "music",
   consumes: ["topic"],
@@ -301,13 +322,14 @@ export const music: Block = {
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
     const musicRoute = channelProgramRouteFromContext(ctx);
-    const isLoopFamily = musicRoute?.family === "music_loop";
     const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
-    const lastResort = isLoopFamily
-      ? `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
-        `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
-        `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`
-      : `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
+    const lastResort = musicFallbackPromptForRoute({
+      family: musicRoute?.family,
+      contentLaneKey: musicRoute?.contentLaneKey,
+      role: composerBrief?.musicIntent?.role,
+      topic,
+      channelIdentitySeed: seed,
+    });
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||

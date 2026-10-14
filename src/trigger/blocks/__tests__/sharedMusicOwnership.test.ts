@@ -10,7 +10,7 @@ import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
 import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
-import { music, musicProgramPlan } from "../musicBlocks";
+import { music, musicFallbackPromptForRoute, musicProgramPlan } from "../musicBlocks";
 
 async function main(): Promise<void> {
   for (const moduleName of ["musicBlocks", "blockContext"]) {
@@ -33,6 +33,24 @@ async function main(): Promise<void> {
     "lofi ambient",
     "LoFi must pass its style intent explicitly instead of relying on a shared-module default",
   );
+  const fallbackInput = {
+    family: "music_loop",
+    topic: "Rain over the glasshouse",
+    channelIdentitySeed: "personal-channel",
+  };
+  assert.match(musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop" }), /lofi hip-hop/u);
+  assert.doesNotMatch(
+    musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop", role: "sleep_sound_bed" }),
+    /lofi|boom-bap|vinyl crackle/iu,
+    "an explicit specialized Composer role must also override the family default",
+  );
+  for (const contentLaneKey of ["sleep", "meditation"]) {
+    assert.doesNotMatch(
+      musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey }),
+      /lofi|boom-bap|vinyl crackle/iu,
+      `${contentLaneKey} intent must not inherit the LoFi-only fallback prompt`,
+    );
+  }
   const musicOwnerPaths = lockableModule("music")?.paths ?? [];
   assert.ok(musicOwnerPaths.includes("src/trigger/blocks/blockContext.ts") &&
     musicOwnerPaths.includes("src/trigger/blocks/musicBlocks.ts"),
