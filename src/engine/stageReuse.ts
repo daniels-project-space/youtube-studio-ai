@@ -104,8 +104,11 @@ export function stageInvocationHash(args: StageReuseInvocation): string {
     deferredConsumes: manifest.deferredConsumes });
 }
 
-/** Stable module/input identity for cross-run measurement; unlike reuse keys it omits run scope and artifact IDs. */
-export function stageContentFingerprint(args: StageReuseInvocation): string {
+/** Stable cross-run measurement identities, separate from run-scoped reuse keys. */
+export function stageMeasurementFingerprints(args: StageReuseInvocation): {
+  inputFingerprint: string;
+  configurationFingerprint: string;
+} {
   const { manifest, params, store, inputIdentities, channelId } = args;
   const inputs = Object.fromEntries([...new Set([
     ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
@@ -126,11 +129,16 @@ export function stageContentFingerprint(args: StageReuseInvocation): string {
   const contracts = (record: ModuleManifest["consumes"]) => Object.fromEntries(
     Object.entries(record).map(([key, contract]) => [key, { type: contract.type, version: contract.version }]),
   );
-  return stageReuseHash({ channelIdentity: stageReuseHash(channelId), moduleId: manifest.id, params, inputs,
-    consumes: contracts(manifest.consumes), optionalConsumes: contracts(manifest.optionalConsumes),
-    produces: contracts(manifest.produces), optionalProduces: contracts(manifest.optionalProduces),
-    providerProfiles: manifest.providerProfiles, resumeInputProjections: manifest.resumeInputProjections,
-    deferredConsumes: manifest.deferredConsumes });
+  return {
+    inputFingerprint: stageReuseHash({ channelIdentity: stageReuseHash(channelId), inputs }),
+    configurationFingerprint: stageReuseHash({
+      params,
+      consumes: contracts(manifest.consumes), optionalConsumes: contracts(manifest.optionalConsumes),
+      produces: contracts(manifest.produces), optionalProduces: contracts(manifest.optionalProduces),
+      providerProfiles: manifest.providerProfiles, resumeInputProjections: manifest.resumeInputProjections,
+      deferredConsumes: manifest.deferredConsumes,
+    }),
+  };
 }
 
 /** Cached consumers need no bytes. New execution must understand deferred data. */

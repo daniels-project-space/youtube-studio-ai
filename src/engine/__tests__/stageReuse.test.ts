@@ -3,7 +3,7 @@ import { artifactContract } from "@/engine/artifactSchemas";
 import { manifestFromBlock, type ModuleManifest } from "@/engine/moduleManifest";
 import {
   assertRestoredStageOutputs, assertStageReuseReceipt, sealStageReuseReceipt,
-  stageContentFingerprint, stageInvocationHash, stageReuseHash, type StageReuseInvocation,
+  stageInvocationHash, stageMeasurementFingerprints, stageReuseHash, type StageReuseInvocation,
 } from "@/engine/stageReuse";
 import { StageReuseReceiptSchema } from "@/engine/stageReuseContract";
 import type { ArtifactRef } from "@/engine/types";
@@ -62,7 +62,7 @@ function invocation(): StageReuseInvocation {
 
 const input = invocation();
 const invocationHash = stageInvocationHash(input);
-const contentFingerprint = stageContentFingerprint(input);
+const measurementFingerprints = stageMeasurementFingerprints(input);
 const refs = Object.entries(outputs).map(([key, value]) => ref(key, value, input.manifest.id));
 const receipt = sealStageReuseReceipt(invocationHash, outputs, refs);
 let passed = 0;
@@ -98,12 +98,17 @@ test("cross-run content fingerprint keeps channel identity but ignores run scope
   next.runId = "run-two";
   next.keyPrefix = "owners/other/channels/channel-two/runs/run-two/";
   next.inputRefs = Object.fromEntries(Object.entries(next.inputRefs).map(([key, value]) => [key, { ...value, artifactId: `other:${key}` }]));
-  assert.equal(stageContentFingerprint(next), contentFingerprint);
+  assert.deepEqual(stageMeasurementFingerprints(next), measurementFingerprints);
   next.channelId = "channel-two";
-  assert.notEqual(stageContentFingerprint(next), contentFingerprint);
+  assert.notEqual(stageMeasurementFingerprints(next).inputFingerprint, measurementFingerprints.inputFingerprint);
   next.channelId = "channel-one";
   next.store = { ...next.store, topic: "A different source" };
-  assert.notEqual(stageContentFingerprint(next), contentFingerprint);
+  assert.notEqual(stageMeasurementFingerprints(next).inputFingerprint, measurementFingerprints.inputFingerprint);
+  assert.equal(stageMeasurementFingerprints(next).configurationFingerprint, measurementFingerprints.configurationFingerprint);
+  next.store = invocation().store;
+  next.params = { ...next.params, fps: 24 };
+  assert.equal(stageMeasurementFingerprints(next).inputFingerprint, measurementFingerprints.inputFingerprint);
+  assert.notEqual(stageMeasurementFingerprints(next).configurationFingerprint, measurementFingerprints.configurationFingerprint);
 });
 
 test("JSON omission of undefined and sparse arrays is stable", () => {

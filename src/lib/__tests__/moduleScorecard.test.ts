@@ -13,6 +13,7 @@ const base = {
   outputValid: true,
   moduleVersion: "3.0.0",
   inputFingerprint: "c".repeat(64),
+  configurationFingerprint: "e".repeat(64),
   outputArtifacts: [{
     key: "titleDecision",
     artifactId: `run-scorecard-test:title_module:titleDecision:${"a".repeat(16)}`,
@@ -94,6 +95,7 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   estimatedCostUsd: -0.0023,
   moduleVersionChanged: false,
   inputFingerprintChanged: false,
+  configurationFingerprintChanged: false,
   outputValidityChanged: false,
   outputArtifactsChanged: false,
 });
@@ -179,6 +181,8 @@ assert.equal(compareModuleScorecards(scorecard, changedOutput).outputArtifactsCh
 const changedInputs = createModuleScorecard({ ...base, inputFingerprint: "d".repeat(64), moduleVersion: "4.0.0" });
 assert.equal(compareModuleScorecards(scorecard, changedInputs).inputFingerprintChanged, true);
 assert.equal(compareModuleScorecards(scorecard, changedInputs).moduleVersionChanged, true);
+const changedConfiguration = createModuleScorecard({ ...base, configurationFingerprint: "f".repeat(64) });
+assert.equal(compareModuleScorecards(scorecard, changedConfiguration).configurationFingerprintChanged, true);
 const sameOutputDifferentRun = createModuleScorecard({
   ...base,
   runId: "run-scorecard-other",
