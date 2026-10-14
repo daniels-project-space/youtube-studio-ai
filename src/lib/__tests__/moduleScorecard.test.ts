@@ -57,9 +57,34 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   providerCalls: -1,
   inputTokens: -30,
   outputTokens: -10,
+  triggerRuns: null,
+  triggerWaits: null,
+  convexReads: null,
+  convexWrites: null,
   estimatedCostUsd: -0.0023,
   outputValidityChanged: false,
 });
+const measuredDelta = compareModuleScorecards(
+  createModuleScorecard({
+    ...base,
+    triggerRuns: 2,
+    triggerWaits: 3,
+    convexReads: 8,
+    convexWrites: 1,
+  }),
+  createModuleScorecard({
+    ...base,
+    triggerRuns: 3,
+    triggerWaits: 5,
+    convexReads: 13,
+    convexWrites: 2,
+  }),
+);
+assert.deepEqual(
+  [measuredDelta.triggerRuns, measuredDelta.triggerWaits, measuredDelta.convexReads, measuredDelta.convexWrites],
+  [1, 2, 5, 1],
+  "measured Trigger/Convex consumption must remain visible in module deltas",
+);
 assert.throws(
   () => compareModuleScorecards(scorecard, createModuleScorecard({ ...base, moduleId: "script_module" })),
   /same module/,

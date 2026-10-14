@@ -116,9 +116,17 @@ export type ModuleScorecardDelta = {
   providerCalls: number;
   inputTokens: number;
   outputTokens: number;
+  triggerRuns: number | null;
+  triggerWaits: number | null;
+  convexReads: number | null;
+  convexWrites: number | null;
   estimatedCostUsd: number;
   outputValidityChanged: boolean;
 };
+
+function nullableDelta(baseline: number | null, current: number | null): number | null {
+  return baseline === null || current === null ? null : current - baseline;
+}
 
 /** Compare a current run to an exact same-module baseline without comparing unrelated modules. */
 export function compareModuleScorecards(
@@ -136,6 +144,10 @@ export function compareModuleScorecards(
     providerCalls: current.providerCalls - baseline.providerCalls,
     inputTokens: current.inputTokens - baseline.inputTokens,
     outputTokens: current.outputTokens - baseline.outputTokens,
+    triggerRuns: nullableDelta(baseline.triggerRuns, current.triggerRuns),
+    triggerWaits: nullableDelta(baseline.triggerWaits, current.triggerWaits),
+    convexReads: nullableDelta(baseline.convexReads, current.convexReads),
+    convexWrites: nullableDelta(baseline.convexWrites, current.convexWrites),
     estimatedCostUsd: Number((current.estimatedCostUsd - baseline.estimatedCostUsd).toFixed(6)),
     outputValidityChanged: current.outputValid !== baseline.outputValid,
   };
