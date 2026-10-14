@@ -4,6 +4,10 @@ import { getManifest } from "./registry";
 import { canonicalJson } from "@/lib/canonicalJson";
 import type { PipelineEntry } from "./types";
 import { YuE2SourceConfigSchema } from "./yue2SourceConfig";
+import {
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  YUE2_SCORED_MUSIC_VERSION,
+} from "./musicModuleVersions";
 
 export interface YuE2PipelineSelection {
   musicIntent: MusicArrangementIntent & Required<Pick<MusicArrangementIntent, "playback" | "role" | "requestedDurationSec">>;
@@ -22,7 +26,7 @@ export const YuE2PipelineSelectionSchema = z.object({
 /** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
 export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
   const selected = YuE2PipelineSelectionSchema.parse(input);
-  const musicVersion = "5.0.0-render-engine-yue2-scored-v2", composerVersion = "3.0.0-yue2-score";
+  const musicVersion = YUE2_SCORED_MUSIC_VERSION, composerVersion = "3.0.0-yue2-score";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
   const sourceParams = selected.sourceParams;
@@ -61,7 +65,9 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   }
   for (const [index, version] of versions) {
     const entry = source[index];
-    if (entry.version !== undefined && entry.version !== version) {
+    const canonicalProviderMusicVersion = entry.block === "music" &&
+      entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION;
+    if (entry.version !== undefined && entry.version !== version && !canonicalProviderMusicVersion) {
       throw new Error(`YuE2 selection cannot replace explicitly pinned ${entry.block}@${entry.version}`);
     }
   }

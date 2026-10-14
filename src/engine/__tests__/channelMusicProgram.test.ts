@@ -11,6 +11,8 @@ import {
   music3StructuredCaptionWordCount,
   musicRoleForRoute,
 } from "@/engine/channelMusicProgram";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 const sha = (value: string) => value.repeat(64);
 
@@ -181,6 +183,8 @@ const sleep = createChannelMusicProgram({
   durationSec: 300,
 });
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
+assert.equal(sleep.identity.bpmRange, null,
+  "sleep programs must not retain a contradictory BPM range from channel DNA or composer direction");
 assert.equal(sleep.mix.narrationPriority, false);
 assert.equal(sleep.mix.bodyMusicVol, 1, "sleep sound is a primary listening program, not a ducked narration bed");
 assert.equal(sleep.mix.targetLufs, -20, "sleep sound uses its quieter standalone target by default");
@@ -203,6 +207,17 @@ assert.doesNotMatch(
   "beatless sleep prompts must not simultaneously prescribe a tempo or tonal center, even when supplied by channel DNA/composer direction",
 );
 assert.doesNotMatch(sleep.generation.structuredCaption, /call-and-response|late lift|genuine contrast passage/u);
+const { fingerprint: _sleepFingerprint, ...sleepBody } = sleep;
+const legacySleepBody = {
+  ...sleepBody,
+  identity: { ...sleep.identity, bpmRange: [100, 100] as const },
+};
+const legacySleep = ChannelMusicProgramSchema.parse({
+  ...legacySleepBody,
+  fingerprint: sha256Hex(canonicalJson(legacySleepBody)),
+});
+assert.deepEqual(legacySleep.identity.bpmRange, [100, 100],
+  "retained v1 sleep programs with the former tempo field remain readable during migration");
 const guidedSleep = createChannelMusicProgram({
   channelId: "channel-guided-sleep",
   channelIdentityFingerprint: sha("9"),

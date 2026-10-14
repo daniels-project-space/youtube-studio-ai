@@ -42,6 +42,10 @@ export type ChannelMusicProvider = z.infer<typeof ChannelMusicProviderSchema>;
 
 const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const boundedText = (maximum: number) => z.string().trim().min(1).max(maximum);
+const BpmRangeSchema = z.tuple([
+  z.number().int().min(30).max(300),
+  z.number().int().min(30).max(300),
+]);
 
 const MusicSectionSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/u),
@@ -68,7 +72,7 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     genre: boundedText(160),
     instrumentation: z.array(boundedText(120)).min(1).max(12),
     textures: z.array(boundedText(120)).max(8),
-    bpmRange: z.tuple([z.number().int().min(30).max(300), z.number().int().min(30).max(300)]),
+    bpmRange: z.union([BpmRangeSchema, z.null()]),
     moodArc: boundedText(600),
     exclusions: z.array(boundedText(160)).min(1).max(20),
   }).strict(),
@@ -115,9 +119,12 @@ function validateChannelMusicProgramBody(
   program: ChannelMusicProgramBody,
   issue: z.RefinementCtx,
 ): void {
-  const [minimumBpm, maximumBpm] = program.identity.bpmRange;
-  if (minimumBpm > maximumBpm) {
+  const bpmRange = program.identity.bpmRange;
+  if (bpmRange && bpmRange[0] > bpmRange[1]) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music BPM range is inverted" });
+  }
+  if (program.role !== "sleep_sound_bed" && bpmRange === null) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, message: "metered music roles require an explicit BPM range" });
   }
   const sections = program.generation.sections;
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
@@ -295,7 +302,7 @@ function structuredCaption(input: {
   genre: string;
   instrumentation: readonly string[];
   textures: readonly string[];
-  bpmRange: readonly [number, number];
+  bpmRange: readonly [number, number] | null;
   moodArc: string;
   composerDirection: string;
   sections: readonly z.infer<typeof MusicSectionSchema>[];
@@ -315,7 +322,7 @@ function structuredCaption(input: {
   // keep the audible palette deliberately small.  This gives the model a
   // memorable musical reason for the later section map without replacing the
   // channel-owned identity or adding an unbounded list of instruments.
-  const tempo = Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2);
+  const tempo = input.bpmRange ? Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2) : null;
   // Music3's Global Metadata explicitly calls for a key and scale. Derive it
   // from the stable channel identity, not episode mood, so a changing brief
   // does not make one channel's playlist feel tonally unrelated. This is prompt
@@ -344,11 +351,12 @@ function structuredCaption(input: {
   // identity. The detailed control section retains it for compatible routes.
   const supportingTimbres = input.instrumentation.slice(1);
   const beatlessSleep = input.role === "sleep_sound_bed";
+  if (!beatlessSleep && !input.bpmRange) throw new Error("metered music caption requires a BPM range");
   const globalMetadata = beatlessSleep
     ? `${input.genre}; unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
       `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
-    : `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
+    : `${input.genre}; ${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
       `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
       `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. ` +
@@ -482,11 +490,12 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);
-  const rawBpm = input.bpmRange ?? (role === "sleep_sound_bed" ? [36, 54] : role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
-  const bpmRange: [number, number] = [
+  const rawBpm = role === "sleep_sound_bed" ? undefined :
+    input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
+  const bpmRange: [number, number] | null = rawBpm ? [
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),
     Math.max(30, Math.min(300, Math.floor(rawBpm[1]))),
-  ];
+  ] : null;
   const moodArc = role === "sleep_sound_bed"
     ? defaults.moodArc
     : cleanText(input.moodArc, defaults.moodArc, 600);

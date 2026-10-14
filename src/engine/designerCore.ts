@@ -82,6 +82,7 @@ import {
 import { routeNarrationProvider } from "@/lib/narrationProviderRouting";
 import { resolveVoiceDoctrine as voiceDoctrine } from "@/engine/golden";
 import { musicRoleForRoute } from "./channelMusicProgram";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./musicModuleVersions";
 import {
   compilePipeline,
   completePipelineForPolicy,
@@ -1267,7 +1268,12 @@ export function designPipelineCore(
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
   // manifests. Creative engine choices remain the designer's responsibility.
-  const completed = completePipelineForPolicy(pipeline, {
+  const policyPipeline = options.validateRuntimeRegistry === false && opts.yue2Music !== undefined
+    ? pipeline.map((entry) => entry.block === "music" && entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+      ? { block: entry.block, params: entry.params }
+      : entry)
+    : pipeline;
+  const completed = completePipelineForPolicy(policyPipeline, {
     generationProfile: generationProfileId,
     manifestSource: options.validateRuntimeRegistry === false ? "structural" : "runtime",
   });

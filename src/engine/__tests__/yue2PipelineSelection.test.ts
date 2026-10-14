@@ -67,6 +67,8 @@ try {
   assert.throws(() => selectYuE2Pipeline(baseline.filter(entry => entry.block !== "music"), selection), /exactly one music/);
   assert.throws(() => selectYuE2Pipeline([...baseline, baseline.find(entry => entry.block === "music")!], selection), /exactly one music/);
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief" ? { ...entry, version: "2.0.0-accepted-arrangement" } : entry), selection), /explicitly pinned/);
+  assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "music" ? { ...entry, version: "4.0.0-owner-pinned" } : entry), selection), /explicitly pinned/,
+    "only the canonical provider-backed Music pin may be replaced by explicit YuE2 selection");
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief"
     ? { ...entry, params: { ...entry.params, musicIntent: { ...selection.musicIntent, playback: "once" } } } : entry), selection), /explicit music intent/);
   for (const patch of [{ seed: undefined }, { personalCreatorAcknowledged: false }, { maxCostUsd: 0.01 }, { provider: "suno" }]) {

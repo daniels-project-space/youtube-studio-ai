@@ -2,9 +2,16 @@ import { z } from "zod";
 import { ExecutionError } from "@/engine/executionErrors";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
+import {
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_PROVIDER_OUTPUTS_VERSION,
+} from "@/engine/musicModuleVersions";
 
-export const MUSIC_PROVIDER_OUTPUTS_VERSION = "2.0.0-provider-outputs";
-export const MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION = "2.1.0-provider-outputs-program-bound";
+export {
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_PROVIDER_OUTPUTS_VERSION,
+} from "@/engine/musicModuleVersions";
+
 const receiptKeys = ["musicRuntimeReceiptKey", "musicNativeWavKey"] as const;
 const auditionKeys = ["musicAuditionSourceKey", "musicAuditionWavKey"] as const;
 const nonblank = z.string().refine((value) => value.trim().length > 0, "nonblank output required");
