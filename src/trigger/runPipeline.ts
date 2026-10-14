@@ -208,7 +208,11 @@ import {
 } from "@/lib/narrativeSeriesStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
-import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
+import {
+  createMusicAuditionCheckpoint,
+  createMusicAuditionCheckpointV2,
+  MusicProviderAuditionSourceSchema,
+} from "@/engine/musicAuditionCheckpoint";
 import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
 import { createAutomaticPreflightReceipt } from "@/lib/automaticWorkflow";
 import { createAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
@@ -2320,10 +2324,16 @@ export const runPipelineTask = task({
       // The music block revalidates its bytes/program/receipts before use.
       const preparedWeeklyMusic = seedStore["preparedMusic"];
       requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && entry.version === "3.0.0-yue2-candidate");
-      requiresMusicAuditionCheckpoint = entries.some((entry) =>
-        entry.block === "music" && entry.params?.provider === "minimax_music3" &&
-        preparedWeeklyMusic === undefined && !requiresYuE2AuditionCheckpoint,
-      );
+      requiresMusicAuditionCheckpoint = entries.some((entry) => {
+        if (entry.block !== "music" || requiresYuE2AuditionCheckpoint) return false;
+        const provider = String(entry.params?.provider ?? "");
+        if (!["minimax_music3", "mureka", "suno"].includes(provider)) return false;
+        const preparedProvider = preparedWeeklyMusic && typeof preparedWeeklyMusic === "object"
+          ? String((preparedWeeklyMusic as Record<string, unknown>).provider ?? "") : "";
+        return preparedWeeklyMusic === undefined
+          ? true
+          : preparedProvider === "mureka" || preparedProvider === "suno";
+      });
       const paramsByBlock = snapshotParamsByBlock(entries);
       log(
         `Production compile ${compilation.policyId}@${compilation.policyVersion} ${compilation.fingerprint}: ` +
@@ -2605,16 +2615,37 @@ export const runPipelineTask = task({
         }
         if (isMusicBoundary) {
           const programKey = typeof result.store.channelMusicProgramKey === "string" ? result.store.channelMusicProgramKey : "";
-          const runtimeKey = typeof result.store.musicRuntimeReceiptKey === "string" ? result.store.musicRuntimeReceiptKey : "";
-          const nativeWavKey = typeof result.store.musicNativeWavKey === "string" ? result.store.musicNativeWavKey : "";
-          if (!programKey || !runtimeKey || !nativeWavKey) throw new Error("MiniMax music boundary is missing durable program/runtime/native-WAV outputs");
-          const [programBytes, runtimeBytes] = await Promise.all([getObjectBytes(programKey), getObjectBytes(runtimeKey)]);
-          const checkpoint = createMusicAuditionCheckpoint({
-            ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
-            channelMusicProgramKey: programKey, musicRuntimeReceiptKey: runtimeKey, musicNativeWavKey: nativeWavKey,
-            program: JSON.parse(Buffer.from(programBytes).toString("utf8")),
-            runtimeReceipt: JSON.parse(Buffer.from(runtimeBytes).toString("utf8")),
-          });
+          if (!programKey) throw new Error("music audition boundary is missing its durable program output");
+          const programBytes = await getObjectBytes(programKey);
+          const program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+          const provider = result.store.musicProvider;
+          const checkpoint = await (provider === "minimax_music3"
+            ? (() => {
+              const runtimeKey = typeof result.store.musicRuntimeReceiptKey === "string" ? result.store.musicRuntimeReceiptKey : "";
+              const nativeWavKey = typeof result.store.musicNativeWavKey === "string" ? result.store.musicNativeWavKey : "";
+              if (!runtimeKey || !nativeWavKey) throw new Error("MiniMax music boundary is missing durable runtime/native-WAV outputs");
+              return getObjectBytes(runtimeKey).then(runtimeBytes => createMusicAuditionCheckpoint({
+                ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+                channelMusicProgramKey: programKey, musicRuntimeReceiptKey: runtimeKey, musicNativeWavKey: nativeWavKey,
+                program,
+                runtimeReceipt: JSON.parse(Buffer.from(runtimeBytes).toString("utf8")),
+              }));
+            })()
+            : await (async () => {
+              if (provider !== "mureka" && provider !== "suno") throw new Error("music audition boundary has an unsupported provider");
+              const sourceKey = typeof result.store.musicAuditionSourceKey === "string" ? result.store.musicAuditionSourceKey : "";
+              const musicKey = typeof result.store.musicKey === "string" ? result.store.musicKey : "";
+              if (!sourceKey || !musicKey || typeof result.store.musicAuditionWavKey !== "string") {
+                throw new Error("provider music boundary is missing its durable source/audition outputs");
+              }
+              const sourceBytes = await getObjectBytes(sourceKey);
+              const source = MusicProviderAuditionSourceSchema.parse(JSON.parse(Buffer.from(sourceBytes).toString("utf8")));
+              return createMusicAuditionCheckpointV2({
+                ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+                channelMusicProgramKey: programKey, musicProviderAuditionSourceKey: sourceKey,
+                expectedMusicKey: musicKey, source, program,
+              });
+            })());
           await logSink.flush();
           const created = await convex.mutation(musicAuditionCheckpointsApi.createAwaiting, {
             ownerId, channelId: payload.channelId as Id<"channels">, runId: payload.runId as Id<"runs">,

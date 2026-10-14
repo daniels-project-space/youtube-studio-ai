@@ -5,13 +5,14 @@ import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 
 export const MUSIC_PROVIDER_OUTPUTS_VERSION = "2.0.0-provider-outputs";
 const receiptKeys = ["musicRuntimeReceiptKey", "musicNativeWavKey"] as const;
+const auditionKeys = ["musicAuditionSourceKey", "musicAuditionWavKey"] as const;
 const nonblank = z.string().refine((value) => value.trim().length > 0, "nonblank output required");
 
 export function isMusicReviewStatusCompatible(provider: unknown, status: unknown): boolean {
   if (provider === "minimax_music3") {
     return status === "awaiting-human-audition" || status === "passed-prepared-weekly-audition";
   }
-  if (provider === "mureka" || provider === "suno") return status === "not-required-provider-route";
+  if (provider === "mureka" || provider === "suno") return status === "awaiting-human-audition";
   if (provider === "reuse") return status === "not-required-reused-master";
   return false;
 }
@@ -24,6 +25,8 @@ const output = z.object({
   channelMusicProgramFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   musicRuntimeReceiptKey: nonblank.optional(),
   musicNativeWavKey: nonblank.optional(),
+  musicAuditionSourceKey: nonblank.optional(),
+  musicAuditionWavKey: nonblank.optional(),
   musicQualityReviewStatus: z.enum([
     "not-required-provider-route", "awaiting-human-audition", "passed-prepared-weekly-audition",
   ]),
@@ -33,11 +36,13 @@ const output = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "music review state is incompatible with its provider route" });
   }
   if (value.musicProvider === "minimax_music3") {
-    if (receiptKeys.some((key) => value[key] === undefined)) {
+    if (receiptKeys.some((key) => value[key] === undefined) ||
+        value.musicAuditionSourceKey !== undefined || value.musicAuditionWavKey !== undefined) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "MiniMax requires native/runtime receipts and its audition state" });
     }
-  } else if (receiptKeys.some((key) => value[key] !== undefined)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "provider output cannot claim another provider's receipts" });
+  } else if (receiptKeys.some((key) => value[key] !== undefined) ||
+      value.musicAuditionSourceKey === undefined || value.musicAuditionWavKey === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "provider output requires its own durable audition source and cannot claim MiniMax receipts" });
   }
 });
 
@@ -46,7 +51,7 @@ export function createProviderAwareMusicManifest(legacy: ModuleManifest): Module
   if (legacy.id !== "music") throw new Error("provider-aware music requires the shared music module");
   const produces = { ...legacy.produces };
   const optionalProduces = { ...legacy.optionalProduces };
-  for (const key of receiptKeys) {
+  for (const key of [...receiptKeys, ...auditionKeys]) {
     if (!produces[key]) throw new Error(`shared music has no declared ${key} contract`);
     optionalProduces[key] = produces[key];
     delete produces[key];
@@ -70,7 +75,7 @@ export function createProviderAwareMusicManifest(legacy: ModuleManifest): Module
     }
     // Absent receipts stay absent, rather than becoming empty success evidence.
     return Object.fromEntries(Object.entries(patch).filter(([key, value]) =>
-      !receiptKeys.some((receiptKey) => receiptKey === key) || value !== undefined));
+      ![...receiptKeys, ...auditionKeys].some((optionalKey) => optionalKey === key) || value !== undefined));
   };
   const block = { ...legacy.block, run };
   return {

@@ -5,15 +5,16 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { ChannelMusicProgramSchema, createMusicProgramQualityReceipt } from "@/engine/channelMusicProgram";
 import { measureNativeMusicQuality } from "@/lib/nativeMusicQuality";
 import {
   assertMusicAuditionNativeBytes,
+  AnyMusicAuditionCheckpointSchema,
   createMusicAuditionApproval,
-  MusicAuditionCheckpointSchema,
+  MusicProviderAuditionSourceSchema,
 } from "@/engine/musicAuditionCheckpoint";
 import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
 
@@ -42,7 +43,8 @@ type ReviewResult = {
   checkpoint: Record<string, unknown>;
   review: {
     nativeWavKey: string; durationSec: number; sampleRateHz: number; channels: number; programFingerprint: string;
-    channelMusicProgramKey: string; musicRuntimeReceiptKey: string; checkpointFingerprint: string;
+    channelMusicProgramKey: string; musicRuntimeReceiptKey?: string; musicProviderAuditionSourceKey?: string;
+    sourceMusicKey?: string; checkpointFingerprint: string;
     immutableCheckpoint: unknown;
   };
 };
@@ -88,22 +90,38 @@ export async function GET(request: Request) {
       runId: parsed.data as Id<"runs">,
     } as never) as unknown as ReviewResult | null;
     if (!result) return NextResponse.json({ ok: true, checkpoint: null }, { headers });
-    assertOwnedKey(actor.ownerId, result.review.nativeWavKey, "music audition native WAV");
+    assertOwnedKey(actor.ownerId, result.review.nativeWavKey, "music audition WAV");
     assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
+    const checkpoint = AnyMusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
     const [programBytes, nativeWavBytes] = await Promise.all([
       getObjectBytes(result.review.channelMusicProgramKey),
       getObjectBytes(result.review.nativeWavKey),
     ]);
     const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
     if (program.fingerprint !== result.review.programFingerprint) throw new Error("music audition program fingerprint validation failed");
-    const checkpoint = MusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
     if (checkpoint.ownerId !== actor.ownerId || checkpoint.programFingerprint !== program.fingerprint) {
-      throw new Error("music audition native WAV checkpoint identity mismatch");
+      throw new Error("music audition WAV checkpoint identity mismatch");
     }
-    assertMusicAuditionNativeBytes({ expected: checkpoint.nativeOutput, bytes: nativeWavBytes });
+    const output = checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput : checkpoint.auditionOutput;
+    assertMusicAuditionNativeBytes({ expected: output, bytes: nativeWavBytes });
+    if (checkpoint.version === "music-audition-checkpoint/v2") {
+      if (!result.review.musicProviderAuditionSourceKey || !result.review.sourceMusicKey) throw new Error("provider music audition is missing its source identities");
+      assertOwnedKey(actor.ownerId, result.review.musicProviderAuditionSourceKey, "music audition source receipt");
+      assertOwnedKey(actor.ownerId, result.review.sourceMusicKey, "provider music source");
+      const [sourceReceiptBytes, sourceMusicBytes] = await Promise.all([
+        getObjectBytes(result.review.musicProviderAuditionSourceKey), getObjectBytes(result.review.sourceMusicKey),
+      ]);
+      const source = MusicProviderAuditionSourceSchema.parse(JSON.parse(Buffer.from(sourceReceiptBytes).toString("utf8")));
+      if (source.fingerprint !== checkpoint.musicProviderAuditionSourceFingerprint ||
+          source.sourceMusicKey !== checkpoint.sourceMusicKey ||
+          sha256BytesHex(sourceMusicBytes) !== checkpoint.sourceOutput.contentSha256 ||
+          sourceMusicBytes.byteLength !== checkpoint.sourceOutput.byteLength) {
+        throw new Error("provider music audition source bytes do not match the immutable checkpoint");
+      }
+    }
     const nativeQuality = await measureNativeMusicQuality({
       audio: nativeWavBytes,
-      durationSec: checkpoint.nativeOutput.durationSec,
+      durationSec: output.durationSec,
     });
     const nativeWavUrl = await presignDownload(result.review.nativeWavKey, { expiresIn: 600 });
     return NextResponse.json({
@@ -114,6 +132,7 @@ export async function GET(request: Request) {
         checkpointFingerprint: undefined, immutableCheckpoint: undefined, nativeWavUrl,
         durationSec: result.review.durationSec, sampleRateHz: result.review.sampleRateHz, channels: result.review.channels,
         programFingerprint: result.review.programFingerprint,
+        audioLabel: checkpoint.version === "music-audition-checkpoint/v2" ? `Owner review: ${checkpoint.provider} master` : "Native worker WAV",
         nativeQuality,
         sections: program.generation.sections.map((section) => ({ id: section.id, label: section.label, instruction: section.instruction })),
       },
@@ -136,44 +155,58 @@ export async function POST(request: Request) {
         ownerId: actor.ownerId, runId: submission.runId as Id<"runs">,
       } as never));
       if (String(result.checkpoint.id ?? "") !== submission.checkpointId) throw new Error("music audition approval checkpoint/run mismatch");
-      const checkpoint = MusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
+      const checkpoint = AnyMusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
       if (checkpoint.ownerId !== actor.ownerId || checkpoint.runId !== submission.runId) {
         throw new Error("music audition approval ownership/run mismatch");
       }
-      assertOwnedKey(actor.ownerId, checkpoint.musicNativeWavKey, "music audition native WAV");
+      const output = checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput : checkpoint.auditionOutput;
+      const wavKey = checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.musicNativeWavKey : checkpoint.auditionWavKey;
+      assertOwnedKey(actor.ownerId, wavKey, "music audition WAV");
       assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
-      assertOwnedKey(actor.ownerId, result.review.musicRuntimeReceiptKey, "music audition runtime receipt");
-      const [programBytes, runtimeBytes, nativeWavBytes] = await Promise.all([
+      const [programBytes, auditionWavBytes] = await Promise.all([
         getObjectBytes(result.review.channelMusicProgramKey),
-        getObjectBytes(result.review.musicRuntimeReceiptKey),
-        getObjectBytes(checkpoint.musicNativeWavKey),
+        getObjectBytes(wavKey),
       ]);
       const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
-      const runtime = JSON.parse(Buffer.from(runtimeBytes).toString("utf8")) as Record<string, unknown>;
-      if (program.fingerprint !== checkpoint.programFingerprint) {
-        throw new Error("music audition frozen program/runtime identity mismatch");
-      }
-      const admittedRuntime = assertPinnedMiniMaxMusic3Receipt(runtime, program);
-      if (
-        admittedRuntime.programFingerprint !== checkpoint.programFingerprint ||
-        admittedRuntime.output.contentSha256 !== checkpoint.nativeOutput.contentSha256 ||
-        admittedRuntime.output.byteLength !== checkpoint.nativeOutput.byteLength ||
-        admittedRuntime.durationSec !== checkpoint.nativeOutput.durationSec ||
-        admittedRuntime.output.sampleRateHz !== checkpoint.nativeOutput.sampleRateHz ||
-        admittedRuntime.output.channels !== checkpoint.nativeOutput.channels ||
-        admittedRuntime.output.codec !== checkpoint.nativeOutput.codec
-      ) {
-        throw new Error("music audition frozen program/runtime identity mismatch");
+      if (program.fingerprint !== checkpoint.programFingerprint) throw new Error("music audition frozen program identity mismatch");
+      if (checkpoint.version === "music-audition-checkpoint/v1") {
+        if (!result.review.musicRuntimeReceiptKey) throw new Error("MiniMax audition is missing its runtime receipt");
+        assertOwnedKey(actor.ownerId, result.review.musicRuntimeReceiptKey, "music audition runtime receipt");
+        const runtimeBytes = await getObjectBytes(result.review.musicRuntimeReceiptKey);
+        const runtime = JSON.parse(Buffer.from(runtimeBytes).toString("utf8")) as Record<string, unknown>;
+        const admittedRuntime = assertPinnedMiniMaxMusic3Receipt(runtime, program);
+        if (admittedRuntime.programFingerprint !== checkpoint.programFingerprint ||
+            admittedRuntime.output.contentSha256 !== output.contentSha256 ||
+            admittedRuntime.output.byteLength !== output.byteLength ||
+            admittedRuntime.durationSec !== output.durationSec ||
+            admittedRuntime.output.sampleRateHz !== output.sampleRateHz ||
+            admittedRuntime.output.channels !== output.channels || admittedRuntime.output.codec !== output.codec) {
+          throw new Error("music audition frozen program/runtime identity mismatch");
+        }
+      } else {
+        if (!result.review.musicProviderAuditionSourceKey || !result.review.sourceMusicKey) throw new Error("provider music audition is missing its source identities");
+        assertOwnedKey(actor.ownerId, result.review.musicProviderAuditionSourceKey, "music audition source receipt");
+        assertOwnedKey(actor.ownerId, result.review.sourceMusicKey, "provider music source");
+        const [sourceReceiptBytes, sourceMusicBytes] = await Promise.all([
+          getObjectBytes(result.review.musicProviderAuditionSourceKey), getObjectBytes(result.review.sourceMusicKey),
+        ]);
+        const source = MusicProviderAuditionSourceSchema.parse(JSON.parse(Buffer.from(sourceReceiptBytes).toString("utf8")));
+        if (source.fingerprint !== checkpoint.musicProviderAuditionSourceFingerprint ||
+            source.sourceMusicKey !== checkpoint.sourceMusicKey ||
+            sha256BytesHex(sourceMusicBytes) !== checkpoint.sourceOutput.contentSha256 ||
+            sourceMusicBytes.byteLength !== checkpoint.sourceOutput.byteLength) {
+          throw new Error("provider music source bytes do not match the immutable audition checkpoint");
+        }
       }
       // Never let an owner review approve a missing, overwritten, or different
       // object merely because its R2 key and worker metadata look plausible.
-      assertMusicAuditionNativeBytes({ expected: checkpoint.nativeOutput, bytes: nativeWavBytes });
+      assertMusicAuditionNativeBytes({ expected: output, bytes: auditionWavBytes });
       // Technical measurements come from these exact retained bytes. The
       // browser only supplies human judgement for arrangement and emotional
       // quality; it cannot type metrics for a more convenient take.
       const nativeQuality = await measureNativeMusicQuality({
-        audio: nativeWavBytes,
-        durationSec: checkpoint.nativeOutput.durationSec,
+        audio: auditionWavBytes,
+        durationSec: output.durationSec,
       });
       const reviewReceiptFingerprint = sha256Hex(canonicalJson({
         version: "music-audition-human-review/v1", checkpointFingerprint: checkpoint.checkpointFingerprint,
@@ -183,9 +216,9 @@ export async function POST(request: Request) {
       const qualityReceipt = createMusicProgramQualityReceipt({
         program,
         output: {
-          contentSha256: checkpoint.nativeOutput.contentSha256, byteLength: checkpoint.nativeOutput.byteLength,
-          durationSec: checkpoint.nativeOutput.durationSec, sampleRate: checkpoint.nativeOutput.sampleRateHz,
-          channels: checkpoint.nativeOutput.channels, codec: checkpoint.nativeOutput.codec,
+          contentSha256: output.contentSha256, byteLength: output.byteLength,
+          durationSec: output.durationSec, sampleRate: output.sampleRateHz,
+          channels: output.channels, codec: output.codec,
         },
         measurements: nativeQuality.measurements,
         sectionReviews: submission.sectionReviews,

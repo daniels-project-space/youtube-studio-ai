@@ -13,7 +13,7 @@ type Desk = {
   ok: boolean;
   error?: string;
   checkpoint?: { id?: string; decision: "awaiting" | "approved" | "rejected" | "blocked"; blockedReason?: string } | null;
-  review?: { nativeWavUrl?: string; durationSec?: number; sampleRateHz?: number; channels?: number; nativeQuality?: NativeQuality; sections?: Section[] };
+  review?: { nativeWavUrl?: string; audioLabel?: string; durationSec?: number; sampleRateHz?: number; channels?: number; nativeQuality?: NativeQuality; sections?: Section[] };
 };
 
 const measurementKeys = [
@@ -96,7 +96,10 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       <span style={{ color: data.checkpoint.decision === "approved" ? "var(--color-success)" : "var(--color-amber)", fontSize: "0.78rem" }}>{data.checkpoint.decision}</span>
     </div>
     <p style={{ color: "var(--color-muted)", margin: "0.35rem 0 0", fontSize: "0.88rem" }}>Native worker WAV · {data.review?.sampleRateHz ? `${data.review.sampleRateHz / 1000} kHz` : "format loading"} · {data.review?.channels ?? 2} channels</p>
-    {data.review?.nativeWavUrl && <audio controls preload="metadata" src={data.review.nativeWavUrl} style={{ width: "100%", marginTop: "0.75rem" }} />}
+    {data.review?.nativeWavUrl && <>
+      <p>{data.review.audioLabel ?? "Native worker WAV"}</p>
+      <audio controls preload="metadata" src={data.review.nativeWavUrl} style={{ width: "100%", marginTop: "0.75rem" }} />
+    </>}
     {data.error && <p style={{ color: "var(--color-failed)", marginBottom: 0 }}>{data.error}</p>}
     {data.checkpoint.decision === "awaiting" && <>
       <details style={{ marginTop: "0.8rem" }}>

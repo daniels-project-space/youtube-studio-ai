@@ -30,8 +30,10 @@ const base = {
   musicUrl: "https://synthetic.invalid/music.mp3",
   channelMusicProgramKey: "owner/fixture/runs/music/program.json",
   channelMusicProgramFingerprint: "a".repeat(64),
-  musicQualityReviewStatus: "not-required-provider-route",
+  musicQualityReviewStatus: "awaiting-human-audition",
   musicRuntimeReceiptKey: undefined, musicNativeWavKey: undefined,
+  musicAuditionSourceKey: "owner/fixture/runs/music/audio/music-provider-audition.json",
+  musicAuditionWavKey: "owner/fixture/runs/music/audio/music-audition.wav",
   [COST_PATCH_KEY]: 0.03,
 };
 const context: StageContext = {
@@ -40,8 +42,8 @@ const context: StageContext = {
 };
 
 async function main() {
-  assert.equal(isMusicReviewStatusCompatible("mureka", "not-required-provider-route"), true);
-  assert.equal(isMusicReviewStatusCompatible("suno", "awaiting-human-audition"), false);
+  assert.equal(isMusicReviewStatusCompatible("mureka", "not-required-provider-route"), false);
+  assert.equal(isMusicReviewStatusCompatible("suno", "awaiting-human-audition"), true);
   assert.equal(isMusicReviewStatusCompatible("minimax_music3", "awaiting-human-audition"), true);
   assert.equal(isMusicReviewStatusCompatible("minimax_music3", "not-required-provider-route"), false);
   assert.equal(isMusicReviewStatusCompatible("reuse", "not-required-reused-master"), true);
@@ -79,8 +81,11 @@ async function main() {
       assert.ok(!("musicRuntimeReceiptKey" in patch));
       assert.ok(!("musicNativeWavKey" in patch));
     }
+    const { musicAuditionSourceKey, musicAuditionWavKey, ...minimaxBase } = base;
+    void musicAuditionSourceKey;
+    void musicAuditionWavKey;
     for (const status of ["awaiting-human-audition", "passed-prepared-weekly-audition"]) {
-      response = { ...base, musicProvider: "minimax_music3", musicQualityReviewStatus: status,
+      response = { ...minimaxBase, musicProvider: "minimax_music3", musicQualityReviewStatus: status,
         musicRuntimeReceiptKey: "owner/fixture/runtime.json", musicNativeWavKey: "owner/fixture/native.wav" };
       assert.deepEqual(await selected.execute(context), response, "MiniMax evidence and pending/approved state stay intact");
     }

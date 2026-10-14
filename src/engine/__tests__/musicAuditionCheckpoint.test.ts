@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import {
   assertMusicAuditionNativeBytes,
+  createMusicAuditionCheckpointV2,
   createMusicAuditionApproval,
   createMusicAuditionCheckpoint,
+  createMusicProviderAuditionSource,
+  AnyMusicAuditionCheckpointSchema,
   MusicAuditionApprovalSchema,
   MusicAuditionCheckpointSchema,
 } from "@/engine/musicAuditionCheckpoint";
@@ -54,6 +57,33 @@ const checkpoint = createMusicAuditionCheckpoint({
 });
 assert.equal(checkpoint.programFingerprint, program.fingerprint);
 assert.throws(() => MusicAuditionCheckpointSchema.parse({ ...checkpoint, musicNativeWavKey: "owner/owner-a/runs/run-a/audio/not-the-native.wav" }), /content-addressed/);
+const providerProgram = createChannelMusicProgram({
+  channelId: "channel-a", channelIdentityFingerprint: "a".repeat(64), family: "music_loop",
+  contentLaneKey: "music_loop", topic: "Rain behind a neon window", providerPreference: "mureka", durationSec: 20,
+});
+const sourceMusicBytes = new Uint8Array(2_000).fill(7);
+const providerWavBytes = new Uint8Array(44 + 64_000).fill(8);
+const providerWavDigest = sha256BytesHex(providerWavBytes);
+const providerSource = createMusicProviderAuditionSource({
+  ownerId: "owner-a", channelId: "channel-a", runId: "run-provider", provider: "mureka", program: providerProgram,
+  sourceMusicKey: "owner/owner-a/runs/run-provider/audio/music.mp3", sourceBytes: sourceMusicBytes,
+  durationSec: 10, auditionWavKey: `owner/owner-a/runs/run-provider/audio/music-audition-${providerWavDigest}.wav`,
+  auditionWavBytes: providerWavBytes,
+});
+const providerCheckpoint = createMusicAuditionCheckpointV2({
+  ownerId: "owner-a", channelId: "channel-a", runId: "run-provider", invocationSha256: "d".repeat(64),
+  channelMusicProgramKey: "owner/owner-a/runs/run-provider/audio/channel-music-program.json",
+  musicProviderAuditionSourceKey: `owner/owner-a/runs/run-provider/audio/music-provider-audition-${providerSource.fingerprint}.json`,
+  expectedMusicKey: providerSource.sourceMusicKey, source: providerSource, program: providerProgram,
+});
+assert.equal(providerCheckpoint.provider, "mureka");
+assert.equal(AnyMusicAuditionCheckpointSchema.parse(providerCheckpoint).checkpointFingerprint, providerCheckpoint.checkpointFingerprint);
+assert.throws(() => createMusicAuditionCheckpointV2({
+  ownerId: "owner-a", channelId: "channel-a", runId: "run-provider", invocationSha256: "d".repeat(64),
+  channelMusicProgramKey: "owner/owner-a/runs/run-provider/audio/channel-music-program.json",
+  musicProviderAuditionSourceKey: `owner/owner-a/runs/run-provider/audio/music-provider-audition-${providerSource.fingerprint}.json`,
+  expectedMusicKey: "owner/owner-a/runs/run-provider/audio/substituted.mp3", source: providerSource, program: providerProgram,
+}), /frozen run\/program/u);
 const runtimeOutput = {
   contentSha256: checkpoint.nativeOutput.contentSha256,
   byteLength: checkpoint.nativeOutput.byteLength,

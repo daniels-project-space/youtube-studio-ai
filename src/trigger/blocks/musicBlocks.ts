@@ -17,7 +17,10 @@ import {
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
-import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
+import {
+  assertMusicAuditionNativeBytes,
+  createMusicProviderAuditionSource,
+} from "@/engine/musicAuditionCheckpoint";
 import {
   generateMureka,
   generateSuno,
@@ -38,7 +41,7 @@ import {
   measureNativeMusicQuality,
   type NativeMusicQualityAnalysis,
 } from "@/lib/nativeMusicQuality";
-import { probe, crossfadeConcatAudio, masterAudioTransparentGain } from "@/lib/ffmpeg";
+import { decodeMusicAuditionPcmWav, probe, crossfadeConcatAudio, masterAudioTransparentGain } from "@/lib/ffmpeg";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -57,6 +60,51 @@ import {
 // existing cost-carrying terminal catch instead of the whole-task timeout.
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
 const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+
+async function retainProviderMusicAuditionSource(input: {
+  ctx: StageContext;
+  provider: "mureka" | "suno";
+  program: ChannelMusicProgram;
+  musicKey: string;
+  sourcePath: string;
+  sourceBytes: Uint8Array;
+  durationSec: number;
+}): Promise<{ musicAuditionSourceKey: string; musicAuditionWavKey: string }> {
+  const directory = await makeRunTempDir(input.ctx.runId);
+  const wavPath = join(directory, "provider-music-audition.wav");
+  await decodeMusicAuditionPcmWav(input.sourcePath, wavPath, input.durationSec);
+  const auditionWavBytes = await readBytes(wavPath);
+  const auditionWavSha256 = sha256BytesHex(auditionWavBytes);
+  const audioPrefix = `${input.ctx.keyPrefix}runs/${input.ctx.runId}/audio/`;
+  const musicAuditionWavKey = `${audioPrefix}music-audition-${auditionWavSha256}.wav`;
+  const source = createMusicProviderAuditionSource({
+    ownerId: input.ctx.ownerId,
+    channelId: String(input.ctx.channelId),
+    runId: input.ctx.runId,
+    provider: input.provider,
+    program: input.program,
+    sourceMusicKey: input.musicKey,
+    sourceBytes: input.sourceBytes,
+    durationSec: input.durationSec,
+    auditionWavKey: musicAuditionWavKey,
+    auditionWavBytes,
+  });
+  const musicAuditionSourceKey = `${audioPrefix}music-provider-audition-${source.fingerprint}.json`;
+  await Promise.all([
+    putObject(musicAuditionWavKey, auditionWavBytes, { contentType: "audio/wav" }),
+    putObject(musicAuditionSourceKey, Buffer.from(JSON.stringify(source)), { contentType: "application/json" }),
+  ]);
+  await recordAsset(input.ctx, "music_provider_audition_source", musicAuditionSourceKey, {
+    provider: input.provider,
+    sourceMusicKey: input.musicKey,
+    sourceContentSha256: source.sourceOutput.contentSha256,
+    auditionWavKey: musicAuditionWavKey,
+    auditionContentSha256: source.auditionOutput.contentSha256,
+    programFingerprint: input.program.fingerprint,
+    spendUsd: 0,
+  });
+  return { musicAuditionSourceKey, musicAuditionWavKey };
+}
 
 /** Seals one episode's audio identity and the visual intent used by loop consumers. */
 export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
@@ -128,6 +176,8 @@ export const music: Block = {
     "channelMusicProgramFingerprint",
     "musicRuntimeReceiptKey",
     "musicNativeWavKey",
+    "musicAuditionSourceKey",
+    "musicAuditionWavKey",
     "musicQualityReviewStatus",
   ],
   paid: true,
@@ -349,6 +399,8 @@ export const music: Block = {
 
       let musicRuntimeReceiptKey: string | undefined;
       let musicNativeWavKey: string | undefined;
+      let musicAuditionSourceKey: string | undefined;
+      let musicAuditionWavKey: string | undefined;
       if (preparedMusic.provider === "minimax_music3") {
         const minimax = preparedMusic.minimax;
         if (!minimax) {
@@ -403,6 +455,18 @@ export const music: Block = {
           reviewBinding: "native-worker-wav",
         });
         musicRuntimeReceiptKey = minimax.runtimeReceiptKey;
+      } else {
+        const retained = await retainProviderMusicAuditionSource({
+          ctx,
+          provider: preparedMusic.provider,
+          program: channelMusicProgram,
+          musicKey: preparedMusic.musicKey,
+          sourcePath: preparedMasterPath,
+          sourceBytes: masterBytes,
+          durationSec: measuredDurationSec,
+        });
+        musicAuditionSourceKey = retained.musicAuditionSourceKey;
+        musicAuditionWavKey = retained.musicAuditionWavKey;
       }
       let musicUrl: string;
       try {
@@ -420,7 +484,7 @@ export const music: Block = {
         runtimeReceiptKey: musicRuntimeReceiptKey,
         trackHumanAuditionStatus: preparedMusic.provider === "minimax_music3"
           ? "passed-prepared-weekly-review"
-          : "not-required-provider-route",
+          : "pending_private_draft_review",
       });
       ctx.log(
         `music: consumed prepared weekly ${preparedMusic.provider} master ` +
@@ -434,9 +498,11 @@ export const music: Block = {
         channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
         musicRuntimeReceiptKey,
         musicNativeWavKey,
+        musicAuditionSourceKey,
+        musicAuditionWavKey,
         musicQualityReviewStatus: preparedMusic.provider === "minimax_music3"
           ? "passed-prepared-weekly-audition"
-          : "not-required-provider-route",
+          : "awaiting-human-audition",
         [COST_PATCH_KEY]: 0,
       };
     }
@@ -703,7 +769,27 @@ export const music: Block = {
     local = loopedMusic;
 
     const musicKey = `${ctx.keyPrefix}runs/${ctx.runId}/music.mp3`;
-    await putObject(musicKey, await readBytes(local), { contentType: "audio/mpeg" });
+    const musicBytes = await readBytes(local);
+    await putObject(musicKey, musicBytes, { contentType: "audio/mpeg" });
+    let musicAuditionSourceKey: string | undefined;
+    let musicAuditionWavKey: string | undefined;
+    if (usedProvider !== "minimax_music3") {
+      const sourceProbe = await probe(local);
+      if (!sourceProbe.hasAudio || sourceProbe.hasVideo || sourceProbe.durationSec < 6 || sourceProbe.durationSec > 300) {
+        throw new Error("music: mastered provider output is not an auditionable 6–300 second audio-only source");
+      }
+      const retained = await retainProviderMusicAuditionSource({
+        ctx,
+        provider: usedProvider,
+        program: channelMusicProgram,
+        musicKey,
+        sourcePath: local,
+        sourceBytes: musicBytes,
+        durationSec: sourceProbe.durationSec,
+      });
+      musicAuditionSourceKey = retained.musicAuditionSourceKey;
+      musicAuditionWavKey = retained.musicAuditionWavKey;
+    }
     await recordAsset(ctx, "music", musicKey, {
       provider: usedProvider,
       jobId: jobIds.join(","),
@@ -715,9 +801,7 @@ export const music: Block = {
       runtimeReceiptKey: musicRuntimeReceiptKey,
       generatedContentDisclosure: usedProvider === "minimax_music3",
       uiAttribution: minimaxReceipt?.license.uiAttribution,
-      trackHumanAuditionStatus: usedProvider === "minimax_music3"
-        ? "pending_private_draft_review"
-        : "not-required-provider-route",
+      trackHumanAuditionStatus: "pending_private_draft_review",
     });
 
     // Downstream consumers (assemble/timeline_assemble) PREFER musicKey — the
@@ -737,12 +821,12 @@ export const music: Block = {
       channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
       musicRuntimeReceiptKey,
       musicNativeWavKey,
+      musicAuditionSourceKey,
+      musicAuditionWavKey,
       // An operational worker qualification is not an audition of this track.
       // The owner/review flow adds musicQualityReceiptKey after section review;
       // upload_draft rejects a MiniMax release until that proof is present.
-      musicQualityReviewStatus: usedProvider === "minimax_music3"
-        ? "awaiting-human-audition"
-        : "not-required-provider-route",
+      musicQualityReviewStatus: "awaiting-human-audition",
       // Keep spend from successful generations made before provider failover;
       // resetting the selected provider's tracks must not erase paid work.
       [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations + billedAttestedCostUsd,

@@ -4,8 +4,8 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import {
+  AnyMusicAuditionCheckpointSchema,
   createMusicAuditionApproval,
-  MusicAuditionCheckpointSchema,
 } from "../src/engine/musicAuditionCheckpoint";
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
@@ -72,19 +72,24 @@ function musicResumeQueueDeadline(run: { musicAuditionResumeQueueDeadlineAt?: nu
 async function assertMusicStageIntegrity(
   ctx: MusicAuditionCtx,
   runId: Id<"runs">,
-  checkpoint: ReturnType<typeof MusicAuditionCheckpointSchema.parse>,
+  checkpoint: ReturnType<typeof AnyMusicAuditionCheckpointSchema.parse>,
 ): Promise<void> {
   const stages = await ctx.db.query("runStages").withIndex("by_run_block", q => q.eq("runId", runId).eq("block", "music")).take(2);
   if (stages.length !== 1 || stages[0]!.status !== "ok" || !stages[0]!.outputs || typeof stages[0]!.outputs !== "object") {
     throw new Error("music audition continuation requires one completed durable music stage");
   }
   const output = stages[0]!.outputs as Record<string, unknown>;
-  if (
-    output.musicProvider !== "minimax_music3" ||
-    output.channelMusicProgramKey !== checkpoint.channelMusicProgramKey ||
-    output.musicRuntimeReceiptKey !== checkpoint.musicRuntimeReceiptKey ||
-    output.musicNativeWavKey !== checkpoint.musicNativeWavKey
-  ) throw new Error("music audition continuation no longer matches the sealed music stage");
+  const matches = checkpoint.version === "music-audition-checkpoint/v1"
+    ? output.musicProvider === "minimax_music3" &&
+      output.channelMusicProgramKey === checkpoint.channelMusicProgramKey &&
+      output.musicRuntimeReceiptKey === checkpoint.musicRuntimeReceiptKey &&
+      output.musicNativeWavKey === checkpoint.musicNativeWavKey
+    : output.musicProvider === checkpoint.provider &&
+      output.channelMusicProgramKey === checkpoint.channelMusicProgramKey &&
+      output.musicAuditionSourceKey === checkpoint.musicProviderAuditionSourceKey &&
+      output.musicKey === checkpoint.sourceMusicKey &&
+      output.musicAuditionWavKey === checkpoint.auditionWavKey;
+  if (!matches) throw new Error("music audition continuation no longer matches the sealed music stage");
 }
 
 async function blockResume(
@@ -126,23 +131,13 @@ export const createAwaiting = mutation({
       throw new Error("music audition ownership/channel mismatch");
     }
     assertRunExecutionWriteFence(run, { leaseOwner: args.leaseOwner, executionLeaseToken: args.executionLeaseToken }, now);
-    const checkpoint = MusicAuditionCheckpointSchema.parse(args.checkpoint);
+    const checkpoint = AnyMusicAuditionCheckpointSchema.parse(args.checkpoint);
     if (
       checkpoint.ownerId !== args.ownerId || checkpoint.channelId !== String(args.channelId) ||
       checkpoint.runId !== String(args.runId) || checkpoint.invocationSha256 !== args.invocationSha256 ||
       run.pipelineInvocationSha256 !== args.invocationSha256
     ) throw new Error("music audition checkpoint does not match the frozen run");
-    const stages = await ctx.db.query("runStages").withIndex("by_run_block", q => q.eq("runId", args.runId).eq("block", "music")).take(2);
-    if (stages.length !== 1 || stages[0]!.status !== "ok" || !stages[0]!.outputs || typeof stages[0]!.outputs !== "object") {
-      throw new Error("music audition requires one completed durable music stage");
-    }
-    const output = stages[0]!.outputs as Record<string, unknown>;
-    if (
-      output.musicProvider !== "minimax_music3" ||
-      output.channelMusicProgramKey !== checkpoint.channelMusicProgramKey ||
-      output.musicRuntimeReceiptKey !== checkpoint.musicRuntimeReceiptKey ||
-      output.musicNativeWavKey !== checkpoint.musicNativeWavKey
-    ) throw new Error("music audition checkpoint no longer matches the current music stage");
+    await assertMusicStageIntegrity(ctx, args.runId, checkpoint);
     const existing = await ctx.db.query("musicAuditionCheckpoints").withIndex("by_run", q => q.eq("runId", args.runId)).take(2);
     if (existing.length > 1) throw new Error("music audition run has more than one immutable checkpoint");
     if (existing[0]) {
@@ -181,7 +176,7 @@ export const getReviewForRun = query({
     if (rows.length > 1) throw new Error("music audition run has more than one immutable checkpoint");
     const row = rows[0];
     if (!row) return null;
-    const checkpoint = MusicAuditionCheckpointSchema.parse(row.checkpoint);
+    const checkpoint = AnyMusicAuditionCheckpointSchema.parse(row.checkpoint);
     if (
       row.ownerId !== args.ownerId || row.channelId !== run.channelId ||
       run.musicAuditionCheckpointId !== row._id ||
@@ -197,16 +192,18 @@ export const getReviewForRun = query({
       review: {
         // The route converts this server-derived key to a short-lived URL and
         // strips it before returning to the browser.
-        nativeWavKey: checkpoint.musicNativeWavKey,
-        durationSec: checkpoint.nativeOutput.durationSec,
-        sampleRateHz: checkpoint.nativeOutput.sampleRateHz,
-        channels: checkpoint.nativeOutput.channels,
+        nativeWavKey: checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.musicNativeWavKey : checkpoint.auditionWavKey,
+        durationSec: checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput.durationSec : checkpoint.auditionOutput.durationSec,
+        sampleRateHz: checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput.sampleRateHz : checkpoint.auditionOutput.sampleRateHz,
+        channels: checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput.channels : checkpoint.auditionOutput.channels,
         programFingerprint: checkpoint.programFingerprint,
         // These stay in the service-to-service response only. The Next route
         // reloads them to build the receipt and strips every locator before
         // replying to the browser.
         channelMusicProgramKey: checkpoint.channelMusicProgramKey,
-        musicRuntimeReceiptKey: checkpoint.musicRuntimeReceiptKey,
+        musicRuntimeReceiptKey: checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.musicRuntimeReceiptKey : undefined,
+        musicProviderAuditionSourceKey: checkpoint.version === "music-audition-checkpoint/v2" ? checkpoint.musicProviderAuditionSourceKey : undefined,
+        sourceMusicKey: checkpoint.version === "music-audition-checkpoint/v2" ? checkpoint.sourceMusicKey : undefined,
         checkpointFingerprint: checkpoint.checkpointFingerprint,
         // Complete checkpoint is service-only; the Next route parses it before
         // it creates a receipt and never serializes this into browser state.
@@ -236,7 +233,7 @@ export const approve = mutation({
     if (!row || row.ownerId !== args.ownerId) throw new Error("music audition checkpoint not found");
     const run = await ctx.db.get(row.runId);
     if (!run || run.ownerId !== args.ownerId || run.channelId !== row.channelId) throw new Error("music audition run ownership mismatch");
-    const checkpoint = MusicAuditionCheckpointSchema.parse(row.checkpoint);
+    const checkpoint = AnyMusicAuditionCheckpointSchema.parse(row.checkpoint);
     const expectedKey = `owner/${args.ownerId}/runs/${String(row.runId)}/audio/music-quality-${args.qualityReceiptFingerprint}.json`;
     if (args.qualityReceiptKey !== expectedKey || args.qualityReceiptKey.includes("..")) {
       throw new Error("music audition quality receipt key is outside the exact owner/run namespace");
@@ -308,7 +305,7 @@ export async function assertApprovedMusicAuditionResume(
 ): Promise<{ qualityReceiptKey: string }> {
   const run = await ownedRun(ctx, args);
   const row = await ownedCheckpoint(ctx, args.ownerId, args.checkpointId);
-  const checkpoint = MusicAuditionCheckpointSchema.parse(row.checkpoint);
+  const checkpoint = AnyMusicAuditionCheckpointSchema.parse(row.checkpoint);
   if (
     row.channelId !== args.channelId || row.runId !== args.runId || row.decision !== "approved" ||
     checkpoint.checkpointFingerprint !== validFingerprint(args.checkpointFingerprint, "music audition checkpoint fingerprint") ||

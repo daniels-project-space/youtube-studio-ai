@@ -49,9 +49,13 @@ import {
   type ChannelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
 import {
+  ChannelMusicProgramSchema,
   assertMusicProgramQualityReceipt,
 } from "@/engine/channelMusicProgram";
-import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
+import {
+  assertMusicAuditionNativeBytes,
+  MusicProviderAuditionSourceSchema,
+} from "@/engine/musicAuditionCheckpoint";
 import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
@@ -588,7 +592,54 @@ async function assertMusicQualityForPublish(ctx: StageContext): Promise<void> {
   if (!isMusicReviewStatusCompatible(provider, reviewStatus)) {
     throw new Error("upload_draft: music provider review state is missing or invalid — refusing to upload");
   }
-  if (provider !== "minimax_music3") return;
+  if (provider === "reuse") return;
+  if (provider === "mureka" || provider === "suno") {
+    const programKey = str(ctx, "channelMusicProgramKey");
+    const sourceKey = str(ctx, "musicAuditionSourceKey");
+    const auditionWavKey = str(ctx, "musicAuditionWavKey");
+    const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");
+    const musicKey = str(ctx, "musicKey");
+    const [programBytes, sourceBytes, qualityBytes, musicBytes, auditionWavBytes] = await Promise.all([
+      getObjectBytes(programKey), getObjectBytes(sourceKey), getObjectBytes(qualityReceiptKey),
+      getObjectBytes(musicKey), getObjectBytes(auditionWavKey),
+    ]);
+    let program: unknown;
+    let sourceValue: unknown;
+    let qualityValue: unknown;
+    try {
+      program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+      sourceValue = JSON.parse(Buffer.from(sourceBytes).toString("utf8"));
+      qualityValue = JSON.parse(Buffer.from(qualityBytes).toString("utf8"));
+    } catch (error) {
+      throw new Error(`upload_draft: provider music review evidence is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const admittedProgram = ChannelMusicProgramSchema.parse(program);
+    const source = MusicProviderAuditionSourceSchema.parse(sourceValue);
+    const quality = assertMusicProgramQualityReceipt({ program: admittedProgram, receipt: qualityValue });
+    if (source.ownerId !== ctx.ownerId || source.channelId !== String(ctx.channelId) || source.runId !== ctx.runId ||
+        source.provider !== provider || source.programFingerprint !== admittedProgram.fingerprint ||
+        source.sourceMusicKey !== musicKey || source.auditionWavKey !== auditionWavKey ||
+        admittedProgram.fingerprint !== str(ctx, "channelMusicProgramFingerprint") ||
+        sha256BytesHex(musicBytes) !== source.sourceOutput.contentSha256 ||
+        musicBytes.byteLength !== source.sourceOutput.byteLength) {
+      throw new Error("upload_draft: provider music review is not bound to the exact mastered source bytes");
+    }
+    assertMusicAuditionNativeBytes({ expected: source.auditionOutput, bytes: auditionWavBytes });
+    if (
+      quality.output.contentSha256 !== source.auditionOutput.contentSha256 ||
+      quality.output.byteLength !== source.auditionOutput.byteLength ||
+      Math.abs(quality.output.durationSec - source.auditionOutput.durationSec) > Math.max(0.1, source.auditionOutput.durationSec * 0.001) ||
+      quality.output.sampleRate !== source.auditionOutput.sampleRateHz ||
+      quality.output.channels !== source.auditionOutput.channels ||
+      quality.output.codec !== source.auditionOutput.codec ||
+      qualityReceiptKey !== `${ctx.keyPrefix}runs/${ctx.runId}/audio/music-quality-${quality.fingerprint}.json`
+    ) {
+      throw new Error("upload_draft: provider music quality receipt does not match the auditioned master");
+    }
+    ctx.log(`upload_draft: admitted byte-bound ${provider} owner audition receipt ${quality.fingerprint.slice(0, 12)}`);
+    return;
+  }
+  if (provider !== "minimax_music3") throw new Error("upload_draft: unsupported music provider; refusing release");
   const programKey = str(ctx, "channelMusicProgramKey");
   const runtimeReceiptKey = str(ctx, "musicRuntimeReceiptKey");
   const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");
