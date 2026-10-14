@@ -5,8 +5,10 @@ import { _resetBlocks, registerAllBlocks } from "@/engine/blocks";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { all, getManifest, require_ } from "@/engine/registry";
+import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
 import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
 import { music, musicProgramPlan } from "../musicBlocks";
 
@@ -47,6 +49,23 @@ async function main(): Promise<void> {
     assert.equal(require_("music_program_plan"), musicProgramPlan,
       "the shared Music module must own the program planner registered into LoFi pipelines");
     assert.equal(getManifest("music")?.block, music);
+    const plannedMusicEntry = LOFI_PIPELINE.find((entry) => entry.block === "music");
+    assert.equal(plannedMusicEntry?.version, MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+      "canonical Lo-Fi must select the music module contract that requires its sealed plan");
+    const plannedMusicManifest = getManifest("music", MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION)!;
+    assert.ok(plannedMusicManifest.consumes.musicProgramPlan);
+    assert.equal(plannedMusicManifest.optionalConsumes.musicProgramPlan, undefined);
+    assert.ok(plannedMusicManifest.requiredCapabilities.includes("music.program.sealed"));
+    assert.deepEqual(plannedMusicManifest.block.consumes, ["topic", "musicProgramPlan"]);
+    assert.doesNotThrow(() => validatePipeline([
+      { block: "music_program_plan" },
+      { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
+    ], ["topic"]), "the sealed music planner must satisfy the shared generator contract");
+    assert.throws(() => validatePipeline([
+      { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
+    ], ["topic"]), /requires upstream capability "music\.program\.sealed"/);
+    assert.doesNotThrow(() => validatePipeline([{ block: "music" }], ["topic"]),
+      "the legacy shared music contract must remain usable without a planner");
     assert.equal(all().filter((block) => block.id === "music").length, 1);
     assert.equal(music.paid, true);
     assert.deepEqual(music.consumes, ["topic"]);

@@ -4,6 +4,7 @@ import type { ModuleManifest } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 
 export const MUSIC_PROVIDER_OUTPUTS_VERSION = "2.0.0-provider-outputs";
+export const MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION = "2.1.0-provider-outputs-program-bound";
 const receiptKeys = ["musicRuntimeReceiptKey", "musicNativeWavKey"] as const;
 const auditionKeys = ["musicAuditionSourceKey", "musicAuditionWavKey"] as const;
 const nonblank = z.string().refine((value) => value.trim().length > 0, "nonblank output required");
@@ -47,14 +48,29 @@ const output = z.object({
 });
 
 /** Correct the selected provider's ABI without changing the legacy generator. */
-export function createProviderAwareMusicManifest(legacy: ModuleManifest): ModuleManifest {
+export function createProviderAwareMusicManifest(
+  legacy: ModuleManifest,
+  options: { requireMusicProgram?: boolean } = {},
+): ModuleManifest {
   if (legacy.id !== "music") throw new Error("provider-aware music requires the shared music module");
   const produces = { ...legacy.produces };
   const optionalProduces = { ...legacy.optionalProduces };
+  const consumes = { ...legacy.consumes };
+  const optionalConsumes = { ...legacy.optionalConsumes };
+  const requiredCapabilities = [...legacy.requiredCapabilities];
   for (const key of [...receiptKeys, ...auditionKeys]) {
     if (!produces[key]) throw new Error(`shared music has no declared ${key} contract`);
     optionalProduces[key] = produces[key];
     delete produces[key];
+  }
+  if (options.requireMusicProgram) {
+    const programPlan = consumes.musicProgramPlan ?? optionalConsumes.musicProgramPlan;
+    if (!programPlan) throw new Error("provider-aware music requires a declared musicProgramPlan input");
+    consumes.musicProgramPlan = programPlan;
+    delete optionalConsumes.musicProgramPlan;
+    if (!requiredCapabilities.includes("music.program.sealed")) {
+      requiredCapabilities.push("music.program.sealed");
+    }
   }
   const run = async (ctx: StageContext) => {
     // The raw legacy shortcut erases provider/review identity. Verified weekly
@@ -77,9 +93,23 @@ export function createProviderAwareMusicManifest(legacy: ModuleManifest): Module
     return Object.fromEntries(Object.entries(patch).filter(([key, value]) =>
       ![...receiptKeys, ...auditionKeys].some((optionalKey) => optionalKey === key) || value !== undefined));
   };
-  const block = { ...legacy.block, run };
+  const block = {
+    ...legacy.block,
+    ...(options.requireMusicProgram && !legacy.block.consumes.includes("musicProgramPlan")
+      ? { consumes: [...legacy.block.consumes, "musicProgramPlan"] }
+      : {}),
+    run,
+  };
   return {
-    ...legacy, version: MUSIC_PROVIDER_OUTPUTS_VERSION, produces, optionalProduces,
+    ...legacy,
+    version: options.requireMusicProgram
+      ? MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+      : MUSIC_PROVIDER_OUTPUTS_VERSION,
+    requiredCapabilities,
+    consumes,
+    optionalConsumes,
+    produces,
+    optionalProduces,
     certification: {
       status: "contract",
       evidence: "Opt-in provider-specific output admission; generation and existing review requirements are unchanged.",

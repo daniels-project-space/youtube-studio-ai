@@ -78,7 +78,9 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createReviewedMotionClipsManifest(getManifest("loop_clips")!, boundScenePlanner));
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
-  registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));
+  const musicManifest = getManifest("music")!;
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest));
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { requireMusicProgram: true }));
   registerManifestVersion(createYuE2MusicManifest());
   registerManifestVersion(createRenderEngineYuE2MusicManifest());
   // Route-owned, provider-free bridge from a completed serialized Topic Select

@@ -145,6 +145,7 @@ import { createNarrativeShortOrigin, type NarrativeShortOrigin } from "@/lib/nar
 import { z } from "zod";
 import { convex, str, recordAsset, routeSeedForTopicSelection, musicProgramForCurrentRoute } from "./blockContext";
 import { musicProgramPlan } from "./musicBlocks";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./providerAwareMusic";
 
 /**
  * Topic-chunk structured-output schema (validated on both Mastra + REST).
@@ -3521,7 +3522,7 @@ export const LOFI_PIPELINE = [
   { block: "topic_select" },
   { block: "music_program_plan" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
-  { block: "music" },
+  { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },

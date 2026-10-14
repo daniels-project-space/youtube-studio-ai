@@ -37,7 +37,7 @@ const LOFI: PipelineEntry[] = [
   // distilled LTX loop does not condition on it, but the ordering gives the
   // future open-weight audio-to-video benchmark the exact mastered source
   // without re-generating audio or creating a hidden dependency.
-  { block: "music" },
+  { block: "music", version: "2.1.0-provider-outputs-program-bound" },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   // Two independently attested 15s FLF2V segments share the exact reviewed
   // start/end anchor. Their internal join and wraparound seam are measured

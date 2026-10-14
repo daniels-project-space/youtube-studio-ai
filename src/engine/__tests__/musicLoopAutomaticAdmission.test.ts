@@ -9,6 +9,7 @@ import {
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { designPipeline } from "@/engine/designer";
 import { familyProductionReadiness } from "@/engine/families";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "@/trigger/blocks/providerAwareMusic";
 
 function indexOf(pipeline: readonly { block: string }[], block: string): number {
   const index = pipeline.findIndex((entry) => entry.block === block);
@@ -52,6 +53,11 @@ assert.equal(
   design.pipeline[music]?.params?.provider,
   undefined,
   "the downstream music block must consume the provider sealed by music_program_plan instead of pinning a competing default",
+);
+assert.equal(
+  design.pipeline[music]?.version,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  "the automatic music-loop designer must select the strict sealed-program music contract",
 );
 assert.ok(
   scenes < loop && music < loop && loop < assemble && music < assemble && assemble < qa && qa < upload,
