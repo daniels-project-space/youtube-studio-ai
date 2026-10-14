@@ -57,7 +57,7 @@ async function main() {
         styleDNA: { narrative: { scriptStyle: "Specific thesis, counterexample, evidence and payoff.",
           pacing: "Build a careful argument.", hookStyle: "A concrete disputed observation.", delivery: "Measured and precise." } },
         criticDoctrine: "Require a clear midpoint challenge to the opening claim.",
-        script: { hookLoop: "Why did the second seed survive?" } },
+        script: { narrationText: context.store.narrationText, hookLoop: "Why did the second seed survive?" } },
       { ...context.store, channelName: "One Clear Minute", persona: "Busy viewers seeking one useful idea.",
         styleDNA: { narrative: { scriptStyle: "Compact opening, concrete example and concise payoff.",
           pacing: "Concise without rushing.", hookStyle: "One useful question.", delivery: "Direct and friendly." } },

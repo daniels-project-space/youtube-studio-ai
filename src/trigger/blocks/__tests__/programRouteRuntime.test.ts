@@ -468,7 +468,7 @@ async function documentaryScriptsUseOnlyTheReviewedEpisodePlan(): Promise<void> 
         topic: episodePlan.topic,
         documentaryEpisodePlan: episodePlan,
         narrationText: `${episodePlan.narrationText} Unreviewed addition.`,
-        script: generated.script,
+        script: { ...(generated.script as Record<string, unknown>), narrationText: `${episodePlan.narrationText} Unreviewed addition.` },
       },
     })),
     /narration differs from its reviewed documentary source plan/,

@@ -10,6 +10,7 @@ import {
 } from "@/lib/planWeekPreparation";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
+import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
@@ -143,14 +144,23 @@ async function main(): Promise<void> {
 
     const downstream = { block: "metadata", version: DELIVERY_METADATA_VERSION, params: { targetDurationSec: 7200 } };
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([downstream], "test"));
+    const assembly = { block: "timeline_assemble", version: COMPOSER_MIX_ASSEMBLY_VERSION };
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([assembly], "test"));
     for (const bad of [
       { ...downstream, block: "music" }, { ...downstream, version: "2.0.0-unqualified" },
       { ...downstream, params: {} }, { ...downstream, params: { targetDurationSec: "7200" } },
+      { ...assembly, version: "2.0.0-unqualified" },
     ]) assert.throws(() => assertWeeklyPreparationVersionsSupported([bad], "test"), /unsupported explicit/);
     const selected = normalizePlanWeekPreparationManifest({ ...base, execution: {
       ...base.execution, pipeline: [...base.execution.pipeline, downstream],
     } });
     assert.deepEqual(selected.execution.pipeline.at(-1), downstream, "weekly freezing must not erase the downstream version");
+    const withAssembly = normalizePlanWeekPreparationManifest({ ...base, execution: {
+      ...base.execution, pipeline: [...base.execution.pipeline, assembly],
+    } });
+    assert.deepEqual(withAssembly.execution.pipeline.at(-1), assembly, "week-ahead receipts preserve the admitted assembly ABI");
+    assert.notEqual(planWeekPreparationManifestSha256(selected), planWeekPreparationManifestSha256(withAssembly),
+      "prepared receipts remain bound to the exact downstream assembly version");
     for (const changed of [{ ...downstream, version: "1.0.0-migration" },
       { ...downstream, params: { targetDurationSec: 3600 } }]) {
       const altered = normalizePlanWeekPreparationManifest({ ...selected, execution: {
