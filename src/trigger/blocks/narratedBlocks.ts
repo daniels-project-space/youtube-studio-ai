@@ -154,7 +154,7 @@ import {
   createShortsOpeningEvidence,
   planShortsOpeningOnScreenTextEvidence,
 } from "@/engine/shortsOpeningEvidence";
-import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
+import { scriptClosingLineIssue, synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -878,6 +878,8 @@ export const scriptGen: Block = {
             issues: [`Channel language policy forbids: ${bannedMatches.slice(0, 8).join(", ")}`],
           };
         }
+        const closingLineIssue = scriptClosingLineIssue(draft.closingLine);
+        if (closingLineIssue) return { score: 0, pass: false, issues: [closingLineIssue] };
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
           const crit = parseScriptCritique(await creativeTextJson<unknown>({

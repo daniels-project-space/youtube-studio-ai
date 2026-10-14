@@ -320,6 +320,18 @@ export function sanitizeSpoken(text: string, opts?: { keepAudioTags?: boolean })
   );
 }
 
+export function normalizeScriptClosingLine(value: unknown): string {
+  return typeof value === "string" ? sanitizeSpoken(value).replace(/\s+/g, " ").trim() : "";
+}
+
+export function scriptClosingLineIssue(value: unknown): string | undefined {
+  const line = normalizeScriptClosingLine(value);
+  if (!line) return "script closing line is missing";
+  if (Array.from(line).length > 80) return "script closing line exceeds 80 characters";
+  if (line.split(/\s+/u).length > 10) return "script closing line must be 10 or fewer spoken words";
+  return undefined;
+}
+
 /** Strip structure-scaffold prefixes the model leaks into chapter headings. */
 function cleanHeading(h: string): string {
   return h
@@ -491,6 +503,7 @@ async function synthFullScriptOneShot(
           `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
           `a distinct idea in depth (about 250-450 words each). Do NOT pad or stop short.`,
         `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
+        `Also return closing_line: one resonant takeaway of no more than 10 spoken words and 80 characters.`,
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
           `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
         ].filter(Boolean).join("\n\n"),
@@ -561,7 +574,7 @@ async function synthFullScriptOneShot(
       log(`scriptGen one-shot (${model}): trimmed ${before}→${wordCount} words to honor the length ceiling (${overCap})`);
     }
     const hook = spoken(req, crafted.coldOpen);
-    const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const closingLine = normalizeScriptClosingLine(o.closing_line);
     const narrationText = assemble(hook, sections);
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
     return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
@@ -630,8 +643,8 @@ async function synthLongScript(
     const head = await creativeTextJson<{ closing_line?: string }>({
       prompt:
         `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
-        `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
-        `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
+        `THE QUOTE of the episode: one resonant, quotable line (<=10 spoken words and <=80 characters) ` +
+        `that distills its lesson, shown on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
       // MEASURED: this exact prompt returns nothing at 300 or 500 (0/3 each),
       // 2/3 at 700, 3/3 at 1200. Reasoning is mandatory on this route and is
@@ -758,7 +771,7 @@ async function synthLongScript(
   }
 
   const hook = spoken(req, hookRaw);
-  const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
+  const closingLine = normalizeScriptClosingLine(closingRaw);
   const narrationText = assemble(hook, sections);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
   return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
@@ -989,12 +1002,12 @@ export async function synthScript(
       : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences.",
     "ENDING AWARENESS: the video holds a brief OUTRO card after the narration, so the narration must land on a " +
       "single DEFINITIVE closing sentence — a clean, conclusive final thought, never trailing off mid-idea. Then " +
-      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 12 words) that distills " +
+      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 10 spoken words and ≤ 80 characters) that distills " +
       "today's lesson, shown on the outro card as the takeaway the viewer carries.",
     "Return STRICT JSON only:",
     `{
   "sections": [ { "heading": string (short label), "narration": string (the spoken words for this section) } ],
-  "closing_line": string (<= 12 words — THE QUOTE: the episode's lesson distilled, quotable)
+  "closing_line": string (<= 10 spoken words and <= 80 characters — THE QUOTE: the episode's lesson distilled, quotable)
 }`,
     "CRITICAL: the narration is fed directly to a text-to-speech voice. Output PLAIN SPOKEN text ONLY. " +
       "Do NOT use asterisks, slashes, underscores, hashes, backticks, bullet points, markdown, emphasis " +
@@ -1015,8 +1028,7 @@ export async function synthScript(
   };
 
   const rawClosing = (raw as { closing_line?: unknown }).closing_line;
-  const closingLine =
-    typeof rawClosing === "string" ? sanitizeSpoken(rawClosing).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  const closingLine = normalizeScriptClosingLine(rawClosing);
   const hook = spoken(req, crafted.coldOpen);
   const sections: ScriptSection[] = Array.isArray(raw.sections)
     ? raw.sections

@@ -75,7 +75,12 @@ async function main(): Promise<void> {
         const attempt = requests.filter((request) => request.kind === "script").length + 1;
         value = { sections: sections.map((section) => ({ ...section,
           narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
-          closing_line: "Follow the small clue and restore what gives life." };
+          closing_line:
+            currentLabel === "closing-line-exhausted" || (currentLabel === "closing-line-retry" && attempt === 1)
+              ? "Carry the seed through the garden gate to find the hidden stream"
+              : currentLabel === "closing-line-length-retry" && attempt === 1
+                ? "A".repeat(81)
+              : "Follow the warm stone to the truth." };
       } else if (prompt.startsWith("Critique this YouTube narration draft for quality")) {
         kind = "critic";
         assert.equal(body.max_tokens, 2500, "critic budget is not lowered");
@@ -127,6 +132,30 @@ async function main(): Promise<void> {
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
       "deterministic policy catches the first draft before critic spend and retries once");
     assert.doesNotMatch((bannedRetry.result.store.script as Script).narrationText, /forbidden phrase/i);
+
+    const closingLineRetry = await run("closing-line-retry", [{ pass: true, issues: [] }]);
+    assert.equal(closingLineRetry.result.ok, true, closingLineRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "overlong outro copy is rejected before critic spend and gets the existing single retry");
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(
+      "script closing line must be 10 or fewer spoken words",
+    ), "closing-line contract issue reaches the retry prompt");
+    assert.equal((closingLineRetry.result.store.script as Script).closingLine, "Follow the warm stone to the truth.");
+
+    const closingLineLengthRetry = await run("closing-line-length-retry", [{ pass: true, issues: [] }]);
+    assert.equal(closingLineLengthRetry.result.ok, true, closingLineLengthRetry.result.error);
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(
+      "script closing line exceeds 80 characters",
+    ), "the character ceiling independently reaches the retry prompt");
+    assert.equal((closingLineLengthRetry.result.store.script as Script).closingLine, "Follow the warm stone to the truth.");
+
+    const closingLineExhausted = await run("closing-line-exhausted", []);
+    assert.equal(closingLineExhausted.result.ok, false);
+    assert.match(closingLineExhausted.result.error ?? "", /independent narrative critique did not clear the quality bar/);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script"],
+      "an invalid closing line after the one retry never reaches paid critique or publication");
+    assert.equal(Object.hasOwn(closingLineExhausted.result.store, "script"), false);
+    assert.equal(Object.hasOwn(closingLineExhausted.result.store, "narrationText"), false);
 
     const repaired = await run("false-then-true", [{ pass: false, issues: [remediation] }, { pass: true, issues: [] }]);
     assert.equal(repaired.result.ok, true, repaired.result.error);
