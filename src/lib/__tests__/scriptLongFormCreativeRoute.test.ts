@@ -17,12 +17,14 @@ async function main(): Promise<void> {
   const previousFetch = globalThis.fetch;
   const previousKey = process.env.OPENROUTER_API_KEY;
   let calls = 0;
+  let prompt = "";
   try {
     process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
     globalThis.fetch = async (url, init) => {
       assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
       const body = JSON.parse(String(init?.body));
       calls++;
+      prompt = String(body.messages.at(-1)?.content);
       assert.equal(body.model, OPENROUTER_MODELS.creative, "long-form script remains on the pinned Gemini Flash model");
       assert.equal(body.max_tokens, 16_000, "one-shot request must not ask beyond the shared creative-text ceiling");
       assert.match(String(body.messages.at(-1)?.content), /Write a COMPLETE long-form YouTube narration script/, "long script must take the actual one-shot path");
@@ -45,8 +47,12 @@ async function main(): Promise<void> {
       topic: "The bridge's warm final stone",
       maxSeconds: 421,
       precraftedHook: crafted,
+      narrative: { pacing: "Let each idea arrive slowly; leave room between discoveries." },
     });
     assert.equal(calls, 1, "a sufficient one-shot must not buy continuation or chunked calls");
+    assert.match(prompt, /WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER/);
+    assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,
+      "a pacing-only identity must shape generation just as it shapes the channel critic");
     assert.equal(script.sections.length, 3);
     assert.ok(script.narrationText.includes("evidence400"));
     console.log("SCRIPT LONG-FORM CREATIVE ROUTE PASS — actual one-shot uses the pinned model and truthful 16k ceiling");

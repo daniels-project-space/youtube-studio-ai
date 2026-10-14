@@ -369,7 +369,7 @@ function styleGuidance(req: ScriptRequest): string {
   const { style, language, narrative, niche } = req;
   // The channel's OWN narrative DNA outranks the generic per-archetype tone —
   // a finance documentary channel must not inherit the stoic-essay register.
-  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.delivery)
+  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.pacing || narrative.delivery)
     ? "WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER (it overrides any generic tone below): " +
       [
         narrative.scriptStyle ? `script style: ${narrative.scriptStyle}` : "",
