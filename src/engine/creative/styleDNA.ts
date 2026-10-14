@@ -179,6 +179,31 @@ function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string
   return issues;
 }
 
+export function resolveStyleDNAReview(input: {
+  deterministicIssues: readonly string[];
+  criticScore: unknown;
+  criticIssues?: readonly string[];
+}): { score: number; pass: boolean; issues: string[] } {
+  const validCriticScore = typeof input.criticScore === "number" &&
+    Number.isFinite(input.criticScore) && input.criticScore >= 0 && input.criticScore <= 1
+    ? input.criticScore
+    : undefined;
+  const criticResponded = validCriticScore !== undefined;
+  const criticScore = validCriticScore ?? 0.5;
+  const score = input.deterministicIssues.length ? Math.min(criticScore, 0.6) : criticScore;
+  const issues = [...input.deterministicIssues, ...(input.criticIssues ?? [])];
+  if (!criticResponded) {
+    issues.push("independent identity critic unavailable or returned an invalid score");
+  } else if (criticScore < 0.8 && !(input.criticIssues?.length)) {
+    issues.push(`independent identity critic score ${criticScore.toFixed(2)} is below the 0.80 acceptance bar`);
+  }
+  return {
+    score,
+    pass: input.deterministicIssues.length === 0 && criticResponded && criticScore >= 0.8,
+    issues,
+  };
+}
+
 /** Keep the critic anchored to the creator's declared identity, not just research. */
 export function styleDNAIdentityAuditContext(
   input: Pick<StyleDNAInput, "family" | "name" | "programBrief" | "persona" | "styleGrammar">,
@@ -385,7 +410,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       },
       critique: async (raw) => {
         const det = deterministicIssues(raw, narrated, input.name);
-        let llmScore = det.length ? 0.5 : 0.8;
+        let criticScore: unknown;
         let llmIssues: string[] = [];
         try {
           const v = await agentJson({
@@ -402,15 +427,16 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
               `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Penalize vague adjectives, any field copy-pasteable to another channel, and anything not grounded in the research.`,
             ].join("\n\n"),
           });
-          llmScore = Math.max(0, Math.min(1, Number(v.score) || 0));
+          criticScore = v.score;
           llmIssues = clampStrs(v.issues, 6);
         } catch (e) {
           log(`styleDNA: critic failed (${e instanceof Error ? e.message : e}) — deterministic-only this iter`);
         }
-        // Deterministic failures cap the score and block acceptance outright.
-        const score = det.length ? Math.min(llmScore, 0.6) : llmScore;
-        const pass = det.length === 0 && llmScore >= 0.8;
-        return { score, pass, issues: [...det, ...llmIssues] };
+        return resolveStyleDNAReview({
+          deterministicIssues: det,
+          criticScore,
+          criticIssues: llmIssues,
+        });
       },
     });
   } catch (e) {
