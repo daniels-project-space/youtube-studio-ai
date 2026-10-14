@@ -130,6 +130,17 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       topic,
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
+      styleDNA: {
+        audio: {
+          genre: "dusty jazz-hop",
+          bpmRange: [68, 76],
+          instrumentation: ["felt piano", "upright bass"],
+          textures: ["soft vinyl noise"],
+          moodArc: "settle into focus, then resolve with quiet optimism",
+          loudnessLufs: -14,
+          loopable: true,
+        },
+      },
     },
   }));
   const sealed = planned.musicProgramPlan as {
@@ -139,6 +150,11 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   };
   assert.match(sealed.fingerprint, /^[a-f0-9]{64}$/iu);
   assert.match(sealed.audio.direction, /Original instrumental program/u);
+  assert.match(sealed.audio.direction, /68-76 BPM/u);
+  assert.match(sealed.audio.direction, /dusty jazz-hop/u);
+  assert.match(sealed.audio.direction, /felt piano, upright bass/u);
+  assert.match(sealed.audio.direction, /soft vinyl noise/u);
+  assert.match(sealed.audio.direction, /settle into focus, then resolve with quiet optimism/u);
   assert.equal(sealed.audio.providerPreference, "minimax_music3");
 
   const scenes = await scenePlanner(stageContext({
@@ -148,6 +164,17 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       topic,
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
+      styleDNA: {
+        audio: {
+          genre: "dusty jazz-hop",
+          bpmRange: [68, 76],
+          instrumentation: ["felt piano", "upright bass"],
+          textures: ["soft vinyl noise"],
+          moodArc: "settle into focus, then resolve with quiet optimism",
+          loudnessLufs: -14,
+          loopable: true,
+        },
+      },
       musicProgramPlan: planned.musicProgramPlan,
     },
   }));

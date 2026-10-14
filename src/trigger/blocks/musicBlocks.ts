@@ -138,8 +138,12 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
       const audioDirection = [
         `Original instrumental program for “${topic}”.`,
         dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
+        dna?.audio?.bpmRange?.length === 2
+          ? `Keep the channel tempo within ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM.`
+          : "",
         dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
         dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
+        dna?.audio?.moodArc ? `Preserve the channel's emotional arc: ${dna.audio.moodArc}.` : "",
         audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
         "No vocals, no lyrics, and a musically resolved seamless loop.",
       ].filter(Boolean).join(" ");

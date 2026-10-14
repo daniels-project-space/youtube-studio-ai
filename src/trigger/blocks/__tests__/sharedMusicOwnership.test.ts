@@ -53,7 +53,8 @@ async function main(): Promise<void> {
     assert.deepEqual(music.produces, [
       "musicKey", "musicProvider", "musicUrl", "channelMusicProgramKey",
       "channelMusicProgramFingerprint", "musicRuntimeReceiptKey",
-      "musicNativeWavKey", "musicQualityReviewStatus",
+      "musicNativeWavKey", "musicAuditionSourceKey", "musicAuditionWavKey",
+      "musicQualityReviewStatus",
     ]);
 
     for (const family of [undefined, "narrated_stock", "music_loop"] as const) {
