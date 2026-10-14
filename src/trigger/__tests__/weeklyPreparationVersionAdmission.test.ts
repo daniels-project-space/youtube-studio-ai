@@ -29,6 +29,8 @@ const base: PlanWeekPreparationManifest = {
 let manifestBytes: Uint8Array = new Uint8Array();
 let reads: string[] = [];
 let paidCalls = 0;
+let paidInput: unknown;
+let paidOutput: unknown;
 let writes = 0;
 let dispatches = 0;
 let mutations = 0;
@@ -43,7 +45,12 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 const originalUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-const paid = async () => { paidCalls++; throw new Error("paid call forbidden"); };
+const paid = async (input: unknown) => {
+  paidInput = input;
+  paidCalls++;
+  if (paidOutput !== undefined) return paidOutput;
+  throw new Error("paid call forbidden");
+};
 
 async function main(): Promise<void> {
   globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
@@ -182,7 +189,10 @@ async function main(): Promise<void> {
 
     // Unversioned invocations still reach the original reuse path. Stop there,
     // without manufacturing a successful receipt or issuing generation work.
-    manifestBytes = Buffer.from(canonicalJson(normalizePlanWeekPreparationManifest(base)));
+    const scriptManifest = normalizePlanWeekPreparationManifest({ ...base, execution: {
+      ...base.execution, seedStore: { bannedWords: ["The Missing Pin"] },
+    } });
+    manifestBytes = Buffer.from(canonicalJson(scriptManifest));
     sidecarMode = "stop";
     for (const [name, producer] of producers) {
       reads = [];
@@ -228,8 +238,21 @@ async function main(): Promise<void> {
     assert.equal(dispatches, 0);
     assert.equal(networkCalls, 0);
     sidecarMode = "missing";
-    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run(payload), /paid call forbidden/);
-    assert.equal(paidCalls, 1, "confirmed missing object still admits first-time script generation (stubbed)");
+    const scriptProducer = producers.find(([name]) => name === "script")![1];
+    paidOutput = {
+      hook: "A sealed archive changed everything.",
+      sections: [{ heading: "The Missing Pin", narration: "The missing pin changed the archive." }],
+      narrationText: "A sealed archive changed everything. The missing pin changed the archive.",
+      estDurationSec: 20,
+      closingLine: "Keep the record close.",
+    };
+    await assert.rejects(() => scriptProducer.run(payload), /weekly prepared script violates channel language policy: The Missing Pin/);
+    assert.equal(writes, 0, "a prohibited prepared script must not become a durable sidecar");
+    paidOutput = undefined;
+    await assert.rejects(() => scriptProducer.run(payload), /paid call forbidden/);
+    assert.equal(paidCalls, 2, "confirmed missing object admits first-time script generation (stubbed)");
+    assert.deepEqual((paidInput as { bannedWords?: unknown }).bannedWords, ["The Missing Pin"],
+      "prepared script generation must receive the exact frozen channel language policy");
     console.log("WEEKLY VERSION ADMISSION PASS: four real producers, version gates, bounded metadata, 28 ambiguous-read holds, 12 corrupt metadata holds, confirmed absence admits one stubbed purchase");
   } finally {
     loader._load = originalLoad;

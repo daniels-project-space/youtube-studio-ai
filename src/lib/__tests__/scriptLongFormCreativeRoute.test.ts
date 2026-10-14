@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { synthScript } from "@/lib/scriptGen";
+import { assertScriptLanguagePolicy, synthScript } from "@/lib/scriptGen";
 import type { CraftedHook } from "@/lib/hookcraft";
 import { OPENROUTER_MODELS } from "@/lib/openRouter";
 
@@ -55,6 +55,12 @@ async function main(): Promise<void> {
       "a pacing-only identity must shape generation just as it shapes the channel critic");
     assert.equal(script.sections.length, 3);
     assert.ok(script.narrationText.includes("evidence400"));
+    assert.throws(
+      () => assertScriptLanguagePolicy(script, ["evidence400"], "long-form script"),
+      /long-form script violates channel language policy: evidence400/,
+      "the shared policy admission helper must reject prohibited narration before any caller persists it",
+    );
+    assert.equal(calls, 1, "deterministic policy admission must not make another provider call");
     console.log("SCRIPT LONG-FORM CREATIVE ROUTE PASS — actual one-shot uses the pinned model and truthful 16k ceiling");
   } finally {
     globalThis.fetch = previousFetch;

@@ -154,7 +154,14 @@ import {
   createShortsOpeningEvidence,
   planShortsOpeningOnScreenTextEvidence,
 } from "@/engine/shortsOpeningEvidence";
-import { scriptClosingLineIssue, synthScript, translateScript, type Script } from "@/lib/scriptGen";
+import {
+  assertScriptLanguagePolicy,
+  scriptClosingLineIssue,
+  scriptLanguagePolicyIssue,
+  synthScript,
+  translateScript,
+  type Script,
+} from "@/lib/scriptGen";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -674,10 +681,7 @@ function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
 }
 
 function assertReusableScriptLanguagePolicy(script: Script, ctx: StageContext, source: string): void {
-  const matches = findChannelBannedWords(script.narrationText, readChannelBannedWords(ctx.store["bannedWords"]));
-  if (matches.length) {
-    throw new Error(`script_gen: ${source} violates channel language policy: ${matches.slice(0, 8).join(", ")}`);
-  }
+  assertScriptLanguagePolicy(script, ctx.store["bannedWords"], `script_gen: ${source}`);
   if (script.closingLine !== undefined) {
     const issue = scriptClosingLineIssue(script.closingLine);
     if (issue) throw new Error(`script_gen: ${source} has an invalid closing line: ${issue}`);
@@ -884,11 +888,11 @@ export const scriptGen: Block = {
         return draft;
       },
       critique: async (draft, iter) => {
-        const bannedMatches = findChannelBannedWords(draft.narrationText, req.bannedWords ?? []);
-        if (bannedMatches.length) {
+        const languageIssue = scriptLanguagePolicyIssue(draft, req.bannedWords);
+        if (languageIssue) {
           return {
             score: 0, pass: false, fatal: true,
-            issues: [`Channel language policy forbids: ${bannedMatches.slice(0, 8).join(", ")}`],
+            issues: [languageIssue],
           };
         }
         const closingLineIssue = scriptClosingLineIssue(draft.closingLine);

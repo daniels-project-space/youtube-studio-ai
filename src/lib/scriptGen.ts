@@ -9,7 +9,11 @@ import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/gol
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
-import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
+import {
+  channelBannedWordsDirective,
+  findChannelBannedWords,
+  readChannelBannedWords,
+} from "@/engine/channelLanguagePolicy";
 
 export interface ScriptSection {
   heading: string;
@@ -330,6 +334,23 @@ export function scriptClosingLineIssue(value: unknown): string | undefined {
   if (Array.from(line).length > 80) return "script closing line exceeds 80 characters";
   if (line.split(/\s+/u).length > 10) return "script closing line must be 10 or fewer spoken words";
   return undefined;
+}
+
+export function scriptLanguagePolicyIssue(
+  script: Pick<Script, "narrationText">,
+  bannedWords: unknown,
+): string | undefined {
+  const matches = findChannelBannedWords(script.narrationText, readChannelBannedWords(bannedWords));
+  return matches.length ? `channel language policy: ${matches.slice(0, 8).join(", ")}` : undefined;
+}
+
+export function assertScriptLanguagePolicy(
+  script: Pick<Script, "narrationText">,
+  bannedWords: unknown,
+  source = "scriptGen",
+): void {
+  const issue = scriptLanguagePolicyIssue(script, bannedWords);
+  if (issue) throw new Error(`${source} violates ${issue}`);
 }
 
 /** Strip structure-scaffold prefixes the model leaks into chapter headings. */
@@ -963,7 +984,8 @@ export async function synthScript(
 
   // Long-form (>~7 min) needs chunked generation — one call can't write it.
   if (maxSeconds > 420) {
-    return bindProgramRoute(req, await synthLongScript(req, crafted, maxSeconds, wordBudget, log));
+    const script = await synthLongScript(req, crafted, maxSeconds, wordBudget, log);
+    return bindProgramRoute(req, script);
   }
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook

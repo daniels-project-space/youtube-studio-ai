@@ -20,6 +20,7 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
@@ -28,7 +29,7 @@ import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { createModelUsageScope } from "@/lib/modelUsage";
-import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
+import { assertScriptLanguagePolicy, synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 
 export interface PlanWeekPreparedScriptArgs {
@@ -140,6 +141,7 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     topic: manifest.plan.topic,
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
+    bannedWords: readChannelBannedWords(seed.bannedWords),
     niche: typeof seed.niche === "string" ? seed.niche : undefined,
     style: payload.style ?? (typeof scriptConfig.style === "string" ? scriptConfig.style : undefined),
     qualityProfile: "production",
@@ -229,6 +231,7 @@ export const planWeekPreparedScriptTask = task({
     if (!Number.isFinite(modelUsage.costUsd) || modelUsage.costUsd > payload.maxCostUsd) {
       throw new Error(`weekly prepared script cost ${modelUsage.costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
     }
+    assertScriptLanguagePolicy(script!, request.bannedWords, "weekly prepared script");
     const prepared: PlanWeekPreparedScript = {
       version: "plan-week-prepared-script/v1",
       manifestSha256: planWeekPreparationManifestSha256(manifest),
