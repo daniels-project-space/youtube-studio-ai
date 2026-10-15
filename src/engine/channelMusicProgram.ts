@@ -154,6 +154,26 @@ function validateChannelMusicProgramBody(
     });
   }
   const sections = program.generation.sections;
+  if (program.role === "sleep_sound_bed") {
+    if (sections.some((section) => section.energy > 0.12) ||
+        sections.some((section) => section.energy !== sections[0]?.energy)) {
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generation", "sections"],
+        message: "sleep soundscape sections must maintain stable low arousal",
+      });
+    }
+    const sleepDirection = [program.generation.structuredCaption, ...sections.map((section) => section.instruction)]
+      .join(" ")
+      .match(/\b(?:four[-\s]?on[-\s]?the[-\s]?floor|driving|strong|prominent|steady|insistent|pulsing)\s+(?:beat|pulse|groove|rhythm|drums?|percussion)\b|\b(?:boom[-\s]?bap|breakbeat|drum\s*(?:and|&)\s*bass)\b/iu)?.[0];
+    if (sleepDirection) {
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generation", "structuredCaption"],
+        message: `sleep soundscape cannot include rhythmic generation direction: ${sleepDirection}`,
+      });
+    }
+  }
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music sections must cover the full program from 0 to 1" });
   }

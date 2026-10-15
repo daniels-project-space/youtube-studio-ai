@@ -329,6 +329,25 @@ const reloadedSleepGenre = ChannelMusicProgramSchema.safeParse({
 assert.equal(reloadedSleepGenre.success, false, "reloaded sleep programs must not admit a rhythmic genre");
 assert.match(JSON.stringify(reloadedSleepGenre.error?.issues), /sleep soundscape cannot use a rhythmic genre: minimal drum and bass/u,
   "the persisted-program schema must report the rhythmic genre conflict");
+const conflictingSleepDirectionProgram = {
+  ...sleep,
+  generation: {
+    ...sleep.generation,
+    structuredCaption: `${sleep.generation.structuredCaption} Add a strong four-on-the-floor groove.`,
+    sections: sleep.generation.sections.map((section, index) => index === 0
+      ? { ...section, energy: 0.5, instruction: "Add a strong four-on-the-floor groove." }
+      : section),
+  },
+};
+const { fingerprint: sleepDirectionFingerprint, ...conflictingSleepDirectionBody } = conflictingSleepDirectionProgram;
+assert.match(sleepDirectionFingerprint, /^[a-f0-9]{64}$/u);
+const reloadedSleepDirection = ChannelMusicProgramSchema.safeParse({
+  ...conflictingSleepDirectionBody,
+  fingerprint: sha256Hex(canonicalJson(conflictingSleepDirectionBody)),
+});
+assert.equal(reloadedSleepDirection.success, false, "reloaded sleep programs must retain stable, beatless section direction");
+assert.match(JSON.stringify(reloadedSleepDirection.error?.issues), /sleep soundscape sections must maintain stable low arousal/u);
+assert.match(JSON.stringify(reloadedSleepDirection.error?.issues), /sleep soundscape cannot include rhythmic generation direction/u);
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
 assert.equal(sleep.identity.bpmRange, null,
   "sleep programs must not retain a contradictory BPM range from channel DNA or composer direction");
