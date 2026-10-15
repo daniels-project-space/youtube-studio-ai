@@ -401,6 +401,23 @@ export function familyDurationContract(family: FamilyKey): FamilyDurationContrac
   return FAMILY_DURATION_CONTRACTS[family];
 }
 
+export function familyLengthCheckEnvelope(
+  family: FamilyKey,
+  targetSeconds: number,
+): Readonly<{ minSeconds: number; maxSeconds: number }> {
+  if (family === "documentary_collage_short") {
+    return { minSeconds: 20, maxSeconds: 60 };
+  }
+  const contract = familyDurationContract(family);
+  if (contract.inputUnit === "fixed") {
+    return { minSeconds: contract.defaultSeconds, maxSeconds: contract.defaultSeconds };
+  }
+  return {
+    minSeconds: Math.max(contract.minimumSeconds, Math.round(targetSeconds * 0.6)),
+    maxSeconds: Math.min(contract.maximumSeconds, Math.round(targetSeconds * 1.8)),
+  };
+}
+
 export type FamilyTimeScalingContract =
   | Readonly<{
       method: "authored_timeline";

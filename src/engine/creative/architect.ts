@@ -33,6 +33,7 @@ import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
+import { FAMILY_KEYS, familyLengthCheckEnvelope, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 import {
   assertPipelineMatchesContentLane,
@@ -484,7 +485,7 @@ function validateParams(
 }
 
 /** Cross-param invariants the LLM never has to remember (code owns them). */
-function enforceInvariants(pipeline: PipelineEntry[]): void {
+function enforceInvariants(pipeline: PipelineEntry[], family?: FamilyKey): void {
   const find = (b: string) => pipeline.find((e) => e.block === b);
   // narration pacing (pauses + voice speed) mirrors into the script word budget.
   const narr = find("narration_tts")?.params;
@@ -497,14 +498,15 @@ function enforceInvariants(pipeline: PipelineEntry[]): void {
   if (narr?.["ttsProvider"] === "elevenlabs" && sg) sg.params = { ...(sg.params ?? {}), voiceTags: true };
   // a data-viz layer requires a data-rich script.
   if (find("visual_inserts") && sg) sg.params = { ...(sg.params ?? {}), dataRich: true };
-  // length_check band follows the script target.
+  // Keep the quality gate aligned with the same family law used at design time.
   const maxSec = sg?.params?.["maxSeconds"];
   const lc = find("length_check");
-  if (typeof maxSec === "number" && lc) {
+  if (typeof maxSec === "number" && lc && family) {
+    const envelope = familyLengthCheckEnvelope(family, maxSec);
     lc.params = {
       ...(lc.params ?? {}),
-      minSeconds: Math.round(maxSec * 0.6),
-      maxSeconds: Math.round(maxSec * 1.6),
+      minSeconds: envelope.minSeconds,
+      maxSeconds: envelope.maxSeconds,
     };
   }
 }
@@ -523,6 +525,7 @@ export function applyArchitectPlan(
   registerAllBlocks();
   const log = opts.log ?? (() => {});
   const kind = familyKind(opts.family);
+  const family = FAMILY_KEYS.includes(opts.family as FamilyKey) ? opts.family as FamilyKey : undefined;
   // The architect can tune a lane, but it cannot exchange the channel's
   // primary visual engine. This also closes the swap pre-pass loophole where
   // producer-compatible blocks could replace one another before appliesTo was
@@ -543,7 +546,7 @@ export function applyArchitectPlan(
   const tryValidated = (next: PipelineEntry[], op: { action: string; block: string }, reason?: string): boolean => {
     try {
       const probe = next.map((e) => ({ ...e }));
-      enforceInvariants(probe);
+      enforceInvariants(probe, family);
       validatePipeline(probe, validationSeeds(probe));
       assertPipelineMatchesContentLane(contentLane, probe);
       pipeline = probe;
@@ -663,7 +666,7 @@ export function applyArchitectPlan(
   }
 
   // Final invariant pass on the winning pipeline.
-  enforceInvariants(pipeline);
+  enforceInvariants(pipeline, family);
   try {
     const finalPipeline = pipeline.map((e) => ({ ...e }));
     validatePipeline(finalPipeline, validationSeeds(finalPipeline));

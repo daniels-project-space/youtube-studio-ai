@@ -11,7 +11,7 @@ import {
   CREW_ROLE_BLOCK,
   assertFamilyAutonomousPlanningPipeline,
   familyAutonomousPlanningCapability,
-  familyDurationContract,
+  familyLengthCheckEnvelope,
   familyTimeScalingContract,
   resolveFamilyEpisodeLengthSeconds,
   familyProductionReadiness,
@@ -241,31 +241,6 @@ const OPTIONAL_BLOCKS = new Set([
   "crosspost",
 ]);
 
-/**
- * A render may tolerate a little natural timing variance, but that variance
- * may never cross the family capability boundary advertised by the creator.
- * Keep this in one helper because the initial design and the post-architect
- * repair pass must enforce exactly the same duration law.
- */
-function lengthCheckEnvelope(
-  family: FamilyKey,
-  targetSeconds: number,
-): Readonly<{ minSeconds: number; maxSeconds: number }> {
-  if (family === "documentary_collage_short") {
-    // The renderer's native five-to-seven-beat QA envelope is deliberately a
-    // little wider than the channel's preferred 35–60s editorial target.
-    return { minSeconds: 20, maxSeconds: 60 };
-  }
-  const contract = familyDurationContract(family);
-  if (contract.inputUnit === "fixed") {
-    return { minSeconds: contract.defaultSeconds, maxSeconds: contract.defaultSeconds };
-  }
-  return {
-    minSeconds: Math.max(contract.minimumSeconds, Math.round(targetSeconds * 0.6)),
-    maxSeconds: Math.min(contract.maximumSeconds, Math.round(targetSeconds * 1.8)),
-  };
-}
-
 /** Build a validated pipeline for a channel from the wizard's choices. */
 export function designPipelineCore(
   opts: DesignOptions,
@@ -468,7 +443,7 @@ export function designPipelineCore(
       // Niche preset sets the script tone unless the archetype already pinned one.
       if (e.block === "script_gen" && preset?.scriptStyle && params.style === undefined) params.style = preset.scriptStyle;
       if (e.block === "length_check" && lenSec) {
-        const envelope = lengthCheckEnvelope(opts.family, lenSec);
+        const envelope = familyLengthCheckEnvelope(opts.family, lenSec);
         params.minSeconds = envelope.minSeconds;
         params.maxSeconds = envelope.maxSeconds;
       }
@@ -1474,7 +1449,7 @@ export function enforceLengthContract(
     ) pin("targetSeconds", lenSec);
     if (e.block === "script_gen") pin("maxSeconds", lenSec);
     if (e.block === "length_check") {
-      const envelope = overrideEnvelope ?? lengthCheckEnvelope(family, lenSec);
+      const envelope = overrideEnvelope ?? familyLengthCheckEnvelope(family, lenSec);
       pin("minSeconds", envelope.minSeconds);
       pin("maxSeconds", envelope.maxSeconds);
     }

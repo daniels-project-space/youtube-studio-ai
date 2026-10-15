@@ -30,6 +30,13 @@ for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
   assert.deepEqual(blockOrder(result.pipeline), blockOrder(design.pipeline), `${family}: no-op must preserve module order`);
   assert.deepEqual(result.report.applied, []);
   assert.deepEqual(result.report.rejected, [], `${family}: seed-backed final validation must not discard a valid floor`);
+  const initialGate = design.pipeline.find(({ block }) => block === "length_check")?.params;
+  const architectGate = result.pipeline.find(({ block }) => block === "length_check")?.params;
+  assert.deepEqual(
+    { minSeconds: architectGate?.minSeconds, maxSeconds: architectGate?.maxSeconds },
+    { minSeconds: initialGate?.minSeconds, maxSeconds: initialGate?.maxSeconds },
+    `${family}: architect must preserve the authored family duration gate`,
+  );
   assert.doesNotThrow(() => validatePipeline(
     result.pipeline,
     channelPipelineValidationSeedKeys(design.contentLane, undefined, result.pipeline),
