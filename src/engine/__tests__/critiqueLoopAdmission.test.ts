@@ -27,6 +27,7 @@ for (const invalid of [
   { score: 0.5, pass: false, issues: ["  "] },
   { score: 0.5, pass: false, issues: ["x".repeat(501)] },
   { score: 0.5, pass: false, issues: [], fatal: "no" },
+  { score: 1, pass: true, issues: [], fatal: true },
   { score: 0.5, pass: false, issues: Array.from({ length: 33 }, () => "too many") },
   null,
 ]) {
@@ -79,6 +80,18 @@ async function main(): Promise<void> {
     /admission-test: malformed critique response.*finite number from 0 to 1/,
   );
   assert.equal(produced, 1, "a malformed first verdict must stop before a second paid-capable attempt");
+
+  let fatalCandidateProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "fatal-pass-contradiction",
+      maxIters: 2,
+      produce: async () => { fatalCandidateProductions += 1; return "unsafe candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [], fatal: true }),
+    }),
+    /fatal-pass-contradiction: malformed critique response.*fatal critique cannot pass/u,
+  );
+  assert.equal(fatalCandidateProductions, 1, "a contradictory fatal verdict must fail before another producer attempt");
 
   const scope = createModuleCritiqueScope();
   const accepted = await scope.run(() => produceAndCritique({

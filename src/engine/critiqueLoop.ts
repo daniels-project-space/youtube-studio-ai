@@ -95,6 +95,9 @@ export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
   if (row.fatal !== undefined && typeof row.fatal !== "boolean") {
     issues.push("critic fatal must be boolean when present");
   }
+  if (row.fatal === true && row.pass === true) {
+    issues.push("a fatal critique cannot pass");
+  }
   if (issues.length) return { pass: false, critique: null, issues };
   return {
     pass: true,
@@ -283,7 +286,7 @@ export async function produceAndCritique<T>(
         log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
       }
 
-      const accepted = critique.pass && critique.score >= threshold;
+      const accepted = !critique.fatal && critique.pass && critique.score >= threshold;
       if (accepted) {
         return record({ value, critique, iterations: iter, accepted: true, history }, true);
       }
