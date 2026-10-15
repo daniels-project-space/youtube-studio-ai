@@ -160,6 +160,68 @@ async function main(): Promise<void> {
           "the immutable program owns its fingerprint; do not publish a redundant fingerprint artifact");
         assert.equal(typeof (planPatch.musicProgramPlan as { fingerprint?: unknown }).fingerprint, "string");
         Object.assign(store, planPatch);
+
+        const makeChannelPlan = async (concept: string, dna: Record<string, unknown>) => {
+          const channelBrief = createChannelProgramBrief({
+            family: "music_loop",
+            nicheKey: "lofi",
+            locale: "en",
+            concept,
+          });
+          const channelRoute = channelProgramRouteRunSeed({
+            route: resolveChannelProgramRoute(channelBrief),
+            programBrief: channelBrief,
+          });
+          const result = await musicProgramPlan.run({
+            ...ctx,
+            params: {},
+            store: { topic: "Quiet focus after midnight", channelProgramRoute: channelRoute, styleDNA: dna },
+          });
+          return result.musicProgramPlan as {
+            fingerprint: string;
+            visual: { setting: string; visualStyle: string };
+            audio: { direction: string };
+          };
+        };
+        const glasshousePlan = await makeChannelPlan(
+          "Rain-lit glasshouse listening sessions with a distinct warm character.",
+          {
+            setting: "rain on a greenhouse roof after dark",
+            colorGrade: "deep emerald with warm brass highlights",
+            audio: {
+              genre: "hushed jazz-hop",
+              instrumentation: ["felt piano", "upright bass"],
+              textures: ["soft rain", "tape warmth"],
+              bpmRange: [68, 76],
+              moodArc: "intimate and gently hopeful",
+            },
+          },
+        );
+        const observatoryPlan = await makeChannelPlan(
+          "Quiet observatory sessions beneath clear winter stars.",
+          {
+            setting: "a high mountain observatory under winter stars",
+            colorGrade: "cold indigo with silver moonlight",
+            audio: {
+              genre: "spacious ambient piano",
+              instrumentation: ["prepared piano", "glass harmonics"],
+              textures: ["clean air", "distant wind"],
+              bpmRange: [52, 60],
+              moodArc: "still, spacious, and contemplative",
+            },
+          },
+        );
+        assert.notEqual(glasshousePlan.fingerprint, observatoryPlan.fingerprint,
+          "distinct channel programs must seal distinct shared music plans");
+        assert.notEqual(glasshousePlan.visual.setting, observatoryPlan.visual.setting,
+          "the shared planner must retain each channel's setting");
+        assert.notEqual(glasshousePlan.visual.visualStyle, observatoryPlan.visual.visualStyle,
+          "the shared planner must retain each channel's color identity");
+        assert.match(glasshousePlan.audio.direction, /hushed jazz-hop/u);
+        assert.match(glasshousePlan.audio.direction, /felt piano, upright bass/u);
+        assert.match(observatoryPlan.audio.direction, /spacious ambient piano/u);
+        assert.match(observatoryPlan.audio.direction, /prepared piano, glass harmonics/u);
+
         await assert.rejects(
           require_("music").run({ ...ctx, params: { provider: "suno" } }),
           /does not match sealed music program provider/,
