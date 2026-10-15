@@ -44,6 +44,12 @@ function main(): void {
   assert.ok(styles.size >= 4, `expected real spread across styles, got ${styles.size}`);
   const personas = new Set(CHANNELS.map(fallbackNarratorPersona));
   assert.ok(personas.size >= 3, `expected real spread across personas, got ${personas.size}`);
+  for (const persona of FALLBACK_NARRATOR_PERSONAS) {
+    assert.doesNotMatch(persona, /\b(witness(?:ed)?|insider|first-hand|read every)\b/iu,
+      `a fallback voice must not invent personal access: ${persona}`);
+    assert.match(persona, /\b(fact|inference|account|record|uncertain|certainty|evidence)\b/iu,
+      `a fallback voice must preserve epistemic care: ${persona}`);
+  }
 
   // IN RANGE. A hash bug that walks off the end would yield undefined, which
   // reads downstream as an empty prompt rather than an error.

@@ -68,11 +68,11 @@ export const FALLBACK_LINE_ART_STYLES = [
  * character. Voice is identity as much as palette is.
  */
 export const FALLBACK_NARRATOR_PERSONAS = [
-  "a weathered chronicler who witnessed these events first-hand and speaks of them plainly, without boast",
-  "a careful archivist who has read every surviving account and reports only what the record will support",
-  "a former insider recounting what they saw, still weighing how much of it they are willing to say",
-  "a patient teacher who assumes intelligence and never condescends, explaining as if to one attentive person",
-  "a dry, unhurried witness who finds the absurdity in events without ever mocking the people caught in them",
+  "a measured documentary narrator who speaks plainly and separates established fact from inference",
+  "a meticulous archival voice, attentive to conflicting accounts and candid about gaps in the record",
+  "an investigative narrator who weighs competing explanations and marks what remains uncertain",
+  "a patient teacher who assumes intelligence, never condescends, and explains without overstating certainty",
+  "a dry, unhurried narrator who finds absurdity without mocking those affected, and never lets wit outrun the evidence",
 ] as const;
 
 /**
