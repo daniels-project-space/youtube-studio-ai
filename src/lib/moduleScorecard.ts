@@ -263,11 +263,14 @@ export function compareModuleScorecards(
   if (baseline.moduleId !== current.moduleId) {
     throw new Error("module scorecard comparison requires the same module");
   }
+  const sameInputs = baseline.inputFingerprint === current.inputFingerprint;
   return {
     moduleId: current.moduleId,
-    oracleScoreDelta: nullableScoreDelta(baseline.oracleScore, current.oracleScore),
-    falsePassesDelta: nullableDelta(baseline.falsePasses, current.falsePasses),
-    falseRejectsDelta: nullableDelta(baseline.falseRejects, current.falseRejects),
+    // Quality deltas need the same frozen input. Keep operational deltas
+    // visible across changed inputs, but never present them as an oracle gain.
+    oracleScoreDelta: sameInputs ? nullableScoreDelta(baseline.oracleScore, current.oracleScore) : null,
+    falsePassesDelta: sameInputs ? nullableDelta(baseline.falsePasses, current.falsePasses) : null,
+    falseRejectsDelta: sameInputs ? nullableDelta(baseline.falseRejects, current.falseRejects) : null,
     wallTimeMs: current.wallTimeMs - baseline.wallTimeMs,
     providerCalls: nullableDelta(baseline.providerCalls, current.providerCalls),
     inputTokens: nullableDelta(baseline.inputTokens, current.inputTokens),

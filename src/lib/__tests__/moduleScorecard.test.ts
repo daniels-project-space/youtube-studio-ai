@@ -181,8 +181,42 @@ assert.equal(compareModuleScorecards(scorecard, changedOutput).outputArtifactsCh
 const changedInputs = createModuleScorecard({ ...base, inputFingerprint: "d".repeat(64), moduleVersion: "4.0.0" });
 assert.equal(compareModuleScorecards(scorecard, changedInputs).inputFingerprintChanged, true);
 assert.equal(compareModuleScorecards(scorecard, changedInputs).moduleVersionChanged, true);
+const changedInputQuality = createModuleScorecard({
+  ...base,
+  inputFingerprint: "d".repeat(64),
+  oracleScore: 9,
+  falsePasses: 0,
+  falseRejects: 0,
+  wallTimeMs: 60,
+});
+const changedInputDelta = compareModuleScorecards(
+  createModuleScorecard({ ...base, oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
+  changedInputQuality,
+);
+assert.deepEqual(
+  [changedInputDelta.oracleScoreDelta, changedInputDelta.falsePassesDelta, changedInputDelta.falseRejectsDelta],
+  [null, null, null],
+  "quality-oracle deltas are unknown when a comparison changes the frozen inputs",
+);
+assert.equal(changedInputDelta.wallTimeMs, -60,
+  "operational deltas remain visible even when quality inputs differ");
 const changedConfiguration = createModuleScorecard({ ...base, configurationFingerprint: "f".repeat(64) });
 assert.equal(compareModuleScorecards(scorecard, changedConfiguration).configurationFingerprintChanged, true);
+const changedConfigQuality = compareModuleScorecards(
+  createModuleScorecard({ ...base, oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
+  createModuleScorecard({
+    ...base,
+    configurationFingerprint: "f".repeat(64),
+    oracleScore: 9,
+    falsePasses: 0,
+    falseRejects: 0,
+  }),
+);
+assert.deepEqual(
+  [changedConfigQuality.oracleScoreDelta, changedConfigQuality.falsePassesDelta, changedConfigQuality.falseRejectsDelta],
+  [2, -2, -1],
+  "same-input oracle changes remain measurable across module/configuration revisions",
+);
 const sameOutputDifferentRun = createModuleScorecard({
   ...base,
   runId: "run-scorecard-other",
