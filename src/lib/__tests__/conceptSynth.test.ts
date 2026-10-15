@@ -83,6 +83,11 @@ async function main(): Promise<void> {
     assert.deepEqual(fallback.requiredCallbacks, [], "offline fallback must remain a valid callback contract");
     assert.ok(logs.some((message) => message.includes("no OpenRouter key")));
     assert.ok(logs.every((message) => !message.includes("no Anthropic key")));
+    await assert.rejects(
+      synthChannelConcept("quiet engineering stories", undefined, undefined, { requireChannelSpecificVoice: true }),
+      /OpenRouter is required for a production channel-specific voice profile/u,
+      "new channel inception must not accept the generic offline identity fallback",
+    );
   } finally {
     global.fetch = originalFetch;
     if (previousOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;

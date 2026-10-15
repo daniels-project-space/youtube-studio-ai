@@ -24,6 +24,10 @@ export interface ChannelConcept {
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
+export interface ChannelConceptSynthesisOptions {
+  requireChannelSpecificVoice?: boolean;
+}
+
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const CADENCES = new Set(["daily", "weekly", "biweekly", "monthly"]);
 const VOICE_PROFILE_FIELDS = [
@@ -86,8 +90,12 @@ export async function synthChannelConcept(
   seed: string,
   nicheContext: string | undefined,
   log: Logger = () => {},
+  options: ChannelConceptSynthesisOptions = {},
 ): Promise<ChannelConcept> {
   if (!hasCreativeTextKey()) {
+    if (options.requireChannelSpecificVoice) {
+      throw new Error("conceptSynth: OpenRouter is required for a production channel-specific voice profile");
+    }
     log("conceptSynth: no OpenRouter key — using deterministic fallback");
     return fallbackConcept(seed);
   }
@@ -132,6 +140,9 @@ export async function synthChannelConcept(
   try {
     raw = await creativeTextJson({ prompt, system, tier: "pro", maxTokens: 1500, temperature: 0.7 });
   } catch (e) {
+    if (options.requireChannelSpecificVoice) {
+      throw new Error(`conceptSynth: production channel identity generation failed: ${e instanceof Error ? e.message : e}`);
+    }
     log(`conceptSynth: LLM failed (${e instanceof Error ? e.message : e}) — fallback`);
     return fallbackConcept(seed);
   }
