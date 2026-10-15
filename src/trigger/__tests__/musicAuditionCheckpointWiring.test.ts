@@ -44,6 +44,7 @@ assert.doesNotMatch(
 assert.match(auditionPanel, /Native WAV QC \(measured from this take\)/u);
 assert.match(auditionPanel, /audioLabel \?\? "Native worker WAV"/u);
 assert.match(auditionPanel, /nativeQuality\?\.measurements/u);
+assert.match(auditionPanel, /<p[^>]*>\{section\.instruction\}<\/p>/u, "each human section score must be shown alongside its sealed listening criterion");
 assert.doesNotMatch(auditionPanel, /setMeasurements/u, "the audition UI must not offer editable technical measurements");
 
 console.log("MUSIC AUDITION CHECKPOINT WIRING PASS — MiniMax stops after music and persists a lease-fenced native-WAV receipt");

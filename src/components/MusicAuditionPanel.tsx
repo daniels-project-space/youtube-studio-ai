@@ -109,8 +109,11 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
         </div>
         {data.review?.nativeQuality && <p style={{ color: "var(--color-muted)", fontSize: "0.76rem", margin: "0.7rem 0 0" }}>High-band continuity: {data.review.nativeQuality.openingHighBand.meanDbfs} dBFS at {data.review.nativeQuality.openingHighBand.startSec.toFixed(2)}s → {data.review.nativeQuality.postOpeningHighBand.meanDbfs} dBFS at {data.review.nativeQuality.postOpeningHighBand.startSec.toFixed(2)}s. A large drop blocks approval.</p>}
         <div style={{ display: "grid", gap: "0.55rem", marginTop: "0.8rem" }}>
-          {(data.review?.sections ?? []).map((section) => <div key={section.id} style={{ display: "grid", gridTemplateColumns: "minmax(120px, 0.55fr) 70px minmax(180px, 1fr)", gap: "0.5rem", alignItems: "end" }}>
-            <span style={{ fontSize: "0.8rem" }}>{section.label}</span>
+          {(data.review?.sections ?? []).map((section) => <div key={section.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: "0.5rem", alignItems: "end", paddingBottom: "0.55rem", borderBottom: "1px solid var(--color-border)" }}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <strong style={{ fontSize: "0.8rem" }}>{section.label}</strong>
+              <p style={{ color: "var(--color-muted)", fontSize: "0.76rem", lineHeight: 1.45, margin: "0.18rem 0 0" }}>{section.instruction}</p>
+            </div>
             <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>score<input aria-label={`${section.id} score`} type="number" min="0" max="1" step="0.01" value={sectionReviews[section.id]?.score ?? ""} onChange={(event) => setSectionReviews((current) => ({ ...current, [section.id]: { ...current[section.id], score: event.target.value } }))} style={inputStyle} /></label>
             <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>evidence<input aria-label={`${section.id} evidence`} value={sectionReviews[section.id]?.evidence ?? ""} onChange={(event) => setSectionReviews((current) => ({ ...current, [section.id]: { ...current[section.id], evidence: event.target.value } }))} style={inputStyle} /></label>
           </div>)}
