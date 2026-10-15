@@ -64,7 +64,7 @@ assert.equal(
 );
 
 const denseReviewEvidence = compactQaVisualReviewEvidenceForStage({
-  version: "video-review/v5",
+  version: "video-review/v6",
   source: { durationSec: 600, sha256: "a".repeat(64) },
   manifestKey: "owner/alice/runs/run-qa/visual-review/manifest.json",
   frames: Array.from({ length: 20_000 }, (_, index) => ({

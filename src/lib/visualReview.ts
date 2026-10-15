@@ -34,10 +34,9 @@ import {
   MUSIC_LOOP_REVIEW_SECONDS, MusicLoopReviewCoverageSchema, type MusicLoopReviewCoverage,
 } from "./musicLoopReviewCoverage";
 
-// v5 adds typed reference-criterion coverage and a full SHA-256 review
-// fingerprint. A receipt made under an earlier schema cannot attest the
-// current independent-review or global sampled-batch coverage guarantees.
-export const VISUAL_REVIEW_VERSION = "video-review/v5" as const;
+// v6 adds per-lock visual verdicts and binds their sampled evidence coverage.
+// Earlier manifests cannot attest that every timed Story Spine lock was judged.
+export const VISUAL_REVIEW_VERSION = "video-review/v6" as const;
 /** Post-review result schema; kept separate so `reviewFingerprint` stays a plan/intent binding. */
 export const VISUAL_REVIEW_RECEIPT_VERSION = "visual-review-receipt/v1" as const;
 /** Opt-in, evidence-bound score emitted once for every broad reviewer batch. */
@@ -237,6 +236,15 @@ export interface VisualReviewReferenceCriterionReceipt {
   id: string;
   scope: VisualReviewReferenceCriterionScope;
   verdict: VisualReviewReferenceCriterionVerdict;
+  evidenceFrameIds: string[];
+}
+
+export type VisualReviewCreativeLockVerdict = "pass" | "fail" | "not_observable";
+
+export interface VisualReviewCreativeLockAssessment {
+  shotId: string;
+  verdict: VisualReviewCreativeLockVerdict;
+  assessment: string;
   evidenceFrameIds: string[];
 }
 
@@ -631,8 +639,12 @@ export interface VisualReviewEvidence {
     /** Sampled witness coverage only; this does not claim continuous shot realization. */
     creativeLocks?: {
       requestedCount: number;
-      observedCount: number;
-      missingLockIds: string[];
+      frameWitnessedCount: number;
+      passedCount: number;
+      missingFrameLockIds: string[];
+      notObservableLockIds: string[];
+      failedLockIds: string[];
+      assessments: VisualReviewCreativeLockAssessment[];
     };
     musicLoop?: MusicLoopReviewCoverage;
   };
@@ -1216,6 +1228,14 @@ function reviewerPrompt(
       `Every receipt must cite one or more IDs from this batch's FRAME LEDGER; never invent frame IDs.\n` +
       `${referenceCriteria.map((item) => `- ${item.id} [${item.scope}]: "${item.criterion}"`).join("\n")}\n\n`
     : "";
+  const observedCreativeLocks = (intent.creativeLocks ?? []).filter((lock) =>
+    frames.some((frame) => frame.descriptor.tSec >= lock.startSec && frame.descriptor.tSec <= lock.endSec),
+  );
+  const creativeLockInstructions = observedCreativeLocks.length
+    ? `STORY / SHOT LOCK ASSESSMENTS\n` +
+      `For every listed lock, return exactly one creativeLockAssessments entry. Judge whether the visible frame(s) in this batch support the literal narrated moment and each authored continuity/visual constraint; do not infer unseen frames. Use pass only when the supplied evidence supports the lock, fail when it contradicts the lock, and not_observable when evidence is insufficient. Cite only matching FRAME LEDGER IDs whose timestamps fall within that lock.\n` +
+      `${observedCreativeLocks.map((lock) => `- ${lock.shotId} @${lock.startSec.toFixed(1)}-${lock.endSec.toFixed(1)}s: "${lock.expected.slice(0, 700)}" criteria: ${lock.acceptanceCriteria.slice(0, 5).map((criterion) => `"${criterion.slice(0, 220)}"`).join("; ")}`).join("\n")}\n\n`
+    : "";
   const broadQualityScoreInstructions = phase === "broad" && collectBroadQualityScore
     ? `WIDE-SAMPLE QUALITY SCORE\n` +
       `Return one \"broadQualityScore\" from 0 to 10 for this entire broad-review batch. Rate only visible ` +
@@ -1247,6 +1267,7 @@ function reviewerPrompt(
         `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
       : "") +
     referenceCriteriaInstructions +
+    creativeLockInstructions +
     broadQualityScoreInstructions +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
@@ -1384,11 +1405,67 @@ function parseReferenceCriteriaReceipt(
   return { referenceCriteria, complete };
 }
 
+function parseCreativeLockAssessments(
+  receipt: Record<string, unknown>,
+  requested: readonly VisualReviewCreativeLock[],
+  frameTimeById: ReadonlyMap<string, number>,
+): { assessments: VisualReviewCreativeLockAssessment[]; complete: boolean } {
+  if (requested.length === 0) return { assessments: [], complete: true };
+  const rows = receipt.creativeLockAssessments;
+  if (!Array.isArray(rows)) return { assessments: [], complete: false };
+  const requestedById = new Map(requested.map((lock) => [lock.shotId, lock]));
+  let complete = requestedById.size === requested.length && rows.length === requestedById.size;
+  const seen = new Set<string>();
+  const assessments: VisualReviewCreativeLockAssessment[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      complete = false;
+      continue;
+    }
+    const item = row as Record<string, unknown>;
+    const shotId = typeof item.shotId === "string" ? item.shotId.trim() : "";
+    const lock = requestedById.get(shotId);
+    const verdict = item.verdict;
+    const assessment = typeof item.assessment === "string" ? item.assessment.trim() : "";
+    const rawFrameIds = item.evidenceFrameIds;
+    if (
+      !lock || seen.has(shotId) ||
+      (verdict !== "pass" && verdict !== "fail" && verdict !== "not_observable") ||
+      !assessment || assessment.length > 800 ||
+      !Array.isArray(rawFrameIds) || rawFrameIds.length === 0 ||
+      rawFrameIds.some((id) => typeof id !== "string" || !frameTimeById.has(id))
+    ) {
+      complete = false;
+      continue;
+    }
+    const evidenceFrameIds = [...new Set(rawFrameIds as string[])];
+    const hasRelevantFrame = evidenceFrameIds.some((id) => {
+      const tSec = frameTimeById.get(id);
+      return tSec !== undefined && tSec >= lock.startSec - VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC &&
+        tSec <= lock.endSec + VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC;
+    });
+    if (!hasRelevantFrame) {
+      complete = false;
+      continue;
+    }
+    seen.add(shotId);
+    assessments.push({
+      shotId,
+      verdict,
+      assessment: assessment.slice(0, 500),
+      evidenceFrameIds,
+    });
+  }
+  if (seen.size !== requestedById.size) complete = false;
+  return { assessments, complete };
+}
+
 function parseModelDefects(
   raw: string,
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
   requestedReferenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+  requestedCreativeLocks: readonly VisualReviewCreativeLock[],
   collectBroadQualityScore: boolean,
 ): {
   defects: VisualReviewDefect[];
@@ -1396,8 +1473,10 @@ function parseModelDefects(
   complete: boolean;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   referenceCriteriaComplete: boolean;
+  creativeLockAssessments: VisualReviewCreativeLockAssessment[];
   broadQualityScore?: number;
 } {
+  const emptyCreativeLockAssessments: VisualReviewCreativeLockAssessment[] = [];
   let parsed: unknown;
   try {
     parsed = parseJsonLoose<unknown>(raw);
@@ -1408,6 +1487,7 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -1417,6 +1497,7 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   const receipt = parsed as Record<string, unknown>;
@@ -1439,11 +1520,17 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   const parsedReferenceCriteria = parseReferenceCriteriaReceipt(receipt, frames, requestedReferenceCriteria);
   const frameTimeById = new Map(frames.map((frame) => [frame.descriptor.id, frame.descriptor.tSec]));
-  let complete = true;
+  const parsedCreativeLockAssessments = parseCreativeLockAssessments(
+    receipt,
+    requestedCreativeLocks,
+    frameTimeById,
+  );
+  let complete = parsedCreativeLockAssessments.complete;
   const defects = reportedDefects.flatMap((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       complete = false;
@@ -1522,6 +1609,7 @@ function parseModelDefects(
     complete,
     referenceCriteria: parsedReferenceCriteria.referenceCriteria,
     referenceCriteriaComplete: parsedReferenceCriteria.complete,
+    creativeLockAssessments: parsedCreativeLockAssessments.assessments,
     ...(broadQualityScore === undefined ? {} : { broadQualityScore }),
   };
 }
@@ -1628,12 +1716,14 @@ async function reviewBatches(
   incompleteReceiptCount: number;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   incompleteReferenceCriteriaReceiptCount: number;
+  creativeLockAssessments: VisualReviewCreativeLockAssessment[];
   broadQualityScores: number[];
   incompleteBroadQualityScoreCount: number;
 }> {
   const defects: VisualReviewDefect[] = [];
   const summaries: string[] = [];
   const criteriaReceipts: VisualReviewReferenceCriterionReceipt[] = [];
+  const creativeLockAssessments: VisualReviewCreativeLockAssessment[] = [];
   let incompleteReceiptCount = 0;
   let incompleteReferenceCriteriaReceiptCount = 0;
   const broadQualityScores: number[] = [];
@@ -1655,9 +1745,20 @@ async function reviewBatches(
         { cause: error },
       );
     }
-    const parsed = parseModelDefects(raw, batch, phase, referenceCriteria, collectBroadQualityScore);
+    const batchCreativeLocks = (intent.creativeLocks ?? []).filter((lock) =>
+      batch.some((frame) => frame.descriptor.tSec >= lock.startSec && frame.descriptor.tSec <= lock.endSec),
+    );
+    const parsed = parseModelDefects(
+      raw,
+      batch,
+      phase,
+      referenceCriteria,
+      batchCreativeLocks,
+      collectBroadQualityScore,
+    );
     defects.push(...parsed.defects);
     criteriaReceipts.push(...parsed.referenceCriteria);
+    creativeLockAssessments.push(...parsed.creativeLockAssessments);
     if (!parsed.complete) incompleteReceiptCount += 1;
     if (!parsed.referenceCriteriaComplete) incompleteReferenceCriteriaReceiptCount += 1;
     if (phase === "broad" && collectBroadQualityScore) {
@@ -1672,6 +1773,7 @@ async function reviewBatches(
     incompleteReceiptCount,
     referenceCriteria: criteriaReceipts,
     incompleteReferenceCriteriaReceiptCount,
+    creativeLockAssessments,
     broadQualityScores,
     incompleteBroadQualityScoreCount,
   };
@@ -1714,6 +1816,57 @@ function aggregateReferenceCriteria(
     return { id: criterion.id, scope: criterion.scope, verdict, evidenceFrameIds };
   });
   return { referenceCriteria, incompleteGlobalCriteria };
+}
+
+function aggregateCreativeLockAssessments(input: {
+  locks: readonly VisualReviewCreativeLock[];
+  broadFrames: readonly Pick<VisualReviewFrame, "id" | "tSec">[];
+  assessments: readonly VisualReviewCreativeLockAssessment[];
+}): NonNullable<VisualReviewEvidence["coverage"]["creativeLocks"]> | undefined {
+  if (input.locks.length === 0) return undefined;
+  const expectedBatchCounts = new Map<string, number>();
+  for (let index = 0; index < input.broadFrames.length; index += FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST) {
+    const batch = input.broadFrames.slice(index, index + FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST);
+    for (const lock of input.locks) {
+      if (batch.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec)) {
+        expectedBatchCounts.set(lock.shotId, (expectedBatchCounts.get(lock.shotId) ?? 0) + 1);
+      }
+    }
+  }
+  const assessments = input.locks.map((lock): VisualReviewCreativeLockAssessment => {
+    const matching = input.assessments.filter((assessment) => assessment.shotId === lock.shotId);
+    const hasFrame = input.broadFrames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec);
+    const verdict: VisualReviewCreativeLockVerdict = matching.some((assessment) => assessment.verdict === "fail")
+      ? "fail"
+      : !hasFrame || matching.length !== (expectedBatchCounts.get(lock.shotId) ?? 0) ||
+          matching.some((assessment) => assessment.verdict !== "pass")
+        ? "not_observable"
+        : "pass";
+    return {
+      shotId: lock.shotId,
+      verdict,
+      assessment: matching.map((assessment) => assessment.assessment).join(" | ").slice(0, 500) ||
+        (hasFrame ? "The broad reviewer did not provide a complete lock assessment." : "No broad-review frame sampled this lock."),
+      evidenceFrameIds: [...new Set(matching.flatMap((assessment) => assessment.evidenceFrameIds))].sort(),
+    };
+  }).sort((left, right) => left.shotId.localeCompare(right.shotId));
+  const missingFrameLockIds = input.locks
+    .filter((lock) => !expectedBatchCounts.has(lock.shotId))
+    .map((lock) => lock.shotId)
+    .sort();
+  const failedLockIds = assessments.filter((assessment) => assessment.verdict === "fail").map((assessment) => assessment.shotId);
+  const notObservableLockIds = assessments
+    .filter((assessment) => assessment.verdict === "not_observable")
+    .map((assessment) => assessment.shotId);
+  return {
+    requestedCount: input.locks.length,
+    frameWitnessedCount: input.locks.length - missingFrameLockIds.length,
+    passedCount: assessments.filter((assessment) => assessment.verdict === "pass").length,
+    missingFrameLockIds,
+    notObservableLockIds,
+    failedLockIds,
+    assessments,
+  };
 }
 
 function defaultReviewer(input: VisualReviewerInput): Promise<string> {
@@ -1808,6 +1961,9 @@ export function visualReviewReceiptFingerprint(input: VisualReviewReceiptFingerp
             .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec || left.reason.localeCompare(right.reason)),
           requiredFocusFrameCount: input.evidence.coverage.requiredFocusFrameCount ?? null,
           missingFocusFrameCount: input.evidence.coverage.missingFocusFrameCount ?? null,
+          ...(input.evidence.coverage.creativeLocks
+            ? { creativeLocks: input.evidence.coverage.creativeLocks }
+            : {}),
           ...(input.evidence.coverage.musicLoop ? { musicLoop: input.evidence.coverage.musicLoop } : {}),
         },
       },
@@ -2078,6 +2234,7 @@ export async function reviewRender(
         incompleteReceiptCount: 0,
         referenceCriteria: [],
         incompleteReferenceCriteriaReceiptCount: 0,
+        creativeLockAssessments: [],
         broadQualityScores: [],
         incompleteBroadQualityScoreCount: 0,
       };
@@ -2101,7 +2258,11 @@ export async function reviewRender(
     broadBatchCount,
   );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
-  const missingCreativeLockIds = missingVisualReviewCreativeLockIds(intent.creativeLocks ?? [], allFrames);
+  const creativeLockCoverage = aggregateCreativeLockAssessments({
+    locks: intent.creativeLocks ?? [],
+    broadFrames: broad.map((frame) => frame.descriptor),
+    assessments: firstPass.creativeLockAssessments,
+  });
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
     !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.01),
   ).length;
@@ -2127,15 +2288,7 @@ export async function reviewRender(
             missingFocusFrameCount,
           }
         : {}),
-      ...((intent.creativeLocks?.length ?? 0) > 0
-        ? {
-            creativeLocks: {
-              requestedCount: intent.creativeLocks!.length,
-              observedCount: intent.creativeLocks!.length - missingCreativeLockIds.length,
-              missingLockIds: missingCreativeLockIds,
-            },
-          }
-        : {}),
+      ...(creativeLockCoverage ? { creativeLocks: creativeLockCoverage } : {}),
     },
   };
   if (opts.persistEvidence !== false) {
@@ -2190,10 +2343,14 @@ export async function reviewRender(
   const failedReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "fail");
   const unobservableReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "not_observable");
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
-  const creativeLockCoverageIncomplete = missingCreativeLockIds.length > 0;
-  const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
+  const failedCreativeLocks = creativeLockCoverage?.failedLockIds ?? [];
+  const incompleteCreativeLocks = [...new Set([
+    ...(creativeLockCoverage?.missingFrameLockIds ?? []),
+    ...(creativeLockCoverage?.notObservableLockIds ?? []),
+  ])];
+  const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length || failedCreativeLocks.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || creativeLockCoverageIncomplete || coverageIncomplete
+    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || incompleteCreativeLocks.length > 0 || coverageIncomplete
       ? "needs_human"
       : "pass";
   // This intentionally happens after `persistEvidence`: the receipt binds the
@@ -2238,8 +2395,10 @@ export async function reviewRender(
     focusCoverageIncomplete
       ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
       : "",
-    creativeLockCoverageIncomplete
-      ? `${missingCreativeLockIds.length}/${intent.creativeLocks?.length ?? 0} creative lock(s) had no reviewed evidence frame: ${missingCreativeLockIds.slice(0, 8).join(", ")}`
+    failedCreativeLocks.length
+      ? `Story Spine visual locks failed: ${failedCreativeLocks.slice(0, 8).join(", ")}`
+      : incompleteCreativeLocks.length
+      ? `Story Spine visual locks lack a complete broad-review assessment: ${incompleteCreativeLocks.slice(0, 8).join(", ")}`
       : "",
   ].filter(Boolean).join(" | ").slice(0, 1000);
   // Record that the critique was channel-grounded: the review fingerprint

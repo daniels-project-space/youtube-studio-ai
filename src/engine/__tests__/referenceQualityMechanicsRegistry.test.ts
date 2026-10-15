@@ -43,7 +43,7 @@ function routeSeed(input: Readonly<Record<string, unknown>>) {
 function visualRelease(referenceCriteria: unknown[] = []) {
   return createVisualReviewReleaseReceipt({
     reviewFingerprint,
-    reviewReceiptVersion: "video-review/v5",
+    reviewReceiptVersion: "video-review/v6",
     reviewReceiptFingerprint,
     verdict: "pass",
     summary: "The existing evidence-backed visual review passed.",

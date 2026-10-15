@@ -34,7 +34,7 @@ assert.match(
 );
 assert.match(
   reviewSource,
-  /video-review\/v5/,
+  /video-review\/v6/,
   "a pre-schema receipt must not be mistaken for current non-Google evidence",
 );
 assert.match(
