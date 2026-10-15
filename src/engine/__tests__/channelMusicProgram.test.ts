@@ -432,6 +432,20 @@ assert.throws(
   "a validly refingerprinted program cannot silently lose a declared channel instrument from the provider prompt",
 );
 
+const legacyPrompt = structuredClone(history);
+delete legacyPrompt.channelIdentityPromptContract;
+legacyPrompt.generation.structuredCaption = legacyPrompt.generation.structuredCaption
+  .replaceAll("felt piano", "generic keyboard");
+const { fingerprint: _legacyPromptFingerprint, ...legacyPromptBody } = legacyPrompt;
+void _legacyPromptFingerprint;
+assert.doesNotThrow(
+  () => ChannelMusicProgramSchema.parse({
+    ...legacyPromptBody,
+    fingerprint: sha256Hex(canonicalJson(legacyPromptBody)),
+  }),
+  "legacy persisted v1 prompts without the new cue contract remain readable",
+);
+
 const tooShortCaption = structuredClone(history);
 tooShortCaption.generation.structuredCaption = "A generic ambient track.";
 assert.throws(

@@ -63,6 +63,7 @@ const MusicSectionSchema = z.object({
 
 const ChannelMusicProgramBodyBaseSchema = z.object({
   version: z.literal(CHANNEL_MUSIC_PROGRAM_VERSION),
+  channelIdentityPromptContract: z.literal("channel-identity-caption/v1").optional(),
   channelId: boundedText(320),
   channelIdentityFingerprint: FingerprintSchema,
   family: boundedText(120),
@@ -145,24 +146,26 @@ function validateChannelMusicProgramBody(
       program.role !== "meditation_bed" && program.role !== "sleep_sound_bed") {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "narrated/short music beds must preserve narration priority" });
   }
-  const caption = program.generation.structuredCaption.toLocaleLowerCase("en-US");
-  const declaredSoundCues = [
-    program.topic,
-    program.identity.genre,
-    program.identity.moodArc,
-    ...program.identity.instrumentation,
-    ...program.identity.textures,
-    ...program.identity.exclusions,
-    ...(bpmRange && program.role !== "sleep_sound_bed"
-      ? [bpmRange[0] === bpmRange[1] ? `${bpmRange[0]} BPM` : `${bpmRange[0]}–${bpmRange[1]} BPM`]
-      : []),
-  ];
-  for (const cue of declaredSoundCues) {
-    if (!caption.includes(cue.toLocaleLowerCase("en-US"))) {
-      issue.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `music structured caption omits declared channel sound cue: ${cue}`,
-      });
+  if (program.channelIdentityPromptContract === "channel-identity-caption/v1") {
+    const caption = program.generation.structuredCaption.toLocaleLowerCase("en-US");
+    const declaredSoundCues = [
+      program.topic,
+      program.identity.genre,
+      program.identity.moodArc,
+      ...program.identity.instrumentation,
+      ...program.identity.textures,
+      ...program.identity.exclusions,
+      ...(bpmRange && program.role !== "sleep_sound_bed"
+        ? [bpmRange[0] === bpmRange[1] ? `${bpmRange[0]} BPM` : `${bpmRange[0]}–${bpmRange[1]} BPM`]
+        : []),
+    ];
+    for (const cue of declaredSoundCues) {
+      if (!caption.includes(cue.toLocaleLowerCase("en-US"))) {
+        issue.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `music structured caption omits declared channel sound cue: ${cue}`,
+        });
+      }
     }
   }
   if (program.generation.providerPreference === "minimax_music3") {
@@ -622,6 +625,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" ? 0.25 : 0.1026)));
   const body: ChannelMusicProgramBody = {
     version: CHANNEL_MUSIC_PROGRAM_VERSION,
+    channelIdentityPromptContract: "channel-identity-caption/v1",
     channelId: input.channelId,
     channelIdentityFingerprint: input.channelIdentityFingerprint,
     family,
