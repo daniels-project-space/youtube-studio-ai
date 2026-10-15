@@ -703,6 +703,20 @@ async function main(): Promise<void> {
   });
   assert.equal(longPlanned.length, 48, "broad evidence must stay within its configured cap");
   assert(longPlanned.filter((frame) => frame.selectionReasons.includes("uniform")).length >= 40, "long masters must retain their reserved temporal anchors");
+  const saturatedNarrationPlan = planVisualReviewEvidence({
+    durationSec: longDurationSec,
+    sceneTimes: Array.from({ length: 120 }, (_, index) => index * 20 + 1),
+    transcriptCues: Array.from({ length: 120 }, (_, index) => ({
+      text: `Cue ${index + 1}`,
+      startSec: index * 20 + 2,
+      endSec: index * 20 + 8,
+    })),
+    maxFrames: 48,
+  });
+  assert(
+    saturatedNarrationPlan.filter((frame) => frame.selectionReasons.includes("cue")).length >= 4,
+    "saturated scene evidence must not crowd every narration cue out of the fixed review budget",
+  );
   assert(
     plannedMaxGapSec(longPlanned, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
     "priority frames must not create an unreviewed long-duration middle",

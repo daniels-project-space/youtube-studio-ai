@@ -832,11 +832,14 @@ const MAX_REVIEW_QUALITY_CRITERION_CHARS = 780;
 
 const REASON_PRIORITY: Record<EvidenceReason, number> = {
   focus: 100,
-  scene: 95,
+  // Scene boundaries and narration cues both carry story-level evidence.
+  // Keeping them in one tier prevents abundant detected cuts from consuming
+  // the semantic budget before any image-to-narration checks are sampled.
+  scene: 85,
   overlay: 90,
   intro: 80,
   outro: 80,
-  cue: 45,
+  cue: 85,
   uniform: 25,
 };
 
