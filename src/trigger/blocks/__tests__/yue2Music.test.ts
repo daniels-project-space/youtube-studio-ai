@@ -87,6 +87,9 @@ async function main() {
   const { runPipeline } = load("@/engine/runner") as typeof import("@/engine/runner");
   const { rehydrateOutputs } = load("@/lib/rehydrate") as typeof import("@/lib/rehydrate");
   const { YUE2_MUSIC_CANDIDATE_VERSION } = load("../yue2Music") as typeof import("../yue2Music");
+  const { createChannelProgramBrief } = load("@/engine/channelProgramBrief") as typeof import("@/engine/channelProgramBrief");
+  const { channelProgramRouteRunSeed, resolveChannelProgramRoute } = load("@/engine/channelProgramRoute") as typeof import("@/engine/channelProgramRoute");
+  const { createOriginalMusicProgramPlan } = load("@/engine/originalMusicProgram") as typeof import("@/engine/originalMusicProgram");
   _resetBlocks(); registerAllBlocks();
   const selected = getManifest("music", YUE2_MUSIC_CANDIDATE_VERSION)!;
   assert.ok(selected && !allManifests().includes(selected));
@@ -94,6 +97,23 @@ async function main() {
   assert.deepEqual(Object.keys(selected.produces), ["yue2MusicCandidate"]);
   assert.deepEqual(selected.capabilities, ["audio.music_candidate"]);
   assert.equal(selected.retryAndResume.retryable, false);
+
+  const brief = createChannelProgramBrief({ family: "music_loop", locale: "en-US", nicheKey: "lofi",
+    concept: "Original instrumental focus sessions with calm seamless visual loops.",
+    audience: "people seeking focused instrumental background music", sampleTopics: [arrangement.topic] });
+  const route = resolveChannelProgramRoute(brief)!;
+  const routeSeed = channelProgramRouteRunSeed({ route, programBrief: brief });
+  const musicProgramPlan = createOriginalMusicProgramPlan({ route: routeSeed, topic: arrangement.topic, providerPreference: "yue2" });
+  const routeBoundContext = { ...context, store: { ...context.store, channelProgramRoute: routeSeed, musicProgramPlan } };
+  for (const patch of [
+    changedArrangement({ arrangement: { ...arrangement.arrangement, role: "sleep_sound_bed" }, musicIntent: { ...arrangement.musicIntent, role: "sleep_sound_bed" } }),
+    changedArrangement({ arrangement: { ...arrangement.arrangement, playback: "once" }, musicIntent: { ...arrangement.musicIntent, playback: "once" } }),
+  ]) {
+    reset();
+    await assert.rejects(selected.execute({ ...routeBoundContext,
+      store: { ...routeBoundContext.store, acceptedMusicArrangement: patch } }), /repeating primary-music arrangement/);
+    assert.equal(calls.length + reads + bootstraps, 0, "route-incompatible arrangements must refuse before paid or storage I/O");
+  }
 
   for (const patch of [
     { ownerId: "another-owner" }, { channelId: "another-channel" }, { runId: "another-run" },

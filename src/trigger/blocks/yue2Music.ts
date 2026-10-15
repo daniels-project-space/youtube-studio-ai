@@ -29,6 +29,9 @@ const block: Block & { version: string } = {
       throw new Error("YuE2 music requires a sealed YuE2 program; a legacy provider choice cannot be overwritten");
     }
     const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+    if (program && (arrangement.arrangement.role !== "primary_music" || arrangement.arrangement.playback !== "repeat")) {
+      throw new Error("YuE2 music-loop route requires a repeating primary-music arrangement");
+    }
     if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
       arrangement.runId !== ctx.runId || arrangement.topic !== ctx.store["topic"] ||
       !arrangement.symbolicScore || !arrangement.reviewContext) {
