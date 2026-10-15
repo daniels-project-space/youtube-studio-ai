@@ -28,7 +28,7 @@ assert.match(
 );
 assert.match(
   music,
-  /musicNativeWavKey\s*=\s*`\$\{ctx\.keyPrefix\}runs\/\$\{ctx\.runId\}\/audio\/minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
+  /musicNativeWavKey\s*=\s*`\$\{musicRunAudioPrefix\(ctx\.ownerId, ctx\.runId\)\}minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
   "the retained owner-audition source must be content-addressed by the already verified native WAV digest",
 );
 assert.match(

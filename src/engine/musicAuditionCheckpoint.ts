@@ -148,6 +148,10 @@ export const MusicProviderAuditionSourceSchema = MusicProviderAuditionSourceBody
 
 export type MusicProviderAuditionSource = z.infer<typeof MusicProviderAuditionSourceSchema>;
 
+export function musicRunAudioPrefix(ownerId: string, runId: string): string {
+  return `owner/${ownerId}/runs/${runId}/audio/`;
+}
+
 export function createMusicProviderAuditionSource(input: {
   readonly ownerId: string;
   readonly channelId: string;

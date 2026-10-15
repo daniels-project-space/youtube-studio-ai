@@ -54,6 +54,7 @@ import {
 } from "@/engine/channelMusicProgram";
 import {
   assertMusicAuditionNativeBytes,
+  musicRunAudioPrefix,
   MusicProviderAuditionSourceSchema,
 } from "@/engine/musicAuditionCheckpoint";
 import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
@@ -632,7 +633,7 @@ async function assertMusicQualityForPublish(ctx: StageContext): Promise<void> {
       quality.output.sampleRate !== source.auditionOutput.sampleRateHz ||
       quality.output.channels !== source.auditionOutput.channels ||
       quality.output.codec !== source.auditionOutput.codec ||
-      qualityReceiptKey !== `${ctx.keyPrefix}runs/${ctx.runId}/audio/music-quality-${quality.fingerprint}.json`
+      qualityReceiptKey !== `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}music-quality-${quality.fingerprint}.json`
     ) {
       throw new Error("upload_draft: provider music quality receipt does not match the auditioned master");
     }
@@ -674,7 +675,7 @@ async function assertMusicQualityForPublish(ctx: StageContext): Promise<void> {
   }
   const nativeWavKey = str(ctx, "musicNativeWavKey");
   const expectedNativeWavKey =
-    `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
+    `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-native-${runtime.output.contentSha256}.wav`;
   if (nativeWavKey !== expectedNativeWavKey) {
     throw new Error("MiniMax-Music3 native WAV key is not bound to this run and immutable worker output");
   }

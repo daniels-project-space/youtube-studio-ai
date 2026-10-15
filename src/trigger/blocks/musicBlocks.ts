@@ -22,6 +22,7 @@ import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
 import {
   assertMusicAuditionNativeBytes,
   createMusicProviderAuditionSource,
+  musicRunAudioPrefix,
 } from "@/engine/musicAuditionCheckpoint";
 import {
   generateMureka,
@@ -77,7 +78,7 @@ async function retainProviderMusicAuditionSource(input: {
   await decodeMusicAuditionPcmWav(input.sourcePath, wavPath, input.durationSec);
   const auditionWavBytes = await readBytes(wavPath);
   const auditionWavSha256 = sha256BytesHex(auditionWavBytes);
-  const audioPrefix = `${input.ctx.keyPrefix}runs/${input.ctx.runId}/audio/`;
+  const audioPrefix = musicRunAudioPrefix(input.ctx.ownerId, input.ctx.runId);
   const musicAuditionWavKey = `${audioPrefix}music-audition-${auditionWavSha256}.wav`;
   const source = createMusicProviderAuditionSource({
     ownerId: input.ctx.ownerId,
@@ -377,7 +378,7 @@ export const music: Block = {
       bodyMusicVol: dna?.audio?.bodyMusicVol,
     });
     const channelMusicProgramKey =
-      `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${channelMusicProgram.fingerprint}.json`;
+      `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}channel-music-program-${channelMusicProgram.fingerprint}.json`;
     await putObject(
       channelMusicProgramKey,
       Buffer.from(JSON.stringify(channelMusicProgram, null, 2)),
@@ -470,7 +471,7 @@ export const music: Block = {
         });
         assertMusicAuditionNativeBytes({ expected: runtime.output, bytes: nativeWavBytes });
         musicNativeWavKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-native-${runtime.output.contentSha256}.wav`;
         await putObject(musicNativeWavKey, nativeWavBytes, { contentType: "audio/wav" });
         await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
           source: "prepared-weekly-music",
@@ -624,7 +625,7 @@ export const music: Block = {
             break;
           }
           const rejectedKey =
-            `${ctx.keyPrefix}runs/${ctx.runId}/audio/rejected/minimax-music3-native-${candidate.receipt.output.contentSha256}.wav`;
+            `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}rejected/minimax-music3-native-${candidate.receipt.output.contentSha256}.wav`;
           await putObject(rejectedKey, candidate.audio, { contentType: "audio/wav" });
           await recordAsset(ctx, "minimax_music3_rejected_native_wav", rejectedKey, {
             requestKey: candidate.receipt.requestKey,
@@ -646,7 +647,7 @@ export const music: Block = {
         minimaxReceipt = result.receipt;
         minimaxLocalPath = await writeBytes(join(tmp, "minimax-music3.wav"), result.audio);
         musicNativeWavKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
         await putObject(musicNativeWavKey, result.audio, { contentType: "audio/wav" });
         await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
           requestKey: result.receipt.requestKey,
@@ -665,7 +666,7 @@ export const music: Block = {
           reviewBinding: "native-worker-wav",
         });
         musicRuntimeReceiptKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-runtime-${result.receipt.requestKey}.json`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-runtime-${result.receipt.requestKey}.json`;
         await putObject(
           musicRuntimeReceiptKey,
           Buffer.from(JSON.stringify(result.receipt, null, 2)),
@@ -797,7 +798,7 @@ export const music: Block = {
     }
     local = loopedMusic;
 
-    const musicKey = `${ctx.keyPrefix}runs/${ctx.runId}/music.mp3`;
+    const musicKey = `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}music.mp3`;
     const musicBytes = await readBytes(local);
     await putObject(musicKey, musicBytes, { contentType: "audio/mpeg" });
     let musicAuditionSourceKey: string | undefined;

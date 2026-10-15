@@ -46,6 +46,16 @@ function wav(value: number): Buffer {
   return result;
 }
 
+function pcmWav(durationSec: number): Buffer {
+  const dataBytes = Math.round(durationSec * 32_000) * 4;
+  const result = Buffer.alloc(44 + dataBytes);
+  result.write("RIFF", 0); result.writeUInt32LE(result.length - 8, 4); result.write("WAVEfmt ", 8);
+  result.writeUInt32LE(16, 16); result.writeUInt16LE(1, 20); result.writeUInt16LE(2, 22);
+  result.writeUInt32LE(32_000, 24); result.writeUInt32LE(128_000, 28); result.writeUInt16LE(4, 32);
+  result.writeUInt16LE(16, 34); result.write("data", 36); result.writeUInt32LE(dataBytes, 40);
+  return result;
+}
+
 type Row = Awaited<ReturnType<NonNullable<RunStageSink["getResumeState"]>>>[number];
 function localSink() {
   const rows = new Map<string, Row>();
@@ -80,6 +90,7 @@ async function main() {
   let voiceCalls = 0;
   let musicCalls = 0;
   let commands: string[][] = [];
+  let decodedPcmDurationSec: number | undefined;
   let normalizationTargets: number[] = [];
   let libraryCalls: Array<Record<string, unknown>> = [];
   let mixes: Array<{ path: string; hash: string }> = [];
@@ -97,6 +108,12 @@ async function main() {
       normalizationTargets.push(Number(loudnorm.match(/loudnorm=I=(-?[\d.]+)/)![1]));
       return { stdout: "", stderr: JSON.stringify({ input_i: "-19", input_tp: "-4", input_lra: "2", input_thresh: "-29", target_offset: "0" }) };
     }
+    if (command === "ffprobe" && values.includes("stream=codec_name,sample_rate,channels:format=duration")) {
+      return { stdout: JSON.stringify({
+        streams: [{ codec_name: "pcm_s16le", sample_rate: "32000", channels: 2 }],
+        format: { duration: String(decodedPcmDurationSec) },
+      }), stderr: "" };
+    }
     if (command === "ffprobe") return { stdout: JSON.stringify({
       streams: [
         ...values.at(-1)!.endsWith(".audio") ? [] : [{ codec_type: "video", duration: "1.7", duration_ts: 17, time_base: "1/10", start_time: "0" }],
@@ -108,7 +125,10 @@ async function main() {
       const inputs = values.flatMap((value, index) => value === "-i" ? [values[index + 1]] : []);
       mixes.push({ path: inputs[2], hash: sha(await readFile(inputs[2])) });
     }
-    if (command === "python3") {
+    if (command === "ffmpeg" && values.includes("pcm_s16le")) {
+      decodedPcmDurationSec = Number(values[values.indexOf("-t") + 1]);
+      await writeFile(values.at(-1)!, pcmWav(decodedPcmDurationSec));
+    } else if (command === "python3") {
       assert.equal(values[0], join("scripts", "mc_page_render.py"));
       await materialize(values[3]);
       await writeFile(join(directory, "motion_comic_review_timeline.json"), JSON.stringify({ version: "motion-comic-review/v1", bubbles: [] }));
@@ -278,7 +298,7 @@ async function main() {
       resetEvidence();
       const selected = { ...entry, params: { ...params, scorePlayback: playback } };
       const runId = `score-${playback}`;
-      const scoreKey = `${prefix}runs/${runId}/music.mp3`;
+      const scoreKey = `owner/${ownerId}/runs/${runId}/audio/music.mp3`;
       const f = await execute(seed, selected, runId);
       assert.equal(f.result.ok, true, f.result.error);
       assert.equal(f.result.store.musicKey, scoreKey);
@@ -317,13 +337,13 @@ async function main() {
       resetEvidence();
       const changedSourceRun = `${runId}-changed-source`;
       sharedAudio = wav(-0.25);
-      const otherScoreKey = `${prefix}runs/${changedSourceRun}/music.mp3`;
+      const otherScoreKey = `owner/${ownerId}/runs/${changedSourceRun}/audio/music.mp3`;
       const fresh = await execute(seed, selected, changedSourceRun);
       assert.equal(fresh.result.ok, true, fresh.result.error);
       assert.equal(musicCalls, 0);
       assert.equal(mixes.at(-1)?.hash, sha(objects.get(otherScoreKey)!));
       const retryRun = `${runId}-interrupted`;
-      const retryKey = `${prefix}runs/${retryRun}/music.mp3`;
+      const retryKey = `owner/${ownerId}/runs/${retryRun}/audio/music.mp3`;
       interruptArtAdmission = true;
       const interrupted = await execute(seed, selected, retryRun);
       interruptArtAdmission = false;
@@ -339,7 +359,7 @@ async function main() {
       sharedAudio = wav(0.125);
     }
     directory = join(root, "producer-reuse-refused"); await mkdir(directory); resetEvidence();
-    const reusedKey = `${prefix}runs/score-once/music.mp3`;
+    const reusedKey = `owner/${ownerId}/runs/score-once/audio/music.mp3`;
     const reusedProducer = await execute({ ...seed, reuseMusicKey: reusedKey }, entry, "producer-reuse");
     assert.equal(reusedProducer.result.ok, false, "an unproven raw reuse key cannot relabel the original provider or approval");
     assert.equal(reusedProducer.result.failedBlock, "music");
@@ -356,8 +376,8 @@ async function main() {
     });
     for (const [invalid, expectedError] of [
       [{ ...seed, musicKey: "owner/another-owner/runs/source/music.wav" }, /owner-scoped/],
-      [{ ...seed, musicKey: `${prefix}runs/source/missing.wav` }, /missing, empty/],
-      [{ ...seed, musicKey: `${prefix}runs/score-once/music.mp3`, acceptedMusicArrangement: arrangement }, /binding or playback mismatch/],
+      [{ ...seed, musicKey: `owner/${ownerId}/runs/source/audio/missing.wav` }, /missing, empty/],
+      [{ ...seed, musicKey: reusedKey, acceptedMusicArrangement: arrangement }, /binding or playback mismatch/],
     ] as const) {
       resetEvidence();
       await assert.rejects(alternate.execute({
