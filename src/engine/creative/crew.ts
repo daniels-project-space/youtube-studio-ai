@@ -351,6 +351,12 @@ export async function briefComposerWithArrangement(
       `a build, drop, climax, motif, or section progression for you. A continuous flat arrangement is valid ` +
       `when requested: its sections are review intervals, not mandatory musical changes, and may have ` +
       `identical energy and instructions with stable texture and no development. ` +
+      `Channel-grounding standard: turn each supplied persona, style-grammar, doctrine, and authored audio-identity ` +
+      `cue into concrete audible choices in the direction and section instructions (for example register, ` +
+      `instrumentation, density, harmonic motion, articulation, space, or development). Make the combination ` +
+      `distinctive to this channel and episode, not a list of mood adjectives or a generic genre preset. ` +
+      `Preserve constraints and exclusions explicitly; do not invent identity traits or preferences for fields that ` +
+      `were not supplied. Every section must state what remains recognizable and what, if anything, is allowed to change. ` +
       `Choose role primary_music, narration_bed, meditation_bed, sleep_sound_bed, or short_form_bed from the supplied intent. ` +
       `sleep_sound_bed is for unattended sleep: stable low arousal, no pulse, melodic arrival, crescendo, or attention-catching event. ` +
       `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +

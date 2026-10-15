@@ -169,6 +169,10 @@ async function main() {
     assert.ok(request.prompt.includes(bible.composerDoctrine!));
     assert.ok(request.prompt.includes("ambient strings"));
     assert.ok(request.prompt.includes("30 min"));
+    assert.match(request.prompt, /Channel-grounding standard: turn each supplied persona/);
+    assert.match(request.prompt, /distinctive to this channel and episode, not a list of mood adjectives/);
+    assert.match(request.prompt, /do not invent identity traits or preferences/);
+    assert.match(request.prompt, /Every section must state what remains recognizable/);
     assert.ok(request.prompt.startsWith(producedBrief.reviewContext.promptContext + "\n\n"), "review retains the exact context actually dispatched");
     for (const value of [bible.positioning, bible.vibe, bible.iconicMotif, bible.avoidInSpace[0], bible.composerDoctrine!, seedStore.persona, seedStore.styleGrammar, "ambient strings", "Operator role directives:"]) {
       assert.ok(producedBrief.reviewContext.promptContext.includes(value), `missing review grounding: ${value}`);
