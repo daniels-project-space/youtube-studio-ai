@@ -238,10 +238,33 @@ const defaultMusicVideo = createChannelMusicProgram({
   contentLaneKey: "music_video",
   topic: "A city wakes before dawn",
 });
+assert.equal(defaultMusicVideo.role, "primary_music");
 assert.equal(defaultMusicVideo.identity.genre,
   primaryMusicFallbackProfile({ family: "cinematic", contentLaneKey: "music_video", channelIdentitySeed: sha("f") }).genre);
 assert.notEqual(defaultMusicVideo.identity.genre, "warm lo-fi instrumental",
   "generic primary-music routes need a music-forward, non-Lo-Fi program default");
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-music-video-role-conflict",
+  channelIdentityFingerprint: sha("f"),
+  family: "cinematic",
+  contentLaneKey: "music_video",
+  topic: "A city wakes before dawn",
+  role: "narration_bed",
+}), /conflicts with route-owned role primary_music/u,
+"music-video lanes must not be converted into ducked narration beds");
+const { fingerprint: defaultMusicVideoFingerprint, ...defaultMusicVideoBody } = defaultMusicVideo;
+assert.match(defaultMusicVideoFingerprint, /^[a-f0-9]{64}$/u);
+assert.throws(() => ChannelMusicProgramSchema.parse({
+  ...defaultMusicVideoBody,
+  role: "narration_bed",
+  mix: { ...defaultMusicVideoBody.mix, bodyMusicVol: 0.1026, narrationPriority: true },
+  fingerprint: sha256Hex(canonicalJson({
+    ...defaultMusicVideoBody,
+    role: "narration_bed",
+    mix: { ...defaultMusicVideoBody.mix, bodyMusicVol: 0.1026, narrationPriority: true },
+  })),
+}), /route-owned role primary_music/u,
+"persisted music-video plans must retain primary-music ownership after re-fingerprinting");
 
 const sleep = createChannelMusicProgram({
   channelId: "channel-sleep",

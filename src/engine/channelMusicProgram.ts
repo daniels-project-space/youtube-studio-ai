@@ -310,7 +310,7 @@ function routeOwnedMusicRole(family: string, contentLaneKey: string): ChannelMus
     role === "sleep_sound_bed" ||
     role === "meditation_bed" ||
     role === "short_form_bed" ||
-    (familyRoute === "music_loop" && laneRoute === "music_loop")
+    role === "primary_music"
   ) {
     return role;
   }
