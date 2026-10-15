@@ -767,8 +767,20 @@ async function main(): Promise<void> {
           const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed" || role === "sleep_sound_bed");
           assert.equal(scoped.job.source_duration_policy, natural ? "natural_loop" : "exact");
           assert.deepEqual(validateYuE2EvaluationRequest(scoped), scoped);
-          if (!natural) assert.throws(() => validateYuE2EvaluationRequest({ ...scoped,
-            job: { ...scoped.job, source_duration_policy: "natural_loop" } }), /accepted arrangement/);
+          const rejectedPolicies: Array<"exact" | "natural_loop" | undefined> = natural
+            ? ["exact", undefined] : ["natural_loop", undefined];
+          for (const policy of rejectedPolicies) {
+            const changed = clone(scoped);
+            assert.ok(changed.job.schema_version === 2);
+            if (policy === undefined) delete changed.job.source_duration_policy;
+            else changed.job.source_duration_policy = policy;
+            const { job_id: _oldId, ...body } = changed.job;
+            void _oldId;
+            changed.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({ version: changed.version,
+              programFingerprint: changed.programFingerprint, manifestSha256: changed.manifestSha256, request: body }))}`;
+            assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/,
+              `${role}/${playback} must reject source-duration policy ${String(policy)}`);
+          }
         }
       }
     });
