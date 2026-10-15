@@ -620,9 +620,13 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     script: dna.narrative ? `${dna.narrative.scriptStyle}; hook: ${dna.narrative.hookStyle}; pacing: ${dna.narrative.pacing}.` : "On-brand script with a strong hook and tight pacing.",
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",
     footage: `On-theme visuals that match the narration; ${dna.composition || "strong composition"}; grade: ${dna.colorGrade || "on-brand"}; avoid: ${dna.visualAvoid.join(", ") || "off-brand shots"}.`,
-    hook: "Scroll-stopping in the first 1-2s; clear payoff promise.",
+    hook: dna.narrative
+      ? `Scroll-stopping in the first 1-2s; clear payoff promise, using this channel's hook style: ${dna.narrative.hookStyle}.`
+      : "Scroll-stopping in the first 1-2s; clear payoff promise.",
     captions: "Time-critical on-screen copy is mobile-legible and correctly timed: karaoke captions where narrated; otherwise prompts, options, timer, and reveal text stay readable without covering the answer or subject.",
-    pacing: "Tight, pattern-interrupted pacing with no dead air.",
+    pacing: dna.narrative
+      ? `Tight, pattern-interrupted pacing with no dead air; ${dna.narrative.pacing}.`
+      : "Tight, pattern-interrupted pacing with no dead air.",
     motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
   // Deterministic floors the iteration loop cannot game.

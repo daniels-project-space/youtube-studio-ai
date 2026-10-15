@@ -106,6 +106,16 @@ assert.match(shortsIdentity?.description ?? "", /archivist at a brass desk/);
 assert.match(shortsIdentity?.description ?? "", /rain-lit records room/);
 assert.match(shortsIdentity?.description ?? "", /era\/weather/);
 
+const shortsBar = buildQualityBar("shorts", DNA, 123);
+assert.match(
+  shortsBar.dimensions.find((dimension) => dimension.id === "hook")?.description ?? "",
+  /open with the consequential fact/,
+);
+assert.match(
+  shortsBar.dimensions.find((dimension) => dimension.id === "pacing")?.description ?? "",
+  /each beat earns the next reveal/,
+);
+
 const whiteboardMotion = buildQualityBar("whiteboard", {
   ...DNA,
   motionVocabulary: ["hand reveals each diagram line", "labels appear with narration"],
