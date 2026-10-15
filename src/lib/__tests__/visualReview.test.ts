@@ -612,6 +612,22 @@ async function main(): Promise<void> {
   assert.equal(malformedRequiredDefects.verdict, "needs_human", "malformed required defect fields must fail visual QA closed");
   assert.equal(malformedRequiredDefects.defects.length, 0, "a malformed defect must not receive invented timing or repair evidence");
 
+  const unknownDefectCategory = await reviewRender(fixture, 18, {
+    title: "Unknown defect-category fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-unknown-defect-category",
+    reviewer: async () => JSON.stringify({
+      defects: [{ ...completeDefect, category: "invented_category" }],
+      summary: "Unknown defect-category fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(unknownDefectCategory.verdict, "needs_human", "an unknown defect category must not be downgraded and marked complete");
+  assert.equal(unknownDefectCategory.defects.length, 0, "an untyped defect must not lose its module-routing category");
+
   const planned = planVisualReviewEvidence({
     durationSec: 18,
     sceneTimes: [2, 6, 10, 15],

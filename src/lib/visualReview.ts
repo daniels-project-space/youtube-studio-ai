@@ -46,23 +46,26 @@ export const VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION =
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
-export type VisualReviewCategory =
-  | "overlay_off_canvas"
-  | "overlay_occlusion"
-  | "overlay_collision"
-  | "caption_cutoff"
-  | "caption_unreadable"
-  | "wrong_footage"
-  | "repeated_clip"
-  | "narration_mismatch"
-  | "continuity_break"
-  | "reveal_failure"
-  | "black_frame"
-  | "frozen_frame"
-  | "transition_break"
-  | "intro_card"
-  | "outro_card"
-  | "general_visual";
+const VISUAL_REVIEW_CATEGORY_VALUES = [
+  "overlay_off_canvas",
+  "overlay_occlusion",
+  "overlay_collision",
+  "caption_cutoff",
+  "caption_unreadable",
+  "wrong_footage",
+  "repeated_clip",
+  "narration_mismatch",
+  "continuity_break",
+  "reveal_failure",
+  "black_frame",
+  "frozen_frame",
+  "transition_break",
+  "intro_card",
+  "outro_card",
+  "general_visual",
+] as const;
+export type VisualReviewCategory = (typeof VISUAL_REVIEW_CATEGORY_VALUES)[number];
+const VISUAL_REVIEW_CATEGORIES = new Set<string>(VISUAL_REVIEW_CATEGORY_VALUES);
 export type EvidenceReason = "intro" | "outro" | "scene" | "uniform" | "cue" | "overlay" | "focus";
 
 export type NormalizedRect = [number, number, number, number];
@@ -1241,7 +1244,7 @@ function reviewerPrompt(
     `Use general_visual only for another visible mood, composition, or aesthetic concern that does not fit a typed category. ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
-    `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|narration_mismatch|continuity_break|reveal_failure|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
+    `"category":"${VISUAL_REVIEW_CATEGORY_VALUES.join("|")}",` +
     `"confidence":0..1,"observed":"what is visibly wrong","expected":"what should be visible",` +
     `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],` +
     (referenceCriteria.length
@@ -1427,6 +1430,7 @@ function parseModelDefects(
     const startSec = item["startSec"];
     const endSec = item["endSec"];
     const rawSeverity = typeof item["severity"] === "string" ? item["severity"].trim().toLowerCase() : "";
+    const rawCategory = typeof item["category"] === "string" ? item["category"].trim().toLowerCase() : "";
     const confidence = item["confidence"];
     if (
       !observed ||
@@ -1443,8 +1447,7 @@ function parseModelDefects(
       !Number.isFinite(confidence) ||
       confidence < 0 ||
       confidence > 1 ||
-      typeof item["category"] !== "string" ||
-      !item["category"].trim()
+      !VISUAL_REVIEW_CATEGORIES.has(rawCategory)
     ) {
       complete = false;
       return [];
@@ -1463,7 +1466,7 @@ function parseModelDefects(
       return [];
     }
     const evidenceFrameIds = [...new Set(ids)];
-    const category = normalizeCategory(item["category"], observed);
+    const category = normalizeCategory(rawCategory, observed);
     const key = `${phase}|${category}|${roundTime(startSec)}|${observed.slice(0, 120)}`;
     return [{
       id: createHash("sha256").update(key).digest("hex").slice(0, 16),
