@@ -124,3 +124,34 @@ export function syntheticScenarioWritingDirective(contract: SyntheticScenarioCon
     "Make the viewer care through concrete stakes, trade-offs, reversals, and a payoff—not by pretending the scenario happened.",
   ].join(" ");
 }
+
+/** Shared audible-opening gate for live runs and prepared narration admission. */
+export function assertSyntheticScenarioOpeningDisclosure(
+  contract: SyntheticScenarioContract,
+  narration: string,
+): SyntheticScenarioDisclosure {
+  const opening = narration
+    .replace(/\[[^\]\r\n]{1,120}\]/g, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 40)
+    .join(" ")
+    .toLocaleLowerCase();
+  if (!opening.includes(contract.visibleDisclosure.toLocaleLowerCase())) {
+    throw new Error(
+      `scenario_disclosure_gate: narration must say "${contract.visibleDisclosure}" within its first 40 spoken words`,
+    );
+  }
+  if (!/illustrative|assumption|fictional/u.test(opening)) {
+    throw new Error(
+      "scenario_disclosure_gate: the first 40 spoken words must say the scenario is illustrative assumptions, not a real simulation",
+    );
+  }
+  return {
+    version: SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
+    profile: contract.profile,
+    visibleDisclosure: contract.visibleDisclosure,
+    openingVerified: true,
+  };
+}

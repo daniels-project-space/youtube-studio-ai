@@ -6,7 +6,7 @@
  */
 import {
   SYNTHETIC_SCENARIO_DISCLOSURE,
-  SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
+  assertSyntheticScenarioOpeningDisclosure,
   assertSyntheticScenarioContract,
   syntheticScenarioContract,
   type SyntheticScenarioContract,
@@ -24,20 +24,6 @@ import type { Block, StageContext } from "@/engine/types";
 function nonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`);
   return value.trim();
-}
-
-/**
- * Voice-performance tags are instructions to the TTS provider, not spoken
- * words. Strip them before measuring a release disclosure's audible position.
- */
-function firstSpokenWords(value: string, count: number): string {
-  return value
-    .replace(/\[[^\]\r\n]{1,120}\]/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, count)
-    .join(" ");
 }
 
 function scenarioFromParams(params: Record<string, unknown>): SyntheticScenarioContract {
@@ -156,27 +142,9 @@ export const scenarioDisclosureGateBlock: Block = {
       throw new Error("scenario_disclosure_gate: scenario contract does not match the frozen channel program route");
     }
     const narration = nonEmptyString(ctx.store["narrationText"], "scenario_disclosure_gate: narrationText");
-    const opening = firstSpokenWords(narration, 40).toLocaleLowerCase();
-    const disclosure = scenario.visibleDisclosure.toLocaleLowerCase();
-    if (!opening.includes(disclosure)) {
-      throw new Error(
-        `scenario_disclosure_gate: narration must say "${scenario.visibleDisclosure}" within its first 40 spoken words`,
-      );
-    }
-    if (!/illustrative|assumption|fictional/.test(opening)) {
-      throw new Error(
-        "scenario_disclosure_gate: the first 40 spoken words must say the scenario is illustrative assumptions, not a real simulation",
-      );
-    }
+    const disclosure = assertSyntheticScenarioOpeningDisclosure(scenario, narration);
     ctx.log(`scenario_disclosure_gate: spoken ${SYNTHETIC_SCENARIO_DISCLOSURE} verified`);
-    return {
-      syntheticScenarioDisclosure: {
-        version: SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
-        profile: scenario.profile,
-        visibleDisclosure: scenario.visibleDisclosure,
-        openingVerified: true,
-      },
-    };
+    return { syntheticScenarioDisclosure: disclosure };
   },
 };
 

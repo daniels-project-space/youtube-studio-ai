@@ -21,6 +21,11 @@ import {
 } from "@/lib/planWeekPreparation";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
+import {
+  assertSyntheticScenarioOpeningDisclosure,
+  syntheticScenarioContract,
+  syntheticScenarioWritingDirective,
+} from "@/engine/syntheticScenario";
 import { readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
@@ -155,6 +160,18 @@ export function preparedScriptFromDocumentaryEpisodePlan(
   };
 }
 
+export function assertPreparedScriptRouteContracts(
+  manifest: PlanWeekPreparationManifest,
+  script: Script,
+): void {
+  const route = routeSeed(manifest);
+  if (!route?.syntheticScenarioProfile) return;
+  assertSyntheticScenarioOpeningDisclosure(
+    syntheticScenarioContract(route.syntheticScenarioProfile),
+    script.narrationText,
+  );
+}
+
 function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
@@ -162,6 +179,9 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
   const scriptConfig = moduleConfig.script_gen ?? {};
   const narrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
     ? (seed.styleDNA as Record<string, unknown>).narrative
+    : undefined;
+  const syntheticScenario = route?.syntheticScenarioProfile
+    ? syntheticScenarioContract(route.syntheticScenarioProfile)
     : undefined;
   return {
     topic: manifest.plan.topic,
@@ -180,6 +200,7 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     dataRich: scriptConfig.dataRich === true,
     sourceAttributionRequired: scriptConfig.sourceAttributionRequired === true,
     weeklyPreparationBrief: manifest.prompts.script,
+    sourceGrounding: syntheticScenario ? syntheticScenarioWritingDirective(syntheticScenario) : undefined,
     programRoute: route,
     narrative: narrative && typeof narrative === "object" && !Array.isArray(narrative)
       ? narrative as ScriptRequest["narrative"]
@@ -238,6 +259,7 @@ export const planWeekPreparedScriptTask = task({
     });
     const prior = await readSidecar(sidecarKey, manifest);
     if (prior) {
+      assertPreparedScriptRouteContracts(manifest, prior.script);
       const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
       return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
     }
@@ -265,6 +287,7 @@ export const planWeekPreparedScriptTask = task({
       costUsd = modelUsage.costUsd;
     }
     assertScriptLanguagePolicy(script!, readChannelBannedWords(seedRecord(manifest).bannedWords), "weekly prepared script");
+    assertPreparedScriptRouteContracts(manifest, script!);
     const prepared: PlanWeekPreparedScript = {
       version: "plan-week-prepared-script/v1",
       manifestSha256: planWeekPreparationManifestSha256(manifest),

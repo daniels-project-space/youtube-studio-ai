@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { buildDocumentarySourceEpisodePlan, documentarySourceSeasonCandidates } from "@/engine/documentarySourceEpisodePlan";
-import { assertPlanWeekPreparedScriptArgs, preparedScriptFromDocumentaryEpisodePlan } from "@/trigger/planWeekPreparedScript";
+import {
+  assertPlanWeekPreparedScriptArgs,
+  assertPreparedScriptRouteContracts,
+  preparedScriptFromDocumentaryEpisodePlan,
+} from "@/trigger/planWeekPreparedScript";
 import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
 
 const scope = { ownerId: "owner1", channelSlug: "history", batchId: "week-1", itemId: "item-1" };
@@ -66,4 +70,36 @@ assert.equal(preparedDocumentaryScript.programRouteFingerprint, documentaryRoute
 assert.throws(() => preparedScriptFromDocumentaryEpisodePlan({ ...documentaryManifest,
   plan: { ...documentaryManifest.plan, topic: "a different topic" } }), /topic differs/,
 "weekly preparation must fail closed when the frozen topic diverges from the reviewed episode");
+
+const syntheticBrief = createChannelProgramBrief({
+  family: "illustrated_explainer",
+  nicheKey: "educational",
+  locale: "en",
+  concept: "Clearly fictional AI thought experiments with disclosed assumptions.",
+  programIntent: { kind: "fictional_scenario", profile: "ai_decision" },
+});
+const syntheticRoute = channelProgramRouteRunSeed({
+  route: resolveChannelProgramRoute(syntheticBrief),
+  programBrief: syntheticBrief,
+});
+const syntheticManifest = {
+  ...documentaryManifest,
+  plan: { ...documentaryManifest.plan, topic: "A fictional town must choose how to ration water" },
+  execution: {
+    ...documentaryManifest.execution,
+    seedStore: { channelProgramRoute: syntheticRoute },
+  },
+};
+const syntheticScript = {
+  hook: "FICTIONAL AI SCENARIO. These illustrative assumptions are not a real simulation.",
+  sections: [],
+  narrationText: "FICTIONAL AI SCENARIO. These illustrative assumptions are not a real simulation.",
+  estDurationSec: 30,
+};
+assert.doesNotThrow(() => assertPreparedScriptRouteContracts(syntheticManifest, syntheticScript));
+assert.throws(() => assertPreparedScriptRouteContracts(syntheticManifest, {
+  ...syntheticScript,
+  narrationText: "A town faces a difficult choice in a simulated future.",
+}), /must say "FICTIONAL AI SCENARIO"/,
+"week-ahead narration must pass the same fictional disclosure gate before paid TTS is dispatched");
 console.log("weekly prepared script producer contract passed");
