@@ -632,7 +632,9 @@ export const music: Block = {
     // NaN here produced NaN, so the track loop ran zero times and the video
     // shipped with no music at all — the quietest possible failure.
     const trackCount = boundedInteger(ctx.params.trackCount, 2, 1, 8);
-    const sunoModel = (ctx.params.model as string | undefined) ?? "V5";
+    const modelOverride = typeof ctx.params.model === "string" ? ctx.params.model.trim() : "";
+    if (modelOverride.length > 12) throw new Error("music: provider model ID must be at most 12 characters");
+    const sunoModel = modelOverride || "V5";
     const mixTitle = (String(ctx.store["channelName"] ?? "") || topic).slice(0, 60);
     const tmp = await makeRunTempDir(ctx.runId);
 
@@ -797,7 +799,7 @@ export const music: Block = {
         ctx.log(`music: generating via ${prov}…`);
         const res = await generateMureka({
           prompt: providerPrompt,
-          model: ctx.params.model as string | undefined,
+          model: modelOverride || undefined,
           timeoutMs: 600_000,
         });
         generations = 1;

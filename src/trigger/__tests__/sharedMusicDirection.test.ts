@@ -12,7 +12,7 @@ import type { PlanWeekPreparedMusicArgs } from "../planWeekPreparedMusic";
 
 type Provider = "mureka" | "suno" | "minimax_music3";
 const boundaryStop = new Error("test stopped at paid provider boundary");
-let dispatched: { provider: Provider; prompt: string; program?: ChannelMusicProgram }[] = [];
+let dispatched: { provider: Provider; prompt: string; model?: string; program?: ChannelMusicProgram }[] = [];
 let persisted: ChannelMusicProgram | undefined;
 let manifestBytes: Uint8Array = new Uint8Array();
 let manifestKey = "";
@@ -23,8 +23,8 @@ const originalFetch = globalThis.fetch;
 let networkCalls = 0;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in direction tests"); };
 
-const dispatch = async (provider: Provider, input: { prompt?: string; program?: ChannelMusicProgram }) => {
-  dispatched.push({ provider, prompt: input.program?.generation.structuredCaption ?? input.prompt!, program: input.program });
+const dispatch = async (provider: Provider, input: { prompt?: string; model?: string; program?: ChannelMusicProgram }) => {
+  dispatched.push({ provider, prompt: input.program?.generation.structuredCaption ?? input.prompt!, model: input.model, program: input.program });
   throw boundaryStop;
 };
 loader._load = function (id, ...args) {
@@ -44,8 +44,8 @@ loader._load = function (id, ...args) {
   const actual = originalLoad.call(this, id, ...args);
   if (id === "@/lib/music") return {
     ...actual as object,
-    generateMureka: (input: { prompt: string }) => dispatch("mureka", input),
-    generateSuno: (input: { prompt: string }) => dispatch("suno", input),
+    generateMureka: (input: { prompt: string; model?: string }) => dispatch("mureka", input),
+    generateSuno: (input: { prompt: string; model?: string }) => dispatch("suno", input),
   };
   if (id === "@/lib/minimaxMusic3") return { ...actual as object, generateMiniMaxMusic3: (input: { program: ChannelMusicProgram }) => dispatch("minimax_music3", input) };
   if (id === "@/lib/files") return { ...actual as object, makeRunTempDir: async () => "/tmp/music-direction-unused" };
@@ -73,7 +73,7 @@ async function main() {
   const { planWeekPreparedMusicTask } = loadWithProviderFixtures("../planWeekPreparedMusic") as {
     planWeekPreparedMusicTask: { run: (args: PlanWeekPreparedMusicArgs) => Promise<unknown> };
   };
-  async function runtime(provider: Provider, prompt: string, store: Record<string, unknown> = {}, error?: RegExp) {
+  async function runtime(provider: Provider, prompt: string, store: Record<string, unknown> = {}, error?: RegExp, model?: string) {
     dispatched = []; persisted = undefined;
     const runtimeStore: Record<string, unknown> = { topic, channelProgramRoute: route, ...store };
     if (runtimeStore.channelProgramRoute === route && runtimeStore.musicProgramPlan === undefined) {
@@ -87,7 +87,7 @@ async function main() {
     const ctx: StageContext = {
       ownerId: "owner-direction", channelId: "channel-direction", runId: "run-direction",
       keyPrefix: "owner/direction/channel/music/", budgetUsd: 5, log: () => {},
-      params: { provider, prompt }, store: runtimeStore,
+      params: { provider, prompt, ...(model === undefined ? {} : { model }) }, store: runtimeStore,
     };
     if (error) {
       await assert.rejects(music.run(ctx), error);
@@ -127,6 +127,10 @@ async function main() {
 
   const flat = "Keep a flat nocturnal pulse with no build, drop, or climax.";
   const active = "Propulsive championship percussion for high energy athletic training.";
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "  ");
+  assert.equal(dispatched[0]!.model, undefined, "blank model control must preserve Mureka's provider default");
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "  ");
+  assert.equal(dispatched[0]!.model, "V5", "blank model control must preserve the existing Suno default");
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
     const sleepPrompt = await runtime(provider, "Use a driving 120 BPM groove with a strong pulse.", {
       channelProgramRoute: sleepRoute,

@@ -211,7 +211,7 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
     removable: false,
     params: [
       { key: "provider", type: "enum", options: ["suno", "mureka", "minimax_music3"], describe: "Primary provider. MiniMax-Music3 requires prominent UI attribution, generated-content disclosure, safeguards, operator license attestation, a reviewed qualification receipt, and a two-GPU Novita spot worker." },
-      { key: "model", type: "string", maxLen: 12, describe: "Suno model, e.g. V5 (highest quality)." },
+      { key: "model", type: "string", maxLen: 12, describe: "Optional provider-specific model ID; leave blank for the provider's default and set only a model qualified for this route." },
       { key: "prompt", type: "string", maxLen: 300, describe: "Optional supplemental style/mood nuance; channel DNA stays primary, sleep routes suppress free-form direction, and MiniMax may trim it to preserve its strict caption limit." },
       { key: "trackCount", type: "number", min: 1, max: 8, describe: "Distinct clips crossfaded into the mix. ~1 per 5-7 min of video; 2 minimum for variety." },
     ],
