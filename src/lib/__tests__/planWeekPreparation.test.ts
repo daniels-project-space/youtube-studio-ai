@@ -539,8 +539,10 @@ roleBoundMusicManifest.execution.seedStore = {
 const roleBoundMusicProgram = planWeekPreparedMusicProgram(roleBoundMusicManifest, "mureka");
 assert.equal(roleBoundMusicProgram.role, "meditation_bed",
   "weekly preparation preserves the Composer's explicit role just like the runtime music module");
-assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.25,
-  "a prepared meditation bed uses the shared role default instead of full music-loop gain");
+assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.1026,
+  "a meditation bed on a narrated route must preserve the narration foreground");
+assert.equal(roleBoundMusicProgram.mix.narrationPriority, true,
+  "prepared music must not discard voice-masking priority when the sound role is meditation");
 assert.equal(roleBoundMusicProgram.mix.targetLufs, -18,
   "a prepared meditation bed uses the shared role-specific master target");
 
@@ -571,6 +573,8 @@ assert.equal(
   preparedMusic.musicProgram.fingerprint,
   "a prepared MiniMax master binds the frozen episode, sealed music program, and all required audit artifacts",
 );
+let schemaRejectedMusicMutation = false;
+let bindingRejectedMusicMutation = false;
 for (const mutate of [
   (program: typeof preparedMusic.musicProgram) => { program.identity.genre = "unrelated stadium metal"; },
   (program: typeof preparedMusic.musicProgram) => { program.channelIdentityFingerprint = "a".repeat(64); },
@@ -581,11 +585,18 @@ for (const mutate of [
   mutate(changed);
   const body: Partial<typeof changed> = { ...changed };
   delete body.fingerprint;
-  const musicProgram = ChannelMusicProgramSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+  const parsed = ChannelMusicProgramSchema.safeParse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+  if (!parsed.success) {
+    schemaRejectedMusicMutation = true;
+    continue;
+  }
+  bindingRejectedMusicMutation = true;
   assert.throws(() => assertPlanWeekPreparedMusicBinding({
-    prepared: { ...preparedMusic, musicProgram }, manifest: musicManifest,
+    prepared: { ...preparedMusic, musicProgram: parsed.data }, manifest: musicManifest,
   }), /music.*(program|binding).*mismatch/, "a valid self-hash must not authorize a different frozen music direction");
 }
+assert.equal(schemaRejectedMusicMutation, true, "internally inconsistent mutations fail at the music-program schema boundary");
+assert.equal(bindingRejectedMusicMutation, true, "valid self-hashed mutations still fail at the frozen preparation binding");
 for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
   const frozen = structuredClone(musicManifest);
   frozen.execution.seedStore = {
