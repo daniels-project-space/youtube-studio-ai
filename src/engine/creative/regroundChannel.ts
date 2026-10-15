@@ -65,6 +65,7 @@ import type {
   StyleDNAInput,
   ThumbnailStyleGuide,
 } from "./styleDNA";
+import { ESTABLISHED_CONFIDENCE } from "./styleDNA";
 
 export type RegroundLogger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -131,10 +132,21 @@ export interface RegroundDeps {
   log?: RegroundLogger;
 }
 
-export type RegroundSkipReason = "already-grounded" | "channel-not-found" | "channel-locked";
+export type RegroundSkipReason =
+  | "already-grounded"
+  | "channel-not-found"
+  | "channel-locked"
+  | "style-dna-not-established";
 
 export type RegroundResult =
-  | { ok: false; reason: RegroundSkipReason; wrote: false }
+  | { ok: false; reason: Exclude<RegroundSkipReason, "style-dna-not-established">; wrote: false }
+  | {
+      ok: false;
+      reason: "style-dna-not-established";
+      wrote: false;
+      confidence: number;
+      groundingGaps: string[];
+    }
   | {
       ok: true;
       wrote: boolean;
@@ -257,6 +269,19 @@ export async function regroundChannelCore(
     now,
     log,
   });
+  if (styleDNA.confidence < ESTABLISHED_CONFIDENCE || styleDNA.groundingGaps.length > 0) {
+    log("reground: refusing unestablished Style DNA — nothing written", {
+      confidence: styleDNA.confidence,
+      groundingGaps: styleDNA.groundingGaps,
+    });
+    return {
+      ok: false,
+      reason: "style-dna-not-established",
+      wrote: false,
+      confidence: styleDNA.confidence,
+      groundingGaps: styleDNA.groundingGaps,
+    };
+  }
   const qaRubric = deps.buildBar(family, styleDNA, now);
   const patch = buildRegroundPatch(styleDNA, qaRubric);
 
