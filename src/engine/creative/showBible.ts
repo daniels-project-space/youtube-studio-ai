@@ -3,7 +3,7 @@
  * signals already gathered by auto-SEO to ground the works/avoid doctrine. Runs
  * through the pinned OpenRouter creative-text route via the `showrunner` agent,
  * with a
- * deterministic fallback so channel creation never hard-fails.
+ * fail-closed quality gate so incomplete identity is never persisted.
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
@@ -14,7 +14,6 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import { VIDEO_CREW_ROLES, type ShowBible, type VideoCrewRole } from "./types";
-import { fallbackChannelMotif, fallbackChannelVibe } from "@/lib/identitySpread";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -51,46 +50,61 @@ const bibleSchema = z.object({
   criticDoctrine: z.string().optional(),
 });
 
-function fallbackBible(input: ShowBibleInput): ShowBible {
-  const crew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
-  const programBriefText = input.programBrief
-    ? channelProgramBriefPositioningText(input.programBrief)
-    : "";
-  return {
-    positioning: programBriefText
-      ? `${input.name} — ${programBriefText}`
-      : `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
-    // Spread by channel name. A single fallback pair meant every channel that
-    // hit this path received identical creative doctrine — and the show bible
-    // drives crew, register and look, so it is the worst place in the system
-    // for a shared default.
-    vibe: input.persona ?? fallbackChannelVibe(input.name),
-    iconicMotif: input.motifHint ?? input.styleGrammar ?? fallbackChannelMotif(input.name),
-    worksInSpace: [],
-    avoidInSpace: [],
-    activeCrew: crew,
-    refreshedAt: input.now,
-  };
-}
-
-/** Keep only valid, family-appropriate crew roles; fall back to the family set. */
-function reconcileCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
-  const allowed = new Set<VideoCrewRole>(FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock);
+/** Keep family roles while retaining the family creator and critic when required. */
+export function reconcileShowBibleCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
+  const familyCrew = FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  const allowed = new Set<VideoCrewRole>(familyCrew);
   const valid = proposed.filter((r): r is VideoCrewRole =>
     (VIDEO_CREW_ROLES as readonly string[]).includes(r) && allowed.has(r as VideoCrewRole),
   );
-  // The critic is mandatory (validation) and the family's primary creator is too.
   const out = new Set<VideoCrewRole>(valid);
-  out.add("critic");
-  if (valid.length === 0) return FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  if (familyCrew.includes("critic")) out.add("critic");
+  const primaryCreator = familyCrew.find((role) => role !== "critic");
+  if (primaryCreator) out.add(primaryCreator);
+  if (valid.length === 0) return familyCrew;
   return [...out];
+}
+
+const DOCTRINE_BY_ROLE: Record<VideoCrewRole, keyof ShowBible> = {
+  director: "directorDoctrine",
+  cinematographer: "dpDoctrine",
+  editor: "editorDoctrine",
+  composer: "composerDoctrine",
+  critic: "criticDoctrine",
+};
+
+/** Deterministic admission checks for the channel-level creative contract. */
+export function inspectShowBibleQuality(bible: ShowBible, family: FamilyKey): string[] {
+  const issues: string[] = [];
+  for (const field of ["positioning", "vibe", "iconicMotif"] as const) {
+    if (!bible[field].trim()) issues.push(`${field} is empty`);
+  }
+  for (const field of ["worksInSpace", "avoidInSpace"] as const) {
+    const distinct = new Set(bible[field].map((item) => item.trim().toLowerCase()).filter(Boolean));
+    if (distinct.size < 5) issues.push(`${field} has fewer than five distinct entries`);
+  }
+
+  const familyCrew = FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  const requiredRoles: VideoCrewRole[] = [];
+  if (familyCrew.includes("critic")) requiredRoles.push("critic");
+  const primaryCreator = familyCrew.find((role) => role !== "critic");
+  if (primaryCreator) requiredRoles.push(primaryCreator);
+  for (const role of requiredRoles) {
+    if (!bible.activeCrew.includes(role)) issues.push(`activeCrew is missing required ${role}`);
+  }
+  for (const role of bible.activeCrew) {
+    const doctrine = bible[DOCTRINE_BY_ROLE[role]];
+    if (typeof doctrine !== "string" || !doctrine.trim()) {
+      issues.push(`${role} doctrine is empty`);
+    }
+  }
+  return issues;
 }
 
 export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> {
   const log = input.log ?? (() => {});
   if (!hasCreativeTextKey()) {
-    log("showBible: no non-Google creative-model key — deterministic fallback");
-    return fallbackBible(input);
+    throw new Error("showBible: no configured creative-text provider; refusing incomplete channel identity");
   }
 
   const familyCrew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
@@ -139,12 +153,6 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       // up to five doctrine strings — about 12 list items in practice, plus eight
       // prose fields, on a route where reasoning is billed from the same budget.
       //
-      // Falling back here is not a bad video, it is a bad CHANNEL. fallbackBible
-      // returns worksInSpace: [] and avoidInSpace: [] with no doctrines, crew.ts's
-      // header() then omits both clauses entirely, and the bible is persisted at
-      // inception — so every crew brief for that channel, for its whole life, is
-      // written without the proven patterns and the anti-patterns the prompt
-      // itself calls critical.
       maxTokens: 4000,
       temperature: 0.8,
       prompt,
@@ -155,7 +163,7 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       iconicMotif: (input.motifHint || raw.iconicMotif).trim(),
       worksInSpace: (raw.worksInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
       avoidInSpace: (raw.avoidInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
-      activeCrew: reconcileCrew(input.family, raw.activeCrew ?? []),
+      activeCrew: reconcileShowBibleCrew(input.family, raw.activeCrew ?? []),
       directorDoctrine: raw.directorDoctrine?.trim() || undefined,
       dpDoctrine: raw.dpDoctrine?.trim() || undefined,
       editorDoctrine: raw.editorDoctrine?.trim() || undefined,
@@ -163,11 +171,15 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       criticDoctrine: raw.criticDoctrine?.trim() || undefined,
       refreshedAt: input.now,
     };
+    const qualityIssues = inspectShowBibleQuality(bible, input.family);
+    if (qualityIssues.length > 0) {
+      throw new Error(`Show Bible failed quality admission: ${qualityIssues.join("; ")}`);
+    }
     log("showBible: ready", { motif: bible.iconicMotif.slice(0, 50), crew: bible.activeCrew });
     return bible;
   } catch (e) {
-    log(`showBible: synth failed (${e instanceof Error ? e.message : e}) — fallback`);
-    return fallbackBible(input);
+    log(`showBible: synth failed (${e instanceof Error ? e.message : e}) — refusing persistence`);
+    throw e;
   }
 }
 
