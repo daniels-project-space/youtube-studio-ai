@@ -92,8 +92,12 @@ export async function assertMusicQualityForPublish(ctx: StageContext): Promise<v
       `MiniMax-Music3 per-track quality evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const runtime = assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, program);
-  const quality = assertMusicProgramQualityReceipt({ program, receipt: qualityReceipt });
+  const admittedProgram = ChannelMusicProgramSchema.parse(program);
+  if (admittedProgram.fingerprint !== str(ctx, "channelMusicProgramFingerprint")) {
+    throw new Error("MiniMax-Music3 channel music program does not match this run's sealed fingerprint");
+  }
+  const runtime = assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, admittedProgram);
+  const quality = assertMusicProgramQualityReceipt({ program: admittedProgram, receipt: qualityReceipt });
   if (
     quality.output.contentSha256 !== runtime.output.contentSha256 ||
     quality.output.byteLength !== runtime.output.byteLength ||
