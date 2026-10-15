@@ -2,6 +2,7 @@ import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import type { VisualArtifactAttempt } from "./visualArtifactAttemptLedger";
 import type { StageReuseReceipt } from "./stageReuseContract";
+import type { ModuleScorecard } from "@/lib/moduleScorecard";
 
 /**
  * Core block-engine contract (MASTER-PLAN §D).
@@ -180,6 +181,7 @@ export interface RunStageSink {
     inputs?: unknown;
     outputs?: unknown;
     reuseReceipt?: StageReuseReceipt;
+    moduleScorecard?: ModuleScorecard;
     error?: string;
   }): Promise<void>;
   /**

@@ -5,6 +5,8 @@ import { deriveReleaseEvidenceProjection } from "../src/lib/releaseEvidenceStatu
 import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "../src/lib/runLease";
 import { StageReuseReceiptSchema } from "../src/engine/stageReuseContract";
 import { prepareRunStageProgress, updateRunStageProgress } from "./runStageProgressProjection";
+import { assertModuleScorecard } from "../src/lib/moduleScorecard";
+import { moduleScorecardValidator } from "./moduleScorecardValidator";
 
 /**
  * Release evidence is the only artifact subset needed for the qa_visual run
@@ -38,6 +40,7 @@ export const upsertRunStage = mutation({
     inputs: v.optional(v.any()),
     outputs: v.optional(v.any()),
     reuseReceipt: v.optional(v.any()),
+    moduleScorecard: v.optional(moduleScorecardValidator),
     error: v.optional(v.string()),
   },
   returns: v.id("runStages"),
@@ -46,6 +49,17 @@ export const upsertRunStage = mutation({
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerId !== args.ownerId) {
       throw new Error("run stage ownership mismatch");
+    }
+    const moduleScorecard = args.moduleScorecard === undefined
+      ? undefined
+      : assertModuleScorecard(args.moduleScorecard);
+    if (moduleScorecard && (
+      moduleScorecard.runId !== args.runId ||
+      moduleScorecard.moduleId !== args.block ||
+      (args.status === "ok" ? moduleScorecard.status !== "passed" : moduleScorecard.status !== "failed") ||
+      (args.status !== "ok" && args.status !== "failed")
+    )) {
+      throw new Error("module scorecard identity or stage status mismatch");
     }
     for (const value of [args.cost, args.costBeforeExecution]) {
       if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
@@ -147,6 +161,27 @@ export const upsertRunStage = mutation({
       stageId, block: args.block, status: args.status,
       ...((args.startedAt ?? existing?.startedAt) === undefined ? {} : { startedAt: args.startedAt ?? existing?.startedAt }),
     }], progress);
+
+    if (moduleScorecard) {
+      const prior = await ctx.db.query("moduleScorecards")
+        .withIndex("by_run_block_fingerprint", (q) => q
+          .eq("runId", args.runId)
+          .eq("block", args.block)
+          .eq("fingerprint", moduleScorecard.fingerprint))
+        .unique();
+      if (!prior) {
+        await ctx.db.insert("moduleScorecards", {
+          ownerId: args.ownerId,
+          runId: args.runId,
+          block: args.block,
+          fingerprint: moduleScorecard.fingerprint,
+          capturedAt: moduleScorecard.capturedAt,
+          scorecard: moduleScorecard,
+        });
+      } else if (prior.ownerId !== args.ownerId || prior.scorecard?.fingerprint !== moduleScorecard.fingerprint) {
+        throw new Error("module scorecard idempotency identity mismatch");
+      }
+    }
 
     // Artifact persistence precedes the runner's `qa_visual: ok` transition.
     // Read the raw rows only after writing this stage, then project a
@@ -258,6 +293,28 @@ export const listRunStages = query({
         ...rest,
         ...(outputs !== undefined ? { outputs: slimValue(outputs) } : {}),
       };
+    });
+  },
+});
+
+/** Service-only, bounded read of the separate module quality ledger. */
+export const listModuleScorecards = query({
+  args: { ownerId: v.string(), runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "module scorecard read");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId) throw new Error("module scorecard run unavailable");
+    const rows = await ctx.db.query("moduleScorecards")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .take(1001);
+    if (rows.length > 1000) throw new Error("module scorecard result exceeds bounded read limit");
+    return rows.map((row) => {
+      const scorecard = assertModuleScorecard(row.scorecard);
+      if (row.ownerId !== args.ownerId || scorecard.runId !== args.runId ||
+          scorecard.moduleId !== row.block || scorecard.fingerprint !== row.fingerprint) {
+        throw new Error("persisted module scorecard identity mismatch");
+      }
+      return { ...row, scorecard };
     });
   },
 });

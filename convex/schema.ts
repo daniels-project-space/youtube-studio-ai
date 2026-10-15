@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { runLogLineValidator } from "./runLogChunks";
+import { moduleScorecardValidator } from "./moduleScorecardValidator";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import {
   CHANNEL_COMPOSITION_RECEIPT_VERSION,
@@ -1342,6 +1343,18 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_run_block", ["runId", "block"])
     .index("by_owner", ["ownerId"]),
+
+  // Append-only module quality/cost measurements; kept off hot stage reads.
+  moduleScorecards: defineTable({
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    block: v.string(),
+    fingerprint: v.string(),
+    capturedAt: v.number(),
+    scorecard: moduleScorecardValidator,
+  })
+    .index("by_run", ["runId"])
+    .index("by_run_block_fingerprint", ["runId", "block", "fingerprint"]),
 
   // Immutable, content-addressed module handoffs. Unlike the legacy ambient
   // run-stage blob, every artifact records its schema/module version and exact

@@ -1421,6 +1421,7 @@ export async function runPipeline(
         ...(!isRemoteExecution && checkpointCosts.receipts.length ? { checkpointCostReceipts: checkpointCosts.receipts } : {}),
         outputs: persistedStageOutputs,
         reuseReceipt: executionReceipt,
+        moduleScorecard: scorecard,
       });
       for (const identity of executionReceipt.outputIdentities) artifactIdentities[identity.key] = identity;
       stages.push({ block: block.id, status: "ok" });
@@ -1498,6 +1499,7 @@ export async function runPipeline(
         finishedAt: Date.now(),
         ...(observedCost > 0 ? { cost: Math.max(costBaseline.priorCost, costBaseline.carriedCost + checkpointAdjustedCost) } : {}),
         ...(!isRemoteExecution && checkpointCostScope.snapshot().receipts.length ? { checkpointCostReceipts: checkpointCostScope.snapshot().receipts } : {}),
+        moduleScorecard: failedScorecard,
         error: message,
       });
       stages.push({ block: block.id, status: "failed" });
