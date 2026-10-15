@@ -80,6 +80,15 @@ async function main() {
     }
   }
   assert.equal(storageCalls, 0); assert.equal(networkCalls, 0);
+  const conflictingSleepStore = {
+    topic: "Steady rain through a quiet night",
+    musicBrief: { musicIntent: { role: "sleep_sound_bed" } },
+    styleDNA: { audio: { genre: "ambient", instrumentation: ["soft sustained pad", "boom-bap drums"] } },
+  };
+  const sleepContext = { ...ctx, params: { provider: "suno" }, store: conflictingSleepStore };
+  await assert.rejects(music.run(sleepContext), /sleep soundscape cannot use rhythmic instrumentation: boom-bap drums/u);
+  assert.equal(storageCalls, 0, "a role-conflicting brief must fail before writing its sound program");
+  assert.equal(networkCalls, 0, "a role-conflicting brief must fail before a provider request");
   for (const provider of [undefined, "mureka", "suno", "minimax_music3"]) {
     const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store, reuseMusicKey: "retained.mp3" } });
     assert.equal(result.musicProvider, "reuse");

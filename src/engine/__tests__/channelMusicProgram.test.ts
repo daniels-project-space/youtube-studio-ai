@@ -276,6 +276,15 @@ const sleep = createChannelMusicProgram({
   composerDirection: "Use a strong four-on-the-floor groove in G major at 100 BPM.",
   durationSec: 300,
 });
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-sleep-rhythm-conflict",
+  channelIdentityFingerprint: sha("c"),
+  family: "sleep",
+  contentLaneKey: "music_loop",
+  topic: "Steady rain through a quiet night",
+  instrumentation: ["soft sustained pad", "soft boom-bap drums"],
+}), /sleep soundscape cannot use rhythmic instrumentation: soft boom-bap drums/u,
+"sleep programs must reject a channel palette that contradicts their beatless role before generation");
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
 assert.equal(sleep.identity.bpmRange, null,
   "sleep programs must not retain a contradictory BPM range from channel DNA or composer direction");

@@ -404,6 +404,16 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
   ];
 }
 
+function assertRoleCompatibleIdentity(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): void {
+  if (role !== "sleep_sound_bed") return;
+  const rhythmicCue = instrumentation?.find((instrument) =>
+    /\b(?:drums?|percussion|boom[-\s]?bap|kick|snare|hi[-\s]?hat|cymbals?|tambourine|shaker|groove|rhythmic)\b/iu.test(instrument),
+  );
+  if (rhythmicCue) {
+    throw new Error(`sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`);
+  }
+}
+
 function structuredCaption(input: {
   channelIdentityFingerprint: string;
   topic: string;
@@ -564,6 +574,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }
   const role = input.role ?? routeRole;
+  assertRoleCompatibleIdentity(role, input.instrumentation);
   const roleDefaults = {
     narration_bed: {
       genre: "restrained documentary underscore",
