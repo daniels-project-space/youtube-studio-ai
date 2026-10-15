@@ -37,6 +37,17 @@ const cases: [string, string, boolean][] = [
   ['-$10.2', 'ten point two dollars', false], ['10.2', '-$10.2', false],
   ['2 million', '2million', true], ['2000', '2k', true],
   ['1', 'one constructor', true], ['2', 'two toString', true],
+  ['$10', '10 people', false], ['$10', 'ten dollars', true],
+  ['$10', '10 US dollars', true],
+  ['€10', '10 euros', true], ['£10', '10 euros', false],
+  ['10 CAD', '10 Canadian dollars', true], ['$10', '10 CAD', false],
+  ['$10', '10 dollars and 10 people', true], ['10 dollars', '$10', true],
+  ['ten dollars', 'ten people', false], ['ten dollars', '10 USD', true],
+  ['10%', 'ten percent', true], ['10%', 'ten percentage points', false],
+  ['10 pct', '10 percent', true], ['10 pct', '10 dollars', false],
+  ['10 percentage points', '10 percent', false],
+  ['10 years', '10 months', false], ['10-year', 'ten year commitment', true],
+  ['10', '10 dollars', true], ['10%', '10', false],
 ];
 const failures: string[] = [];
 for (const [claim, source, expected] of cases) {

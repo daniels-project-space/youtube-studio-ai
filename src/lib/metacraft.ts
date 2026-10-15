@@ -37,7 +37,7 @@ import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/y
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
-import { unmatchedTitleNumbers } from "@/lib/numericClaims";
+import { unmatchedTitleNumbers, unmatchedTitleUnits } from "@/lib/numericClaims";
 import { MetadataDeliverySchema, musicDeliveryClaims, type MetadataDelivery } from "@/lib/metadataDelivery";
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 import type { AutomaticFrameStrategy } from "@/lib/automaticVideoPlan";
@@ -501,7 +501,8 @@ export function titleOpeningSignal(title: string, opening: string): TitleOpening
   const titleTerms = [...contentTitleTokens(title)];
   const openingTerms = contentTitleTokens(opening);
   const matchedTerms = titleTerms.filter((term) => openingTerms.has(term));
-  const numbersMatch = unmatchedTitleNumbers(title, opening).length === 0;
+  const numbersMatch = unmatchedTitleNumbers(title, opening).length === 0 &&
+    unmatchedTitleUnits(title, opening).length === 0;
   return {
     matchedTerms,
     titleTerms,
@@ -556,7 +557,7 @@ export function lintTitle(
       issues.push("opening promise mismatch — no title subject or payoff term appears in the first spoken beat");
     }
     if (!openingSignal.numbersMatch) {
-      issues.push("opening promise mismatch — a title number is not spoken in the first beat");
+      issues.push("opening promise mismatch — a title number or its explicit unit is not spoken in the first beat");
     }
   }
 
@@ -595,6 +596,8 @@ export function lintTitle(
     const hay = o.grounding.toLowerCase();
     for (const tok of unmatchedTitleNumbers(sourceClaimTitle, o.grounding))
       issues.push(`ungrounded number "${tok}" — not in the script`);
+    for (const tok of unmatchedTitleUnits(sourceClaimTitle, o.grounding))
+      issues.push(`ungrounded number unit "${tok}" — its explicit currency or time unit is not in the script`);
     // Proper nouns must exist in the grounding. Title-Cased titles capitalize
     // EVERY word, so there the check narrows to capitalized runs of ≥2 words —
     // and a run passes when ANY of its non-stopword words exists (only fully-

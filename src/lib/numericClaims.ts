@@ -15,6 +15,9 @@ interface Decimal { coefficient: bigint; places: number }
 interface Parsed { value: Decimal; end: number }
 export interface NumericMention {
   raw: string;
+  /** Offsets in the NFKC-normalized input, for binding adjacent units. */
+  start: number;
+  end: number;
   /** Exact equality key; never compare floating-point plot values for evidence. */
   key: string;
   digit: boolean;
@@ -119,7 +122,14 @@ export function numericMentions(input: string): NumericMention[] {
     let part = atom(i);
     if (!part) {
       // Ambiguous digit notation can only match the exact same complete token.
-      if (token && /^\d/.test(token.text)) found.push({ raw: text.slice(tokens[start].start, token.end), key: `literal:${sign}:${token.text}`, digit: true, plotValue: null });
+      if (token && /^\d/.test(token.text)) found.push({
+        raw: text.slice(tokens[start].start, token.end),
+        start: tokens[start].start,
+        end: token.end,
+        key: `literal:${sign}:${token.text}`,
+        digit: true,
+        plotValue: null,
+      });
       i = first + 1; continue;
     }
     let value = integer(0), lastPower = Infinity;
@@ -139,12 +149,83 @@ export function numericMentions(input: string): NumericMention[] {
     value.coefficient *= BigInt(sign);
     const raw = text.slice(tokens[start].start, tokens[i - 1].end);
     const plotValue = Number(value.coefficient) / (10 ** value.places);
-    found.push({ raw, key: key(value), digit: /\d/.test(raw), plotValue: Number.isFinite(plotValue) ? plotValue : null });
+    found.push({
+      raw,
+      start: tokens[start].start,
+      end: tokens[i - 1]!.end,
+      key: key(value),
+      digit: /\d/.test(raw),
+      plotValue: Number.isFinite(plotValue) ? plotValue : null,
+    });
   }
   return found;
 }
 
-/** Compare complete quantities; leave units, causal claims and aliases to the judge. */
+function explicitUnit(input: string, mention: NumericMention): string | undefined {
+  const text = input.normalize('NFKC').toLowerCase().replace(/−/g, '-');
+  const before = text.slice(Math.max(0, mention.start - 32), mention.start);
+  const raw = text.slice(mention.start, mention.end);
+  const after = text.slice(mention.end, mention.end + 40)
+    .replace(/^\s*[-–]\s*/u, ' ')
+    .trimStart();
+  const currencyCode = /^(usd|cad|aud|nzd|sgd|hkd|cny|rmb|eur|gbp|jpy|inr|chf|mxn|brl|krw|zar)\b/u.exec(after)?.[1];
+  if (currencyCode) return `currency:${currencyCode}`;
+  const currencyName = /^(canadian dollars?|australian dollars?|new zealand dollars?|singapore dollars?|hong kong dollars?|chinese yuan|yuan|renminbi|indian rupees?|swiss francs?|mexican pesos?|brazilian reais?|south korean won)\b/u.exec(after)?.[1];
+  if (currencyName) {
+    if (currencyName.startsWith('canadian')) return 'currency:cad';
+    if (currencyName.startsWith('australian')) return 'currency:aud';
+    if (currencyName.startsWith('new zealand')) return 'currency:nzd';
+    if (currencyName.startsWith('singapore')) return 'currency:sgd';
+    if (currencyName.startsWith('hong kong')) return 'currency:hkd';
+    if (currencyName === 'yuan' || currencyName.startsWith('chinese') || currencyName === 'renminbi') return 'currency:cny';
+    if (currencyName.startsWith('indian')) return 'currency:inr';
+    if (currencyName.startsWith('swiss')) return 'currency:chf';
+    if (currencyName.startsWith('mexican')) return 'currency:mxn';
+    if (currencyName.startsWith('brazilian')) return 'currency:brl';
+    return 'currency:krw';
+  }
+  const prefixCode = /\b(usd|cad|aud|nzd|sgd|hkd|cny|rmb|eur|gbp|jpy|inr|chf|mxn|brl|krw|zar)\s*$/u.exec(before)?.[1];
+  if (prefixCode) return `currency:${prefixCode}`;
+
+  if (/[$]/u.test(raw) || /\$\s*$/u.test(before) || /\b(?:usd|us dollars?)\s*$/u.test(before)) return 'currency:usd';
+  if (/€/u.test(raw) || /€\s*$/u.test(before) || /\b(?:eur|euros?)\s*$/u.test(before)) return 'currency:eur';
+  if (/£/u.test(raw) || /£\s*$/u.test(before) || /\b(?:gbp|pounds? sterling)\s*$/u.test(before)) return 'currency:gbp';
+  if (/¥/u.test(raw) || /¥\s*$/u.test(before) || /\b(?:jpy|yen)\s*$/u.test(before)) return 'currency:jpy';
+
+  if (/^(?:percentage\s+points?|basis\s+points?|bps)\b/u.test(after)) {
+    return /^(?:basis\s+points?|bps)\b/u.test(after) ? 'rate:basis-point' : 'rate:percentage-point';
+  }
+  if (/^%/u.test(after) || /^(?:percent(?:age)?|per\s+cent|pct)\b/u.test(after)) return 'rate:percent';
+  if (/^(?:us\s+)?(?:dollars?|usd|bucks?)\b/u.test(after)) return 'currency:usd';
+  if (/^(?:euros?|eur)\b/u.test(after)) return 'currency:eur';
+  if (/^(?:pounds?|gbp)\b/u.test(after)) return 'currency:gbp';
+  if (/^(?:yen|jpy)\b/u.test(after)) return 'currency:jpy';
+  if (/^(?:years?|yrs?)\b/u.test(after)) return 'time:year';
+  if (/^(?:months?|mos?)\b/u.test(after)) return 'time:month';
+  if (/^(?:weeks?|wks?)\b/u.test(after)) return 'time:week';
+  if (/^(?:days?)\b/u.test(after)) return 'time:day';
+  if (/^(?:hours?|hrs?)\b/u.test(after)) return 'time:hour';
+  if (/^(?:minutes?|mins?)\b/u.test(after)) return 'time:minute';
+  if (/^(?:seconds?|secs?)\b/u.test(after)) return 'time:second';
+  return undefined;
+}
+
+/** Explicit title units must belong to the same exact numeric claim in source. */
+export function unmatchedTitleUnits(title: string, source: string): string[] {
+  const titleMentions = numericMentions(title);
+  if (!titleMentions.length) return [];
+  const sourceMentions = numericMentions(source);
+  return titleMentions
+    .filter((titleMention) => {
+      const unit = explicitUnit(title, titleMention);
+      return unit !== undefined && !sourceMentions.some((sourceMention) =>
+        sourceMention.key === titleMention.key && explicitUnit(source, sourceMention) === unit,
+      );
+    })
+    .map((mention) => mention.raw);
+}
+
+/** Compare complete numeric quantities; unit, causal and alias checks are separate. */
 export function unmatchedTitleNumbers(title: string, source: string): string[] {
   const claimed = numericMentions(title).filter((mention) => mention.digit);
   if (!claimed.length) return [];
