@@ -210,19 +210,24 @@ function explicitUnit(input: string, mention: NumericMention): string | undefine
   return undefined;
 }
 
-/** Explicit title units must belong to the same exact numeric claim in source. */
-export function unmatchedTitleUnits(title: string, source: string): string[] {
-  const titleMentions = numericMentions(title);
-  if (!titleMentions.length) return [];
+/** Explicit units must belong to the same exact numeric claim in source. */
+export function unmatchedNumericUnits(rendered: string, source: string): string[] {
+  const renderedMentions = numericMentions(rendered);
+  if (!renderedMentions.length) return [];
   const sourceMentions = numericMentions(source);
-  return titleMentions
-    .filter((titleMention) => {
-      const unit = explicitUnit(title, titleMention);
+  return renderedMentions
+    .filter((renderedMention) => {
+      const unit = explicitUnit(rendered, renderedMention);
       return unit !== undefined && !sourceMentions.some((sourceMention) =>
-        sourceMention.key === titleMention.key && explicitUnit(source, sourceMention) === unit,
+        sourceMention.key === renderedMention.key && explicitUnit(source, sourceMention) === unit,
       );
     })
     .map((mention) => mention.raw);
+}
+
+/** Explicit title units must belong to the same exact numeric claim in source. */
+export function unmatchedTitleUnits(title: string, source: string): string[] {
+  return unmatchedNumericUnits(title, source);
 }
 
 /** Compare complete numeric quantities; unit, causal and alias checks are separate. */

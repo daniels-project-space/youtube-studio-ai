@@ -136,7 +136,7 @@ function main(): void {
   // ---- what must still get through ---------------------------------------
   // Narration says "534 thousand"; rendering the full figure is formatting.
   assert.ok(
-    clean({ value: "$534,000", anchorValues: ["534"] }, "The programme added 534 thousand jobs."),
+    clean({ value: "534,000", anchorValues: ["534"] }, "The programme added 534 thousand jobs."),
     "expanding a spoken magnitude word must not be treated as invention",
   );
   // And the reverse: the script says the long number, the chart abbreviates.
@@ -243,6 +243,25 @@ function main(): void {
     "the exact spoken magnitude remains admissible",
   );
   assert.equal(
+    offender({ value: "$10" }, "Growth reached 10%."),
+    "value",
+    "an amount must not pass when only the same percentage was spoken",
+  );
+  assert.equal(
+    offender({ value: "10 percentage points" }, "The rate increased by 10 percent."),
+    "value",
+    "percentage points and percent must not be conflated",
+  );
+  assert.equal(
+    offender({ value: "€10" }, "The cost was $10."),
+    "value",
+    "distinct currencies must not share numeric-presence credit",
+  );
+  assert.ok(
+    clean({ value: "$10" }, "The cost was ten dollars."),
+    "symbol and spoken aliases for the same currency remain admissible",
+  );
+  assert.equal(
     offender({ value: "-2%" }, "The change was two percent."),
     "value",
     "a rendered negative must not pass when narration states only a positive magnitude",
@@ -312,7 +331,7 @@ function main(): void {
   // no way to tell an over-tight gate from a lying director.
   assert.match(
     SOURCE,
-    /\$\{unspoken\.field\}="\$\{unspoken\.rendered\}" renders a number not spoken/,
+    /\$\{unspoken\.field\}="\$\{unspoken\.rendered\}" renders a number or unit not spoken/,
     "the drop must log which field carried the unspoken number",
   );
 
