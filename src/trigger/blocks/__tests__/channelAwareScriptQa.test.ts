@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { registerAllBlocks } from "@/engine/blocks";
+import { contentLaneForFamily } from "@/engine/contentLane";
 import { allManifests, getManifest } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
@@ -177,7 +178,81 @@ async function main() {
     assert.equal(stages.includes("narration_tts"), false);
     assert.equal(prompts.length, before + 1, "failed verdict cannot cause a blind critic retry");
     assert.ok(result.costTotal > 0, "rejected fixture verdict remains accounted");
-    console.log("CHANNEL-AWARE SCRIPT QA PASS: three distinct channel briefs, strict version selection, unchanged legacy prompt, context refusal and real runner rejection before TTS; critic transport synthetic");
+
+    const integratedPrompts: string[] = [];
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
+      const body = JSON.parse(String(init?.body));
+      const prompt = String(body.messages.at(-1)?.content);
+      integratedPrompts.push(prompt);
+      let content: unknown;
+      if (prompt.includes("You are the cold-open director")) {
+        content = { candidates: [{ device: "result_first",
+          hook: "Chernobyl's ignored safety test failed in 1986.",
+          opening: "At 1:23 a.m., engineers disabled the alarm in Reactor Four. Within minutes, a routine check became the decision that sent the roof into the sky. The surviving logs show who saw the warning first, why the shutdown came too late, and how one ignored test changed the night.",
+          loop: "Why did the ignored test change the night?" }] };
+      } else if (prompt.includes("You are a brutal YouTube retention judge")) {
+        content = { verdicts: [{ punch: 9, specificity: 9, curiosity: 9, voiceMatch: 9,
+          promise: 9, honest: true, note: "Grounded and specific." }], best: 0 };
+      } else if (prompt.includes("Write a YouTube narration script about:")) {
+        content = { sections: [
+          { heading: "The warning", narration: "At 1:23 a.m., operators ran a safety test at Reactor Four. The test exposed a dangerous weakness in the shutdown system. Instead of stopping, the team continued through a procedure whose risks were poorly understood. The control room had warnings, but the sequence made each decision feel manageable on its own." },
+          { heading: "The decision", narration: "That detail matters because the disaster was not one mysterious instant. It emerged from design flaws, institutional pressure, and choices made under a false sense of control. Records help separate what operators knew from what later accounts assumed. The distinction keeps the story honest and shows how a routine test became a chain of consequences." },
+          { heading: "What changed", narration: "The ignored test changed how engineers understood reactor safety and how authorities described risk. It also left families and communities living with consequences no control-room checklist could contain. The most useful lesson is not that one person explains everything. It is that systems must make dangerous conditions visible before ordinary procedure turns them into catastrophe." },
+        ], closing_line: "Warnings matter before the crisis." };
+      } else if (prompt.includes("Critique this YouTube narration draft")) {
+        content = { pass: true, issues: [] };
+      } else if (prompt.includes("Critique this YouTube narration for quality and on-brand voice")) {
+        content = { pass: true, issues: [] };
+      } else {
+        throw new Error(`unexpected integration prompt: ${prompt.slice(0, 120)}`);
+      }
+      return Response.json({ id: `script-pair-${integratedPrompts.length}`, model: body.model,
+        choices: [{ message: { content: JSON.stringify(content) } }],
+        usage: { prompt_tokens: 400, completion_tokens: 150, total_tokens: 550, cost: 0.003 } });
+    };
+    const integrationLane = contentLaneForFamily("narrated_stock")!;
+    const integrationBible = {
+      positioning: "Evidence-led histories about overlooked decisions and their human consequences.",
+      vibe: "Measured, humane, and exact.",
+      worksInSpace: ["Ground the opening in a documented detail before interpreting it."],
+      avoidInSpace: ["Never turn an evidence gap into a suspense claim."],
+    };
+    const integrationGraph = validatePipeline([
+      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+        params: { maxSeconds: 35, qualityProfile: "production" } },
+      { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+    ], ["topic", "showBible", "channelName"]);
+    const integrated = await runPipeline(integrationGraph, {
+      ownerId: "writer-integration-owner", channelId: "writer-integration-channel",
+      runId: "writer-integration-run", keyPrefix: "owner/writer-integration/", budgetUsd: 20,
+      defaultRetries: 1,
+      seedStore: {
+        topic: "Chernobyl's ignored safety test", channelName: "Inked Histories",
+        persona: integrationBible.positioning, showBible: integrationBible,
+        styleDNA: { narrative: { scriptStyle: "Evidence first, interpretation second.",
+          hookStyle: "Lead with a documented decision.", pacing: "Measured, with room for each reveal.",
+          delivery: "Calm, humane, and precise." } },
+        criticDoctrine: "Reject invented claims and melodramatic certainty.",
+        contentLane: integrationLane, bannedWords: [],
+      },
+      sink: { async upsert() {} },
+    });
+    assert.equal(integrated.ok, true, integrated.error);
+    assert.equal(integratedPrompts.length, 5,
+      "the integrated writer and critic should make one hook generation, one hook review, one body generation, and two script reviews");
+    for (const prompt of [integratedPrompts[0], integratedPrompts[1], integratedPrompts[2],
+      integratedPrompts[3], integratedPrompts[4]]) {
+      assert.ok(prompt.includes(integrationBible.positioning));
+      assert.ok(prompt.includes(integrationBible.vibe));
+      assert.ok(prompt.includes(integrationBible.worksInSpace[0]));
+      assert.ok(prompt.includes(integrationBible.avoidInSpace[0]));
+    }
+    assert.ok(integratedPrompts[2]?.includes("Evidence first, interpretation second."),
+      "the selected writer must receive this channel's narrative Style DNA");
+    assert.ok(integratedPrompts[4]?.includes("The ignored test changed how engineers understood reactor safety"),
+      "the selected critic must review the actual narration emitted by its paired writer");
+    console.log("CHANNEL-AWARE SCRIPT PAIR PASS: three channel briefs, unchanged legacy behavior, pre-spend refusal, and successful selected-writer→selected-critic runner handoff; provider responses synthetic");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = originalKey;
