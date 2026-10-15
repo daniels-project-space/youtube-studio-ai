@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
+import { FAMILIES, type FamilyKey } from "@/engine/families";
 import { inspectStyleDNADraft, type StyleDNADraft } from "@/engine/creative/styleDNA";
 
 const draft: StyleDNADraft = {
@@ -44,6 +46,16 @@ const draft: StyleDNADraft = {
 };
 
 assert.deepEqual(inspectStyleDNADraft(draft, true, "The Chalk Observatory"), []);
+
+for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+  const requiresNarrative = CHANNEL_INCEPTION_FAMILY_POLICIES[family].requiresNarrativePlaybook;
+  const issues = inspectStyleDNADraft({ ...draft, narrative: undefined }, requiresNarrative, "The Chalk Observatory");
+  assert.equal(
+    issues.some((issue) => issue.includes("narrated family but no narrative block")),
+    requiresNarrative,
+    `${family} Style DNA narrative requirement must match channel inception policy`,
+  );
+}
 
 const corruptions: Array<{ field: string; candidate: StyleDNADraft; issue: string }> = [
   { field: "composition", candidate: { ...draft, composition: " " }, issue: "composition is empty" },

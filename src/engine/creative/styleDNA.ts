@@ -18,6 +18,7 @@ import { agentJson } from "@/agents/mastra";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
+import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
 import {
   channelProgramBriefPositioningText,
   type ChannelProgramBrief,
@@ -236,14 +237,12 @@ export function styleDNAIdentityAuditContext(
   ].filter(Boolean).join("\n");
 }
 
-/** Families that narrate (so a missing narrative block is a real grounding gap). */
-const NARRATED: ReadonlySet<FamilyKey> = new Set<FamilyKey>([
-  "narrated_stock",
-  "cinematic",
-  "sleep",
-  "shorts",
-  "whiteboard",
-] as FamilyKey[]);
+/** Keep Style DNA's voice requirements aligned with channel inception ownership. */
+const NARRATED: ReadonlySet<FamilyKey> = new Set(
+  Object.values(CHANNEL_INCEPTION_FAMILY_POLICIES)
+    .filter((policy) => policy.requiresNarrativePlaybook)
+    .map((policy) => policy.family),
+);
 
 /**
  * Honest, ungrounded skeleton — used ONLY when there is no LLM at all. It is
