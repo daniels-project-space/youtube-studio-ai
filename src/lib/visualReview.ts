@@ -1128,7 +1128,10 @@ export function narrationCueForVisualFrame(
   const narrationStartSec = cues.reduce((earliest, cue) => Math.min(earliest, cue.startSec), Number.POSITIVE_INFINITY);
   const narrationEndSec = cues.reduce((latest, cue) => Math.max(latest, cue.endSec), Number.NEGATIVE_INFINITY);
   if (tSec < narrationStartSec || tSec > narrationEndSec) return undefined;
-  const activeCue = cues.find((item) => item.startSec <= tSec && item.endSec >= tSec);
+  const activeCue = cues.find((item) =>
+    item.startSec <= tSec &&
+    (item.endSec > tSec || (tSec === narrationEndSec && item.endSec === narrationEndSec))
+  );
   const cue = activeCue ?? cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
     if (!nearest) return item;
     const distanceToInterval = (candidate: VisualReviewTranscriptCue) =>

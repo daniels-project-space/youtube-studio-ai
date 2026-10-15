@@ -15,3 +15,12 @@ test("frame context uses active or nearby narration, never a remote cue across a
   assert.equal(narrationCueForVisualFrame(cues, 4), undefined, "intro frames remain outside narration context");
   assert.equal(narrationCueForVisualFrame(cues, 32), undefined, "outro frames remain outside narration context");
 });
+
+test("a frame on an adjacent sentence boundary uses the sentence beginning there", () => {
+  const adjacentCues = [
+    { text: "The first sentence ends.", startSec: 0, endSec: 2 },
+    { text: "The next sentence begins.", startSec: 2, endSec: 4 },
+  ];
+  assert.equal(narrationCueForVisualFrame(adjacentCues, 2), "The next sentence begins.");
+  assert.equal(narrationCueForVisualFrame(adjacentCues, 4), "The next sentence begins.", "the final cue endpoint remains covered");
+});
