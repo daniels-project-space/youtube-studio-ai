@@ -33,7 +33,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
-import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
+import { getVisualBrief } from "@/engine/creative/brief";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
@@ -3381,10 +3381,11 @@ export const lofiBlocks: Block[] = [
 /**
  * Canonical lofi pipeline (ordered block entries) for a channel.
  *
- * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
- *   competitor_research → music plan/music → scene_planner → keyframes
+ * Order:
+ *   competitor_research → topic_select → scene_planner → music plan/music → keyframes
  *   → loop_clips(2×15s) → upscale(short source unit) → metadata
- *   → assemble(packet-looped 1–8h master) → qa_visual
+ *   → package_to_opening_plan → assemble(packet-looped 1–8h master)
+ *   → qa_visual
  *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → upload_draft → notify
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
@@ -3399,13 +3400,14 @@ export const lofiBlocks: Block[] = [
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
-  { block: "music_program_plan", params: { visualStyle: "lofi ambient" } },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
+  { block: "music_program_plan", params: { visualStyle: "lofi ambient" } },
   { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
+  { block: "package_to_opening_plan" },
   { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },

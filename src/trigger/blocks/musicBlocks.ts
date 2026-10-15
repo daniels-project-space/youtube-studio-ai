@@ -136,6 +136,11 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
       const visual = getVisualBrief(ctx.store);
       const audio = getMusicBrief(ctx.store);
+      const episodeMusicDirections = [...new Set([
+        audio?.musicPrompt,
+        typeof ctx.store["sceneMusicPrompt"] === "string" ? ctx.store["sceneMusicPrompt"] : undefined,
+      ].map((direction) => direction?.trim()).filter((direction): direction is string => Boolean(direction)))]
+        .map((direction) => direction.slice(0, 260));
       const setting = [visual?.setting, visual?.world, visual?.footageQueries?.[0], ctx.params["setting"] as string | undefined,
         dna?.setting, identity ? identity.niche : ctx.store["niche"] as string | undefined]
         .map(value => value?.toString().trim()).find(Boolean);
@@ -148,7 +153,7 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
         dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
         dna?.audio?.moodArc ? `Preserve the channel's emotional arc: ${dna.audio.moodArc}.` : "",
-        audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
+        episodeMusicDirections.length ? `Episode mood movement: ${episodeMusicDirections.join(" ")}.` : "",
         "No vocals, no lyrics, and a musically resolved seamless loop.",
       ].filter(Boolean).join(" ");
       const visualStyle = (ctx.params["visualStyle"] as string | undefined) ??

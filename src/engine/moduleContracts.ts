@@ -371,9 +371,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // but the runtime block itself refuses to mint a plan without these two
     // route-owned seeds.  The automatic route requires both blocks.
     optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "visualStyle","channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
+      // Exact runtime inputs accepted when an automatic planner supplies them.
+      "visualStyle", "channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche", "sceneMusicPrompt"],
     providerProfiles: [local],
     qualityRequired: true,
   }),

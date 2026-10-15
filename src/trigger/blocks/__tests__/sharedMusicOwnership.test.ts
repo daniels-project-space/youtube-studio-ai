@@ -38,6 +38,11 @@ async function main(): Promise<void> {
     "lofi ambient",
     "LoFi must pass its style intent explicitly instead of relying on a shared-module default",
   );
+  assert.ok(
+    LOFI_PIPELINE.findIndex((entry) => entry.block === "scene_planner") <
+      LOFI_PIPELINE.findIndex((entry) => entry.block === "music_program_plan"),
+    "LoFi must plan its visual/music cue before the shared Music program is sealed",
+  );
   const fallbackInput = {
     family: "music_loop",
     topic: "Rain over the glasshouse",
@@ -86,7 +91,11 @@ async function main(): Promise<void> {
       "the central registry must resolve the planner from the shared Music module");
     assert.equal(all().filter((block) => block.id === "music_program_plan").length, 1,
       "the shared Music planner must be registered exactly once");
+    assert.ok(getManifest("music_program_plan")?.optionalConsumes.sceneMusicPrompt,
+      "the shared Music planner accepts LoFi's scene-derived music cue as an optional input");
     assert.equal(getManifest("music")?.block, music);
+    assert.doesNotThrow(() => validatePipeline(LOFI_PIPELINE),
+      "the complete LoFi pipeline must compile from its own module handoffs");
     const plannedMusicEntry = LOFI_PIPELINE.find((entry) => entry.block === "music");
     assert.equal(plannedMusicEntry?.version, MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
       "canonical Lo-Fi must select the music module contract that requires its sealed plan");
@@ -142,15 +151,22 @@ async function main(): Promise<void> {
         });
       }
       if (family === "music_loop") {
+        store.sceneMusicPrompt = "Let the rain-lit window motif resolve into warm felt piano.";
         await assert.rejects(
           require_("music").run(ctx),
           /Required|expected object|musicProgramPlan/i,
           "the registry must preserve sealed-program admission before reuse",
         );
-        Object.assign(store, await require_("music_program_plan").run({
+        const musicPlanPatch = await require_("music_program_plan").run({
           ...ctx,
           params: { provider: "minimax_music3", visualStyle: "lofi" },
-        }));
+        });
+        assert.match(
+          (musicPlanPatch.musicProgramPlan as { audio: { direction: string } }).audio.direction,
+          /rain-lit window motif resolve into warm felt piano/u,
+          "the shared Music program preserves the LoFi scene planner's episode-specific cue",
+        );
+        Object.assign(store, musicPlanPatch);
         await assert.rejects(
           require_("music").run({ ...ctx, params: { provider: "suno" } }),
           /does not match sealed music program provider/,
