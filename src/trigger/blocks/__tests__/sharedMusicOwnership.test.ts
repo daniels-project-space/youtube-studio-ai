@@ -9,6 +9,7 @@ import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
 import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
+import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
 import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
 import { music, musicFallbackPromptForRoute, musicProgramPlan } from "../musicBlocks";
@@ -173,7 +174,17 @@ async function main(): Promise<void> {
           "the immutable program owns its fingerprint; do not publish a redundant fingerprint artifact");
         assert.equal(typeof (planPatch.musicProgramPlan as { fingerprint?: unknown }).fingerprint, "string");
         Object.assign(store, planPatch);
-
+        assert.throws(() => assertMusicReuseReceipt({
+          receipt: store.reuseMusicReceipt,
+          ownerId: String(ctx.ownerId),
+          siblingChannelId: String(ctx.channelId),
+          musicKey: String(store.reuseMusicKey),
+          currentFamily: route.family,
+          currentContentLaneKey: route.contentLaneKey,
+          currentProvider: "minimax_music3",
+          currentStyleDNA: store.styleDNA,
+        }), /MiniMax music reuse is disabled/u,
+        "strict MiniMax channels generate per-channel until native review evidence transfer is supported");
         const makeChannelPlan = async (concept: string, dna: Record<string, unknown>) => {
           const channelBrief = createChannelProgramBrief({
             family: "music_loop",
@@ -240,6 +251,7 @@ async function main(): Promise<void> {
           /does not match sealed music program provider/,
         );
       }
+      if (family === "music_loop") continue;
       const result = await require_("music").run(ctx);
       assert.equal(result.musicKey, ctx.store.reuseMusicKey, family);
       assert.equal(result.musicProvider, "reuse", family);

@@ -60,7 +60,14 @@ test("installed SDK makes one durable delivery attempt, preserving identity afte
           musicReuseReceipt: createMusicReuseReceipt({ ownerId: "owner-fixture", baseRunId: "base",
             baseChannelId: "base-channel", siblingChannelId: "sibling", musicKey: "retained-music",
             family: "narrated_stock", contentLaneKey: "narrated_stock", provider: "mureka",
-            audioSha256: "a".repeat(64), audioByteLength: 1_000, soundProfileFingerprint: "b".repeat(64) }) } });
+            audioSha256: "a".repeat(64), audioByteLength: 1_000, soundProfileFingerprint: "b".repeat(64),
+            baseMusicKey: "owner/owner-fixture/runs/base/audio/music.mp3",
+            providerEvidence: {
+              program: { key: "program.json", sha256: "c".repeat(64) },
+              source: { key: "source.json", sha256: "d".repeat(64) },
+              quality: { key: "quality.json", sha256: "e".repeat(64) },
+              auditionWav: { key: "audition.wav", sha256: "f".repeat(64) },
+            } }) } });
       const schedules = [
         { file: "bundleFanoutDispatcher", request: bundleFanoutDispatchSchedule({ runId: "child", envelope }) },
         { file: "serializedProgramEpisodeRetryDispatcher", request: serializedProgramEpisodeBusyRetrySchedule({

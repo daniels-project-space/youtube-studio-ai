@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
-import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { createChannelMusicProgram, createMusicProgramQualityReceipt } from "@/engine/channelMusicProgram";
+import { createMusicProviderAuditionSource } from "@/engine/musicAuditionCheckpoint";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
 import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
@@ -78,12 +79,56 @@ async function main() {
 
   const reusedAudio = Buffer.alloc(1_024, 9);
   objects.set("reused.mp3", reusedAudio);
+  const baseProgram = createChannelMusicProgram({
+    channelId: "base-channel", channelIdentityFingerprint: "c".repeat(64),
+    family: "narrated_stock", contentLaneKey: "narrated_stock", topic: "Quiet evening", providerPreference: "mureka",
+  });
+  const baseMusicKey = "owner/owner-release-gate/runs/base-run/audio/music.mp3";
+  const auditionWav = Buffer.alloc(44, 1);
+  const auditionSha = sha256BytesHex(auditionWav);
+  const auditionWavKey = `owner/owner-release-gate/runs/base-run/audio/music-audition-${auditionSha}.wav`;
+  const source = createMusicProviderAuditionSource({
+    ownerId: String(ctx.ownerId), channelId: "base-channel", runId: "base-run", provider: "mureka",
+    program: baseProgram, sourceMusicKey: baseMusicKey, sourceBytes: reusedAudio, durationSec: 10,
+    auditionWavKey, auditionWavBytes: auditionWav,
+  });
+  const quality = createMusicProgramQualityReceipt({
+    program: baseProgram,
+    output: { contentSha256: auditionSha, byteLength: auditionWav.byteLength, durationSec: 10,
+      sampleRate: 32_000, channels: 2, codec: "pcm_s16le" },
+    measurements: { integratedLufs: baseProgram.mix.targetLufs,
+      truePeakDbtp: baseProgram.mix.truePeakMaxDbtp - 1, lraLu: 20, crestDb: 20,
+      clippedSamples: 0, maximumConsecutiveCeilingSamples: 0, dcOffsetAbsolute: 0,
+      silenceFraction: 0, mechanicalArtifactScore: 0, openingHighBandDropDb: 0 },
+    sectionReviews: baseProgram.generation.sections.map((section) => ({ sectionId: section.id, score: 1, evidence: "test" })),
+    audition: { reviewerId: "test-owner", reviewReceiptFingerprint: "d".repeat(64), emotionalDepthScore: 1,
+      arrangementDepthScore: 1, hollowOrGeneric: false, verdict: "pass", notes: "fixture" },
+  });
+  const evidenceBytes = {
+    program: Buffer.from(JSON.stringify(baseProgram)),
+    source: Buffer.from(JSON.stringify(source)),
+    quality: Buffer.from(JSON.stringify(quality)),
+    auditionWav,
+  };
+  const evidenceKeys = {
+    program: "owner/owner-release-gate/group/fixture/bundle/base-run/music-evidence/program.json",
+    source: "owner/owner-release-gate/group/fixture/bundle/base-run/music-evidence/source.json",
+    quality: "owner/owner-release-gate/group/fixture/bundle/base-run/music-evidence/quality.json",
+    auditionWav: "owner/owner-release-gate/group/fixture/bundle/base-run/music-evidence/audition.wav",
+  };
+  for (const name of Object.keys(evidenceBytes) as Array<keyof typeof evidenceBytes>) {
+    objects.set(evidenceKeys[name], evidenceBytes[name]);
+  }
   const reuseReceipt = {
     ...musicReuseTestReceipt({ ownerId: String(ctx.ownerId), baseRunId: "base-run", baseChannelId: "base-channel",
       siblingChannelId: String(ctx.channelId), family: "narrated_stock", contentLaneKey: "narrated_stock",
       provider: "mureka", musicKey: "reused.mp3" }),
     audioSha256: sha256BytesHex(reusedAudio),
     audioByteLength: reusedAudio.byteLength,
+    baseMusicKey,
+    providerEvidence: Object.fromEntries((Object.keys(evidenceBytes) as Array<keyof typeof evidenceBytes>).map((name) => [name, {
+      key: evidenceKeys[name], sha256: sha256BytesHex(evidenceBytes[name]),
+    }])),
   };
   objectReads.length = 0;
   await assertMusicQualityForPublish({ ...ctx, store: {
@@ -91,7 +136,8 @@ async function main() {
     reuseMusicReceipt: reuseReceipt,
     styleDNA: musicReuseTestStyleDNA,
   } });
-  assert.deepEqual(objectReads, ["reused.mp3"], "reuse release re-reads and hashes the exact durable audio");
+  assert.deepEqual(objectReads, ["reused.mp3", ...Object.values(evidenceKeys)],
+    "reuse release re-reads and hashes the exact audio and complete source-review evidence chain");
   for (const receipt of [undefined, { ...reuseReceipt, siblingChannelId: "foreign-sibling" },
     { ...reuseReceipt, audioSha256: "b".repeat(64) },
     { ...reuseReceipt, soundProfileFingerprint: "c".repeat(64) }]) {
@@ -103,6 +149,13 @@ async function main() {
     } }), /music reuse receipt/u);
     assert.deepEqual(objectReads, ["reused.mp3"], "invalid or mismatched reuse proof cannot pass release");
   }
+  const retainedSourceEvidence = objects.get(evidenceKeys.source)!;
+  objects.set(evidenceKeys.source, Buffer.from("{}"));
+  await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
+    musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
+    reuseMusicReceipt: reuseReceipt, styleDNA: musicReuseTestStyleDNA,
+  } }), /reused source evidence bytes/u, "source-review receipt replacement bytes cannot authorize reuse");
+  objects.set(evidenceKeys.source, retainedSourceEvidence);
   objects.set("reused.mp3", Buffer.alloc(reusedAudio.byteLength, 8));
   await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
     musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",

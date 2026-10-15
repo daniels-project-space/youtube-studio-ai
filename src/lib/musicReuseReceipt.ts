@@ -2,7 +2,12 @@ import { z } from "zod";
 import { sha256BytesHex } from "@/lib/sha256";
 import { groupMusicSoundProfileFingerprint } from "@/lib/groupMusicProfile";
 
-export const MUSIC_REUSE_RECEIPT_VERSION = "music_reuse/v1" as const;
+export const MUSIC_REUSE_RECEIPT_VERSION = "music_reuse/v2" as const;
+
+const ContentDigestSchema = z.object({
+  key: z.string().trim().min(1).max(2_000),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
 
 export const MusicReuseReceiptSchema = z.object({
   version: z.literal(MUSIC_REUSE_RECEIPT_VERSION),
@@ -17,6 +22,13 @@ export const MusicReuseReceiptSchema = z.object({
   audioSha256: z.string().regex(/^[a-f0-9]{64}$/u),
   audioByteLength: z.number().int().min(1).max(250_000_000),
   soundProfileFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  baseMusicKey: z.string().trim().min(1).max(2_000),
+  providerEvidence: z.object({
+    program: ContentDigestSchema,
+    source: ContentDigestSchema,
+    quality: ContentDigestSchema,
+    auditionWav: ContentDigestSchema,
+  }).strict(),
 }).strict();
 
 export type MusicReuseReceipt = z.infer<typeof MusicReuseReceiptSchema>;
@@ -47,6 +59,16 @@ export function assertMusicReuseReceipt(input: {
       receipt.musicKey !== input.musicKey || (input.audioBytes !== undefined &&
       (receipt.audioByteLength !== input.audioBytes.byteLength || receipt.audioSha256 !== sha256BytesHex(input.audioBytes)))) {
     throw new Error("music reuse receipt does not match this owner, sibling, key, or exact audio bytes");
+  }
+  const baseAudioPrefix = `owner/${receipt.ownerId}/runs/${receipt.baseRunId}/audio/`;
+  const groupEvidencePrefix = `owner/${receipt.ownerId}/group/`;
+  if (!receipt.baseMusicKey.startsWith(baseAudioPrefix) || receipt.baseMusicKey.includes("..") ||
+      Object.values(receipt.providerEvidence).some(({ key }) => !key.startsWith(groupEvidencePrefix) ||
+        !key.includes(`/bundle/${receipt.baseRunId}/music-evidence/`) || key.includes(".."))) {
+    throw new Error("music reuse receipt evidence keys are outside the exact base-run and durable group namespaces");
+  }
+  if (receipt.provider === "minimax_music3") {
+    throw new Error("MiniMax music reuse is disabled until its native worker evidence can be transferred and reverified");
   }
   const currentProfile = groupMusicSoundProfileFingerprint({
     family: input.currentFamily ?? receipt.family,

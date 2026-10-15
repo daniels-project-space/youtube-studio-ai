@@ -13,7 +13,7 @@ import {
 } from "@/lib/bundleFanout";
 
 const musicReuseReceipt = {
-  version: "music_reuse/v1" as const,
+  version: "music_reuse/v2" as const,
   ownerId: "owner_a",
   baseRunId: "run_base",
   baseChannelId: "channel_base",
@@ -25,6 +25,13 @@ const musicReuseReceipt = {
   audioSha256: "a".repeat(64),
   audioByteLength: 1_000,
   soundProfileFingerprint: "b".repeat(64),
+  baseMusicKey: "owner/owner_a/runs/run_base/audio/music.mp3",
+  providerEvidence: {
+    program: { key: "owner/owner_a/group/fixture/bundle/run_base/music-evidence/program.json", sha256: "c".repeat(64) },
+    source: { key: "owner/owner_a/group/fixture/bundle/run_base/music-evidence/source.json", sha256: "d".repeat(64) },
+    quality: { key: "owner/owner_a/group/fixture/bundle/run_base/music-evidence/quality.json", sha256: "e".repeat(64) },
+    auditionWav: { key: "owner/owner_a/group/fixture/bundle/run_base/music-evidence/audition.wav", sha256: "f".repeat(64) },
+  },
 };
 
 function envelope() {

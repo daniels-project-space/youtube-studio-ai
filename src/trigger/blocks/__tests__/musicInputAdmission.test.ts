@@ -113,7 +113,7 @@ async function main() {
   );
   assert.equal(storageCalls, 0, "a role-conflicting channel genre must fail before writing its sound program");
   assert.equal(networkCalls, 0, "a role-conflicting channel genre must fail before a provider request");
-  for (const provider of [undefined, "mureka", "suno", "minimax_music3"] as const) {
+  for (const provider of ["mureka", "suno"] as const) {
     const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store,
       reuseMusicKey: reusedKey,
       reuseMusicReceipt: musicReuseTestReceipt({ ownerId: ctx.ownerId, baseRunId: "base-run",
@@ -121,6 +121,14 @@ async function main() {
         contentLaneKey: "narrated_stock", provider: provider ?? "mureka", musicKey: reusedKey }) } });
     assert.equal(result.musicProvider, "reuse");
   }
+  await assert.rejects(music.run({ ...ctx, params: { provider: "minimax_music3" }, store: { ...ctx.store,
+    reuseMusicKey: reusedKey,
+    reuseMusicReceipt: musicReuseTestReceipt({ ownerId: ctx.ownerId, baseRunId: "base-run",
+      baseChannelId: "base-channel", siblingChannelId: String(ctx.channelId), family: "narrated_stock",
+      contentLaneKey: "narrated_stock", provider: "minimax_music3", musicKey: reusedKey }) } }), /admitted-first-storage-write/u,
+  "MiniMax reuse is rejected and follows its own generation path until worker review evidence is portable");
+  storageCalls = 0;
+  networkCalls = 0;
   for (const patch of [{ ownerId: "foreign" }, { channelId: "foreign" }, { topic: "Other topic" }]) {
     await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: { ...prepared, ...patch } } }), /current owner, channel and topic/);
   }

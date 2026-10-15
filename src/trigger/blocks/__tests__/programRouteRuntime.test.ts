@@ -15,7 +15,7 @@ import {
 import { classifyExecutionError, ExecutionError } from "@/engine/executionErrors";
 import type { Block, StageContext } from "@/engine/types";
 import { freezeChannelInceptionProbeContext } from "@/lib/channelInceptionProbe";
-import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { assertMusicReuseReceipt, createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { groupMusicSoundProfileFingerprint } from "@/lib/groupMusicProfile";
 import { createSerializedProgramEpisodeContext } from "@/lib/serializedProgramEpisodeContext";
 import {
@@ -223,26 +223,28 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   assert.equal(scenes.sceneMusicPrompt, undefined, "scene planning does not publish an unconsumed music prompt");
   assert.equal(scenes.musicProgramMotionIntent, sealed.visual.motionIntent);
 
-  const reused = await music(stageContext({
-    store: {
-      channelProgramRoute: musicSeed,
-      topic,
-      musicProgramPlan: planned.musicProgramPlan,
-      reuseMusicKey: "owner/test/channel/program-route/reused-music.mp3",
-      reuseMusicReceipt: createMusicReuseReceipt({
-        ownerId: "owner-program-route-test", baseRunId: "base-run", baseChannelId: "base-channel",
-        siblingChannelId: "channel-program-route-test",
-        family: musicRoute.family, contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3",
-        musicKey: "owner/test/channel/program-route/reused-music.mp3",
-        audioSha256: "a".repeat(64), audioByteLength: 1_000,
-        soundProfileFingerprint: groupMusicSoundProfileFingerprint({ family: musicRoute.family,
-          contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3", styleDNA: musicStyleDNA })!,
-      }),
-      styleDNA: musicStyleDNA,
+  const minimaxReuseReceipt = createMusicReuseReceipt({
+    ownerId: "owner-program-route-test", baseRunId: "base-run", baseChannelId: "base-channel",
+    siblingChannelId: "channel-program-route-test",
+    family: musicRoute.family, contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3",
+    musicKey: "owner/test/channel/program-route/reused-music.mp3",
+    audioSha256: "a".repeat(64), audioByteLength: 1_000,
+    baseMusicKey: "owner/owner-program-route-test/runs/base-run/audio/music.mp3",
+    providerEvidence: {
+      program: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/program.json", sha256: "c".repeat(64) },
+      source: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/source.json", sha256: "d".repeat(64) },
+      quality: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/quality.json", sha256: "e".repeat(64) },
+      auditionWav: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/audition.wav", sha256: "f".repeat(64) },
     },
-  }));
-  assert.equal(reused.musicProvider, "reuse");
-  assert.equal(reused.musicKey, "owner/test/channel/program-route/reused-music.mp3");
+    soundProfileFingerprint: groupMusicSoundProfileFingerprint({ family: musicRoute.family,
+      contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3", styleDNA: musicStyleDNA })!,
+  });
+  assert.throws(() => assertMusicReuseReceipt({ receipt: minimaxReuseReceipt,
+    ownerId: "owner-program-route-test", siblingChannelId: "channel-program-route-test",
+    musicKey: "owner/test/channel/program-route/reused-music.mp3", currentFamily: musicRoute.family,
+    currentContentLaneKey: musicRoute.contentLaneKey, currentProvider: "minimax_music3",
+    currentStyleDNA: musicStyleDNA }), /MiniMax music reuse is disabled/u,
+  "MiniMax route reuse waits for its distinct worker/audition evidence transfer contract");
 
   await assert.rejects(
     music(stageContext({

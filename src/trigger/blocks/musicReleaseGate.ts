@@ -28,7 +28,7 @@ export async function assertMusicQualityForPublish(ctx: StageContext): Promise<v
   if (provider === "reuse") {
     const musicKey = str(ctx, "musicKey");
     const route = channelProgramRouteFromContext(ctx);
-    assertMusicReuseReceipt({
+    const receipt = assertMusicReuseReceipt({
       receipt: ctx.store["reuseMusicReceipt"],
       ownerId: ctx.ownerId,
       siblingChannelId: String(ctx.channelId),
@@ -38,7 +38,49 @@ export async function assertMusicQualityForPublish(ctx: StageContext): Promise<v
       currentStyleDNA: ctx.store["styleDNA"],
       audioBytes: await getObjectBytes(musicKey),
     });
-    ctx.log("upload_draft: admitted byte-bound render-group music reuse receipt");
+    const evidenceEntries = Object.entries(receipt.providerEvidence) as Array<
+      [keyof typeof receipt.providerEvidence, { key: string; sha256: string }]
+    >;
+    const evidenceBytes = await Promise.all(evidenceEntries.map(([, evidence]) => getObjectBytes(evidence.key)));
+    const evidence = Object.fromEntries(evidenceEntries.map(([name, entry], index) => {
+      const bytes = evidenceBytes[index];
+      if (sha256BytesHex(bytes) !== entry.sha256) {
+        throw new Error(`upload_draft: reused ${name} evidence bytes do not match the immutable fan-out receipt`);
+      }
+      return [name, bytes];
+    })) as Record<keyof typeof receipt.providerEvidence, Uint8Array>;
+    let programValue: unknown;
+    let sourceValue: unknown;
+    let qualityValue: unknown;
+    try {
+      programValue = JSON.parse(Buffer.from(evidence.program).toString("utf8"));
+      sourceValue = JSON.parse(Buffer.from(evidence.source).toString("utf8"));
+      qualityValue = JSON.parse(Buffer.from(evidence.quality).toString("utf8"));
+    } catch (error) {
+      throw new Error(`upload_draft: reused provider evidence is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const program = ChannelMusicProgramSchema.parse(programValue);
+    const source = MusicProviderAuditionSourceSchema.parse(sourceValue);
+    const quality = assertMusicProgramQualityReceipt({ program, receipt: qualityValue });
+    if (program.channelId !== receipt.baseChannelId || program.family !== receipt.family ||
+        program.contentLaneKey !== receipt.contentLaneKey || program.fingerprint !== source.programFingerprint ||
+        program.generation.providerPreference !== receipt.provider || source.ownerId !== receipt.ownerId ||
+        source.channelId !== receipt.baseChannelId || source.runId !== receipt.baseRunId ||
+        source.provider !== receipt.provider || source.sourceMusicKey !== receipt.baseMusicKey ||
+        source.sourceOutput.contentSha256 !== receipt.audioSha256 ||
+        source.sourceOutput.byteLength !== receipt.audioByteLength ||
+        quality.output.contentSha256 !== source.auditionOutput.contentSha256 ||
+        quality.output.byteLength !== source.auditionOutput.byteLength ||
+        Math.abs(quality.output.durationSec - source.auditionOutput.durationSec) > Math.max(0.1, source.auditionOutput.durationSec * 0.001) ||
+        quality.output.sampleRate !== source.auditionOutput.sampleRateHz ||
+        quality.output.channels !== source.auditionOutput.channels || quality.output.codec !== source.auditionOutput.codec) {
+      throw new Error("upload_draft: reused provider review evidence is not bound to the source channel, run, provider and exact audio");
+    }
+    assertMusicAuditionNativeBytes({ expected: {
+      contentSha256: source.auditionOutput.contentSha256,
+      byteLength: source.auditionOutput.byteLength,
+    }, bytes: evidence.auditionWav });
+    ctx.log(`upload_draft: admitted byte-bound ${receipt.provider} source review evidence ${quality.fingerprint.slice(0, 12)} for render-group reuse`);
     return;
   }
   if (provider === "mureka" || provider === "suno") {

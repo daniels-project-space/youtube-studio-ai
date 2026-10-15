@@ -34,5 +34,12 @@ export function musicReuseTestReceipt(input: {
     audioSha256: "a".repeat(64),
     audioByteLength: 1_000,
     soundProfileFingerprint,
+    baseMusicKey: `owner/${input.ownerId}/runs/${input.baseRunId}/audio/music.mp3`,
+    providerEvidence: {
+      program: { key: `owner/${input.ownerId}/group/fixture/bundle/${input.baseRunId}/music-evidence/program.json`, sha256: "c".repeat(64) },
+      source: { key: `owner/${input.ownerId}/group/fixture/bundle/${input.baseRunId}/music-evidence/source.json`, sha256: "d".repeat(64) },
+      quality: { key: `owner/${input.ownerId}/group/fixture/bundle/${input.baseRunId}/music-evidence/quality.json`, sha256: "e".repeat(64) },
+      auditionWav: { key: `owner/${input.ownerId}/group/fixture/bundle/${input.baseRunId}/music-evidence/audition.wav`, sha256: "f".repeat(64) },
+    },
   });
 }

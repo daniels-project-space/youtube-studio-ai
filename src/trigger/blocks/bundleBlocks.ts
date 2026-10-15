@@ -81,7 +81,16 @@ export const emitBundle: Block = {
       styleDNA: ctx.store["styleDNA"],
     });
     const reusableMusicProfileBySibling = new Map<string, string>();
-    if (sourceProfile && sourceProfile === runProfile) {
+    const musicProvider = ctx.store["musicProvider"];
+    const providerEvidenceKeys = {
+      program: ctx.store["channelMusicProgramKey"],
+      source: ctx.store["musicAuditionSourceKey"],
+      quality: ctx.store["musicQualityReceiptKey"],
+      auditionWav: ctx.store["musicAuditionWavKey"],
+    };
+    const hasReusableProviderEvidence = (musicProvider === "mureka" || musicProvider === "suno") &&
+      Object.values(providerEvidenceKeys).every((key) => typeof key === "string" && key.length > 0);
+    if (hasReusableProviderEvidence && sourceProfile && sourceProfile === runProfile) {
       for (const sibling of siblings) {
         const siblingProfile = groupMusicSoundProfileFingerprint({
           family: sibling.family,
@@ -115,6 +124,12 @@ export const emitBundle: Block = {
     let durableMusicKey: string | undefined;
     let durableMusicSha256: string | undefined;
     let durableMusicByteLength: number | undefined;
+    let durableProviderEvidence: {
+      program: { key: string; sha256: string };
+      source: { key: string; sha256: string };
+      quality: { key: string; sha256: string };
+      auditionWav: { key: string; sha256: string };
+    } | undefined;
     let durableThirdPartyStockEvidence: ThirdPartyStockEvidenceReference | undefined;
     try {
       let sourceStockManifest: ThirdPartyStockEvidenceManifest | undefined;
@@ -177,6 +192,18 @@ export const emitBundle: Block = {
         await putObject(durableMusicKey, musicBytes, { contentType: "audio/mpeg" });
         durableMusicSha256 = createHash("sha256").update(musicBytes).digest("hex");
         durableMusicByteLength = musicBytes.byteLength;
+        const evidence: typeof durableProviderEvidence = {} as NonNullable<typeof durableProviderEvidence>;
+        for (const [name, sourceKey] of Object.entries(providerEvidenceKeys) as Array<
+          [keyof typeof providerEvidenceKeys, string]
+        >) {
+          const bytes = await getObjectBytes(sourceKey);
+          const sha256 = createHash("sha256").update(bytes).digest("hex");
+          const suffix = name === "auditionWav" ? "wav" : "json";
+          const key = `${bundleDir}music-evidence/${name}-${sha256}.${suffix}`;
+          await putObject(key, bytes, { contentType: suffix === "wav" ? "audio/wav" : "application/json" });
+          evidence[name] = { key, sha256 };
+        }
+        durableProviderEvidence = evidence;
       }
 
       const bundle = {
@@ -232,11 +259,13 @@ export const emitBundle: Block = {
                 siblingChannelId: String(sib._id),
                 family: String(channel.family),
                 contentLaneKey: String(channel.contentLane!.key),
-                provider: ctx.store["musicProvider"] as "mureka" | "suno" | "minimax_music3",
+                provider: musicProvider as "mureka" | "suno",
                 musicKey: durableMusicKey,
                 audioSha256: durableMusicSha256,
                 audioByteLength: durableMusicByteLength,
                 soundProfileFingerprint: reuseProfileFingerprint,
+                baseMusicKey: musicKey!,
+                providerEvidence: durableProviderEvidence!,
               }) }
             : {}),
         },
