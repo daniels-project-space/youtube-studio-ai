@@ -12,6 +12,17 @@ import {
   parseBundleFanoutEnvelope,
 } from "@/lib/bundleFanout";
 
+const musicReuseReceipt = {
+  version: "music_reuse/v1" as const,
+  ownerId: "owner_a",
+  baseRunId: "run_base",
+  baseChannelId: "channel_base",
+  siblingChannelId: "channel_es",
+  musicKey: "owner/a/bundle/run_base/music.mp3",
+  audioSha256: "a".repeat(64),
+  audioByteLength: 1_000,
+};
+
 function envelope() {
   return bundleFanoutEnvelope({
     ownerId: "owner_a",
@@ -27,6 +38,7 @@ function envelope() {
       },
       footageKeys: ["owner/a/bundle/run_base/clip_0.mp4", "owner/a/bundle/run_base/clip_1.mp4"],
       musicKey: "owner/a/bundle/run_base/music.mp3",
+      musicReuseReceipt,
     },
   });
 }
@@ -45,6 +57,7 @@ function main(): void {
         sections: [{ narration: "One" }, { narration: "Two" }],
       },
       musicKey: "owner/a/bundle/run_base/music.mp3",
+      musicReuseReceipt,
       topic: "A durable handoff",
       language: "es",
     },
@@ -69,6 +82,8 @@ function main(): void {
   assert.deepEqual(replaySchedule.payload, schedule.payload);
   assert.equal(schedule.payload.channelId, "channel_es");
   assert.deepEqual(schedule.payload.reuse.footageKeys, first.reuse.footageKeys);
+  assert.deepEqual(schedule.payload.reuse.musicReuseReceipt, musicReuseReceipt,
+    "the immutable Trigger child payload retains the exact sibling-scoped audio receipt");
 
   assert.throws(
     () => parseBundleFanoutEnvelope({
@@ -79,10 +94,20 @@ function main(): void {
     "a changed replay payload cannot silently mint or dispatch a different child contract",
   );
   assert.throws(
+    () => parseBundleFanoutEnvelope({ ...first, reuse: { ...first.reuse,
+      musicReuseReceipt: { ...musicReuseReceipt, siblingChannelId: "channel_fr" } } }),
+    /music reuse receipt identity does not match its envelope/u,
+    "a receipt for a different sibling cannot be substituted on replay",
+  );
+  assert.throws(
     () => parseBundleFanoutEnvelope({ ...first, dispatchKey: "bundle_fanout/v1:other:channel_es" }),
     /dispatch key is not bound/,
     "the stored key is bound to the exact parent run and sibling",
   );
+  assert.throws(() => bundleFanoutEnvelope({
+    ownerId: "owner_a", baseRunId: "run_base", baseChannelId: "channel_base", siblingChannelId: "channel_es",
+    reuse: { language: "es", footageKeys: [], musicKey: "owner/a/bundle/run_base/music.mp3" },
+  }), /must be supplied together/u, "a newly authored music handoff cannot omit its byte receipt");
 
   let elapsed = 0;
   for (let attempt = 1; attempt <= BUNDLE_FANOUT_MAX_DISPATCH_ATTEMPTS; attempt++) {

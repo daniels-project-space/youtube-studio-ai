@@ -17,6 +17,7 @@ import { putObject, getObjectBytes } from "@/lib/storage";
 import { readBytes } from "@/lib/files";
 import { ExecutionError } from "@/engine/executionErrors";
 import { bundleFanoutDispatchSchedule, bundleFanoutEnvelope } from "@/lib/bundleFanout";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import {
   ThirdPartyStockEvidenceReferenceSchema,
   assertThirdPartyStockEvidenceMatchesFootageKeys,
@@ -79,6 +80,8 @@ export const emitBundle: Block = {
     const footageKeys: string[] = [];
     const footageSha256: string[] = [];
     let durableMusicKey: string | undefined;
+    let durableMusicSha256: string | undefined;
+    let durableMusicByteLength: number | undefined;
     let durableThirdPartyStockEvidence: ThirdPartyStockEvidenceReference | undefined;
     try {
       let sourceStockManifest: ThirdPartyStockEvidenceManifest | undefined;
@@ -137,7 +140,10 @@ export const emitBundle: Block = {
       // the base run key: cleanup can remove it before a queued sibling starts.
       if (musicKey) {
         durableMusicKey = `${bundleDir}music.mp3`;
-        await putObject(durableMusicKey, await getObjectBytes(musicKey), { contentType: "audio/mpeg" });
+        const musicBytes = await getObjectBytes(musicKey);
+        await putObject(durableMusicKey, musicBytes, { contentType: "audio/mpeg" });
+        durableMusicSha256 = createHash("sha256").update(musicBytes).digest("hex");
+        durableMusicByteLength = musicBytes.byteLength;
       }
 
       const bundle = {
@@ -183,6 +189,17 @@ export const emitBundle: Block = {
             ? { thirdPartyStockEvidence: durableThirdPartyStockEvidence }
             : {}),
           ...(durableMusicKey !== undefined ? { musicKey: durableMusicKey } : {}),
+          ...(durableMusicKey !== undefined && durableMusicSha256 !== undefined && durableMusicByteLength !== undefined
+            ? { musicReuseReceipt: createMusicReuseReceipt({
+                ownerId: ctx.ownerId,
+                baseRunId: ctx.runId,
+                baseChannelId: String(ctx.channelId),
+                siblingChannelId: String(sib._id),
+                musicKey: durableMusicKey,
+                audioSha256: durableMusicSha256,
+                audioByteLength: durableMusicByteLength,
+              }) }
+            : {}),
         },
       });
       const child = await c.mutation(api.runs.claimBundleFanoutRun, {

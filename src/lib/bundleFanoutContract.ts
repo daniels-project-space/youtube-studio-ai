@@ -3,6 +3,7 @@ import {
   RENDER_CHILD_WAIT_DISPATCH_GRACE_MS,
 } from "./renderChildLease";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
+import type { MusicReuseReceipt } from "@/lib/musicReuseReceipt";
 
 /** Immutable wire contract for one base-run → language-sibling handoff. */
 export const BUNDLE_FANOUT_VERSION = "bundle_fanout/v1" as const;
@@ -35,6 +36,8 @@ export interface BundleFanoutReuse {
   /** Immutable evidence copied with the reusable footage, when it is stock. */
   readonly thirdPartyStockEvidence?: ThirdPartyStockEvidenceReference;
   readonly musicKey?: string;
+  /** Exact copied-master bytes and this sibling's identity, sealed into the envelope fingerprint. */
+  readonly musicReuseReceipt?: MusicReuseReceipt;
 }
 
 export interface BundleFanoutEnvelope {

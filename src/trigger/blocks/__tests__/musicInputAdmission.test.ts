@@ -6,6 +6,7 @@ import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 
 const ctx: StageContext = {
   ownerId: "owner-admission", channelId: "channel-admission", runId: "run-admission",
@@ -17,6 +18,10 @@ const program = createChannelMusicProgram({
   family: "narrated_stock", contentLaneKey: "narrated_stock", topic: "Quiet evening", providerPreference: "mureka",
 });
 const master = Buffer.alloc(1000, 7);
+const reusedKey = "retained.mp3";
+const reuseReceipt = createMusicReuseReceipt({ ownerId: ctx.ownerId, baseRunId: "base-run",
+  baseChannelId: "base-channel", siblingChannelId: String(ctx.channelId), musicKey: reusedKey,
+  audioSha256: sha256BytesHex(master), audioByteLength: master.length });
 const prepared = { ownerId: ctx.ownerId, channelId: ctx.channelId, topic: "Quiet evening", musicProgram: program,
   provider: "mureka",
   audioByteLength: master.length, audioSha256: sha256BytesHex(master), musicDurationSec: 10,
@@ -80,6 +85,12 @@ async function main() {
     }
   }
   assert.equal(storageCalls, 0); assert.equal(networkCalls, 0);
+  await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, reuseMusicKey: reusedKey } }),
+    /object|received/iu, "raw reuse keys without a sibling-scoped receipt are refused before generation");
+  await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, reuseMusicKey: reusedKey,
+    reuseMusicReceipt: { ...reuseReceipt, siblingChannelId: "foreign-sibling" } } }),
+  /does not match this owner, sibling, key/u, "receipt identity must match this target channel");
+  assert.equal(storageCalls, 0); assert.equal(networkCalls, 0);
   const conflictingSleepStore = {
     topic: "Steady rain through a quiet night",
     musicBrief: { musicIntent: { role: "sleep_sound_bed" } },
@@ -101,7 +112,8 @@ async function main() {
   assert.equal(storageCalls, 0, "a role-conflicting channel genre must fail before writing its sound program");
   assert.equal(networkCalls, 0, "a role-conflicting channel genre must fail before a provider request");
   for (const provider of [undefined, "mureka", "suno", "minimax_music3"]) {
-    const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store, reuseMusicKey: "retained.mp3" } });
+    const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store,
+      reuseMusicKey: reusedKey, reuseMusicReceipt: reuseReceipt } });
     assert.equal(result.musicProvider, "reuse");
   }
   for (const patch of [{ ownerId: "foreign" }, { channelId: "foreign" }, { topic: "Other topic" }]) {
@@ -217,7 +229,7 @@ async function main() {
   await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: { ...prepared, provider: "mureka" } } }), /master bytes do not match/);
   master[0] ^= 1;
   assert.equal(networkCalls, 0);
-  console.log("MUSIC INPUT ADMISSION PASS: exact provider selection, historical reuse, owner/channel/topic binding and fingerprint validation before I/O");
+  console.log("MUSIC INPUT ADMISSION PASS: exact provider selection, receipted reuse, owner/channel/topic binding and fingerprint validation before I/O");
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   loader._load = originalLoad; globalThis.fetch = originalFetch;

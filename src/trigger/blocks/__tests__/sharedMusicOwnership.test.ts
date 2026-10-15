@@ -8,6 +8,7 @@ import { all, getManifest, require_ } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
 import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
 import { music, musicFallbackPromptForRoute, musicProgramPlan } from "../musicBlocks";
@@ -123,6 +124,11 @@ async function main(): Promise<void> {
       const store: Record<string, unknown> = {
         topic: "Quiet focus after midnight",
         reuseMusicKey: "owner/test/base/music.mp3",
+        reuseMusicReceipt: createMusicReuseReceipt({
+          ownerId: "owner-music-test", baseRunId: "base-run", baseChannelId: "base-channel",
+          siblingChannelId: "channel-music-test", musicKey: "owner/test/base/music.mp3",
+          audioSha256: "a".repeat(64), audioByteLength: 1_000,
+        }),
       };
       const ctx: StageContext = {
         ownerId: "owner-music-test",

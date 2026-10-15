@@ -8,6 +8,7 @@ import type { StageContext } from "@/engine/types";
 import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
 import { getObjectBytes } from "@/lib/storage";
 import { sha256BytesHex } from "@/lib/sha256";
+import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { str } from "./blockContext";
 import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
 
@@ -24,7 +25,18 @@ export async function assertMusicQualityForPublish(ctx: StageContext): Promise<v
   if (!isMusicReviewStatusCompatible(provider, reviewStatus)) {
     throw new Error("upload_draft: music provider review state is missing or invalid — refusing to upload");
   }
-  if (provider === "reuse") return;
+  if (provider === "reuse") {
+    const musicKey = str(ctx, "musicKey");
+    assertMusicReuseReceipt({
+      receipt: ctx.store["reuseMusicReceipt"],
+      ownerId: ctx.ownerId,
+      siblingChannelId: String(ctx.channelId),
+      musicKey,
+      audioBytes: await getObjectBytes(musicKey),
+    });
+    ctx.log("upload_draft: admitted byte-bound render-group music reuse receipt");
+    return;
+  }
   if (provider === "mureka" || provider === "suno") {
     const programKey = str(ctx, "channelMusicProgramKey");
     const sourceKey = str(ctx, "musicAuditionSourceKey");

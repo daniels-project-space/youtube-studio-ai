@@ -15,6 +15,7 @@ import {
 import { classifyExecutionError, ExecutionError } from "@/engine/executionErrors";
 import type { Block, StageContext } from "@/engine/types";
 import { freezeChannelInceptionProbeContext } from "@/lib/channelInceptionProbe";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { createSerializedProgramEpisodeContext } from "@/lib/serializedProgramEpisodeContext";
 import {
   serializedProgramEpisodeIdentity,
@@ -226,6 +227,12 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       topic,
       musicProgramPlan: planned.musicProgramPlan,
       reuseMusicKey: "owner/test/channel/program-route/reused-music.mp3",
+      reuseMusicReceipt: createMusicReuseReceipt({
+        ownerId: "owner-program-route-test", baseRunId: "base-run", baseChannelId: "base-channel",
+        siblingChannelId: "channel-program-route-test",
+        musicKey: "owner/test/channel/program-route/reused-music.mp3",
+        audioSha256: "a".repeat(64), audioByteLength: 1_000,
+      }),
     },
   }));
   assert.equal(reused.musicProvider, "reuse");

@@ -50,6 +50,7 @@ import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { join } from "node:path";
 import {
   str,
@@ -264,6 +265,12 @@ export const music: Block = {
     // (identical audio bed; only narration differs) — no Mureka/Suno generation.
     const reuseMusicKey = ctx.store["reuseMusicKey"] as string | undefined;
     if (reuseMusicKey) {
+      assertMusicReuseReceipt({
+        receipt: ctx.store["reuseMusicReceipt"],
+        ownerId: ctx.ownerId,
+        siblingChannelId: String(ctx.channelId),
+        musicKey: reuseMusicKey,
+      });
       ctx.log(`music: REUSED base music track ${reuseMusicKey} (no generation)`);
       let reuseUrl = "";
       try { reuseUrl = publicUrl(reuseMusicKey); } catch { reuseUrl = `r2://${reuseMusicKey}`; }

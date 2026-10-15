@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { sha256BytesHex } from "@/lib/sha256";
 
 const ctx: StageContext = {
   ownerId: "owner-release-gate",
@@ -74,6 +76,35 @@ async function main() {
   assert.deepEqual(objectReads, ["program.json", "runtime.json", "quality.json"],
     "a foreign MiniMax program must fail before any native audio bytes are read");
 
+  const reusedAudio = Buffer.alloc(1_024, 9);
+  objects.set("reused.mp3", reusedAudio);
+  const reuseReceipt = createMusicReuseReceipt({
+    ownerId: String(ctx.ownerId), baseRunId: "base-run", baseChannelId: "base-channel",
+    siblingChannelId: String(ctx.channelId), musicKey: "reused.mp3",
+    audioSha256: sha256BytesHex(reusedAudio),
+    audioByteLength: reusedAudio.byteLength,
+  });
+  objectReads.length = 0;
+  await assertMusicQualityForPublish({ ...ctx, store: {
+    musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
+    reuseMusicReceipt: reuseReceipt,
+  } });
+  assert.deepEqual(objectReads, ["reused.mp3"], "reuse release re-reads and hashes the exact durable audio");
+  for (const receipt of [undefined, { ...reuseReceipt, siblingChannelId: "foreign-sibling" },
+    { ...reuseReceipt, audioSha256: "b".repeat(64) }]) {
+    objectReads.length = 0;
+    await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
+      musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
+      reuseMusicReceipt: receipt,
+    } }), /music reuse receipt/u);
+    assert.deepEqual(objectReads, ["reused.mp3"], "invalid or mismatched reuse proof cannot pass release");
+  }
+  objects.set("reused.mp3", Buffer.alloc(reusedAudio.byteLength, 8));
+  await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
+    musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
+    reuseMusicReceipt: reuseReceipt,
+  } }), /exact audio bytes/u, "same-length replacement bytes cannot pass a previously valid receipt");
+
   for (const provider of ["mureka", "suno"] as const) {
     objectReads.length = 0;
     await assert.rejects(
@@ -113,7 +144,7 @@ async function main() {
     assert.deepEqual(objectReads, requiredEvidenceKeys,
       `${provider} release must load program, source, quality receipt, master, and audition bytes`);
   }
-  console.log("MUSIC RELEASE GATE PASS: foreign MiniMax identity and missing Mureka/Suno audition evidence fail closed");
+  console.log("MUSIC RELEASE GATE PASS: byte-bound reuse plus foreign MiniMax identity and missing provider audition evidence fail closed");
 }
 
 void main().finally(() => {

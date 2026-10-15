@@ -6,6 +6,7 @@ import ts from "typescript";
 import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { apiClientManager, type ApiRequestOptions } from "@trigger.dev/core/v3";
 import { bundleFanoutEnvelope, bundleFanoutDispatchSchedule } from "@/lib/bundleFanout";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { serializedProgramEpisodeBusyRetrySchedule } from "@/lib/serializedProgramEpisode";
 
 function actualRequestOptions(file: string): ApiRequestOptions {
@@ -55,7 +56,10 @@ test("installed SDK makes one durable delivery attempt, preserving identity afte
       await assert.rejects(tasks.trigger("run-pipeline", { fixture: "control" }));
       assert.equal(received.length, 5, "control confirms inherited retry amplification in the installed SDK");
       const envelope = bundleFanoutEnvelope({ ownerId: "owner-fixture", baseRunId: "base", baseChannelId: "base-channel",
-        siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music" } });
+        siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music",
+          musicReuseReceipt: createMusicReuseReceipt({ ownerId: "owner-fixture", baseRunId: "base",
+            baseChannelId: "base-channel", siblingChannelId: "sibling", musicKey: "retained-music",
+            audioSha256: "a".repeat(64), audioByteLength: 1_000 }) } });
       const schedules = [
         { file: "bundleFanoutDispatcher", request: bundleFanoutDispatchSchedule({ runId: "child", envelope }) },
         { file: "serializedProgramEpisodeRetryDispatcher", request: serializedProgramEpisodeBusyRetrySchedule({

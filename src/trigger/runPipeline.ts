@@ -208,6 +208,7 @@ import {
   getNarrativeSeriesPlanRecord,
 } from "@/lib/narrativeSeriesStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
+import type { MusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 import {
   createMusicAuditionCheckpoint,
@@ -426,6 +427,7 @@ export interface RunPipelineInput {
     footageKeys?: string[];
     thirdPartyStockEvidence?: ThirdPartyStockEvidenceReference;
     musicKey?: string;
+    musicReuseReceipt?: MusicReuseReceipt;
   };
 }
 
@@ -1986,6 +1988,7 @@ export const runPipelineTask = task({
             seedStore["reuseThirdPartyStockEvidence"] = payload.reuse.thirdPartyStockEvidence;
           }
           if (payload.reuse.musicKey) seedStore["reuseMusicKey"] = payload.reuse.musicKey;
+          if (payload.reuse.musicReuseReceipt) seedStore["reuseMusicReceipt"] = payload.reuse.musicReuseReceipt;
           if (payload.reuse.language) seedStore["reuseLanguage"] = payload.reuse.language;
           log(`run-pipeline: render-group REUSE active (lang=${payload.reuse.language}, ${payload.reuse.footageKeys?.length ?? 0} clips)`);
         }
