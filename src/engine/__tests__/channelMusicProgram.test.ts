@@ -389,26 +389,46 @@ assert.throws(
   "a passing music receipt cannot be borrowed by another channel or episode",
 );
 
-assert.throws(
-  () => createMusicProgramQualityReceipt({
-    program: lofi,
-    ...receiptInput,
-    measurements: { ...receiptInput.measurements, lraLu: 0.8, crestDb: 4.2 },
-    audition: { ...receiptInput.audition, hollowOrGeneric: true },
-  }),
-  /loudness range.*crest factor.*hollow or generic/iu,
-  "a technically decodable but flat/hollow song must not qualify",
-);
+const independentQualityRejections: {
+  label: string;
+  measurements?: Partial<typeof receiptInput.measurements>;
+  sectionScore?: number;
+  audition?: Partial<typeof receiptInput.audition>;
+  expected: RegExp;
+}[] = [
+  { label: "loudness window", measurements: { integratedLufs: -19 }, expected: /integrated loudness/u },
+  { label: "true-peak ceiling", measurements: { truePeakDbtp: -0.9 }, expected: /true peak/u },
+  { label: "role-specific loudness range", measurements: { lraLu: 0.8 }, expected: /loudness range/u },
+  { label: "crest factor", measurements: { crestDb: 4.2 }, expected: /crest factor/u },
+  { label: "clipped samples", measurements: { clippedSamples: 1 }, expected: /clipped samples/u },
+  { label: "flat-topped ceiling run", measurements: { maximumConsecutiveCeilingSamples: 4 }, expected: /flat-topped ceiling run/u },
+  { label: "DC offset", measurements: { dcOffsetAbsolute: 0.021 }, expected: /DC offset/u },
+  { label: "digital silence", measurements: { silenceFraction: 0.081 }, expected: /digital silence/u },
+  { label: "mechanical artifacts", measurements: { mechanicalArtifactScore: 0.16 }, expected: /mechanical\/broadband artifact/u },
+  { label: "known high-band collapse", measurements: { openingHighBandDropDb: 18.1 }, expected: /opening-to-early-interior high-band energy collapsed/u },
+  { label: "per-section review floor", sectionScore: 0.74, expected: /at least one musical section failed review/u },
+  { label: "emotional depth", audition: { emotionalDepthScore: 0.79 }, expected: /insufficient emotional depth/u },
+  { label: "arrangement depth", audition: { arrangementDepthScore: 0.79 }, expected: /insufficient arrangement depth/u },
+  { label: "generic result", audition: { hollowOrGeneric: true }, expected: /hollow or generic/u },
+  { label: "failed audition", audition: { verdict: "fail" }, expected: /human audition did not pass/u },
+];
 
-assert.throws(
-  () => createMusicProgramQualityReceipt({
-    program: lofi,
+for (const rejection of independentQualityRejections) {
+  const candidate = {
     ...receiptInput,
-    measurements: { ...receiptInput.measurements, openingHighBandDropDb: 26, mechanicalArtifactScore: 0.4 },
-  }),
-  /opening-to-early-interior high-band energy collapsed/u,
-  "a take with the known post-opening Music3 spectral collapse must never qualify",
-);
+    measurements: { ...receiptInput.measurements, ...rejection.measurements },
+    sectionReviews: rejection.sectionScore === undefined
+      ? receiptInput.sectionReviews
+      : receiptInput.sectionReviews.map((section, index) =>
+          index === 0 ? { ...section, score: rejection.sectionScore } : section),
+    audition: { ...receiptInput.audition, ...rejection.audition },
+  };
+  assert.throws(
+    () => createMusicProgramQualityReceipt({ program: lofi, ...candidate }),
+    rejection.expected,
+    `the independent ${rejection.label} gate must reject a failing result`,
+  );
+}
 
 const tampered = structuredClone(history);
 tampered.identity.genre = "generic cinematic";
