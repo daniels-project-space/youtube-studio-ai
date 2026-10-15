@@ -158,6 +158,25 @@ async function main(): Promise<void> {
     "the typed identity gate must carry concrete recurring subject, world, and palette instead of only a channel name",
   );
 
+  const fullQualityProfile = channelVisualReviewProfile({
+    contentLaneKey: "documentary_short",
+    qualityDimensions: Array.from({ length: 8 }, (_, index) => `dimension-${index + 1}`),
+    qualityCriteria: [
+      ...Array.from({ length: 7 }, (_, index) => `scorecard criterion ${index + 1}`),
+      `long criterion ${"x".repeat(700)} REQUIRED_SENTINEL`,
+    ],
+  });
+  assert.match(fullQualityProfile.channelWorld ?? "", /dimension-8/);
+  assert.match(fullQualityProfile.qualityCriteria[7] ?? "", /REQUIRED_SENTINEL/);
+  assert.throws(
+    () => channelVisualReviewProfile({
+      contentLaneKey: "documentary_short",
+      qualityCriteria: Array.from({ length: 9 }, (_, index) => `scorecard criterion ${index + 1}`),
+    }),
+    /at most 8 scorecard entries/,
+    "scorecard overflow must fail explicitly rather than silently dropping module standards",
+  );
+
   const whiteboardProfile = channelVisualReviewProfile({
     contentLaneKey: "whiteboard_explainer",
     primaryRenderer: "whiteboard_scribe",
@@ -300,7 +319,7 @@ async function main(): Promise<void> {
   const referenceCriteriaPassed = await reviewRender(fixture, 18, {
     title: "Typed reference-criteria fixture",
     expectTitleCard: false,
-    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    qualityCriteria: Array.from({ length: 17 }, (_, index) => `Generic prose criterion ${index + 1}`),
     referenceCriteria,
   }, {
     runId: "visual-review-reference-criteria",
@@ -317,7 +336,8 @@ async function main(): Promise<void> {
   assert.deepEqual(referenceCriteriaPassed.referenceCriteria.map((criterion) => criterion.id), referenceCriteria.map((criterion) => criterion.id));
   assert(referenceCriteriaPassed.referenceCriteria.every((criterion) => criterion.scope === "global"), "typed mechanics must default to sampled broad-review coverage");
   assert.match(referenceCriteriaPrompt, /REFERENCE-MECHANICS CRITERIA/, "typed mechanics must reach the existing reviewer request");
-  assert.match(referenceCriteriaPrompt, /reference-mechanic-7/, "typed mechanics must not be truncated by the six-item QualityBar cap");
+  assert.match(referenceCriteriaPrompt, /reference-mechanic-7/, "typed mechanics must remain independent from prose criteria");
+  assert.match(referenceCriteriaPrompt, /Generic prose criterion 17/, "all bounded scorecard and downstream criteria must reach the final reviewer prompt");
 
   const receiptWithDifferentPersistedFrameKey = visualReviewReceiptFingerprint({
     ran: referenceCriteriaPassed.ran,
@@ -359,7 +379,7 @@ async function main(): Promise<void> {
   const outputChangedReceipt = await reviewRender(fixture, 18, {
     title: "Typed reference-criteria fixture",
     expectTitleCard: false,
-    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    qualityCriteria: Array.from({ length: 17 }, (_, index) => `Generic prose criterion ${index + 1}`),
     referenceCriteria,
   }, {
     runId: "visual-review-reference-criteria-output-change",

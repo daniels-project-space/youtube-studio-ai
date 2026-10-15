@@ -210,7 +210,7 @@ export interface VisualReviewCreativeLock {
 /**
  * A source-bound, renderer-independent visual mechanic to attest against the
  * supplied evidence. This deliberately stays distinct from `qualityCriteria`,
- * which is a small prose context block rather than a typed review contract.
+   * which is bounded prose context rather than a typed review contract.
  */
 export interface VisualReviewReferenceCriterion {
   id: string;
@@ -526,15 +526,19 @@ export function channelVisualReviewProfile(
     typeof showBible?.["dpDoctrine"] === "string" ? showBible["dpDoctrine"] : undefined,
     100,
   );
+  if ((input.qualityDimensions?.length ?? 0) > MAX_QUALITY_BAR_DIMENSIONS) {
+    throw new Error(`qualityDimensions may contain at most ${MAX_QUALITY_BAR_DIMENSIONS} entries`);
+  }
+  if ((input.qualityCriteria?.length ?? 0) > MAX_QUALITY_BAR_DIMENSIONS) {
+    throw new Error(`qualityCriteria may contain at most ${MAX_QUALITY_BAR_DIMENSIONS} scorecard entries`);
+  }
   const qualityDimensions = (input.qualityDimensions ?? [])
     .map((dimension) => compactReviewContext(dimension, 60))
-    .filter((dimension): dimension is string => Boolean(dimension))
-    .slice(0, 8);
+    .filter((dimension): dimension is string => Boolean(dimension));
   const qualityCriteria = (input.qualityCriteria ?? [])
-    .map((criterion) => compactReviewContext(criterion, 360))
+    .map((criterion) => compactReviewContext(criterion, MAX_REVIEW_QUALITY_CRITERION_CHARS))
     .filter((criterion): criterion is string => Boolean(criterion))
-    .filter((criterion, index, values) => values.indexOf(criterion) === index)
-    .slice(0, 6);
+    .filter((criterion, index, values) => values.indexOf(criterion) === index);
   const channelWorld = [
     channelName ? `Channel: ${channelName}` : "",
     persona ? `Audience/persona: ${persona}` : "",
@@ -804,6 +808,9 @@ const DEFAULT_STRUCTURE =
 // moderately richer mechanics contract remains reviewable without silently
 // truncating it into generic reviewer context.
 const MAX_REFERENCE_CRITERIA = 12;
+const MAX_QUALITY_BAR_DIMENSIONS = 8;
+const MAX_REVIEW_QUALITY_CRITERIA = 20;
+const MAX_REVIEW_QUALITY_CRITERION_CHARS = 780;
 
 const REASON_PRIORITY: Record<EvidenceReason, number> = {
   focus: 100,
@@ -1181,9 +1188,11 @@ function reviewerPrompt(
     .filter(Boolean)
     .slice(0, 4);
   const qualityCriteria = (intent.qualityCriteria ?? [])
-    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 360))
-    .filter(Boolean)
-    .slice(0, 6);
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, MAX_REVIEW_QUALITY_CRITERION_CHARS))
+    .filter(Boolean);
+  if (qualityCriteria.length > MAX_REVIEW_QUALITY_CRITERIA) {
+    throw new Error(`visual review qualityCriteria may contain at most ${MAX_REVIEW_QUALITY_CRITERIA} entries`);
+  }
   const referenceCriteriaInstructions = referenceCriteria.length
     ? `REFERENCE-MECHANICS CRITERIA\n` +
       `These are original, source-bound production mechanics, not an automatic comparison with any reference channel. ` +
