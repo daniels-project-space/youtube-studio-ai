@@ -105,15 +105,28 @@ async function main() {
   const routeSeed = channelProgramRouteRunSeed({ route, programBrief: brief });
   const musicProgramPlan = createOriginalMusicProgramPlan({ route: routeSeed, topic: arrangement.topic, providerPreference: "yue2" });
   const routeBoundContext = { ...context, store: { ...context.store, channelProgramRoute: routeSeed, musicProgramPlan } };
-  for (const patch of [
-    changedArrangement({ arrangement: { ...arrangement.arrangement, role: "sleep_sound_bed" }, musicIntent: { ...arrangement.musicIntent, role: "sleep_sound_bed" } }),
-    changedArrangement({ arrangement: { ...arrangement.arrangement, playback: "once" }, musicIntent: { ...arrangement.musicIntent, playback: "once" } }),
+  for (const [patch, reason] of [
+    [changedArrangement({ arrangement: { ...arrangement.arrangement, role: "sleep_sound_bed" }, musicIntent: { ...arrangement.musicIntent, role: "sleep_sound_bed" } }), /requires a primary_music arrangement/],
+    [changedArrangement({ arrangement: { ...arrangement.arrangement, playback: "once" }, musicIntent: { ...arrangement.musicIntent, playback: "once" } }), /requires a repeating primary-music arrangement/],
   ]) {
     reset();
     await assert.rejects(selected.execute({ ...routeBoundContext,
-      store: { ...routeBoundContext.store, acceptedMusicArrangement: patch } }), /repeating primary-music arrangement/);
+      store: { ...routeBoundContext.store, acceptedMusicArrangement: patch } }), reason);
     assert.equal(calls.length + reads + bootstraps, 0, "route-incompatible arrangements must refuse before paid or storage I/O");
   }
+  const sleepBrief = createChannelProgramBrief({ family: "sleep", locale: "en-US", nicheKey: "history",
+    concept: "Quiet continuous sleep soundscapes without attention-catching changes.",
+    audience: "people seeking stable overnight sleep sound", sampleTopics: [arrangement.topic] });
+  const sleepRoute = resolveChannelProgramRoute(sleepBrief)!;
+  const sleepRouteSeed = channelProgramRouteRunSeed({ route: sleepRoute, programBrief: sleepBrief });
+  const wrongSleepArrangement = changedArrangement({
+    arrangement: { ...arrangement.arrangement, role: "primary_music" },
+    musicIntent: { ...arrangement.musicIntent, role: "primary_music" },
+  });
+  reset();
+  await assert.rejects(selected.execute({ ...context, store: { ...context.store,
+    channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: wrongSleepArrangement } }), /requires a sleep_sound_bed arrangement/);
+  assert.equal(calls.length + reads + bootstraps, 0, "a sleep route must not pass a primary-music arrangement to YuE2");
 
   for (const patch of [
     { ownerId: "another-owner" }, { channelId: "another-channel" }, { runId: "another-run" },
