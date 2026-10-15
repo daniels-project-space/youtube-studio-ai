@@ -217,6 +217,7 @@ import {
 import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
 import { createAutomaticPreflightReceipt } from "@/lib/automaticWorkflow";
 import { createAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
+import { narrationTranscriptProofLanguagePreflightIssue } from "@/lib/narrationTranscriptProof";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -2229,6 +2230,17 @@ export const runPipelineTask = task({
         ...(programRoute ? { programRouteFingerprint: programRoute.fingerprint } : {}),
         ...(probeBudgetAdmission ? { budgetAdmission: probeBudgetAdmission } : {}),
       });
+      const narrationLanguageIssue = narrationTranscriptProofLanguagePreflightIssue({
+        entries: invocationCandidate.entries,
+        inheritedLanguage: invocationCandidate.seedStore["reuseLanguage"],
+      });
+      if (narrationLanguageIssue) {
+        throw new ExecutionError(narrationLanguageIssue, {
+          code: "NARRATION_TRANSCRIPT_LANGUAGE_UNQUALIFIED",
+          retryable: false,
+          phase: "pipeline_preflight",
+        });
+      }
       preflight(resolved, { budgetUsd: invocationCandidate.budgetUsd });
       const invocationSha256 = pipelineInvocationSha256(invocationCandidate);
       const claimedInvocation = await convex.mutation(api.runs.claimInvocationSnapshot, {

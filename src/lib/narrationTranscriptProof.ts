@@ -12,6 +12,7 @@ export const NARRATION_TRANSCRIPT_PROOF_SCRIPT = "scripts/narration_transcript_p
 export const NARRATION_TRANSCRIPT_MODEL_ID = "Systran/faster-whisper-small.en";
 export const NARRATION_TRANSCRIPT_MODEL_REVISION = "d1d751a5f8271d482d14ca55d9e2deeebbae577f";
 export const FASTER_WHISPER_VERSION = "1.2.1";
+export const NARRATION_TRANSCRIPT_PROOF_LANGUAGE = "en" as const;
 export const NARRATION_TRANSCRIPT_MODEL_DIR = "/opt/youtube-studio-qa-narration-proof/model";
 export const NARRATION_TRANSCRIPT_PROOF_PYTHON = "/opt/youtube-studio-qa-narration-proof/bin/python";
 /**
@@ -76,6 +77,58 @@ export const NarrationTranscriptProofSchema = z.object({
 }).strict();
 
 export type NarrationTranscriptProof = z.infer<typeof NarrationTranscriptProofSchema>;
+
+/**
+ * The pinned offline transcript model is English-only. Check the frozen module
+ * plan before any sibling block can spend on narration, music, or visuals.
+ */
+export function narrationTranscriptProofLanguagePreflightIssue(args: {
+  entries: readonly { block: string; params?: unknown }[];
+  inheritedLanguage?: unknown;
+}): string | undefined {
+  if (!args.entries.some((entry) => entry.block === "qa_visual")) return undefined;
+
+  const declarations: Array<{ block: string; language: string }> = [];
+  if (
+    args.inheritedLanguage !== undefined &&
+    args.inheritedLanguage !== null &&
+    args.inheritedLanguage !== "" &&
+    typeof args.inheritedLanguage !== "string"
+  ) {
+    return "render-group narration language must be a string; refusing provider work";
+  }
+  if (typeof args.inheritedLanguage === "string" && args.inheritedLanguage.trim()) {
+    declarations.push({ block: "render-group", language: args.inheritedLanguage });
+  }
+  for (const entry of args.entries) {
+    if (entry.block !== "script_gen" && entry.block !== "narration_tts") continue;
+    const params = entry.params && typeof entry.params === "object"
+      ? entry.params as Record<string, unknown>
+      : {};
+    const value = params.language ?? params.locale;
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value !== "string") {
+      return `narration transcript QA language for ${entry.block} must be a string; refusing provider work`;
+    }
+    declarations.push({ block: entry.block, language: value });
+  }
+
+  const normalized = declarations.map(({ block, language }) => ({
+    block,
+    raw: language.trim(),
+    base: language.trim().toLowerCase().replaceAll("_", "-").split("-")[0]!,
+  }));
+  const languages = new Set(normalized.map(({ base }) => base === "english" ? "en" : base));
+  if (languages.size > 1) {
+    return `script, narration, and render-group languages disagree (${normalized.map(({ block, raw }) => `${block}=${raw}`).join(", ")}); refusing provider work`;
+  }
+  const requested = normalized[0]?.raw ?? "English (default)";
+  const language = [...languages][0] ?? NARRATION_TRANSCRIPT_PROOF_LANGUAGE;
+  if (language !== NARRATION_TRANSCRIPT_PROOF_LANGUAGE) {
+    return `final-master narration proof is pinned to ${NARRATION_TRANSCRIPT_MODEL_ID} (English only); requested ${requested} has no qualified transcript-proof route, so the pipeline is held before provider work`;
+  }
+  return undefined;
+}
 
 /** Fixed-size projection of a full transcript proof retained in the R2 audit object. */
 export const NarrationTranscriptProofSummarySchema = z.object({
