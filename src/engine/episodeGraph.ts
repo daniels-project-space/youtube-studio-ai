@@ -439,6 +439,7 @@ export function assertEpisodeGraphAgainstStorySpine(value: unknown, storySpine: 
     );
   }
   const storyBeatIds = new Set(spine.narrativeBeats.map((beat) => beat.id));
+  const storyBeatsById = new Map(spine.narrativeBeats.map((beat) => [beat.id, beat]));
   const sentenceIds = new Set(spine.timedScript.sentences.map((sentence) => sentence.id));
   const characterIds = new Set(
     spine.continuityLedger.entities.map((entity) => canonicalEpisodeCatalogId(entity.id, "character")),
@@ -454,11 +455,33 @@ export function assertEpisodeGraphAgainstStorySpine(value: unknown, storySpine: 
   }
   assertKnownIds(graph.characterIds, characterIds, "episode graph characterIds");
   assertKnownIds(graph.settingIds, settingIds, "episode graph settingIds");
+  const representedStoryBeatIds = new Set<string>();
   for (const beat of graph.beats) {
     assertKnownIds(beat.storySpineBeatIds, storyBeatIds, `episode beat ${beat.id}`);
     assertKnownIds(beat.storySpineSentenceIds, sentenceIds, `episode beat ${beat.id}`);
     assertKnownIds(beat.characterIds, characterIds, `episode beat ${beat.id}`);
     if (beat.settingId) assertKnownIds([beat.settingId], settingIds, `episode beat ${beat.id}`);
+
+    const sourceBeats = beat.storySpineBeatIds.map((id) => storyBeatsById.get(id)!);
+    if (sourceBeats.some((sourceBeat) => representedStoryBeatIds.has(sourceBeat.id))) {
+      throw new Error(`episode beat ${beat.id} repeats a Story Spine beat already assigned to another Episode Graph beat`);
+    }
+    sourceBeats.forEach((sourceBeat) => representedStoryBeatIds.add(sourceBeat.id));
+    const expectedSentenceIds = sourceBeats.flatMap((sourceBeat) => sourceBeat.sourceSentenceIds);
+    if (
+      beat.storySpineSentenceIds.length !== expectedSentenceIds.length ||
+      beat.storySpineSentenceIds.some((id, index) => id !== expectedSentenceIds[index])
+    ) {
+      throw new Error(`episode beat ${beat.id} Story Spine sentence mapping does not match its source beats`);
+    }
+    const expectedT0 = Math.min(...sourceBeats.map((sourceBeat) => sourceBeat.t0));
+    const expectedT1 = Math.max(...sourceBeats.map((sourceBeat) => sourceBeat.t1));
+    if (Math.abs(beat.t0 - expectedT0) > EPSILON || Math.abs(beat.t1 - expectedT1) > EPSILON) {
+      throw new Error(`episode beat ${beat.id} timing does not match its Story Spine beats`);
+    }
+  }
+  if (representedStoryBeatIds.size !== storyBeatIds.size) {
+    throw new Error("Episode Graph does not represent every Story Spine beat");
   }
   return graph;
 }

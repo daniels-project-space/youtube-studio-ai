@@ -207,6 +207,19 @@ const storySpine = {
 
 assert.equal(assertEpisodeGraphAgainstStorySpine(graph, storySpine).episodeId, graph.episodeId);
 
+const misboundNarration = structuredClone(graph);
+misboundNarration.beats[0].storySpineSentenceIds = ["sentence-lesson"];
+assert.throws(
+  () => assertEpisodeGraphAgainstStorySpine(misboundNarration, storySpine),
+  /Story Spine sentence mapping does not match its source beats/,
+  "a graph beat must not cite a different valid narration sentence than its source beat",
+);
+assert.throws(
+  () => compileSceneManifest(misboundNarration, storySpine),
+  /Story Spine sentence mapping does not match its source beats/,
+  "the scene compiler must reject narration references that disagree with the visible scene text",
+);
+
 // This is the reusable children-learning handoff: real Story Spine evidence
 // becomes a causal Episode Graph, a zero-provider Scene Manifest, and a
 // private-human-review receipt before a renderer may be admitted.
