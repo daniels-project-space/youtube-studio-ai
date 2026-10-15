@@ -778,6 +778,23 @@ async function main(): Promise<void> {
     );
     assert.match(coverageEscalated.summary, /evidence gap/i, "coverage escalation must be diagnosable in the QA report");
 
+    const advisoryCoverage = await reviewRender(sparseCoverage, 90, {
+      title: "Advisory coverage-gate fixture",
+      expectTitleCard: false,
+    }, {
+      runId: "visual-review-advisory-coverage-gate",
+      required: false,
+      reviewer,
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 6,
+    });
+    assert.equal(advisoryCoverage.verdict, "needs_human", "advisory QA must not call incompletely sampled media a pass");
+    assert(
+      advisoryCoverage.evidence.coverage.maxGapSec > advisoryCoverage.evidence.coverage.maxAllowedGapSec,
+      "advisory review must retain its honest sampled-coverage gap",
+    );
+
     const badComic = join(work, "comic-overlay-defects.mp4");
     makeBadComic(fixture, badComic);
     const flawedIntent: VisualReviewIntent = {

@@ -2158,7 +2158,7 @@ export async function reviewRender(
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
   const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
+    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || coverageIncomplete
       ? "needs_human"
       : "pass";
   // This intentionally happens after `persistEvidence`: the receipt binds the
