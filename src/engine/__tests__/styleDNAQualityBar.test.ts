@@ -49,7 +49,7 @@ const DNA: StyleDNA = {
 };
 
 const SPECIALIST_EXPECTED: Record<
-  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear" | "shorts">,
+  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear" | "shorts" | "whiteboard">,
   readonly string[]
 > = {
   comic: ["identity", "script", "voice", "footage", "motion", "thumbnail"],
@@ -57,6 +57,7 @@ const SPECIALIST_EXPECTED: Record<
   loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
   quizyear: ["identity", "hook", "captions", "pacing", "thumbnail", "music"],
   shorts: ["hook", "captions", "pacing", "thumbnail", "voice"],
+  whiteboard: ["identity", "script", "footage", "motion", "thumbnail", "voice"],
 };
 
 for (const [family, expectedIds] of Object.entries(SPECIALIST_EXPECTED) as Array<
@@ -97,6 +98,14 @@ const voice = buildQualityBar("narrated_stock", DNA, 123).dimensions.find(
 );
 assert.match(voice?.description ?? "", /measured documentary narrator/);
 assert.match(voice?.description ?? "", /delivery: calm and precise/);
+
+const whiteboardMotion = buildQualityBar("whiteboard", {
+  ...DNA,
+  motionVocabulary: ["hand reveals each diagram line", "labels appear with narration"],
+  motionDiscipline: "keep the drawing hand visible and reveal legible marks in speech order",
+}, 123).dimensions.find((dimension) => dimension.id === "motion");
+assert.match(whiteboardMotion?.description ?? "", /hand reveals each diagram line/);
+assert.match(whiteboardMotion?.description ?? "", /speech order/);
 
 const loreMotion = buildQualityBar("loreshort", DNA, 123).dimensions.find(
   (dimension) => dimension.id === "motion",

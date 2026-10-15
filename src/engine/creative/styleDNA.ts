@@ -584,7 +584,7 @@ const FAMILY_DIMENSIONS: Record<FamilyKey, readonly QualityDimensionId[]> = {
   narrated_stock: ["identity", "script", "footage", "voice", "thumbnail"],
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
   sleep: ["identity", "music", "voice", "thumbnail"],
-  whiteboard: ["identity", "script", "footage", "thumbnail"],
+  whiteboard: ["identity", "script", "footage", "motion", "thumbnail"],
   shorts: ["hook", "captions", "pacing", "thumbnail"],
   // The page renderer is self-contained, but its story, narration, visual
   // grammar, and constrained page/camera motion remain independently
