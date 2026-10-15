@@ -44,17 +44,24 @@ async function main() {
     const selectedWriter = getManifest("script_gen", CHANNEL_AWARE_SCRIPT_GEN_VERSION)!;
     assert.ok(selected); assert.notEqual(selected, legacy);
     assert.ok(selectedWriter); assert.notEqual(selectedWriter, legacyWriter);
-    assert.ok(Object.hasOwn(selectedWriter.optionalConsumes, "showBible"),
-      "only the versioned writer may consume the frozen Show Bible artifact");
+    assert.ok(Object.hasOwn(selectedWriter.consumes, "showBible"),
+      "the identity-grounded writer must require the frozen Show Bible artifact");
+    assert.equal(Object.hasOwn(selectedWriter.optionalConsumes, "showBible"), false,
+      "the selected writer cannot silently degrade to generic writing when channel identity is missing");
     assert.equal(allManifests().includes(selectedWriter), false, "writer identity grounding is opt-in, not a silent legacy migration");
     const beforeInvalidWriterIdentity = prompts.length;
-    await assert.rejects(selectedWriter.execute({
-      ...context,
-      params: {},
-      store: { ...context.store, topic: "A test topic", showBible: { positioning: 42 } },
-    }));
+    for (const showBible of [undefined, {}, { positioning: "Only positioning." },
+      { positioning: "A distinct channel.", vibe: "Warm and measured.", worksInSpace: ["Use concrete sensory details."] },
+      { positioning: "A distinct channel.", vibe: "Warm and measured.", avoidInSpace: ["Avoid dramatic suspense."] },
+      { positioning: 42 }]) {
+      await assert.rejects(selectedWriter.execute({
+        ...context,
+        params: {},
+        store: { ...context.store, topic: "A test topic", showBible },
+      }), /requires an authored Show Bible/);
+    }
     assert.equal(prompts.length, beforeInvalidWriterIdentity,
-      "the versioned script writer must reject malformed frozen identity before provider spend");
+      "missing, thin, or malformed channel identity must be rejected before provider spend");
     assert.equal(allManifests().includes(selected), false, "no silent default migration");
     const invoke = (manifest: typeof legacy, ctx = context) => createModelUsageScope().run(() => manifest.execute(ctx));
 
@@ -157,6 +164,9 @@ async function main() {
 
     const entries = [{ block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION }, { block: "narration_tts" }];
     assert.throws(() => validatePipeline(entries, ["narrationText"]), /channelName/);
+    const writerEntries = [{ block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION }];
+    assert.throws(() => validatePipeline(writerEntries, ["topic"]), /showBible/);
+    assert.doesNotThrow(() => validatePipeline(writerEntries, ["topic", "showBible"]));
     const graph = validatePipeline(entries, Object.keys(context.store));
     verdict = { pass: false, issues: ["The narration contradicts the channel's quiet delivery."] };
     const stages: string[] = [], before = prompts.length;

@@ -277,8 +277,9 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
       "emit_bundle",
     ]).has(entry.block),
   );
+  const validationSeeds = channelPipelineValidationSeedKeys(production.contentLane, undefined, privateProbe);
   const compilation = compilePipeline(
-    validatePipeline(privateProbe, ["channelName"]),
+    validatePipeline(privateProbe, validationSeeds),
     PRIVATE_PROBE_CONTRACT_POLICY,
   );
   assert.equal(compilation.policyId, "private-probe-contract");
@@ -295,7 +296,7 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
     assert(compilation.capabilities.includes(capability), `private probe must retain ${capability}`);
   }
   assert.throws(
-    () => compilePipeline(validatePipeline(privateProbe, ["channelName"])),
+    () => compilePipeline(validatePipeline(privateProbe, validationSeeds)),
     /publish\.connector_bound/,
     "the ordinary production policy must continue to reject a non-uploading pipeline",
   );
@@ -377,7 +378,7 @@ function crewRemovalAndOrderFail(): void {
     lengthMinutes: 3,
     publishMode: "draft",
   });
-  const seeds = ["channelName"];
+  const seeds = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
   const withoutDirector = design.pipeline.filter((entry) => entry.block !== "director_brief");
   assert.throws(
     () => compilePipeline(validatePipeline(withoutDirector, seeds)),
