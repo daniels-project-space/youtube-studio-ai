@@ -164,6 +164,7 @@ import {
   translateScript,
   type Script,
 } from "@/lib/scriptGen";
+import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -691,7 +692,10 @@ function assertReusableScriptLanguagePolicy(script: Script, ctx: StageContext, s
   }
 }
 
-export const scriptGen: Block = {
+export function createScriptGenBlock(
+  readChannelVoice?: (ctx: StageContext) => ShowBibleVoice | undefined,
+): Block {
+  return {
   id: "script_gen",
   consumes: ["topic"],
   produces: ["script", "narrationText"],
@@ -817,6 +821,7 @@ export const scriptGen: Block = {
       topic,
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
+      ...(readChannelVoice ? { channelVoice: readChannelVoice(ctx) } : {}),
       bannedWords: readChannelBannedWords(ctx.store["bannedWords"]),
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
@@ -864,6 +869,10 @@ export const scriptGen: Block = {
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const scriptChannel: ChannelCritiqueContext = {
       ...channelCritiqueContext(ctx),
+      positioning: req.channelVoice?.positioning,
+      vibe: req.channelVoice?.vibe,
+      worksInSpace: req.channelVoice?.worksInSpace,
+      avoidInSpace: req.channelVoice?.avoidInSpace,
       bannedWords: req.bannedWords,
     };
 
@@ -983,6 +992,9 @@ export const scriptGen: Block = {
     return { script, narrationText: script.narrationText };
   },
 };
+}
+
+export const scriptGen: Block = createScriptGenBlock();
 
 export const hookCraft: Block = {
   id: "hook_craft",

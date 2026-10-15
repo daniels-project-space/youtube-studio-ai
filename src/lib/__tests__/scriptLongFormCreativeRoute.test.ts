@@ -67,19 +67,37 @@ async function main(): Promise<void> {
       maxSeconds: 421,
       precraftedHook: crafted,
       narrative: { pacing: "Let each idea arrive slowly; leave room between discoveries." },
+      channelVoice: {
+        positioning: "Patient source-led stories about overlooked evidence in ordinary places.",
+        vibe: "Curious, humane, and quietly exact.",
+        worksInSpace: ["Let a physical detail reveal the larger historical mechanism."],
+        avoidInSpace: ["Do not turn uncertainty into a mystery cliffhanger."],
+      },
     });
     assert.equal(calls, 1, "a sufficient one-shot must not buy continuation or chunked calls");
     assert.match(prompt, /WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER/);
     assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,
       "a pacing-only identity must shape generation just as it shapes the channel critic");
+    for (const guidance of [
+      "Patient source-led stories about overlooked evidence in ordinary places.",
+      "Curious, humane, and quietly exact.",
+      "Let a physical detail reveal the larger historical mechanism.",
+      "Do not turn uncertainty into a mystery cliffhanger.",
+    ]) {
+      assert.ok(prompt.includes(guidance), `script-generation prompt must preserve authored channel identity: ${guidance}`);
+    }
     assert.equal(script.sections.length, 3);
     assert.ok(script.narrationText.includes("evidence400"));
+    await synthScript({ topic: "The bridge's warm final stone", maxSeconds: 421, precraftedHook: crafted });
+    assert.equal(calls, 2);
+    assert.doesNotMatch(prompt, /FROZEN CHANNEL CREATIVE IDENTITY/,
+      "legacy generation without a versioned identity projection keeps its prior prompt contract");
     assert.throws(
       () => assertScriptLanguagePolicy(script, ["evidence400"], "long-form script"),
       /long-form script violates channel language policy: evidence400/,
       "the shared policy admission helper must reject prohibited narration before any caller persists it",
     );
-    assert.equal(calls, 1, "deterministic policy admission must not make another provider call");
+    assert.equal(calls, 2, "deterministic policy admission must not make another provider call");
     console.log("SCRIPT LONG-FORM CREATIVE ROUTE PASS — actual one-shot uses the pinned model and truthful 16k ceiling");
   } finally {
     globalThis.fetch = previousFetch;

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createChannelProgramBrief } from "../channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "../channelProgramRoute";
 import { channelPipelineValidationSeedKeys } from "../channelPipelineSeedKeys";
-import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "../channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+  selectChannelAwareScriptQa,
+} from "../channelAwareScriptQaSelection";
 import { childrenShowBibleSeedKeys } from "../childrenShowBible";
 import { contentLaneForFamily } from "../contentLane";
 import { designPipeline } from "../designer";
@@ -27,7 +31,10 @@ try {
     assert.deepEqual(keys, [
       "contentLane", "channelProgramRoute",
       ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
-        ? ["channelName", "showBible"] : []),
+        ? ["channelName"] : []),
+      ...(design.pipeline.some(entry =>
+        (entry.block === "script_gen" && entry.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) ||
+        (entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) ? ["showBible"] : []),
       ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
     ]);
     assert.equal(keys.includes("workedExampleRequest"), false, "no nonexistent producer can be claimed as a seed");
@@ -38,7 +45,10 @@ try {
     assert.deepEqual(withoutRoute, [
       "contentLane",
       ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
-        ? ["channelName", "showBible"] : []),
+        ? ["channelName"] : []),
+      ...(design.pipeline.some(entry =>
+        (entry.block === "script_gen" && entry.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) ||
+        (entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) ? ["showBible"] : []),
       ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
     ]);
     if (family === "narrated_stock") {
@@ -59,6 +69,15 @@ try {
   const children = contentLaneForFamily("children_learning")!;
   assert.deepEqual(channelPipelineValidationSeedKeys(children), ["contentLane", ...childrenShowBibleSeedKeys(children)]);
   const music = contentLaneForFamily("music_loop")!;
+  assert.deepEqual(selectChannelAwareScriptQa([{ block: "script_gen" }, { block: "qa_script" }]), [
+    { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+    { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+  ], "new otherwise-unpinned script routes install writer and critic versions together");
+  const manuallyPinned = [
+    { block: "script_gen", version: "1.0.0-migration" }, { block: "qa_script" },
+  ];
+  assert.deepEqual(selectChannelAwareScriptQa(manuallyPinned), manuallyPinned,
+    "explicitly pinned legacy modules remain untouched");
   assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
     { block: "music_program_plan", version: "2.1.0-yue2-frozen-identity" },
   ]), ["contentLane", "channelProfile"]);

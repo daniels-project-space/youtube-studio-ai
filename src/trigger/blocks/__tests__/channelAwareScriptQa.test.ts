@@ -6,6 +6,7 @@ import { runPipeline } from "@/engine/runner";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import type { StageContext } from "@/engine/types";
 import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "../channelAwareScriptQa";
+import { CHANNEL_AWARE_SCRIPT_GEN_VERSION } from "@/engine/channelAwareScriptQaSelection";
 
 async function main() {
   const originalFetch = globalThis.fetch, originalKey = process.env.OPENROUTER_API_KEY;
@@ -39,7 +40,21 @@ async function main() {
     };
     registerAllBlocks();
     const legacy = getManifest("qa_script")!, selected = getManifest("qa_script", CHANNEL_AWARE_SCRIPT_QA_VERSION)!;
+    const legacyWriter = getManifest("script_gen")!;
+    const selectedWriter = getManifest("script_gen", CHANNEL_AWARE_SCRIPT_GEN_VERSION)!;
     assert.ok(selected); assert.notEqual(selected, legacy);
+    assert.ok(selectedWriter); assert.notEqual(selectedWriter, legacyWriter);
+    assert.ok(Object.hasOwn(selectedWriter.optionalConsumes, "showBible"),
+      "only the versioned writer may consume the frozen Show Bible artifact");
+    assert.equal(allManifests().includes(selectedWriter), false, "writer identity grounding is opt-in, not a silent legacy migration");
+    const beforeInvalidWriterIdentity = prompts.length;
+    await assert.rejects(selectedWriter.execute({
+      ...context,
+      params: {},
+      store: { ...context.store, topic: "A test topic", showBible: { positioning: 42 } },
+    }));
+    assert.equal(prompts.length, beforeInvalidWriterIdentity,
+      "the versioned script writer must reject malformed frozen identity before provider spend");
     assert.equal(allManifests().includes(selected), false, "no silent default migration");
     const invoke = (manifest: typeof legacy, ctx = context) => createModelUsageScope().run(() => manifest.execute(ctx));
 

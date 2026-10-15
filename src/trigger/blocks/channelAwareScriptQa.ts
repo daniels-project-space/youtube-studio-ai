@@ -3,6 +3,7 @@ import type { ModuleManifest } from "@/engine/moduleManifest";
 import { z } from "zod";
 import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 import { laneQualityPolicy } from "@/engine/contentLane";
+import { showBibleVoiceSchema } from "@/engine/showBibleVoice";
 import type { ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import type { Block, StageContext } from "@/engine/types";
 import { createQaScriptBlock } from "./narratedBlocks";
@@ -10,12 +11,7 @@ import { createQaScriptBlock } from "./narratedBlocks";
 const scriptContextSchema = z.object({
   channelName: z.string().optional(), persona: z.string().optional(), criticDoctrine: z.string().optional(),
   bannedWords: z.array(z.string().min(1).max(160)).max(32).optional(),
-  showBible: z.object({
-    positioning: z.string().max(2000).optional(),
-    vibe: z.string().max(1000).optional(),
-    worksInSpace: z.array(z.string().max(500)).max(10).optional(),
-    avoidInSpace: z.array(z.string().max(500)).max(10).optional(),
-  }).nullish(),
+  showBible: showBibleVoiceSchema.nullish(),
   styleDNA: z.object({ narrative: z.object({
     scriptStyle: z.string().optional(), hookStyle: z.string().optional(),
     pacing: z.string().optional(), delivery: z.string().optional(),

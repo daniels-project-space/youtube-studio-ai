@@ -23,6 +23,7 @@
  * Mastra workflow can wrap this loop) without changing any chunk.
  */
 import { recordModuleCritique } from "@/lib/moduleCritiqueEvidence";
+import { showBibleVoicePromptLines } from "./showBibleVoice";
 
 export interface Critique {
   /** 0..1 quality. */
@@ -155,12 +156,7 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
   const lines = [
     compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
     compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
-    compact(channel.positioning, 420) ? `Channel positioning: ${compact(channel.positioning, 420)}` : "",
-    compact(channel.vibe, 220) ? `Channel tonal signature: ${compact(channel.vibe, 220)}` : "",
-    ...(channel.worksInSpace ?? []).slice(0, 4).map((item) => compact(item, 180))
-      .filter((item): item is string => Boolean(item)).map((item) => `Channel pattern to preserve: ${item}`),
-    ...(channel.avoidInSpace ?? []).slice(0, 4).map((item) => compact(item, 180))
-      .filter((item): item is string => Boolean(item)).map((item) => `Channel anti-pattern to reject: ${item}`),
+    ...showBibleVoicePromptLines(channel),
     compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
     ...(["scriptStyle", "hookStyle", "pacing", "delivery"] as const).map(field => {
       const value = compact(channel.narrative?.[field], 240);

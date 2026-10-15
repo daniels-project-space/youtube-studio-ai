@@ -1,5 +1,8 @@
 import { childrenShowBibleSeedKeys } from "./childrenShowBible";
-import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "./channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "./channelAwareScriptQaSelection";
 import { parseChannelProgramRouteRunSeed } from "./channelProgramRoute";
 import type { ContentLane } from "./contentLane";
 import type { PipelineEntry } from "./types";
@@ -30,7 +33,13 @@ export function channelPipelineValidationSeedKeys(
     keys.push("channelProgramRoute");
   }
   if (pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) {
-    keys.push("channelName", "showBible");
+    keys.push("channelName");
+  }
+  if (pipeline.some(entry =>
+    (entry.block === "script_gen" && entry.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) ||
+    (entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
+  )) {
+    keys.push("showBible");
   }
   if (pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script")) {
     keys.push("bannedWords");

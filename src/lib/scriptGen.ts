@@ -9,6 +9,8 @@ import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/gol
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import type { ShowBibleVoice } from "@/engine/showBibleVoice";
+import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
 import { assembleScriptNarration } from "@/engine/scriptNarration";
 import {
   channelBannedWordsDirective,
@@ -117,6 +119,8 @@ export interface ScriptRequest {
   topic: string;
   channelName?: string;
   persona?: string;
+  /** Bounded editorial identity; visual motif and render doctrines are excluded. */
+  channelVoice?: ShowBibleVoice;
   // NO styleGrammar. It was declared here and passed by script_gen, and read at
   // zero sites while persona, niche, channelName, style and language beside it
   // are each read at four or more — the asymmetry that made it look like an
@@ -425,7 +429,12 @@ function styleGuidance(req: ScriptRequest): string {
   const weeklyPreparation = req.weeklyPreparationBrief?.trim()
     ? `\n\nFROZEN WEEKLY PREPARATION (follow this episode-specific brief; do not quote it): ${req.weeklyPreparationBrief.trim()}`
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) +
+  const voiceLines = showBibleVoicePromptLines(req.channelVoice);
+  const voiceClause = voiceLines.length
+    ? `FROZEN CHANNEL CREATIVE IDENTITY — honor this authored editorial contract without copying its wording. ` +
+      `Episode route, source evidence, and safety constraints remain authoritative.\n${voiceLines.join("\n")}\n`
+    : "";
+  return dnaClause + voiceClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) +
     channelBannedWordsDirective(req.bannedWords ?? []) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 

@@ -22,6 +22,7 @@ import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeS
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
 import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
 import { createChannelAwareScriptQaManifest } from "@/trigger/blocks/channelAwareScriptQa";
+import { createChannelAwareScriptGenManifest } from "@/trigger/blocks/channelAwareScriptGen";
 import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
 import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
@@ -95,6 +96,7 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createDeliveryAwareMetadataManifest(getManifest("metadata")!));
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
+  registerManifestVersion(createChannelAwareScriptGenManifest(getManifest("script_gen")!));
   registerManifestVersion(createChannelAwareScriptQaManifest(getManifest("qa_script")!));
   registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("assemble")!));
