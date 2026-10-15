@@ -567,7 +567,20 @@ export const ESTABLISHED_CONFIDENCE = 0.7;
  * reviewer, and visual IDs (identity/footage/motion) also reach the cinematic
  * asset and shot graders.
  */
-const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
+type QualityDimensionId =
+  | "identity"
+  | "loop_seam"
+  | "music"
+  | "thumbnail"
+  | "script"
+  | "voice"
+  | "footage"
+  | "hook"
+  | "captions"
+  | "pacing"
+  | "motion";
+
+const FAMILY_DIMENSIONS: Record<FamilyKey, readonly QualityDimensionId[]> = {
   music_loop: ["identity", "loop_seam", "music", "thumbnail"],
   narrated_stock: ["identity", "script", "footage", "voice", "thumbnail"],
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
@@ -599,11 +612,11 @@ const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
  * `target` mean of 1.6 / 2 ≈ the 80% bar the operator asked for.
  */
 export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): QualityBar {
-  const ids = FAMILY_DIMENSIONS[family] ?? ["identity", "thumbnail"];
-  const desc: Record<string, string> = {
+  const ids = FAMILY_DIMENSIONS[family];
+  const desc: Record<QualityDimensionId, string> = {
     identity: `Reads unmistakably as "${dna.recurringSubject || "this channel"}" in "${dna.setting || "its setting"}" — palette ${dna.palette.join("/") || "on-brand"}, motifs (${dna.motifs.join(", ") || "—"}); only ${dna.variationAxes.join("/") || "approved axes"} may vary.`,
     loop_seam: `Seamless loop — no visible pop/velocity-flip at the boundary; only ${dna.motionVocabulary.join(", ") || "subtle ambient motion"}; ${dna.motionDiscipline || "camera locked"}.`,
-    music: `${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
+    music: `${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; emotional arc: ${dna.audio.moodArc}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
     thumbnail: `${dna.thumbnail.subject || dna.recurringSubject || "clear subject"}; ${dna.thumbnail.composition || "subject-on-third, high-contrast, mobile-legible"}; text: ${dna.thumbnail.textRule || "≤3 words"}.`,
     script: dna.narrative ? `${dna.narrative.scriptStyle}; hook: ${dna.narrative.hookStyle}; pacing: ${dna.narrative.pacing}.` : "On-brand script with a strong hook and tight pacing.",
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",
@@ -614,14 +627,14 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
   // Deterministic floors the iteration loop cannot game.
-  const floors: Record<string, Pick<QualityDimension, "metric" | "op" | "threshold">> = {
+  const floors: Partial<Record<QualityDimensionId, Pick<QualityDimension, "metric" | "op" | "threshold">>> = {
     loop_seam: { metric: "seam_ssim", op: ">=", threshold: 0.9 },
     music: { metric: "lufs_abs_err", op: "<=", threshold: 1.5 },
   };
 
   const dimensions: QualityDimension[] = ids.map((id) => ({
     id,
-    description: desc[id] ?? `Meets the channel's standard for ${id}.`,
+    description: desc[id],
     minScore: 1, // must be at least "acceptable" (0-1-2 scale)
     ...(floors[id] ?? {}),
   }));

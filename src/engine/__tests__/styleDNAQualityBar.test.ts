@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { buildQualityBar } from "@/engine/creative/styleDNA";
-import type { FamilyKey } from "@/engine/families";
+import { FAMILIES, type FamilyKey } from "@/engine/families";
 import type { StyleDNA } from "@/engine/creative/types";
 
 const DNA: StyleDNA = {
@@ -77,6 +77,26 @@ for (const [family, expectedIds] of Object.entries(SPECIALIST_EXPECTED) as Array
     `${family} must not invent deterministic floors without a matching evaluator`,
   );
 }
+
+for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+  const bar = buildQualityBar(family, DNA, 123);
+  assert.ok(bar.dimensions.length > 0, `${family} must define a reviewer scorecard`);
+  assert.ok(
+    bar.dimensions.every((dimension) => dimension.description.length > 24),
+    `${family} must not fall back to generic dimension guidance`,
+  );
+}
+
+const music = buildQualityBar("sleep", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "music",
+);
+assert.match(music?.description ?? "", /emotional arc: unease to clarity/);
+
+const voice = buildQualityBar("narrated_stock", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "voice",
+);
+assert.match(voice?.description ?? "", /measured documentary narrator/);
+assert.match(voice?.description ?? "", /delivery: calm and precise/);
 
 const loreMotion = buildQualityBar("loreshort", DNA, 123).dimensions.find(
   (dimension) => dimension.id === "motion",
