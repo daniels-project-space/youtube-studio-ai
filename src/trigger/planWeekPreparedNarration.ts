@@ -44,6 +44,7 @@ import {
 } from "@/lib/narrationPerformance";
 import { narrationTtsCost } from "@/engine/pricing";
 import { planStorySpine } from "@/engine/storySpine";
+import { narrationSpeedForStyleDNA } from "@/engine/golden";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   createQwenNarrationSourceEvidence,
@@ -307,16 +308,20 @@ export const planWeekPreparedNarrationTask = task({
     const config = moduleConfig(manifest);
     const seed = seedRecord(manifest);
     const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "fish");
-    const speed = assertNarrationSpeed(payload.speed ?? numberOr(config.ttsSpeed, 1), "weekly prepared narration speed");
-    const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, 0.85);
-    const jitterSec = payload.jitterSec ?? numberOr(config.sentenceGapJitter, 0.2);
-    const cadence = planNarrationCadence({ sentences, baseGapSec, jitterSec });
-    const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
-    const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
     const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
       ? (seed.styleDNA as { narrative?: { voiceProfile?: unknown; pacing?: unknown; delivery?: unknown } }).narrative
       : undefined;
     const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
+    const configuredSpeed = payload.speed ?? (config.ttsSpeed === undefined ? undefined : config.ttsSpeed);
+    const speed = assertNarrationSpeed(
+      configuredSpeed ?? narrationSpeedForStyleDNA(dnaNarrative) ?? physics.speed,
+      "weekly prepared narration speed",
+    );
+    const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, physics.sentenceGap ?? 0.85);
+    const jitterSec = payload.jitterSec ?? numberOr(config.sentenceGapJitter, 0.2);
+    const cadence = planNarrationCadence({ sentences, baseGapSec, jitterSec });
+    const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
+    const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
     const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
       explicit: config.qwenInstruction,
       editorialBrief: manifest.prompts.narration,

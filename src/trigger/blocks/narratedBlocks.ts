@@ -191,6 +191,7 @@ import {
   type QwenTtsReceipt,
   type QwenTtsSpeaker,
 } from "@/lib/qwenTts";
+import { narrationSpeedForStyleDNA } from "@/engine/golden";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationDeliveryRate,
@@ -1415,24 +1416,18 @@ export const narrationTts: Block = {
     // SPEAKING RATE — param > Style-DNA pacing > archetype physics > native.
     const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { voiceProfile?: string; pacing?: string; delivery?: string } } | null)
       ?.narrative;
-    const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
-    const dnaSpeed =
-      /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
-        : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
-        : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
-        : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05
-        : 0;
+    const dnaSpeed = narrationSpeedForStyleDNA(dnaPacing);
     const explicitSpeed = ctx.params["ttsSpeed"];
     if (explicitSpeed !== undefined && (typeof explicitSpeed !== "number" || !Number.isFinite(explicitSpeed))) {
       throw new Error("narration_tts: ttsSpeed must be a finite number");
     }
     const speed = assertNarrationSpeed(
-      explicitSpeed === undefined ? (dnaSpeed || physics.speed) : explicitSpeed,
+      explicitSpeed === undefined ? (dnaSpeed ?? physics.speed) : explicitSpeed,
       "narration_tts: ttsSpeed",
     );
     if (speed !== 1)
       ctx.log(
-        `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
+        `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed !== undefined ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
       );
     // ElevenLabs render settings from the physics (v3 stability/style/seed).
     const elevenSeed = 4242;

@@ -368,6 +368,18 @@ export function narrationPhysicsFor(niche?: string): NarrationPhysics & { archet
   return phys ? { ...phys, archetype: key } : { ...DEFAULT_NARRATION_PHYSICS, archetype: key || "default" };
 }
 
+/** Resolve an authored channel pacing direction into the shared TTS rate override. */
+export function narrationSpeedForStyleDNA(narrative?: { pacing?: unknown; delivery?: unknown }): number | undefined {
+  const pacing = typeof narrative?.pacing === "string" ? narrative.pacing : "";
+  const delivery = typeof narrative?.delivery === "string" ? narrative.delivery : "";
+  const direction = `${pacing} ${delivery}`.toLowerCase();
+  if (/sleep|meditat|hypnot|very slow|drowsy/u.test(direction)) return 0.88;
+  if (/slow|gentle|calm|soothing|unhurried/u.test(direction)) return 0.93;
+  if (/measured|deliberate|contemplative|documentary/u.test(direction)) return 0.96;
+  if (/fast|energetic|punchy|rapid|urgent/u.test(direction)) return 1.05;
+  return undefined;
+}
+
 /**
  * FOOTAGE DOCTRINE — what each kind of channel NEEDS from its b-roll beyond the
  * subject: MOTION character and camera energy. A calm stoic/meditation channel
