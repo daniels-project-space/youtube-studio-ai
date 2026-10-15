@@ -39,6 +39,8 @@ assert.match(renderedLoopToolbox, /foreground primary music/u,
   "the architect must not reduce music-led routes to background-score generation");
 assert.match(renderedLoopToolbox, /visual loop generation belongs to visual modules/u,
   "the music module must not take over visual-loop responsibilities");
+assert.match(renderedLoopToolbox, /prompt \[string \(max 300 chars\)\].*supplemental style\/mood nuance/u,
+  "the architect must expose the bounded module direction that execution actually consumes");
 assert.match(renderedLoopToolbox, /produces artifacts[^\n]*musicKey/u,
   "the architect must see real output artifact keys, not capabilities alone");
 const treatmentTool: Tool = {

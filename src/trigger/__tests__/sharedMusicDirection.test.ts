@@ -157,14 +157,16 @@ async function main() {
       assert.ok(!caption.includes(intent === flat ? active : flat));
     }
     const composer = "Follow the episode's rain motif, ending with crystalline silence.";
-    const composerOnly = await runtime(provider, "IGNORED_EXPLICIT_GENRE", { musicBrief: { musicPrompt: composer } });
+    const composerOnly = await runtime(provider, "glassy harmonic", { musicBrief: { musicPrompt: composer } });
     assert.ok(composerOnly.includes(composer));
-    assert.ok(!composerOnly.includes("IGNORED_EXPLICIT_GENRE"));
-    const caption = await runtime(provider, "IGNORED_EXPLICIT_GENRE", { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
+    assert.ok(composerOnly.includes("glassy harmonic"));
+    const moduleNuance = "Keep a glass harmonic under the episode's rain motif.";
+    const caption = await runtime(provider, moduleNuance, { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
     assert.ok(caption.includes(dna.audio.genre));
     assert.ok(caption.includes(composer));
+    if (provider !== "minimax_music3") assert.ok(caption.includes(moduleNuance));
+    assert.ok(music3StructuredCaptionWordCount(caption) <= 450);
     assert.ok(caption.includes(studioCore.promptAddenda[0]));
-    assert.ok(!caption.includes("IGNORED_EXPLICIT_GENRE"));
     assert.ok(!caption.includes("to study and relax to"));
     assert.match(caption, /natural ending/i);
     assert.match(await runtime(provider, "IGNORED_EXPLICIT_GENRE", { styleDNA: { audio: { ...dna.audio, loopable: true } } }), /loop-friendly, resolves back to the tonic/i);
@@ -182,18 +184,19 @@ async function main() {
     "legacy runs without a route must not inherit LoFi's primary-music gain");
   for (const intent of [flat, active]) assert.ok((await weekly(intent)).includes(intent));
   const composer = "Let this episode's motif dissolve into glass harmonics.";
-  const weeklyDna = await weekly("IGNORED_EXPLICIT_GENRE", { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
+  const weeklyNuance = "Add a barely audible glass harmonic.";
+  const weeklyDna = await weekly(weeklyNuance, { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
   assert.ok(weeklyDna.includes(dna.audio.genre));
   assert.ok(weeklyDna.includes(composer));
+  assert.ok(weeklyDna.includes(weeklyNuance));
   assert.ok(weeklyDna.includes(studioCore.promptAddenda[0]));
-  assert.ok(!weeklyDna.includes("IGNORED_EXPLICIT_GENRE"));
   assert.match(weeklyDna, /natural ending/i);
   assert.match(await weekly(flat, { styleDNA: { audio: { ...dna.audio, loopable: true } } }), /loop-friendly, resolves back to the tonic/i);
-  assert.ok(!(await weekly("IGNORED_EXPLICIT_GENRE", { styleDNA: dna })).includes("IGNORED_EXPLICIT_GENRE"));
+  assert.ok((await weekly(weeklyNuance, { styleDNA: dna })).includes(weeklyNuance));
   for (const field of ["composerDirection", "musicPrompt"]) {
     const caption = await weekly("IGNORED_EXPLICIT_GENRE", {}, { [field]: composer });
     assert.ok(caption.includes(composer));
-    assert.ok(!caption.includes("IGNORED_EXPLICIT_GENRE"));
+    assert.ok(caption.includes("Additional module direction"));
   }
   const sealedDirection = "Preserve the sealed prepared session's metallic pulse.";
   const plan = createOriginalMusicProgramPlan({ route, topic, audioDirection: sealedDirection, providerPreference: "mureka" });

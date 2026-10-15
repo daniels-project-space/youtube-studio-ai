@@ -205,13 +205,14 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "music",
-    purpose: "Generates the fingerprint-bound route-specific audio program with authored sections and transparent mastering; it owns audio only, not visual loops or footage.",
+    purpose: "Generates the fingerprint-bound route-specific audio program with authored sections and transparent mastering; an optional bounded prompt adds secondary nuance, and this module owns audio only, not visual loops or footage.",
     whenToUse: "Core when the route has an audio program. The sealed role sets foreground primary music or a narration-aware background, meditation, or sleep bed; trackCount controls distinct-track crossfades on longer videos.",
     addable: false,
     removable: false,
     params: [
       { key: "provider", type: "enum", options: ["suno", "mureka", "minimax_music3"], describe: "Primary provider. MiniMax-Music3 requires prominent UI attribution, generated-content disclosure, safeguards, operator license attestation, a reviewed qualification receipt, and a two-GPU Novita spot worker." },
       { key: "model", type: "string", maxLen: 12, describe: "Suno model, e.g. V5 (highest quality)." },
+      { key: "prompt", type: "string", maxLen: 300, describe: "Optional supplemental style/mood nuance; channel DNA stays primary, sleep routes suppress free-form direction, and MiniMax may trim it to preserve its strict caption limit." },
       { key: "trackCount", type: "number", min: 1, max: 8, describe: "Distinct clips crossfaded into the mix. ~1 per 5-7 min of video; 2 minimum for variety." },
     ],
   },
@@ -712,6 +713,7 @@ export function renderArchitectToolbox(kind: "narrated" | "loop", extra: Tool[] 
           const bounds =
             p.type === "number" ? ` (${p.min}-${p.max})`
             : p.type === "enum" || p.type === "enum_list" ? ` (${(p.options ?? []).join("|")})`
+            : p.type === "string" && p.maxLen ? ` (max ${p.maxLen} chars)`
             : "";
           return `    - ${p.key} [${p.type}${bounds}]: ${p.describe}`;
         })
