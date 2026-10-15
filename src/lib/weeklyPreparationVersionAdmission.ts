@@ -1,7 +1,10 @@
 import type { PlanWeekPreparationManifest } from "./planWeekPreparationContract";
 import { DELIVERY_METADATA_VERSION, MetadataDeliverySchema } from "./metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
-import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "@/engine/channelAwareScriptQaSelection";
 
 /** Prepared producers remain unversioned; only exact, preserved downstream pins are admitted. */
 export function assertWeeklyPreparationVersionsSupported(
@@ -23,6 +26,9 @@ export function assertWeeklyPreparationVersionsSupported(
     // Weekly narration preparation runs the exact frozen script reviewer before
     // TTS, so this pin is admitted only when it names that executable contract.
     if (candidate.block === "qa_script" && candidate.version === CHANNEL_AWARE_SCRIPT_QA_VERSION) return [];
+    // Prepared script generation shares the versioned module's authored
+    // Show Bible preflight and channelVoice prompt contract (see scriptRequest).
+    if (candidate.block === "script_gen" && candidate.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) return [];
     const block = typeof candidate.block === "string" ? candidate.block : "<unknown block>";
     return [`${block}@${JSON.stringify(candidate.version)} (entry ${index})`];
   });

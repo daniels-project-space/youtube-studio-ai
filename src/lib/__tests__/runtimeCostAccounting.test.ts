@@ -39,6 +39,7 @@ import { qaVisual } from "@/trigger/blocks/narratedBlocks";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import { synthNarration, TtsError } from "@/lib/tts";
 import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
+import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "@/trigger/blocks/__tests__/musicReuseFixtures";
 
 function providerAwarePricing(): void {
   assert.equal(
@@ -180,7 +181,21 @@ async function cachedMusicIsFree(): Promise<void> {
     channelId: "channel-test",
     keyPrefix: "owner/owner-test/channel/test/",
     params: {},
-    store: { topic: "A bounded test", reuseMusicKey: "runs/base/music.mp3" },
+    store: {
+      topic: "A bounded test",
+      reuseMusicKey: "owner/owner-test/runs/base-run/audio/music.mp3",
+      styleDNA: musicReuseTestStyleDNA,
+      reuseMusicReceipt: musicReuseTestReceipt({
+        ownerId: "owner-test",
+        baseRunId: "base-run",
+        baseChannelId: "base-channel",
+        siblingChannelId: "channel-test",
+        musicKey: "owner/owner-test/runs/base-run/audio/music.mp3",
+        family: "narrated_stock",
+        contentLaneKey: "narrated-stock/foundation",
+        provider: "mureka",
+      }),
+    },
     budgetUsd: 1,
     log: () => {},
   };

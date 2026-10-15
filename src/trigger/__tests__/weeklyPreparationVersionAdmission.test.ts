@@ -12,7 +12,10 @@ import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparatio
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
-import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "@/engine/channelAwareScriptQaSelection";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -114,6 +117,9 @@ async function main(): Promise<void> {
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
     ], "test"), "weekly preparation executes the exact frozen channel-aware reviewer before TTS");
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+    ], "test"), "weekly preparation implements the exact identity-grounded writer contract");
     assert.throws(() => assertWeeklyPreparationVersionsSupported([
       { block: "qa_script", version: "2.0.0-unqualified" },
     ], "test"), /qa_script@"2\.0\.0-unqualified"/);
@@ -197,7 +203,22 @@ async function main(): Promise<void> {
     // Unversioned invocations still reach the original reuse path. Stop there,
     // without manufacturing a successful receipt or issuing generation work.
     const scriptManifest = normalizePlanWeekPreparationManifest({ ...base, execution: {
-      ...base.execution, seedStore: { bannedWords: ["The Missing Pin"] },
+      ...base.execution,
+      pipeline: [
+        { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+        { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+      ],
+      seedStore: {
+        bannedWords: ["The Missing Pin"],
+        channelName: "Inked Histories",
+        persona: "Careful viewers seeking evidence-led history.",
+        showBible: {
+          positioning: "Evidence-led histories about overlooked decisions.",
+          vibe: "Measured, humane, and exact.",
+          worksInSpace: ["Ground claims in documented details."],
+          avoidInSpace: ["Do not turn evidence gaps into suspense."],
+        },
+      },
     } });
     manifestBytes = Buffer.from(canonicalJson(scriptManifest));
     sidecarMode = "stop";

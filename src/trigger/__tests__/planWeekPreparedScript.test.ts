@@ -6,6 +6,7 @@ import {
   assertPlanWeekPreparedScriptArgs,
   assertPreparedScriptRouteContracts,
   preparedScriptFromDocumentaryEpisodePlan,
+  scriptRequest,
 } from "@/trigger/planWeekPreparedScript";
 import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
 
@@ -62,6 +63,29 @@ const documentaryManifest = {
   },
   prompts: { script: "", narration: "", shotlist: "", visual: "" },
 };
+const authoredShowBible = {
+  positioning: "Evidence-led histories about overlooked decisions.",
+  vibe: "Measured, humane, and exact.",
+  worksInSpace: ["Ground each claim in a documented detail."],
+  avoidInSpace: ["Never turn an evidence gap into suspense."],
+};
+const identityManifest = {
+  ...documentaryManifest,
+  execution: { ...documentaryManifest.execution, seedStore: {
+    ...documentaryManifest.execution.seedStore,
+    channelName: "Inked Histories",
+    persona: "Careful viewers seeking evidence-led history.",
+    showBible: authoredShowBible,
+  } },
+};
+const identityRequest = scriptRequest(identityManifest, parsed);
+assert.deepEqual(identityRequest.channelVoice, authoredShowBible,
+  "the prepared writer must receive the same authored voice contract required by the versioned script_gen module");
+assert.throws(() => scriptRequest({
+  ...identityManifest,
+  execution: { ...identityManifest.execution, seedStore: { channelName: "Inked Histories" } },
+}, parsed), /requires an authored Show Bible/,
+"week-ahead generation must reject missing channel identity before provider dispatch");
 const preparedDocumentaryScript = preparedScriptFromDocumentaryEpisodePlan(documentaryManifest)!;
 assert.equal(preparedDocumentaryScript.narrationText, documentaryPlan.narrationText,
   "weekly preparation must retain the exact source-reviewed documentary narration");

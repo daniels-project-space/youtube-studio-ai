@@ -24,6 +24,7 @@ for (const invalid of [
   { score: Number.NaN, pass: true, issues: [] },
   { score: 1.1, pass: true, issues: [] },
   { score: 0.5, pass: "true", issues: [] },
+  { score: 0.5, pass: false, issues: [] },
   { score: 0.5, pass: false, issues: ["  "] },
   { score: 0.5, pass: false, issues: ["x".repeat(501)] },
   { score: 0.5, pass: false, issues: [], fatal: "no" },
@@ -92,6 +93,32 @@ async function main(): Promise<void> {
     /fatal-pass-contradiction: malformed critique response.*fatal critique cannot pass/u,
   );
   assert.equal(fatalCandidateProductions, 1, "a contradictory fatal verdict must fail before another producer attempt");
+
+  let unhelpfulRejectionProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "empty-rejection-guidance",
+      threshold: 0.8,
+      maxIters: 2,
+      produce: async () => { unhelpfulRejectionProductions += 1; return "candidate"; },
+      critique: async () => ({ score: 0.2, pass: false, issues: [] }),
+    }),
+    /empty-rejection-guidance: malformed critique response.*actionable issue/u,
+  );
+  assert.equal(unhelpfulRejectionProductions, 1, "a rejection without repair guidance must not buy another candidate");
+
+  let belowThresholdProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "below-threshold-guidance",
+      threshold: 0.8,
+      maxIters: 2,
+      produce: async () => { belowThresholdProductions += 1; return "candidate"; },
+      critique: async () => ({ score: 0.79, pass: true, issues: [] }),
+    }),
+    /below-threshold-guidance: rejected critique must include at least one actionable issue/u,
+  );
+  assert.equal(belowThresholdProductions, 1, "a below-threshold candidate must have actionable repair guidance");
 
   const scope = createModuleCritiqueScope();
   const accepted = await scope.run(() => produceAndCritique({

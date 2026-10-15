@@ -32,7 +32,7 @@ import { FAMILY_KEYS, resolveFamilyEpisodeLengthSeconds } from "@/engine/familie
 import { designPipeline } from "@/engine/designer";
 import { validatePipeline } from "@/engine/validate";
 import { registerAllBlocks } from "@/engine/blocks";
-import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { inferContentLane } from "@/engine/contentLane";
 import type { PipelineEntry } from "@/engine/types";
 import { PAYLOAD_SEED_INPUT_KEYS } from "@/lib/payloadSeedInputs";
@@ -57,7 +57,11 @@ const PAYLOAD_SEEDS: readonly string[] = PAYLOAD_SEED_INPUT_KEYS;
 
 function seedsFor(entries: readonly PipelineEntry[]): string[] {
   const lane = inferContentLane(entries);
-  return [...IDENTITY_SEEDS, ...PAYLOAD_SEEDS, "contentLane", ...childrenShowBibleSeedKeys(lane)];
+  return [...new Set([
+    ...IDENTITY_SEEDS,
+    ...PAYLOAD_SEEDS,
+    ...channelPipelineValidationSeedKeys(lane, undefined, entries),
+  ])];
 }
 
 function main(): void {

@@ -43,6 +43,7 @@ import {
   type ScriptRequest,
 } from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { requireAuthoredShowBibleVoice } from "@/engine/showBibleVoice";
 
 export interface PlanWeekPreparedScriptArgs {
   ownerId: string;
@@ -178,7 +179,7 @@ export function assertPreparedScriptRouteContracts(
   );
 }
 
-function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
+export function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
   const moduleConfig = manifest.execution.moduleConfig;
@@ -189,10 +190,12 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
   const syntheticScenario = route?.syntheticScenarioProfile
     ? syntheticScenarioContract(route.syntheticScenarioProfile)
     : undefined;
+  const channelVoice = requireAuthoredShowBibleVoice(seed.showBible, "weekly prepared script_gen");
   const request: ScriptRequest = {
     topic: manifest.plan.topic,
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
+    channelVoice,
     bannedWords: readChannelBannedWords(seed.bannedWords),
     niche: typeof seed.niche === "string" ? seed.niche : undefined,
     style: payload.style ?? (typeof scriptConfig.style === "string" ? scriptConfig.style : undefined),

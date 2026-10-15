@@ -5,6 +5,7 @@ import ts from "typescript";
 import * as bundle from "@/lib/bundleFanout";
 import * as serialized from "@/lib/serializedProgramEpisode";
 import * as deployment from "@/lib/pipelineWorkerDeployment";
+import { musicReuseTestReceipt } from "@/trigger/blocks/__tests__/musicReuseFixtures";
 
 type Row = Record<string, unknown>;
 type Kind = "bundle" | "serialized";
@@ -85,7 +86,15 @@ test("empty delivery ticks perform one indexed-query call and no provider bootst
 test("bundle delivery preserves immutable payload, global identity, and acknowledgement lease", async () => {
   const envelope = bundle.bundleFanoutEnvelope({
     ownerId: "owner-fixture", baseRunId: "base", baseChannelId: "base-channel",
-    siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music" },
+    siblingChannelId: "sibling", reuse: {
+      language: "fr", footageKeys: [],
+      musicKey: "owner/owner-fixture/runs/base/audio/music.mp3",
+      musicReuseReceipt: musicReuseTestReceipt({
+        ownerId: "owner-fixture", baseRunId: "base", baseChannelId: "base-channel",
+        siblingChannelId: "sibling", musicKey: "owner/owner-fixture/runs/base/audio/music.mp3",
+        family: "narrated_stock", contentLaneKey: "narrated-stock/foundation", provider: "mureka",
+      }),
+    },
   });
   const request = bundle.bundleFanoutDispatchSchedule({ runId: "child", envelope });
   for (const failure of [false, true]) {

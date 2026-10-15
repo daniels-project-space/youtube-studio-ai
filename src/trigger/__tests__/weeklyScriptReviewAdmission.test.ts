@@ -13,6 +13,8 @@ const manifest: PlanWeekPreparationManifest = {
     { block: "qa_script", version: "2.0.0-channel-aware" }, { block: "narration_tts" }],
     moduleConfig: {}, seedStore: { channelName: "Inked Histories", persona: "Curious history listeners",
       criticDoctrine: "Ground each reveal in named historical evidence.", contentLane: "narrated_documentary",
+      showBible: { positioning: "Evidence-led stories from overlooked history.", vibe: "Curious and measured.",
+        worksInSpace: ["Named archival details"], avoidInSpace: ["Unsupported dramatic claims"] },
       styleDNA: { narrative: { scriptStyle: "Measured, vivid archival storytelling.", pacing: "Build clarity before suspense." } } } },
   prompts: { script: "Source", narration: "Voice", shotlist: "Shots", visual: "Archive" },
 };

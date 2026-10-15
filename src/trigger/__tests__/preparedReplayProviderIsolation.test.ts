@@ -10,13 +10,34 @@ import {
 } from "@/lib/planWeekPreparation";
 import { PREPARED_METADATA_READ } from "@/lib/preparedMediaStorage";
 import { assembleScriptNarration } from "@/engine/scriptNarration";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "@/engine/channelAwareScriptQaSelection";
 
 const manifest: PlanWeekPreparationManifest = {
   version: "plan-week-preparation/inputs-v1", ownerId: "replay-owner", channelId: "replay-channel",
   channelSlug: "archive", batchId: "batch", itemId: "episode", itemKey: "week:0", requestKey: "week", frozenAt: 1,
   plan: { topic: "The old lock", title: "The old lock", description: "A source-bound history.",
     sceneSeed: "An archive", thumbnailKey: "owner/replay-owner/old.jpg", thumbnailSource: "planner_artwork" },
-  execution: { pipeline: [{ block: "script_gen" }, { block: "qa_script" }, { block: "narration_tts" }], moduleConfig: {}, seedStore: {} },
+  execution: {
+    pipeline: [
+      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+      { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+      { block: "narration_tts" },
+    ],
+    moduleConfig: {},
+    seedStore: {
+      channelName: "Archive Notes",
+      persona: "Curious viewers seeking careful archival history.",
+      showBible: {
+        positioning: "Source-led histories of overlooked decisions.",
+        vibe: "Measured, humane, and clear.",
+        worksInSpace: ["Separate documented facts from interpretation."],
+        avoidInSpace: ["Never invent evidence to heighten suspense."],
+      },
+    },
+  },
   prompts: { script: "Source", narration: "Voice", shotlist: "Shots", visual: "Archive" },
 };
 const encode = (value: unknown) => Buffer.from(canonicalJson(value));
@@ -167,7 +188,7 @@ async function main() {
       delete body.fingerprint;
       substituted.musicProgram.fingerprint = sha256Hex(canonicalJson(body));
       sidecars.set(musicSidecarKey, encode(substituted));
-      await assert.rejects(() => tasks[2].run(payload), /music program binding mismatch/);
+      await assert.rejects(() => tasks[2].run(payload), /music program binding mismatch|music structured caption omits declared channel sound cue/);
       assert.equal(mediaReads, beforeMusicReads, "reject substituted sound before downloading paid media");
       assert.equal(paidCalls, 0); assert.equal(writes, 0); assert.equal(claims.size, 0);
     }

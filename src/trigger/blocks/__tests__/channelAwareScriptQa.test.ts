@@ -213,9 +213,9 @@ async function main() {
           promise: 9, honest: true, note: "Grounded and specific." }], best: 0 };
       } else if (prompt.includes("Write a YouTube narration script about:")) {
         content = { sections: [
-          { heading: "The warning", narration: "At 1:23 a.m., operators ran a safety test at Reactor Four. The test exposed a dangerous weakness in the shutdown system. Instead of stopping, the team continued through a procedure whose risks were poorly understood. The control room had warnings, but the sequence made each decision feel manageable on its own." },
-          { heading: "The decision", narration: "That detail matters because the disaster was not one mysterious instant. It emerged from design flaws, institutional pressure, and choices made under a false sense of control. Records help separate what operators knew from what later accounts assumed. The distinction keeps the story honest and shows how a routine test became a chain of consequences." },
-          { heading: "What changed", narration: "The ignored test changed how engineers understood reactor safety and how authorities described risk. It also left families and communities living with consequences no control-room checklist could contain. The most useful lesson is not that one person explains everything. It is that systems must make dangerous conditions visible before ordinary procedure turns them into catastrophe." },
+          { heading: "The warning", narration: "At 1:23 a.m., operators began Reactor Four's safety test. It exposed a shutdown weakness, yet they continued despite poorly understood risks." },
+          { heading: "The decision", narration: "This was no single mysterious instant. Design flaws, pressure, and false confidence combined. Records separate what operators knew from later assumptions." },
+          { heading: "What changed", narration: "The test changed reactor safety and official risk descriptions. Make danger visible before ordinary procedure turns it catastrophic." },
         ], closing_line: "Warnings matter before the crisis." };
       } else if (prompt.includes("Critique this YouTube narration draft")) {
         content = { pass: true, issues: [] };
@@ -271,7 +271,7 @@ async function main() {
     }
     assert.ok(integratedPrompts[2]?.includes("Evidence first, interpretation second."),
       "the selected writer must receive this channel's narrative Style DNA");
-    assert.ok(integratedPrompts[4]?.includes("The ignored test changed how engineers understood reactor safety"),
+    assert.ok(integratedPrompts[4]?.includes("The test changed reactor safety and official risk descriptions"),
       "the selected critic must review the actual narration emitted by its paired writer");
     console.log("CHANNEL-AWARE SCRIPT PAIR PASS: three channel briefs, unchanged legacy behavior, pre-spend refusal, and successful selected-writer→selected-critic runner handoff; provider responses synthetic");
   } finally {

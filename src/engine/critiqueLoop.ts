@@ -98,6 +98,9 @@ export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
   if (row.fatal === true && row.pass === true) {
     issues.push("a fatal critique cannot pass");
   }
+  if (row.pass === false && Array.isArray(row.issues) && row.issues.length === 0) {
+    issues.push("a rejected critique must include at least one actionable issue");
+  }
   if (issues.length) return { pass: false, critique: null, issues };
   return {
     pass: true,
@@ -271,6 +274,9 @@ export async function produceAndCritique<T>(
         );
       }
       const critique = admission.critique;
+      if ((!critique.pass || critique.score < threshold) && critique.issues.length === 0) {
+        throw new Error(`${label}: rejected critique must include at least one actionable issue`);
+      }
       history.push(critique);
       log(
         `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,

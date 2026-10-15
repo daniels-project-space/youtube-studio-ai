@@ -263,7 +263,7 @@ assert.throws(
 // resulting graph-owned manifest and still validates the exact scene/sentence
 // attachment on its own boundary.
 const factualStorySpine = structuredClone(storySpine);
-factualStorySpine.timedScript.sentences[0].text = "According to Seed Atlas, 20 seeds sprouted in week one and 35 in week two.";
+factualStorySpine.timedScript.sentences[0].text = "According to Seed Atlas, 20 seeds sprouted in week one and 35 seeds sprouted in week two.";
 const factualVisualBase = {
   version: "evidence-visual-manifest/v1" as const,
   id: "visual-seed-sprout-trend",
