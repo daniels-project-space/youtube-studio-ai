@@ -306,6 +306,15 @@ function main(): void {
     "value",
     "a coordinated value cannot inherit a different explicit unit",
   );
+  assert.ok(
+    clean({ value: "2 years" }, "It lasts from two to four years."),
+    "an explicit range unit applies to both endpoints",
+  );
+  assert.equal(
+    offender({ value: "2%" }, "It lasts from two to four years."),
+    "value",
+    "a range endpoint cannot borrow the other endpoint's mismatched unit",
+  );
 
   // ---- quantity is pinned to its sentence; frame may cite the script -------
   const script =

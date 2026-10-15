@@ -222,7 +222,7 @@ export function unmatchedNumericUnits(rendered: string, source: string): string[
     const next = mentions[index + 1];
     if (!next || !explicitUnit(input, next)) return undefined;
     const between = input.normalize('NFKC').toLowerCase().replace(/−/g, '-').slice(mention.end, next.start);
-    return /^\s+(?:and|or)\s+$/u.test(between) ? explicitUnit(input, next) : undefined;
+    return /^\s+(?:and|or|to|through)\s+$/u.test(between) ? explicitUnit(input, next) : undefined;
   };
   return renderedMentions
     .filter((renderedMention, index) => {

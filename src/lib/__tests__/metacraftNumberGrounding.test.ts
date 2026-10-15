@@ -47,6 +47,8 @@ const cases: [string, string, boolean][] = [
   ['-2%', 'minus two and five percent', true],
   ['-2%', 'minus two but five percent', false],
   ['-2%', 'minus two and five percentage points', false],
+  ['2 years', 'two to four years', true],
+  ['2%', 'two to four years', false],
   ['10 pct', '10 percent', true], ['10 pct', '10 dollars', false],
   ['10 percentage points', '10 percent', false],
   ['10 years', '10 months', false], ['10-year', 'ten year commitment', true],
