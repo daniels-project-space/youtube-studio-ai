@@ -683,9 +683,6 @@ export const topicSelect: Block = {
       ...plannedTopics.map(normalizeTopic),
     ]);
     const recentList = rememberedTopics.slice(-40);
-    // Phase 7: bias toward topics like past high-retention winners ("" until enough data).
-    const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
-
     // SERIES MODE — an ordered, numbered run (e.g. "7 Days of Stoic Calm"). The
     // episode number = how many of this series already exist + 1; each episode
     // gets a unique subtitle that continues the arc. When the series is finished
@@ -961,34 +958,38 @@ export const topicSelect: Block = {
     if (!hasCreativeTextKey()) {
       throw new Error("topic_select: OPENROUTER_API_KEY missing — refusing silent pool fallback");
     }
-    const competitorRows = niche
-      ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
-          .catch((e) => {
-            // Same shape optimizeTopics has one layer up, and named for the same
-            // reason: an outage and a niche with no tracked competitors produce
-            // the same empty array, and this bet is written without the evidence
-            // either way.
-            ctx.log(
-              `topic_select: COMPETITOR EVIDENCE LOST — this bet is written without competitor ` +
-                `titles (${e instanceof Error ? e.message : e})`,
-            );
-            return [];
+    // These evidence sources are independent. Load them only for the ordinary
+    // topic-ranking path, and in parallel; episode continuations do not use
+    // performance or competitor evidence at all.
+    const [perfCtx, competitorRows, outliers] = await Promise.all([
+      loadPerformanceContext(ctx.keyPrefix),
+      niche
+        ? c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
+            .catch((e) => {
+              // An outage and a niche with no tracked competitors both produce
+              // an empty list, so make the lost evidence explicit.
+              ctx.log(
+                `topic_select: COMPETITOR EVIDENCE LOST — this bet is written without competitor ` +
+                  `titles (${e instanceof Error ? e.message : e})`,
+              );
+              return [];
+            })
+        : Promise.resolve([]),
+      niche
+        ? loadOutlierBank({
+            convex: c,
+            ownerId: ctx.ownerId,
+            niche,
+            query: [niche, ...pool.slice(0, 2)].filter(Boolean).join(" "),
+            log: (m) => ctx.log(m),
           })
-      : [];
+        : Promise.resolve([]),
+    ]);
     const competitorTitles = (competitorRows as { topVideos?: { title: string; views: number }[] }[])
       .flatMap((r) => r.topVideos ?? [])
       .sort((a, b) => b.views - a.views)
       .slice(0, 12)
       .map((v) => ({ title: v.title, views: v.views }));
-    const outliers = niche
-      ? await loadOutlierBank({
-          convex: c,
-          ownerId: ctx.ownerId,
-          niche,
-          query: [niche, ...pool.slice(0, 2)].filter(Boolean).join(" "),
-          log: (m) => ctx.log(m),
-        })
-      : [];
 
     const crafted = await craftTopics({
       channelName,
