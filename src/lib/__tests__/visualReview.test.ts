@@ -578,6 +578,40 @@ async function main(): Promise<void> {
   assert.equal(malformedDefectEvidence.verdict, "needs_human", "a defect with a fabricated frame ID must not complete visual QA");
   assert.equal(malformedDefectEvidence.defects.length, 0, "an unbound defect must not be routed to an arbitrary frame");
 
+  const completeDefect = {
+    startSec: 1,
+    endSec: 2,
+    severity: "major",
+    category: "wrong_footage",
+    confidence: 0.95,
+    observed: "The wrong character appears.",
+    expected: "The established main character should appear.",
+    evidenceFrameIds: ["f001"],
+    suggestedRepair: "Restore the established character.",
+  };
+  const malformedRequiredDefects = await reviewRender(fixture, 18, {
+    title: "Malformed required defect-fields fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-malformed-required-defect-fields",
+    reviewer: async () => JSON.stringify({
+      defects: [
+        { ...completeDefect, startSec: undefined, tSec: 1 },
+        { ...completeDefect, endSec: 0 },
+        { ...completeDefect, severity: "urgent" },
+        { ...completeDefect, confidence: 1.1 },
+        { ...completeDefect, expected: "  " },
+        { ...completeDefect, suggestedRepair: undefined },
+      ],
+      summary: "Malformed required defect fields fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedRequiredDefects.verdict, "needs_human", "malformed required defect fields must fail visual QA closed");
+  assert.equal(malformedRequiredDefects.defects.length, 0, "a malformed defect must not receive invented timing or repair evidence");
+
   const planned = planVisualReviewEvidence({
     durationSec: 18,
     sceneTimes: [2, 6, 10, 15],

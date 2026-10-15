@@ -1254,11 +1254,6 @@ function reviewerPrompt(
   );
 }
 
-function normalizeSeverity(value: unknown): VisualReviewSeverity {
-  const raw = String(value ?? "minor").toLowerCase();
-  return raw === "critical" || raw === "major" ? raw : "minor";
-}
-
 function normalizeCategory(value: unknown, observed: string): VisualReviewCategory {
   const raw = `${String(value ?? "")} ${observed}`.toLowerCase();
   if (/off.?canvas|out.?of.?frame|clipp|cut.?off|overflow/.test(raw) && /overlay|bubble|caption|text/.test(raw)) return "overlay_off_canvas";
@@ -1364,7 +1359,6 @@ function parseReferenceCriteriaReceipt(
 function parseModelDefects(
   raw: string,
   frames: readonly ExtractedFrame[],
-  intent: VisualReviewIntent,
   phase: "broad" | "focus",
   requestedReferenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
   collectBroadQualityScore: boolean,
@@ -1427,13 +1421,34 @@ function parseModelDefects(
       complete = false;
       return [];
     }
-    const observed = String(item["observed"] ?? item["issue"] ?? "").trim();
-    if (!observed) {
+    const observed = typeof item["observed"] === "string" ? item["observed"].trim() : "";
+    const expected = typeof item["expected"] === "string" ? item["expected"].trim() : "";
+    const suggestedRepair = typeof item["suggestedRepair"] === "string" ? item["suggestedRepair"].trim() : "";
+    const startSec = item["startSec"];
+    const endSec = item["endSec"];
+    const rawSeverity = typeof item["severity"] === "string" ? item["severity"].trim().toLowerCase() : "";
+    const confidence = item["confidence"];
+    if (
+      !observed ||
+      !expected ||
+      !suggestedRepair ||
+      typeof startSec !== "number" ||
+      !Number.isFinite(startSec) ||
+      startSec < 0 ||
+      typeof endSec !== "number" ||
+      !Number.isFinite(endSec) ||
+      endSec < startSec ||
+      (rawSeverity !== "critical" && rawSeverity !== "major" && rawSeverity !== "minor") ||
+      typeof confidence !== "number" ||
+      !Number.isFinite(confidence) ||
+      confidence < 0 ||
+      confidence > 1 ||
+      typeof item["category"] !== "string" ||
+      !item["category"].trim()
+    ) {
       complete = false;
       return [];
     }
-    const startSec = clamp(finite(item["startSec"] ?? item["tSec"], frames[0]?.descriptor.tSec ?? 0), 0, Number.MAX_SAFE_INTEGER);
-    const endSec = Math.max(startSec, finite(item["endSec"], startSec));
     const rawFrameIds = item["evidenceFrameIds"];
     const ids = Array.isArray(rawFrameIds)
       ? rawFrameIds.filter((id): id is string => typeof id === "string").map((id) => id.trim())
@@ -1449,20 +1464,18 @@ function parseModelDefects(
     }
     const evidenceFrameIds = [...new Set(ids)];
     const category = normalizeCategory(item["category"], observed);
-    const severity = normalizeSeverity(item["severity"]);
-    const confidence = clamp(finite(item["confidence"], 0.65), 0, 1);
     const key = `${phase}|${category}|${roundTime(startSec)}|${observed.slice(0, 120)}`;
     return [{
       id: createHash("sha256").update(key).digest("hex").slice(0, 16),
       startSec,
       endSec,
-      severity,
+      severity: rawSeverity as VisualReviewSeverity,
       category,
       confidence,
       observed,
-      expected: String(item["expected"] ?? intent.expectedStructure ?? DEFAULT_STRUCTURE).slice(0, 300),
+      expected: expected.slice(0, 300),
       evidenceFrameIds,
-      suggestedRepair: String(item["suggestedRepair"] ?? "Inspect and repair the owning render stage").slice(0, 240),
+      suggestedRepair: suggestedRepair.slice(0, 240),
       source: "vision" as const,
     } satisfies VisualReviewDefect];
   });
@@ -1605,7 +1618,7 @@ async function reviewBatches(
         { cause: error },
       );
     }
-    const parsed = parseModelDefects(raw, batch, intent, phase, referenceCriteria, collectBroadQualityScore);
+    const parsed = parseModelDefects(raw, batch, phase, referenceCriteria, collectBroadQualityScore);
     defects.push(...parsed.defects);
     criteriaReceipts.push(...parsed.referenceCriteria);
     if (!parsed.complete) incompleteReceiptCount += 1;
