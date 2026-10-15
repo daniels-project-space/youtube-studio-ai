@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { MIN_CINEMATIC_BEAT_SEC } from "../shotBoundaryTiming";
-import { planStorySpine } from "../storySpine";
+import { planStorySpine, validateStorySpine } from "../storySpine";
 
 // A sample narration timeline mixing several very short sentences (each
 // well under MIN_CINEMATIC_BEAT_SEC) with one long, uninterrupted 40s
@@ -102,5 +102,37 @@ for (const shot of spine.shotList) {
     assert.ok(!(forbidden in shot), `Story Spine shot ${shot.id} must never carry the Casefile-only field "${forbidden}"`);
   }
 }
+
+const firstShot = spine.shotList[0]!;
+const shiftedEdl = {
+  ...spine,
+  editorEdl: {
+    ...spine.editorEdl,
+    shots: spine.editorEdl.shots.map((entry, index) =>
+      index === 0 ? { ...entry, t1: entry.t1 - 1 } : entry),
+  },
+};
+assert.throws(
+  () => validateStorySpine(shiftedEdl),
+  /story spine EDL does not match visual shot/u,
+  "the timing module must not hand the editor a different shot boundary than the approved visual plan",
+);
+
+const wrongSentenceId = spine.timedScript.sentences.at(-1)!.id;
+const crossBoundShot = {
+  ...spine,
+  shotList: spine.shotList.map((shot, index) =>
+    index === 0 ? { ...shot, sourceSentenceIds: [wrongSentenceId] } : shot),
+  editorEdl: {
+    ...spine.editorEdl,
+    shots: spine.editorEdl.shots.map((entry, index) =>
+      index === 0 ? { ...entry, sourceSentenceIds: [wrongSentenceId] } : entry),
+  },
+};
+assert.throws(
+  () => validateStorySpine(crossBoundShot),
+  /references narration outside its parent beat/u,
+  "a shot must not claim narration owned by a different beat even when its EDL agrees",
+);
 
 console.log("story spine shot weighting tests passed");

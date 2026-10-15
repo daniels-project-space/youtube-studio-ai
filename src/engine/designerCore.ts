@@ -1268,16 +1268,22 @@ export function designPipelineCore(
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
   // manifests. Creative engine choices remain the designer's responsibility.
-  const policyPipeline = options.validateRuntimeRegistry === false && opts.yue2Music !== undefined
+  const policyPipeline = options.validateRuntimeRegistry === false
     ? pipeline.map((entry) => entry.block === "music" && entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
       ? { block: entry.block, params: entry.params }
       : entry)
     : pipeline;
+  const restorePreviewMusicVersion = options.validateRuntimeRegistry === false
+    && pipeline.some((entry) => entry.block === "music" && entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
   const completed = completePipelineForPolicy(policyPipeline, {
     generationProfile: generationProfileId,
     manifestSource: options.validateRuntimeRegistry === false ? "structural" : "runtime",
   });
-  pipeline = completed.entries;
+  pipeline = completed.entries.map((entry) => restorePreviewMusicVersion
+    && entry.block === "music"
+    && entry.version === undefined
+    ? { ...entry, version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION }
+    : entry);
   if (completed.inserted.length) {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
   }

@@ -10,6 +10,7 @@ import {
   resolveContentLane,
 } from "@/engine/contentLane";
 import type { PipelineEntry } from "@/engine/types";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { designPipeline } from "@/engine/designer";
 import { FAMILIES } from "@/engine/families";
 import { validatePipeline } from "@/engine/validate";
@@ -341,14 +342,20 @@ assert.throws(
   "a supervised children pipeline must declare the external human-editor packet rather than silently fabricate one",
 );
 assert.doesNotThrow(
-  () => validatePipeline(childrenLearning.pipeline, ["contentLane", "curriculumEpisodeSeedInput", "childrenShowBibleInput"]),
+  () => validatePipeline(
+    childrenLearning.pipeline,
+    channelPipelineValidationSeedKeys(childrenLearning.contentLane, undefined, childrenLearning.pipeline),
+  ),
   "the approved packet is a deliberate per-run seed, not a missing automatic planner output",
 );
 assert.throws(
-  () => validatePipeline(
-    childrenLearning.pipeline.slice(0, childrenBlocks.indexOf("children_video_treatment") + 1),
-    ["contentLane", "curriculumEpisodeSeedInput", "childrenShowBibleInput"],
-  ),
+  () => {
+    const partial = childrenLearning.pipeline.slice(0, childrenBlocks.indexOf("children_video_treatment") + 1);
+    return validatePipeline(
+      partial,
+      channelPipelineValidationSeedKeys(childrenLearning.contentLane, undefined, partial),
+    );
+  },
   /children_video_treatment.*downstream capability/,
   "a domain module may require its specialist consumer; it must not embed a competing thumbnail path",
 );
