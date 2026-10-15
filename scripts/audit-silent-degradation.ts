@@ -232,8 +232,9 @@ function main(): void {
     `  ConvexClientProvider       an unauthenticated read in the UI, logged as such.\n` +
     `\nAnd the older four:\n` +
     `the next reader does not repeat it:\n` +
-    `  metacraft youtubeSuggest   an accessor in all but name — its caller logs the query\n` +
-    `                             count, so an empty autocomplete IS visible one level up.\n` +
+    `  metacraft youtubeSuggest   now logs HTTP/network failure explicitly and leaves the\n` +
+    `                             transient result uncached; successful empty results remain\n` +
+    `                             distinguishable through the caller's evidence count.\n` +
     `  storyboardCritic           returns null, and loreShortBlocks then rejects the whole\n` +
     `                             outcome (critique.accepted !== true), so it FAILS CLOSED\n` +
     `                             rather than accepting an uncritiqued storyboard.\n` +

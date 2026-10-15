@@ -164,7 +164,7 @@ export function clearMetacraftEvidenceCache(): void {
 }
 
 /** Live YouTube autocomplete — the real query strings people type. */
-export async function youtubeSuggest(seed: string): Promise<string[]> {
+export async function youtubeSuggest(seed: string, log?: (message: string) => void): Promise<string[]> {
   const key = normalizeEvidenceKey(seed);
   if (!key) return [];
   const cached = suggestCache.get(key);
@@ -179,13 +179,20 @@ export async function youtubeSuggest(seed: string): Promise<string[]> {
         `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(key)}`,
         { signal: AbortSignal.timeout(8000) },
       );
-      if (!res.ok) return [];
+      if (!res.ok) {
+        log?.(`metacraft: YouTube autocomplete unavailable (HTTP ${res.status})`);
+        return [];
+      }
       const j = (await res.json()) as [string, string[]];
       const values = Array.isArray(j?.[1]) ? j[1].slice(0, 8) : [];
       successful = true;
       suggestCache.set(key, values);
       return values;
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError"
+        ? "timed out"
+        : "request failed (network or response error)";
+      log?.(`metacraft: YouTube autocomplete ${reason}`);
       return [];
     } finally {
       suggestCache.deleteInflight(key);
@@ -951,7 +958,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   // potentially inconsistent evidence snapshot for the same title decision.
   const hasProvidedCompetitorEvidence = a.competitorTitles !== undefined;
   const [suggests, fetched] = await Promise.all([
-    youtubeSuggest(seed),
+    youtubeSuggest(seed, a.log),
     hasProvidedCompetitorEvidence
       ? Promise.resolve<{ title: string; views: number }[]>([])
       : fetchCompetitorTitles(seed, a.log),
