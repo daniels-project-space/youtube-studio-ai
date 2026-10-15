@@ -552,6 +552,32 @@ async function main(): Promise<void> {
   assert.equal(malformedReferenceCriteria.verdict, "needs_human", "a malformed evidence-frame receipt must never pass visual QA");
   assert.equal(malformedReferenceCriteria.referenceCriteriaComplete, false);
 
+  const malformedDefectEvidence = await reviewRender(fixture, 18, {
+    title: "Malformed defect-evidence fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-malformed-defect-evidence",
+    reviewer: async () => JSON.stringify({
+      defects: [{
+        startSec: 1,
+        endSec: 2,
+        severity: "major",
+        category: "wrong_footage",
+        confidence: 0.95,
+        observed: "The wrong character appears.",
+        expected: "The established main character should appear.",
+        evidenceFrameIds: ["not-a-reviewed-frame"],
+        suggestedRepair: "Restore the established character.",
+      }],
+      summary: "Malformed defect evidence fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedDefectEvidence.verdict, "needs_human", "a defect with a fabricated frame ID must not complete visual QA");
+  assert.equal(malformedDefectEvidence.defects.length, 0, "an unbound defect must not be routed to an arbitrary frame");
+
   const planned = planVisualReviewEvidence({
     durationSec: 18,
     sceneTimes: [2, 6, 10, 15],

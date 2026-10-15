@@ -1434,10 +1434,20 @@ function parseModelDefects(
     }
     const startSec = clamp(finite(item["startSec"] ?? item["tSec"], frames[0]?.descriptor.tSec ?? 0), 0, Number.MAX_SAFE_INTEGER);
     const endSec = Math.max(startSec, finite(item["endSec"], startSec));
-    const ids = Array.isArray(item["evidenceFrameIds"])
-      ? item["evidenceFrameIds"].map(String).filter((id) => known.has(id))
+    const rawFrameIds = item["evidenceFrameIds"];
+    const ids = Array.isArray(rawFrameIds)
+      ? rawFrameIds.filter((id): id is string => typeof id === "string").map((id) => id.trim())
       : [];
-    const evidenceFrameIds = ids.length ? [...new Set(ids)] : nearestFrameId(frames, startSec);
+    if (
+      !Array.isArray(rawFrameIds) ||
+      ids.length !== rawFrameIds.length ||
+      ids.length === 0 ||
+      ids.some((id) => !known.has(id))
+    ) {
+      complete = false;
+      return [];
+    }
+    const evidenceFrameIds = [...new Set(ids)];
     const category = normalizeCategory(item["category"], observed);
     const severity = normalizeSeverity(item["severity"]);
     const confidence = clamp(finite(item["confidence"], 0.65), 0, 1);
