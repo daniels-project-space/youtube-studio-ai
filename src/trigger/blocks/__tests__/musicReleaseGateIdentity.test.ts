@@ -26,6 +26,7 @@ const objects = new Map([
   ["runtime.json", Buffer.from("{}")],
   ["quality.json", Buffer.from("{}")],
 ]);
+const objectReads: string[] = [];
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -33,6 +34,7 @@ loader._load = function (id, ...args) {
   if (id === "@/lib/storage") {
     return {
       getObjectBytes: async (key: string) => {
+        objectReads.push(key);
         const bytes = objects.get(key);
         if (!bytes) throw new Error(`unexpected object read: ${key}`);
         return bytes;
@@ -69,7 +71,49 @@ async function main() {
     assertMusicQualityForPublish(foreignProgramContext),
     /does not match this run's sealed fingerprint/u,
   );
-  console.log("MUSIC RELEASE GATE IDENTITY PASS: foreign MiniMax program receipts fail before native audio reads");
+  assert.deepEqual(objectReads, ["program.json", "runtime.json", "quality.json"],
+    "a foreign MiniMax program must fail before any native audio bytes are read");
+
+  for (const provider of ["mureka", "suno"] as const) {
+    objectReads.length = 0;
+    await assert.rejects(
+      assertMusicQualityForPublish({
+        ...ctx,
+        store: {
+          musicProvider: provider,
+          musicKey: "master.mp3",
+          musicQualityReviewStatus: "not-required-provider-route",
+        },
+      }),
+      /review state is missing or invalid/u,
+      `${provider} cannot claim that owner review is unnecessary`,
+    );
+    assert.deepEqual(objectReads, [], `${provider} invalid review state must stop before storage reads`);
+
+    const requiredEvidenceKeys = [
+      "program.json", "source.json", "quality.json", "master.mp3", "audition.wav",
+    ];
+    await assert.rejects(
+      assertMusicQualityForPublish({
+        ...ctx,
+        store: {
+          musicProvider: provider,
+          musicKey: "master.mp3",
+          musicQualityReviewStatus: "awaiting-human-audition",
+          channelMusicProgramKey: "program.json",
+          channelMusicProgramFingerprint: program.fingerprint,
+          musicAuditionSourceKey: "source.json",
+          musicQualityReceiptKey: "quality.json",
+          musicAuditionWavKey: "audition.wav",
+        },
+      }),
+      /unexpected object read/u,
+      `${provider} with an awaiting status must still require its durable review objects`,
+    );
+    assert.deepEqual(objectReads, requiredEvidenceKeys,
+      `${provider} release must load program, source, quality receipt, master, and audition bytes`);
+  }
+  console.log("MUSIC RELEASE GATE PASS: foreign MiniMax identity and missing Mureka/Suno audition evidence fail closed");
 }
 
 void main().finally(() => {
