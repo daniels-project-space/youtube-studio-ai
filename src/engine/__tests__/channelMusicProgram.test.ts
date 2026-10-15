@@ -63,6 +63,30 @@ assert.equal(meditation.mix.bodyMusicVol, 0.25,
   "a specific meditation lane must not inherit primary-music full volume from its broad family");
 assert.equal(meditation.mix.narrationPriority, false);
 assert.equal(meditation.quality.minimumLraLu, 2);
+const guidedSleepAlias = createChannelMusicProgram({
+  channelId: "channel-guided-sleep-alias",
+  channelIdentityFingerprint: sha("7"),
+  family: "sleep",
+  contentLaneKey: "ambient-guided",
+  topic: "A slow walk through a quiet forest",
+});
+assert.equal(guidedSleepAlias.role, "sleep_sound_bed");
+assert.equal(guidedSleepAlias.mix.narrationPriority, true,
+  "spoken sleep aliases must reserve the foreground for narration");
+assert.equal(guidedSleepAlias.mix.bodyMusicVol, 0.1026,
+  "hyphenated spoken sleep lanes must not play their bed at full volume");
+const unguidedMeditation = createChannelMusicProgram({
+  channelId: "channel-unguided-meditation",
+  channelIdentityFingerprint: sha("8"),
+  family: "meditation",
+  contentLaneKey: "unguided",
+  topic: "Open silent awareness",
+});
+assert.equal(unguidedMeditation.role, "meditation_bed");
+assert.equal(unguidedMeditation.mix.narrationPriority, false,
+  "unguided meditation must not be mistaken for a spoken guided program");
+assert.equal(unguidedMeditation.mix.bodyMusicVol, 0.25,
+  "unguided meditation retains the intended music-forward bed level");
 const meditationSibling = createChannelMusicProgram({
   channelId: "channel-meditation-es",
   channelIdentityFingerprint: sha("e"),

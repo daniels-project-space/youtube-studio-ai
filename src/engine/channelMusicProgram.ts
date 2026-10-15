@@ -370,6 +370,11 @@ function routeOwnedMusicRole(family: string, contentLaneKey: string): ChannelMus
   return undefined;
 }
 
+function routeHasNarrationCue(family: string, contentLaneKey: string): boolean {
+  const routeWords = `${family} ${contentLaneKey}`.toLowerCase().replace(/[_-]+/gu, " ");
+  return /\b(?:guided|breathwork|spoken|narrated)\b/u.test(routeWords);
+}
+
 function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
   // Global Metadata and Vocal Details already establish genre, instruments,
   // space and the instrumental constraint. Repeating all of that inside every
@@ -724,10 +729,8 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
-  const narratedSleepRoute = role === "sleep_sound_bed" && contentLaneKey.toLowerCase() === "ambient_guided";
-  const narratedMeditationRoute = role === "meditation_bed" && /(?:guided|breathwork|spoken|narrated)/u.test(
-    `${family} ${contentLaneKey}`.toLowerCase(),
-  );
+  const narratedSleepRoute = role === "sleep_sound_bed" && routeHasNarrationCue(family, contentLaneKey);
+  const narratedMeditationRoute = role === "meditation_bed" && routeHasNarrationCue(family, contentLaneKey);
   const bodyMusicVol = role === "primary_music" || (role === "sleep_sound_bed" && !narratedSleepRoute)
     ? 1
     : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" && !narratedMeditationRoute ? 0.25 : 0.1026)));
