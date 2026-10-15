@@ -22,7 +22,12 @@ async function main(): Promise<void> {
         choices: [{ message: { content: JSON.stringify({
           name: "Margin of History",
           niche: "forgotten history",
-          persona: "Forensic and humane.",
+          voiceProfile: {
+            editorialLens: "Trace how overlooked infrastructure decisions reshaped ordinary lives and public trust.",
+            audienceRelationship: "Address curious adults as thoughtful peers, supplying context without assuming specialist knowledge.",
+            delivery: "Use measured, evidence-led sentences, moving from a concrete record detail to its human consequence.",
+            boundaries: "Separate documented fact from inference, name uncertainty, and never turn tragedy into spectacle.",
+          },
           styleGrammar: "engraved ink, archival paper",
           palette: ["#121212", "#E9DCC5", "#A3412D"],
           topicPool: ["The warning hidden in a bridge inspector's notebook"],
@@ -41,10 +46,36 @@ async function main(): Promise<void> {
       ["Evidence in the margins", "human cost"],
       "inception must persist normalized, channel-specific callback motifs from the creative route",
     );
+    assert.match(concept.persona, /Editorial lens: Trace how overlooked infrastructure decisions/u);
+    assert.match(concept.persona, /Audience relationship: Address curious adults as thoughtful peers/u);
+    assert.match(concept.persona, /Delivery: Use measured, evidence-led sentences/u);
+    assert.match(concept.persona, /Editorial boundaries: Separate documented fact from inference/u);
     assert.equal(requests.length, 1);
     const body = JSON.parse(String(requests[0]?.body));
     assert.equal(body.model, "google/gemini-3.7-flash");
     assert.match(body.messages.at(-1)?.content ?? "", /"requiredCallbacks"/);
+    assert.match(body.messages.at(-1)?.content ?? "", /"voiceProfile"/);
+
+    global.fetch = async () => Response.json({
+      id: "shallow-concept-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify({
+        name: "Margin of History",
+        niche: "forgotten history",
+        voiceProfile: { editorialLens: "Forensic and humane." },
+        styleGrammar: "engraved ink, archival paper",
+        palette: ["#121212", "#E9DCC5"],
+        topicPool: ["A documented story"],
+        cadence: "weekly",
+        archetypeKey: "documentary",
+      }) } }],
+      usage: { prompt_tokens: 20, completion_tokens: 30, total_tokens: 50 },
+    });
+    await assert.rejects(
+      synthChannelConcept("forgotten infrastructure disasters", undefined),
+      /voiceProfile\.editorialLens must contain 24-240 characters/u,
+      "a shallow model persona must not silently become the channel's production identity",
+    );
 
     delete process.env.OPENROUTER_API_KEY;
     const logs: string[] = [];
