@@ -23,7 +23,7 @@
  * Mastra workflow can wrap this loop) without changing any chunk.
  */
 import { recordModuleCritique } from "@/lib/moduleCritiqueEvidence";
-import { showBibleVoicePromptLines } from "./showBibleVoice";
+import { parseShowBibleVoice, showBibleVoicePromptLines } from "./showBibleVoice";
 
 export interface Critique {
   /** 0..1 quality. */
@@ -145,6 +145,65 @@ export interface ChannelCritiqueContext {
   qualityDimensions?: readonly string[];
   /** Literal spoken wording forbidden by this channel's frozen identity. */
   bannedWords?: readonly string[];
+}
+
+function textFromStore(store: Readonly<Record<string, unknown>>, key: string, max: number): string | undefined {
+  const value = store[key];
+  return typeof value === "string" ? compact(value, max) : undefined;
+}
+
+function stringListFromStore(value: unknown, count: number, max: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => compact(item, max))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, count);
+  return items.length ? items : undefined;
+}
+
+/**
+ * Resolve the shared identity inputs consumed by module-owned critics. Callers
+ * still declare these optional artifacts in their own manifest; the runner's
+ * guarded store makes undeclared reads fail before module work can proceed.
+ */
+export function channelCritiqueContextFromStore(
+  store: Readonly<Record<string, unknown>>,
+  laneEmphasis?: readonly string[],
+): ChannelCritiqueContext {
+  const showBible = parseShowBibleVoice(store["showBible"]);
+  const dna = store["styleDNA"] as {
+    colorGrade?: unknown;
+    motifs?: unknown;
+    visualAvoid?: unknown;
+  } | null | undefined;
+  const lane = store["contentLane"] as { key?: unknown } | null | undefined;
+  const laneKey = typeof lane?.key === "string" ? compact(lane.key, 60) : undefined;
+  const bannedWords = stringListFromStore(store["bannedWords"], 32, 120);
+  const dnaVibe = typeof dna?.colorGrade === "string" ? compact(dna.colorGrade, 160) : undefined;
+  const channelName = textFromStore(store, "channelName", 120);
+  const persona = textFromStore(store, "persona", 180);
+  const styleGrammar = textFromStore(store, "styleGrammar", 240);
+  const criticDoctrine = textFromStore(store, "criticDoctrine", 600);
+  const worksInSpace = showBible?.worksInSpace?.length
+    ? showBible.worksInSpace
+    : stringListFromStore(dna?.motifs, 10, 140);
+  const avoidInSpace = showBible?.avoidInSpace?.length
+    ? showBible.avoidInSpace
+    : stringListFromStore(dna?.visualAvoid, 10, 140);
+  return {
+    ...(channelName ? { channelName } : {}),
+    ...(persona ? { persona } : {}),
+    ...(showBible?.positioning ? { positioning: showBible.positioning } : {}),
+    ...((showBible?.vibe ?? dnaVibe) ? { vibe: showBible?.vibe ?? dnaVibe } : {}),
+    ...(worksInSpace ? { worksInSpace } : {}),
+    ...(avoidInSpace ? { avoidInSpace } : {}),
+    ...(styleGrammar ? { styleGrammar } : {}),
+    ...(criticDoctrine ? { criticDoctrine } : {}),
+    ...(laneKey ? { contentLaneKey: laneKey } : {}),
+    ...(bannedWords ? { bannedWords } : {}),
+    ...(laneEmphasis?.length ? { laneEmphasis: laneEmphasis.slice(0, 4) } : {}),
+  };
 }
 
 function compact(value: string | undefined, max: number): string | undefined {

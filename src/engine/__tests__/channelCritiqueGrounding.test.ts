@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 
-import { channelCritiqueBrief, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
+import {
+  channelCritiqueBrief,
+  channelCritiqueContextFromStore,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
+import { getManifest } from "@/engine/registry";
+import { registerAllBlocks } from "@/engine/blocks";
 
 const fieldNotes: ChannelCritiqueContext = {
   channelName: "Quiet Field Notes",
@@ -63,5 +70,39 @@ assert.ok(fieldBrief.includes("OUTRANKS generic criteria"), "operator doctrine m
 assert.equal(channelCritiqueBrief(), "", "unconfigured callers retain the no-grounding legacy prompt");
 assert.ok(channelCritiqueBrief({ criticDoctrine: "x".repeat(2_000) }).length < 800,
   "operator-authored grounding must remain bounded before entering provider prompts");
+
+registerAllBlocks();
+const showBible = {
+  positioning: "An authored channel promise, not generic topic coverage",
+  vibe: "Precise, warm, and observant",
+  worksInSpace: ["Show one real mechanism changing"],
+  avoidInSpace: ["Invented scenery"],
+};
+const guardedInputs = {
+  topic: "A test topic",
+  channelName: "Grounded Field Lab",
+  persona: "Viewers who value visible evidence",
+  styleGrammar: "Concrete, direct language",
+  criticDoctrine: "Never trade evidence for spectacle.",
+  showBible,
+  styleDNA: { colorGrade: "soft natural light", motifs: ["field notebook"], visualAvoid: ["glowing diagrams"] },
+  contentLane: { key: "whiteboard_explainer" },
+  bannedWords: ["miracle"],
+};
+for (const moduleId of ["whiteboard_scribe", "motion_comic", "lore_short", "self_contained_story_plan"]) {
+  const manifest = getManifest(moduleId);
+  assert.ok(manifest, `${moduleId} must have a registered executable manifest`);
+  const guardedStore = declaredArtifactStore(manifest, guardedInputs, new Set());
+  const context = channelCritiqueContextFromStore(guardedStore, ["illustrate the exact claim"]);
+  const brief = channelCritiqueBrief(context);
+  for (const value of [
+    showBible.positioning,
+    showBible.vibe,
+    showBible.worksInSpace[0]!,
+    showBible.avoidInSpace[0]!,
+    guardedInputs.criticDoctrine,
+    guardedInputs.bannedWords[0]!,
+  ]) assert.ok(brief.includes(value), `${moduleId} must pass authored channel guidance through its guarded store: ${value}`);
+}
 
 console.log("CHANNEL CRITIQUE GROUNDING PASS — distinct identities and lane-specific doctrine survive the shared module boundary");

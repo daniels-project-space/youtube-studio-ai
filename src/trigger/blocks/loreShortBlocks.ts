@@ -55,6 +55,7 @@ import {
 } from "@/lib/storyboardCritic";
 import { synthNarration } from "@/lib/tts";
 import {
+  channelCritiqueContextFromStore,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -144,21 +145,7 @@ export function loreBeatCount(targetSeconds: number): number {
 /** Channel doctrine + lane grounding for this block's critique. */
 function loreCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
   const lane = ctx.store["contentLane"];
-  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
-    ? String((lane as { key?: unknown }).key)
-    : undefined;
-  const text = (key: string): string | undefined => {
-    const value = ctx.store[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
-  return {
-    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
-    ...(text("persona") ? { persona: text("persona")! } : {}),
-    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
-    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
-    ...(laneKey ? { contentLaneKey: laneKey } : {}),
-    laneEmphasis: laneQualityPolicy(lane).emphasis,
-  };
+  return channelCritiqueContextFromStore(ctx.store, laneQualityPolicy(lane).emphasis);
 }
 
 /**

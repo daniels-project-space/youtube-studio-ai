@@ -45,6 +45,7 @@ import {
   unavailableStoryboardCriticVerdict,
 } from "@/lib/storyboardCritic";
 import {
+  channelCritiqueContextFromStore,
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -157,21 +158,7 @@ export type CritiquedMotionComicStoryboard = CritiquedSelfContainedStory & {
 /** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
 function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
   const lane = ctx.store["contentLane"];
-  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
-    ? String((lane as { key?: unknown }).key)
-    : undefined;
-  const text = (key: string): string | undefined => {
-    const value = ctx.store[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
-  return {
-    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
-    ...(text("persona") ? { persona: text("persona")! } : {}),
-    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
-    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
-    ...(laneKey ? { contentLaneKey: laneKey } : {}),
-    laneEmphasis: laneQualityPolicy(lane).emphasis,
-  };
+  return channelCritiqueContextFromStore(ctx.store, laneQualityPolicy(lane).emphasis);
 }
 
 function motionComicAtlasIdentity(

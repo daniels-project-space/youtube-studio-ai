@@ -1371,6 +1371,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "persona",
       "styleGrammar",
       "criticDoctrine",
+      "showBible",
+      "styleDNA",
+      "bannedWords",
     ],
     providerProfiles: [managed],
     // Two planning candidates and two critic verdicts are the hard maximum.
@@ -1397,6 +1400,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
         // undeclared read, so this threw the moment its branch ran.
         "contentLane", "researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette",
         "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName", "visualRepair",
+        "persona", "styleGrammar", "criticDoctrine", "showBible", "styleDNA", "bannedWords",
       ],
       providerProfiles: [managed, local],
       // 16 panels × five sealed one-worker image envelopes, plus
@@ -1416,7 +1420,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // every generated beat. It is optional for frozen legacy invocations,
       // but must be declared whenever a current channel supplies it so the
       // guarded stage store can admit the read.
-      optionalConsumes: ["visualBrief", "styleDNA", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
+      optionalConsumes: ["visualBrief", "styleDNA", "showBible", "bannedWords", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
       providerProfiles: [managed, local],
       maxCostUsd: 30,
       maxCostUsdFor: (params, context) => loreShortCostCeiling(params, context),
@@ -1475,7 +1479,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "channelName", "contentLane","researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
+      "channelName", "persona", "criticDoctrine", "showBible", "bannedWords", "contentLane", "researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes the live direct-Novita primary/recovery panel
