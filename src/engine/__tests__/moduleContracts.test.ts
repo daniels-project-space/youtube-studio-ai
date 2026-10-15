@@ -20,6 +20,7 @@ import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   CATALOG_EXECUTION_BINDINGS,
   catalogExecutionBinding,
+  assessGoldenPromotion,
   GOLDEN_PROMOTION_PROOFS,
   selectGoldenProductionModules,
   type GoldenPromotionProof,
@@ -661,6 +662,28 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     /promotion proof is missing/,
     "Golden certification without an immutable proof receipt is insufficient",
   );
+
+  const musicModule = GOLDEN_MODULES.find((module) => module.key === "music")!;
+  const musicBinding = catalogExecutionBinding(musicModule.key);
+  const musicManifests = musicBinding.executableIds.map((id) => {
+    const manifest = manifests.find((candidate) => candidate.id === id);
+    assert.ok(manifest, `test fixture needs manifest ${id}`);
+    return {
+      ...manifest,
+      certification: { status: "golden" as const, evidence: "test promotion receipt" },
+    };
+  });
+  const musicProof = proofFor({ ...musicModule, status: "reference" }, musicManifests);
+  const musicDecision = assessGoldenPromotion({
+    module: { ...musicModule, status: "reference" },
+    manifests: musicManifests,
+    proof: musicProof,
+  });
+  assert.equal(musicDecision.promoted, false,
+    "a planner's quality contract must not qualify the separately paid music generator");
+  assert.ok(musicDecision.blockers.some((blocker) =>
+    blocker.includes("paid modules lack their own required fail-closed quality contract: music")),
+  "promotion diagnostics must name the paid module whose own quality contract is missing");
 
   const incompleteProof: GoldenPromotionProof = {
     ...proofFor(packageOpening, [certified]),

@@ -665,6 +665,15 @@ export function assessGoldenPromotion(args: {
   ) {
     blockers.push("bound module set has no required fail-closed quality contract");
   }
+  const paidWithoutQuality = boundManifests.filter((manifest) =>
+    manifest.costAndLatency.paid &&
+    !(manifest.qualityContract.required && manifest.qualityContract.failClosed),
+  );
+  if (paidWithoutQuality.length) {
+    blockers.push(
+      `paid modules lack their own required fail-closed quality contract: ${paidWithoutQuality.map((manifest) => manifest.id).join(", ")}`,
+    );
+  }
 
   const parsed = GoldenPromotionProofSchema.safeParse(args.proof);
   if (!parsed.success) {
