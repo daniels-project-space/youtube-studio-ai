@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 
 import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
-import { inspectStyleDNADraft, type StyleDNADraft } from "@/engine/creative/styleDNA";
+import {
+  ESTABLISHED_CONFIDENCE,
+  inspectStyleDNADraft,
+  styleDNAConfidence,
+  type StyleDNADraft,
+} from "@/engine/creative/styleDNA";
 
 const draft: StyleDNADraft = {
   palette: ["#17202A", "#E7B75A", "#D9E1E8"],
@@ -46,6 +51,11 @@ const draft: StyleDNADraft = {
 };
 
 assert.deepEqual(inspectStyleDNADraft(draft, true, "The Chalk Observatory"), []);
+assert.equal(styleDNAConfidence({ hasVision: true, hasTitles: true, hasDatabank: true, accepted: true }), 1);
+assert.ok(
+  styleDNAConfidence({ hasVision: true, hasTitles: true, hasDatabank: true, accepted: false }) < ESTABLISHED_CONFIDENCE,
+  "a fully grounded draft that failed specificity review must stay below the established threshold",
+);
 
 for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
   const requiresNarrative = CHANNEL_INCEPTION_FAMILY_POLICIES[family].requiresNarrativePlaybook;
@@ -71,6 +81,9 @@ const corruptions: Array<{ field: string; candidate: StyleDNADraft; issue: strin
   },
   { field: "audio.textures", candidate: { ...draft, audio: { ...draft.audio, textures: [] } }, issue: "audio.textures is empty" },
   { field: "audio.moodArc", candidate: { ...draft, audio: { ...draft.audio, moodArc: " " } }, issue: "audio.moodArc is empty" },
+  { field: "audio BPM bounds", candidate: { ...draft, audio: { ...draft.audio, bpmMin: 301 } }, issue: "audio BPM bounds must stay within 30–300" },
+  { field: "audio BPM order", candidate: { ...draft, audio: { ...draft.audio, bpmMin: 92, bpmMax: 72 } }, issue: "audio BPM minimum exceeds its maximum" },
+  { field: "audio LUFS", candidate: { ...draft, audio: { ...draft.audio, loudnessLufs: -8 } }, issue: "audio.loudnessLufs must stay within -23 to -12 LUFS" },
   { field: "narrative.scriptStyle", candidate: { ...draft, narrative: { ...draft.narrative!, scriptStyle: " " } }, issue: "narrative.scriptStyle is empty" },
   { field: "narrative.hookStyle", candidate: { ...draft, narrative: { ...draft.narrative!, hookStyle: " " } }, issue: "narrative.hookStyle is empty" },
   { field: "narrative.pacing", candidate: { ...draft, narrative: { ...draft.narrative!, pacing: " " } }, issue: "narrative.pacing is empty" },

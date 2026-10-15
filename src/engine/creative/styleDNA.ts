@@ -27,6 +27,8 @@ import { attachReferenceQualityContract } from "./referenceQuality";
 import type { QualityBar, QualityDimension, StyleDNA } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
+/** Confidence at or above this value is "established" only when grounding gaps are empty. */
+export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /** Visual signals mined by `refreshNicheResearchCore` (nicheIntelligence). */
 export interface ThumbnailStyleGuide {
@@ -145,6 +147,20 @@ const GENERIC_TELLS = [
   "a focused channel",
 ];
 
+export function styleDNAConfidence(input: {
+  hasVision: boolean;
+  hasTitles: boolean;
+  hasDatabank: boolean;
+  accepted: boolean;
+}): number {
+  let confidence = 0.45;
+  if (input.hasVision) confidence += 0.3;
+  if (input.hasTitles) confidence += 0.15;
+  if (input.hasDatabank) confidence += 0.1;
+  if (!input.accepted) confidence = Math.min(confidence * 0.7, ESTABLISHED_CONFIDENCE - 0.01);
+  return Math.min(1, Number(confidence.toFixed(2)));
+}
+
 /**
  * Trustworthy facts the model must not be allowed to fudge — folded into the
  * critique so a draft with no locked identity or generic filler can never pass.
@@ -178,9 +194,23 @@ export function inspectStyleDNADraft(raw: StyleDNADraft, narrated: boolean, chan
   if (!raw.motionDiscipline?.trim()) issues.push("motionDiscipline is empty");
   if (clampStrs(raw.visualAvoid, 10).length < 1) issues.push("visualAvoid has no explicit anti-patterns");
   if (!raw.audio?.genre?.trim()) issues.push("audio.genre is empty");
+  if (
+    !Number.isFinite(raw.audio?.bpmMin) || !Number.isFinite(raw.audio?.bpmMax) ||
+    raw.audio.bpmMin < 30 || raw.audio.bpmMin > 300 || raw.audio.bpmMax < 30 || raw.audio.bpmMax > 300
+  ) {
+    issues.push("audio BPM bounds must stay within 30–300 so the music module can preserve the declared tempo");
+  }
+  if (Number.isFinite(raw.audio?.bpmMin) && Number.isFinite(raw.audio?.bpmMax) && raw.audio.bpmMin > raw.audio.bpmMax) {
+    issues.push("audio BPM minimum exceeds its maximum");
+  }
   if (clampStrs(raw.audio?.instrumentation, 8).length < 1) issues.push("audio.instrumentation is empty");
   if (clampStrs(raw.audio?.textures, 4).length < 1) issues.push("audio.textures is empty");
   if (!raw.audio?.moodArc?.trim()) issues.push("audio.moodArc is empty");
+  if (
+    !Number.isFinite(raw.audio?.loudnessLufs) || raw.audio.loudnessLufs < -23 || raw.audio.loudnessLufs > -12
+  ) {
+    issues.push("audio.loudnessLufs must stay within -23 to -12 LUFS so the music module can honor the intended master level");
+  }
   if (narrated && !raw.narrative) {
     issues.push("narrated family but no narrative block (voiceProfile/scriptStyle missing)");
   } else if (narrated && raw.narrative) {
@@ -462,13 +492,13 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   }
   const raw = loop.value;
 
-  // Earn confidence from real grounding AND from clearing the specificity bar.
-  let confidence = 0.45; // the LLM ran and produced a structured spec
-  if (g.hasVision) confidence += 0.3;
-  if (g.hasTitles) confidence += 0.15;
-  if (g.hasDatabank) confidence += 0.1;
-  if (!loop.accepted) confidence *= 0.7; // critic never cleared the bar → flag for Doctor
-  confidence = Math.min(1, Number(confidence.toFixed(2)));
+  // Confidence alone must never establish a draft that failed its specificity review.
+  const confidence = styleDNAConfidence({
+    hasVision: g.hasVision,
+    hasTitles: g.hasTitles,
+    hasDatabank: g.hasDatabank,
+    accepted: loop.accepted,
+  });
   const gaps = [...g.gaps];
   if (!loop.accepted) {
     gaps.push(
@@ -538,7 +568,6 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   return dna;
 }
 
-/** Confidence at/above which a channel's grounding is "established" (Doctor-free). */
 /**
  * Self-contained deterministic engines can only MOVE in specific ways: the
  * distiller used to promise papercraft parallax/breathing cutouts the comic
@@ -551,8 +580,6 @@ const ENGINE_MOTION_LIMITS: Record<string, string> = {
   whiteboard:
     "ENGINE MOTION LIMITS (hard): a hand draws line-art and lettered labels onto a whiteboard, panel by panel, synced to narration. Do NOT promise camera moves, parallax, color-grade shifts or animated characters.",
 };
-
-export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /* --------------------------- Quality Bar ------------------------------ */
 
