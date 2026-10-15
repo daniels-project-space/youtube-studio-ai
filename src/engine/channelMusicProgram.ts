@@ -137,6 +137,14 @@ function validateChannelMusicProgramBody(
   if (program.role !== "sleep_sound_bed" && bpmRange === null) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "metered music roles require an explicit BPM range" });
   }
+  const rhythmicCue = sleepSoundRhythmicCue(program.role, program.identity.instrumentation);
+  if (rhythmicCue) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["identity", "instrumentation"],
+      message: `sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`,
+    });
+  }
   const sections = program.generation.sections;
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music sections must cover the full program from 0 to 1" });
@@ -404,11 +412,15 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
   ];
 }
 
-function assertRoleCompatibleIdentity(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): void {
-  if (role !== "sleep_sound_bed") return;
-  const rhythmicCue = instrumentation?.find((instrument) =>
+function sleepSoundRhythmicCue(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): string | undefined {
+  if (role !== "sleep_sound_bed") return undefined;
+  return instrumentation?.find((instrument) =>
     /\b(?:drums?|percussion|boom[-\s]?bap|kick|snare|hi[-\s]?hat|cymbals?|tambourine|shaker|groove|rhythmic)\b/iu.test(instrument),
   );
+}
+
+function assertRoleCompatibleIdentity(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): void {
+  const rhythmicCue = sleepSoundRhythmicCue(role, instrumentation);
   if (rhythmicCue) {
     throw new Error(`sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`);
   }

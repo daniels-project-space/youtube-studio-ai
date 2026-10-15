@@ -285,6 +285,23 @@ assert.throws(() => createChannelMusicProgram({
   instrumentation: ["soft sustained pad", "soft boom-bap drums"],
 }), /sleep soundscape cannot use rhythmic instrumentation: soft boom-bap drums/u,
 "sleep programs must reject a channel palette that contradicts their beatless role before generation");
+const conflictingSleepProgram = {
+  ...sleep,
+  identity: { ...sleep.identity, instrumentation: ["soft sustained pad", "soft boom-bap drums"] },
+  generation: {
+    ...sleep.generation,
+    structuredCaption: `${sleep.generation.structuredCaption} soft boom-bap drums`,
+  },
+};
+const { fingerprint: originalSleepFingerprint, ...conflictingSleepBody } = conflictingSleepProgram;
+assert.ok(originalSleepFingerprint);
+const reloadedSleep = ChannelMusicProgramSchema.safeParse({
+  ...conflictingSleepBody,
+  fingerprint: sha256Hex(canonicalJson(conflictingSleepBody)),
+});
+assert.equal(reloadedSleep.success, false, "reloaded sleep programs must not admit role-conflicting instrumentation");
+assert.match(JSON.stringify(reloadedSleep.error?.issues), /sleep soundscape cannot use rhythmic instrumentation: soft boom-bap drums/u,
+  "the persisted-program schema must report the role conflict, not only a changed fingerprint");
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
 assert.equal(sleep.identity.bpmRange, null,
   "sleep programs must not retain a contradictory BPM range from channel DNA or composer direction");
