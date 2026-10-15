@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
-import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { sha256BytesHex } from "@/lib/sha256";
+import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
 
 const ctx: StageContext = {
   ownerId: "owner-release-gate",
@@ -78,24 +78,28 @@ async function main() {
 
   const reusedAudio = Buffer.alloc(1_024, 9);
   objects.set("reused.mp3", reusedAudio);
-  const reuseReceipt = createMusicReuseReceipt({
-    ownerId: String(ctx.ownerId), baseRunId: "base-run", baseChannelId: "base-channel",
-    siblingChannelId: String(ctx.channelId), musicKey: "reused.mp3",
+  const reuseReceipt = {
+    ...musicReuseTestReceipt({ ownerId: String(ctx.ownerId), baseRunId: "base-run", baseChannelId: "base-channel",
+      siblingChannelId: String(ctx.channelId), family: "narrated_stock", contentLaneKey: "narrated_stock",
+      provider: "mureka", musicKey: "reused.mp3" }),
     audioSha256: sha256BytesHex(reusedAudio),
     audioByteLength: reusedAudio.byteLength,
-  });
+  };
   objectReads.length = 0;
   await assertMusicQualityForPublish({ ...ctx, store: {
     musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
     reuseMusicReceipt: reuseReceipt,
+    styleDNA: musicReuseTestStyleDNA,
   } });
   assert.deepEqual(objectReads, ["reused.mp3"], "reuse release re-reads and hashes the exact durable audio");
   for (const receipt of [undefined, { ...reuseReceipt, siblingChannelId: "foreign-sibling" },
-    { ...reuseReceipt, audioSha256: "b".repeat(64) }]) {
+    { ...reuseReceipt, audioSha256: "b".repeat(64) },
+    { ...reuseReceipt, soundProfileFingerprint: "c".repeat(64) }]) {
     objectReads.length = 0;
     await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
       musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
       reuseMusicReceipt: receipt,
+      styleDNA: musicReuseTestStyleDNA,
     } }), /music reuse receipt/u);
     assert.deepEqual(objectReads, ["reused.mp3"], "invalid or mismatched reuse proof cannot pass release");
   }
@@ -103,6 +107,7 @@ async function main() {
   await assert.rejects(assertMusicQualityForPublish({ ...ctx, store: {
     musicProvider: "reuse", musicKey: "reused.mp3", musicQualityReviewStatus: "not-required-reused-master",
     reuseMusicReceipt: reuseReceipt,
+    styleDNA: musicReuseTestStyleDNA,
   } }), /exact audio bytes/u, "same-length replacement bytes cannot pass a previously valid receipt");
 
   for (const provider of ["mureka", "suno"] as const) {

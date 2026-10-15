@@ -16,6 +16,7 @@ import { classifyExecutionError, ExecutionError } from "@/engine/executionErrors
 import type { Block, StageContext } from "@/engine/types";
 import { freezeChannelInceptionProbeContext } from "@/lib/channelInceptionProbe";
 import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { groupMusicSoundProfileFingerprint } from "@/lib/groupMusicProfile";
 import { createSerializedProgramEpisodeContext } from "@/lib/serializedProgramEpisodeContext";
 import {
   serializedProgramEpisodeIdentity,
@@ -124,6 +125,17 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const musicRoute = resolveChannelProgramRoute(musicBrief);
   const musicSeed = channelProgramRouteRunSeed({ route: musicRoute, programBrief: musicBrief });
   const topic = "Rainy city focus after midnight";
+  const musicStyleDNA = {
+    audio: {
+      genre: "dusty jazz-hop",
+      bpmRange: [68, 76],
+      instrumentation: ["felt piano", "upright bass"],
+      textures: ["soft vinyl noise"],
+      moodArc: "settle into focus, then resolve with quiet optimism",
+      loudnessLufs: -14,
+      loopable: true,
+    },
+  };
   const planned = await musicProgramPlan(stageContext({
     params: { visualStyle: "lofi", provider: "minimax_music3" },
     store: {
@@ -131,17 +143,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       topic,
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
-      styleDNA: {
-        audio: {
-          genre: "dusty jazz-hop",
-          bpmRange: [68, 76],
-          instrumentation: ["felt piano", "upright bass"],
-          textures: ["soft vinyl noise"],
-          moodArc: "settle into focus, then resolve with quiet optimism",
-          loudnessLufs: -14,
-          loopable: true,
-        },
-      },
+      styleDNA: musicStyleDNA,
     },
   }));
   const sealed = planned.musicProgramPlan as {
@@ -230,9 +232,13 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       reuseMusicReceipt: createMusicReuseReceipt({
         ownerId: "owner-program-route-test", baseRunId: "base-run", baseChannelId: "base-channel",
         siblingChannelId: "channel-program-route-test",
+        family: musicRoute.family, contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3",
         musicKey: "owner/test/channel/program-route/reused-music.mp3",
         audioSha256: "a".repeat(64), audioByteLength: 1_000,
+        soundProfileFingerprint: groupMusicSoundProfileFingerprint({ family: musicRoute.family,
+          contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3", styleDNA: musicStyleDNA })!,
       }),
+      styleDNA: musicStyleDNA,
     },
   }));
   assert.equal(reused.musicProvider, "reuse");

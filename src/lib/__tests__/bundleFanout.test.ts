@@ -18,9 +18,13 @@ const musicReuseReceipt = {
   baseRunId: "run_base",
   baseChannelId: "channel_base",
   siblingChannelId: "channel_es",
+  family: "narrated_stock",
+  contentLaneKey: "narrated_stock",
+  provider: "mureka" as const,
   musicKey: "owner/a/bundle/run_base/music.mp3",
   audioSha256: "a".repeat(64),
   audioByteLength: 1_000,
+  soundProfileFingerprint: "b".repeat(64),
 };
 
 function envelope() {

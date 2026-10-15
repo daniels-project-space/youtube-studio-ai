@@ -8,7 +8,7 @@ import { all, getManifest, require_ } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
-import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
 import { LOFI_PIPELINE, lofiBlocks } from "../lofiBlocks";
 import { music, musicFallbackPromptForRoute, musicProgramPlan } from "../musicBlocks";
@@ -124,11 +124,7 @@ async function main(): Promise<void> {
       const store: Record<string, unknown> = {
         topic: "Quiet focus after midnight",
         reuseMusicKey: "owner/test/base/music.mp3",
-        reuseMusicReceipt: createMusicReuseReceipt({
-          ownerId: "owner-music-test", baseRunId: "base-run", baseChannelId: "base-channel",
-          siblingChannelId: "channel-music-test", musicKey: "owner/test/base/music.mp3",
-          audioSha256: "a".repeat(64), audioByteLength: 1_000,
-        }),
+        styleDNA: musicReuseTestStyleDNA,
       };
       const ctx: StageContext = {
         ownerId: "owner-music-test",
@@ -140,6 +136,10 @@ async function main(): Promise<void> {
         budgetUsd: 0,
         log: () => {},
       };
+      let route = resolveChannelProgramRoute(createChannelProgramBrief({
+        family: "narrated_stock", nicheKey: "educational", locale: "en",
+        concept: "Original calm sessions with a repeatable viewer promise.",
+      }));
       if (family) {
         const brief = createChannelProgramBrief({
           family,
@@ -147,11 +147,18 @@ async function main(): Promise<void> {
           locale: "en",
           concept: "Original calm sessions with a repeatable viewer promise.",
         });
+        route = resolveChannelProgramRoute(brief);
         store.channelProgramRoute = channelProgramRouteRunSeed({
-          route: resolveChannelProgramRoute(brief),
+          route,
           programBrief: brief,
         });
       }
+      store.reuseMusicReceipt = musicReuseTestReceipt({
+        ownerId: "owner-music-test", baseRunId: "base-run", baseChannelId: "base-channel",
+        siblingChannelId: "channel-music-test", family: route.family, contentLaneKey: route.contentLaneKey,
+        provider: family === "music_loop" ? "minimax_music3" : "mureka",
+        musicKey: "owner/test/base/music.mp3",
+      });
       if (family === "music_loop") {
         await assert.rejects(
           require_("music").run(ctx),

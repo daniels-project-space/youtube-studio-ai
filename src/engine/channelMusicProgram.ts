@@ -241,6 +241,23 @@ export const ChannelMusicProgramSchema = ChannelMusicProgramBodyBaseSchema.exten
 
 export type ChannelMusicProgram = z.infer<typeof ChannelMusicProgramSchema>;
 
+/** Channel-level sound contract, excluding per-video topic and channel identifiers. */
+export function musicSoundProfileFingerprint(program: ChannelMusicProgram): string {
+  return sha256Hex(canonicalJson({
+    role: program.role,
+    identity: program.identity,
+    generation: {
+      providerPreference: program.generation.providerPreference,
+      durationSec: program.generation.durationSec,
+      instrumental: program.generation.instrumental,
+      lyricsControl: program.generation.lyricsControl,
+      sections: program.generation.sections,
+    },
+    mix: program.mix,
+    quality: program.quality,
+  }));
+}
+
 export interface CreateChannelMusicProgramInput {
   readonly channelId: string;
   readonly channelIdentityFingerprint: string;

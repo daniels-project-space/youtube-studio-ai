@@ -59,7 +59,8 @@ test("installed SDK makes one durable delivery attempt, preserving identity afte
         siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music",
           musicReuseReceipt: createMusicReuseReceipt({ ownerId: "owner-fixture", baseRunId: "base",
             baseChannelId: "base-channel", siblingChannelId: "sibling", musicKey: "retained-music",
-            audioSha256: "a".repeat(64), audioByteLength: 1_000 }) } });
+            family: "narrated_stock", contentLaneKey: "narrated_stock", provider: "mureka",
+            audioSha256: "a".repeat(64), audioByteLength: 1_000, soundProfileFingerprint: "b".repeat(64) }) } });
       const schedules = [
         { file: "bundleFanoutDispatcher", request: bundleFanoutDispatchSchedule({ runId: "child", envelope }) },
         { file: "serializedProgramEpisodeRetryDispatcher", request: serializedProgramEpisodeBusyRetrySchedule({

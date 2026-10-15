@@ -9,7 +9,7 @@ import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
 import { getObjectBytes } from "@/lib/storage";
 import { sha256BytesHex } from "@/lib/sha256";
 import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
-import { str } from "./blockContext";
+import { channelProgramRouteFromContext, str } from "./blockContext";
 import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
 
 /**
@@ -27,11 +27,15 @@ export async function assertMusicQualityForPublish(ctx: StageContext): Promise<v
   }
   if (provider === "reuse") {
     const musicKey = str(ctx, "musicKey");
+    const route = channelProgramRouteFromContext(ctx);
     assertMusicReuseReceipt({
       receipt: ctx.store["reuseMusicReceipt"],
       ownerId: ctx.ownerId,
       siblingChannelId: String(ctx.channelId),
       musicKey,
+      currentFamily: route?.family,
+      currentContentLaneKey: route?.contentLaneKey,
+      currentStyleDNA: ctx.store["styleDNA"],
       audioBytes: await getObjectBytes(musicKey),
     });
     ctx.log("upload_draft: admitted byte-bound render-group music reuse receipt");

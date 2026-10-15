@@ -455,7 +455,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: [
         // Music is absent on non-music routes; when present, retain its source
         // identity and audition evidence through the final upload package.
-        "channelMusicProgramKey", "channelMusicProgramFingerprint", "musicProvider", "musicKey", "reuseMusicReceipt",
+        "channelMusicProgramKey", "channelMusicProgramFingerprint", "musicProvider", "musicKey", "reuseMusicReceipt", "styleDNA",
         "musicAuditionSourceKey", "musicAuditionWavKey", "musicRuntimeReceiptKey", "musicNativeWavKey",
         "musicQualityReceiptKey", "musicQualityReviewStatus", "finalMasterReleaseCertificate",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
@@ -1492,6 +1492,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "script",
       "narrationText",
       "musicKey",
+      "musicProvider",
+      "styleDNA",
       "footageClips",
       "footageKeys",
       "thirdPartyStockEvidence",

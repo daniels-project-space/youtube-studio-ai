@@ -10,6 +10,7 @@ import {
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
   music3StructuredCaptionWordCount,
   musicRoleForRoute,
+  musicSoundProfileFingerprint,
   primaryMusicFallbackProfile,
 } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -62,6 +63,37 @@ assert.equal(meditation.mix.bodyMusicVol, 0.25,
   "a specific meditation lane must not inherit primary-music full volume from its broad family");
 assert.equal(meditation.mix.narrationPriority, false);
 assert.equal(meditation.quality.minimumLraLu, 2);
+const meditationSibling = createChannelMusicProgram({
+  channelId: "channel-meditation-es",
+  channelIdentityFingerprint: sha("e"),
+  family: "music_loop",
+  contentLaneKey: "meditation",
+  topic: "A different episode topic",
+  providerPreference: meditation.generation.providerPreference,
+  durationSec: meditation.generation.durationSec,
+  genre: meditation.identity.genre,
+  instrumentation: meditation.identity.instrumentation,
+  textures: meditation.identity.textures,
+  bpmRange: meditation.identity.bpmRange ?? undefined,
+  moodArc: meditation.identity.moodArc,
+  targetLufs: meditation.mix.targetLufs,
+  bodyMusicVol: meditation.mix.bodyMusicVol,
+});
+assert.equal(musicSoundProfileFingerprint(meditation), musicSoundProfileFingerprint(meditationSibling),
+  "channel and episode identifiers do not create a false sound-profile mismatch");
+const differentSound = createChannelMusicProgram({
+  channelId: "channel-meditation-different-sound",
+  channelIdentityFingerprint: sha("f"),
+  family: "music_loop",
+  contentLaneKey: "meditation",
+  topic: "A different episode topic",
+  genre: "warm acoustic folk",
+  instrumentation: ["nylon guitar", "upright bass"],
+  textures: ["close wooden resonance"],
+  moodArc: meditation.identity.moodArc,
+});
+assert.notEqual(musicSoundProfileFingerprint(meditation), musicSoundProfileFingerprint(differentSound),
+  "a channel with different authored instrumentation cannot reuse this sound profile");
 assert.throws(() => createChannelMusicProgram({
   channelId: "channel-meditation-conflict",
   channelIdentityFingerprint: sha("d"),
