@@ -13,7 +13,7 @@ const text = (maximum: number) => z.string().trim().min(1).max(maximum);
 const NativeOutputIntegritySchema = z.object({
   contentSha256: FingerprintSchema,
   byteLength: z.number().int().min(44).max(50_000_000),
-}).strict();
+}).passthrough();
 
 /**
  * A content-addressed key and a worker receipt alone do not prove that R2

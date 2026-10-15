@@ -24,6 +24,14 @@ assert.deepEqual(
   assertMusicAuditionNativeBytes({ expected: retainedWavIntegrity, bytes: retainedWavBytes }),
   retainedWavIntegrity,
 );
+assert.deepEqual(
+  assertMusicAuditionNativeBytes({
+    expected: { ...retainedWavIntegrity, durationSec: 12, sampleRateHz: 32_000, channels: 2, codec: "pcm_s16le" },
+    bytes: retainedWavBytes,
+  }),
+  retainedWavIntegrity,
+  "provider receipts may include format metadata while byte admission remains hash-and-length exact",
+);
 assert.throws(
   () => assertMusicAuditionNativeBytes({ expected: retainedWavIntegrity, bytes: new Uint8Array([...retainedWavBytes, 0]) }),
   /retained native Music3 WAV does not match/u,
