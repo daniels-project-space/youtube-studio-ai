@@ -625,8 +625,8 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
       : "Scroll-stopping in the first 1-2s; clear payoff promise.",
     captions: "Time-critical on-screen copy is mobile-legible and correctly timed: karaoke captions where narrated; otherwise prompts, options, timer, and reveal text stay readable without covering the answer or subject.",
     pacing: dna.narrative
-      ? `Tight, pattern-interrupted pacing with no dead air; ${dna.narrative.pacing}.`
-      : "Tight, pattern-interrupted pacing with no dead air.",
+      ? `Follow this channel's intended pacing: ${dna.narrative.pacing}. Transitions should earn the next beat; preserve intentional rests and avoid unplanned dead air.`
+      : "Keep the pacing purposeful for this format; transitions should earn the next beat, and avoid unplanned dead air.",
     motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
   // Deterministic floors the iteration loop cannot game.

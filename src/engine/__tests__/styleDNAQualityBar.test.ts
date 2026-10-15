@@ -116,6 +116,17 @@ assert.match(
   /each beat earns the next reveal/,
 );
 
+const deliberateRestPacing = buildQualityBar("children_learning", {
+  ...DNA,
+  narrative: {
+    ...DNA.narrative!,
+    pacing: "gentle call-and-response with a full breath for learners to answer",
+  },
+}, 123).dimensions.find((dimension) => dimension.id === "pacing");
+assert.match(deliberateRestPacing?.description ?? "", /full breath for learners to answer/);
+assert.match(deliberateRestPacing?.description ?? "", /preserve intentional rests/);
+assert.doesNotMatch(deliberateRestPacing?.description ?? "", /pattern-interrupted/u);
+
 const whiteboardMotion = buildQualityBar("whiteboard", {
   ...DNA,
   motionVocabulary: ["hand reveals each diagram line", "labels appear with narration"],
