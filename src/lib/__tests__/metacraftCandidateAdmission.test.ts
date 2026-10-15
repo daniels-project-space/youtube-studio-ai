@@ -11,6 +11,7 @@ const manifest = JSON.parse(readFileSync('test-fixtures/title-baseline/manifest.
 let title = '';
 let generatorCalls = 0;
 let judgeCalls = 0;
+let pinnedCommentCalls = 0;
 let rejectedTitle = '';
 let generatedTitles: string[] | undefined;
 let preferredTitle = '';
@@ -22,7 +23,10 @@ loader._load = function (request, ...rest) {
   const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
   if (!request.endsWith('/creativeText')) return resolved;
   return { ...resolved, hasCreativeTextKey: () => true, creativeTextJson: async ({ prompt }: { prompt: string }) => {
-    if (prompt.includes('pinned comment')) return { comment: 'Which detail stood out?' };
+    if (prompt.includes('pinned comment')) {
+      pinnedCommentCalls++;
+      return { comment: 'Which detail stood out?' };
+    }
     if (prompt.includes('description + tags')) return { description: 'Fixture package.', tagsCsv: 'a,b,c,d,e' };
     if (prompt.startsWith('You are a YouTube CTR strategist')) {
       judgeCalls++;
@@ -65,6 +69,7 @@ async function main() {
       warmStartTitle: `${title} 999999`,
     });
     assert.equal(output.title, title, `${selected.channel}: invalid provisional claim cannot suppress a valid generated title`);
+    assert.equal(output.pinnedComment, '', 'unused pinned-comment compatibility output remains empty');
     assert.equal(generatorCalls, 1, 'No avoidable second paid generation');
     assert.equal(judgeCalls, 1);
   }
@@ -123,6 +128,7 @@ async function main() {
   assert.equal(judgeCalls, 1, 'the collapsed slate never reaches the paid semantic judge');
   forceCollapsedFirstSlate = false;
   collapsedSlateAttempts = 0;
+  assert.equal(pinnedCommentCalls, 0, 'metadata must not buy comments until the publishing flow consumes them');
 
   for (const [left, right] of [
     ['The Bridge Failed After 4 Years', 'The Bridge Failed After 40 Years'],

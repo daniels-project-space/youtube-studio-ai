@@ -57,7 +57,7 @@ async function main() {
     const graph = validatePipeline([{ block: "metadata", version: DELIVERY_METADATA_VERSION, params: ctx.params }], Object.keys(ctx.store));
     const result = await runPipeline(graph, { ...ctx, seedStore: ctx.store, sink: { async upsert() {}, async upsertArtifacts() {} } });
     assert.equal(result.ok, true, result.error); assert.equal(result.store.title, title);
-    assert.equal(prompts.length, 4);
+    assert.equal(prompts.length, 3, "title generation, judge and description package remain; unused comment spend is absent");
     for (const prompt of prompts) {
       const context = JSON.parse(prompt.split("VIDEO CONTEXT JSON:\n")[1].split("\nEND VIDEO CONTEXT")[0]);
       assert.deepEqual(context.delivery, { basis: "planned", durationSec: 7200 });
@@ -83,7 +83,7 @@ async function main() {
     assert.equal(prompts.length, 0);
     const legacy = await getManifest("metadata").execute(ctx);
     assert.equal(legacy.titleDecision, null, "legacy degraded behavior is unchanged");
-    console.log("DELIVERY METADATA PASS: actual creator and runner, four creative consumers, planned/measured separation, short-source isolation, duration refusal before judge, sealed receipt and legacy parity; providers synthetic.");
+    console.log("DELIVERY METADATA PASS: actual creator and runner, three creative consumers, planned/measured separation, short-source isolation, duration refusal before judge, sealed receipt and legacy parity; providers synthetic.");
   } finally { loader._load = originalLoad; globalThis.fetch = originalFetch; }
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

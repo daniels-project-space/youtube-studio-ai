@@ -65,9 +65,9 @@ async function main() {
   assert.ok(prompts[0]?.includes(JSON.stringify(full)), 'Generator lost exact full narration at the production caller');
   assert.equal(output?.title, candidate, 'Late-source claim must survive the actual lint and finishing path');
   const contexts = prompts.map(contextFrom);
-  assert.equal(contexts.length, 4);
+  assert.equal(contexts.length, 3);
   for (const context of contexts) {
-    assert.deepEqual(context, contexts[0], 'Generation, judge, description and comment must share source and identity');
+    assert.deepEqual(context, contexts[0], 'Generation, judge and description must share source and identity');
     assert.equal(context.source.text, full);
     assert.equal(context.source.kind, 'full_narration');
     assert.equal(context.channel.persona, baseStore.persona);

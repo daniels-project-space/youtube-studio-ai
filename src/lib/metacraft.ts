@@ -10,7 +10,7 @@
  *        → 7 source- and identity-aware title candidates
  *        → deterministic lint (claims grounding, truncation, setup-prefix ban)
  *        → feed judge (supported, clickScore + directness + identityFit + viewer motivation ≥7)
- *        → ONE description+tags and optional pinned comment in parallel
+ *        → ONE description+tags package for the admitted winner
  *
  * Title doctrine: SHORT and DIRECT (format-aware bounds) — the point itself, never a
  * setup for the point; no scene-setting prefixes or two-part colon
@@ -24,7 +24,7 @@
  *   const meta = await craftMetadata({ topic, channelName, niche, coldOpen,
  *     narrationText, hookLoop, quote, competitorTitles, log });
  *   // meta.title · meta.description · meta.tags · meta.titleAlternate (CTR
- *   // swap) · meta.titleDecision · meta.pinnedComment · meta.frame/clickScore/suggests/feed
+ *   // swap) · meta.titleDecision · meta.frame/clickScore/suggests/feed
  *
  * Deps: OPENROUTER_API_KEY (vault "openrouter"); live competitor research rides
  * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
@@ -819,7 +819,7 @@ export interface CraftedMetadata {
   tags: string[];
   /** Runner-up title — a future native-test candidate, never an auto-swap instruction. */
   titleAlternate: string;
-  /** Comment-seeding question for the upload block to pin. */
+  /** Reserved for a future owner-approved publishing consumer; currently empty. */
   pinnedComment: string;
   frame: string;
   /**
@@ -1002,40 +1002,6 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       `their length, framing, and phrasing${feedAvgLen ? `; they average ${feedAvgLen} chars` : ""}):\n` +
       feed.map((c) => `${c.views >= 1e6 ? `${(c.views / 1e6).toFixed(1)}M` : `${Math.round(c.views / 1e3)}k`} — "${c.title}"`).join("\n")
     : "";
-
-  // Pinned comment doesn't depend on the winning title, so once a title is
-  // admitted we can craft it in parallel with the ancillary package (it seeds
-  // discussion about the episode's tension). Keeping this lazy avoids paying
-  // for an optional comment when title generation/judging fails closed.
-  //
-  // maxTokens was 300, and that produced an EMPTY pinned comment on every video
-  // ever made. The route is a reasoning model: the ceiling has to cover the
-  // reasoning AND the answer, and at 300 the budget was gone before any JSON
-  // was emitted, so the call failed its contract 100% of the time. Measured on
-  // this exact prompt: 300 and 600 fail every attempt, 1200 and 2000 succeed.
-  //
-  // There is no safe universal floor to hoist this to — how much the model
-  // reasons depends on the prompt, and simpler prompts clear 700 comfortably.
-  // What makes the class survivable is the logging below, not the number.
-  const makePinnedComment = (): Promise<string> => creativeTextJson<{ comment?: string }>({
-    beforeDispatch: a.beforePurchase,
-    prompt:
-      `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
-      `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
-      `("what do you think?"), never engagement-bait. ${a.hookLoop ? `The video's promise: "${a.hookLoop}". ` : ""}` +
-      `Return STRICT JSON {"comment":string}.\n\n${ancillaryVideoContext}${lang}`,
-    maxTokens: 1200,
-    temperature: 0.8,
-  })
-    .then((p) => (p.comment ?? "").trim())
-    // A pinned comment is genuinely optional, so failing soft is right — but
-    // `.catch(() => "")` said nothing, which is how a feature stayed dead in
-    // production indefinitely. Degrade quietly in behaviour, never in the log.
-    .catch((error: unknown) => {
-      if (error instanceof ExecutionError && error.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw error;
-      a.log?.(`metacraft: pinned comment failed, shipping without one: ${error instanceof Error ? error.message : String(error)}`);
-      return "";
-    });
 
   let fixNote = "";
   let lastIssues: string[] = [];
@@ -1377,11 +1343,6 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           `preserving the judged title with deterministic package fallback`,
         );
       }
-      // The pinned comment is optional. Start it only after the required
-      // description/tags package has been admitted: if that request fails or
-      // has an ambiguous post-dispatch outcome, there is no metadata package
-      // to ship and an in-flight comment would be avoidable provider spend.
-      const pinnedComment = packageFallback ? "" : await makePinnedComment();
       if (!titleDecision) throw new Error("metacraft: title decision receipt missing after judge admission");
       a.log?.(
         `metacraft: [${w.frame}] wins (${judged ? `click ${score}/10` : "UNJUDGED — lint only"}) ` +
@@ -1392,7 +1353,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         description,
         tags,
         titleAlternate: runner >= 0 ? survivors[runner]?.title ?? "" : "",
-        pinnedComment,
+        pinnedComment: "",
         frame: w.frame,
         clickScore: score,
         judged,
