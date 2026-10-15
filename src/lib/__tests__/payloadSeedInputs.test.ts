@@ -37,6 +37,15 @@ type EveryKeyIsAcceptedByRunPipeline =
 const _acceptedByRunPipeline: EveryKeyIsAcceptedByRunPipeline = true;
 void _acceptedByRunPipeline;
 
+// A caller-supplied value cannot stand in for authored cinematic direction or
+// the human editor's signature; those artifacts need a separate authority path.
+type HumanReviewCannotBePayloadSeed = Extract<
+  keyof RunPipelineInput,
+  "cinematicCaseDirection" | "cinematicSequenceEditorialReview"
+> extends never ? true : never;
+const _humanReviewCannotBePayloadSeed: HumanReviewCannotBePayloadSeed = true;
+void _humanReviewCannotBePayloadSeed;
+
 /* ------------------------------ the seeding ------------------------------- */
 
 assert.deepEqual(
