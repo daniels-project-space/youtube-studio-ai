@@ -7,6 +7,8 @@ import {
   type AcceptedMusicArrangement, type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
 import { compilePipeline, type PipelinePolicy } from "@/engine/pipelineCompiler";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { runPipeline } from "@/engine/runner";
 import { stageReuseHash } from "@/engine/stageReuse";
 import type { PipelineEntry, RunStageSink } from "@/engine/types";
@@ -104,6 +106,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
   let httpCalls = 0;
   let leaseChecks = 0;
   let dispatchChecks = 0;
+  let validMusicBrief: Record<string, unknown> | undefined;
   const prompts: string[] = [];
   globalThis.fetch = async () => { httpCalls++; throw new Error("handoff fixture forbids every network request"); };
   loader._load = function (id, ...args) {
@@ -143,6 +146,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     assert.equal(alternate.block.paid, true);
     assert.equal(registry.allManifests().includes(alternate), false);
     assert.equal(planner.produces.acceptedMusicArrangement.opaque, false);
+    assert.ok(planner.optionalConsumes.channelProgramRoute, "planner must declare the route read enforced by the runner");
     assert.equal(baseline.capabilities.includes("crew.accepted_music_arrangement"), false);
     assert.ok(alternate.capabilities.includes("crew.accepted_music_arrangement"));
     assert.ok(planner.requiredCapabilities.includes("crew.accepted_music_arrangement"));
@@ -206,6 +210,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       const producedBrief = f.result.store.musicBrief as {
         config: { voiceFx: string }; directives: Record<string, unknown>;
       };
+      validMusicBrief = structuredClone(f.result.store.musicBrief as Record<string, unknown>);
       assert.equal(producedBrief.config.voiceFx, "none", "exercise the real default-none producer path");
       assert.equal(Object.hasOwn(producedBrief.directives, "voiceFx"), false, "producer must omit the JSON-unsafe optional value");
       assert.deepEqual(artifact.arrangement, arrangement, "no downstream authoring or section replacement");
@@ -269,6 +274,36 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     assert.equal(legacyBrief.arrangement, undefined);
     assert.equal(legacy.resolved.blocks[0], composerBriefBlock);
     const callsBeforeMissing = llmCalls;
+    const frozenRoute = (family: "sleep" | "music_loop") => {
+      const programBrief = createChannelProgramBrief({
+        family, nicheKey: "educational", locale: "en",
+        concept: "A consistent, carefully arranged listening experience.",
+      });
+      return channelProgramRouteRunSeed({
+        route: resolveChannelProgramRoute(programBrief), programBrief,
+      });
+    };
+    const sleepRoute = frozenRoute("sleep");
+    const briefForRoute = (arrangement: AcceptedMusicArrangementDraft) => {
+      const routeBrief = structuredClone(validMusicBrief!);
+      delete routeBrief.musicIntent;
+      routeBrief.arrangement = arrangement;
+      return routeBrief;
+    };
+    await assert.rejects(planner.execute({
+      ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "route-sleep-mismatch",
+      keyPrefix: "fixtures/accepted-arrangement/", params: {},
+      store: { topic: seedStore.topic, musicBrief: briefForRoute(draft("primary_music")), channelProgramRoute: sleepRoute },
+      budgetUsd: 1, log: () => {},
+    }), /requires a sleep_sound_bed arrangement/);
+    const musicLoopRoute = frozenRoute("music_loop");
+    const oneShotScore = draft("primary_music", true);
+    await assert.rejects(planner.execute({
+      ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "route-music-loop-once",
+      keyPrefix: "fixtures/accepted-arrangement/", params: {},
+      store: { topic: seedStore.topic, musicBrief: briefForRoute(oneShotScore), channelProgramRoute: musicLoopRoute },
+      budgetUsd: 1, log: () => {},
+    }), /requires repeating playback/);
     await assert.rejects(planner.execute({
       ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "legacy-missing-arrangement",
       keyPrefix: "fixtures/accepted-arrangement/", params: {},

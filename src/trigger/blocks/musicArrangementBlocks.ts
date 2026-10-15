@@ -14,6 +14,8 @@ import type { ComposerDirectives } from "@/lib/crew/composer";
 import { agentJsonConfiguration } from "@/agents/mastra";
 import { arrangementComposerReservation, assertArrangementComposerAdmission } from "@/lib/arrangementComposerBudget";
 import { createComposerBriefBlock } from "./crewBlocks";
+import { musicRoleForRoute } from "@/engine/channelMusicProgram";
+import { channelProgramRouteFromContext } from "./blockContext";
 
 export const ARRANGEMENT_COMPOSER_VERSION = "2.1.0-channel-grounding";
 export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.1.0-yue2-score-grounding";
@@ -99,6 +101,16 @@ export const musicArrangementPlan: Block = {
       throw new Error("music_arrangement_plan requires a non-empty topic");
     }
     if (!ctx.channelId) throw new Error("music_arrangement_plan requires a channel id");
+    const route = channelProgramRouteFromContext(ctx);
+    if (route) {
+      const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
+      if (brief.arrangement.role !== expectedRole) {
+        throw new Error(`music_arrangement_plan requires a ${expectedRole} arrangement for route ${route.routeKey}`);
+      }
+      if (route.requiredBlocks.includes("music_program_plan") && brief.arrangement.playback !== "repeat") {
+        throw new Error(`music_arrangement_plan requires repeating playback for route ${route.routeKey}`);
+      }
+    }
     return {
       acceptedMusicArrangement: createAcceptedMusicArrangement({
         ownerId: ctx.ownerId,
