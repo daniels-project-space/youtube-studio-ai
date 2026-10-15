@@ -14,7 +14,7 @@ The opt-in composer version accepts typed `params.musicIntent` constraints:
 [
   {
     "block": "composer_brief",
-    "version": "2.0.0-accepted-arrangement",
+    "version": "2.1.0-channel-grounding",
     "params": {
       "musicIntent": {
         "role": "narration_bed",
@@ -31,7 +31,8 @@ The opt-in composer version accepts typed `params.musicIntent` constraints:
 
 Each field is optional; omitted fields remain composer decisions guided by the
 frozen channel/episode context, not invented family defaults. Role supports
-`primary_music`, `narration_bed`, `meditation_bed` and `short_form_bed`. Duration
+`primary_music`, `narration_bed`, `meditation_bed`, `sleep_sound_bed` and
+`short_form_bed`. Duration
 is the requested **native source piece**, an integer from 10 to 300 seconds, not
 the final session/video duration. Form is `continuous`, `through_composed` or
 `sectional`. Ending and playback remain independent: a natural cadence may repeat
@@ -47,7 +48,7 @@ cannot make an arrangement that contradicts retained intent pass validation.
 The existing YuE request constructor therefore validates the same constraints
 before transport. Absence of intent leaves existing artifact shape/hashes intact.
 
-Local evidence covers all four roles through the real compiler/runner/composer/
+Local evidence covers all five roles through the real compiler/runner/composer/
 planner/YuE-request path, wrong values for every control, zero-dispatch invalid
 inputs, immutable review grounding and preservation of one observed synthetic
 charge after rejection despite a configured retry allowance. Provider transport
@@ -71,10 +72,20 @@ does not establish production readiness or real generated-audio quality.
 
 ## Accepted arrangement entry
 
+The current composer versions (`2.1.0-channel-grounding` and
+`3.1.0-yue2-score-grounding`) require `channelGrounding`: exact quoted cues from
+the frozen channel identity and episode topic, at least two distinct musical
+dimensions for each cue, and section IDs showing where each decision applies.
+The accepted-artifact fingerprint retains this evidence and the YuE style
+projection carries it to the provider. Missing, invented, or unlinked cues hold
+the paid composer result; this is traceable creative intent, not acoustic proof
+that the rendered audio followed it. Older accepted arrangements remain
+readable without invented grounding evidence.
+
 ### Isolated live composer evaluation
 
 `src/scripts/evaluate-music-composer.ts` invokes the actual opt-in
-`3.0.0-yue2-score` composer and deterministic arrangement planner from a frozen
+`3.1.0-yue2-score-grounding` composer and deterministic arrangement planner from a frozen
 local input. It never mutates a channel/run or submits GPU work. The input names
 its provenance, owner/channel/evaluation-run IDs, frozen seed store, family,
 music intent, seed and text budget. A channel slug is required to prevent the

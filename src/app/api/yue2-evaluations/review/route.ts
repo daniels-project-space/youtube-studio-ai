@@ -97,6 +97,7 @@ export async function GET(request: Request) {
         topic: material.request.acceptedArrangement.topic,
         sourceBriefFingerprint: material.request.acceptedArrangement.sourceBriefFingerprint,
         reviewContext: material.request.acceptedArrangement.reviewContext ?? null,
+        channelGrounding: material.request.acceptedArrangement.channelGrounding ?? null,
         contextRetained: material.request.acceptedArrangement.reviewContext !== undefined,
         channelPersonalityVerified: false,
       },

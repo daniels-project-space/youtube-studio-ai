@@ -6,6 +6,7 @@ import type { z } from "zod";
 import type { ShowBible } from "@/engine/creative/types";
 import {
   AcceptedMusicArrangementSchema,
+  createMusicReviewContext,
   type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -23,11 +24,34 @@ let providerError: Error | undefined;
 let fixtureChargeUsd: number | undefined;
 let networkCalls = 0;
 let routingProbe = false;
+let omitGrounding = false;
 const routedRequests: { tier?: string; system?: string }[] = [];
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in arrangement tests"); };
+function channelGroundingFor(draft: AcceptedMusicArrangementDraft) {
+  const sectionIds = draft.sections.map((section) => section.id);
+  const entry = (source: string, cue: string, dimensions: readonly [string, string][]) => ({ source, cue,
+    decisions: dimensions.map(([dimension, choice]) => ({ dimension, choice })), sectionIds });
+  return [
+    entry("channel_persona", seedStore.persona, [
+      ["space", "Keep the stereo image close and intimate, with no distant or arena-sized reverb."],
+      ["dynamics", "Keep level and density restrained so no gesture becomes theatrical or attention seeking."],
+    ]),
+    entry("episode_topic", seedStore.topic, [
+      ["texture", "Use a quiet, slowly changing upper haze that suggests a night horizon without literal sound effects."],
+      ["harmony", "Hold a suspended open interval so the episode feels unresolved but calm rather than dramatic."],
+    ]),
+  ];
+}
+function responseWithGrounding(value: unknown): unknown {
+  if (omitGrounding || !value || typeof value !== "object" || !("arrangement" in value) || "channelGrounding" in value) return structuredClone(value);
+  const arrangement = (value as { arrangement?: unknown }).arrangement;
+  if (!arrangement || typeof arrangement !== "object" || !("sections" in arrangement)) return structuredClone(value);
+  const draft = arrangement as AcceptedMusicArrangementDraft;
+  return { ...structuredClone(value as object), channelGrounding: channelGroundingFor(draft) };
+}
 loader._load = function (id, ...args) {
   if (id === "@/agents/mastra" && !routingProbe) return {
     agentJsonConfiguration: () => ({ model: openRouterModel("intelligence"), system: "Fixture composer system" }),
@@ -38,14 +62,14 @@ loader._load = function (id, ...args) {
       if (fixtureChargeUsd !== undefined) recordModelUsage({
         provider: "fixture", model: "fixture-composer", kind: "text", reportedCostUsd: fixtureChargeUsd,
       });
-      return structuredClone(response);
+      return responseWithGrounding(response);
     },
   };
   if (id === "@/lib/creativeText" && routingProbe) return {
     hasCreativeTextKey: () => true,
     creativeTextJson: async (request: { tier?: string; system?: string }) => {
       routedRequests.push(request);
-      return structuredClone(response);
+      return responseWithGrounding(response);
     },
   };
   return originalLoad.call(this, id, ...args);
@@ -154,6 +178,8 @@ async function main() {
     assert.equal(accepted.reviewContext?.topic, seedStore.topic);
     assert.equal(accepted.reviewContext?.channelName, seedStore.channelName);
     assert.equal(accepted.reviewContext?.family, family);
+    assert.equal(accepted.channelGrounding?.length, 2);
+    assert.ok(accepted.channelGrounding?.every((entry) => entry.sectionIds.length === arrangement.sections.length));
     assert.deepEqual(accepted.arrangement, arrangement, "no inferred sections, normalization, or duration clamp");
     assert.equal(accepted.sourceBriefFingerprint, sha256Hex(canonicalJson(result.store.musicBrief)));
     for (const key of ["ownerId", "channelId", "runId"] as const) assert.equal(accepted[key], stageContext()[key]);
@@ -178,6 +204,9 @@ async function main() {
       assert.ok(producedBrief.reviewContext.promptContext.includes(value), `missing review grounding: ${value}`);
     }
     assert.ok(request.prompt.includes(`Content family: ${producedBrief.reviewContext.family}.`));
+    const boundYuE = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
+    assert.match(boundYuE.job.style, /Grounded channel and episode decisions:/);
+    assert.match(boundYuE.job.style, /Observant, intimate, never theatrical/);
     assert.ok(!request.schema.safeParse({ ...response as object, inventedField: true }).success);
     assert.ok(!request.schema.safeParse({ ...response as object, reviewContext: producedBrief.reviewContext }).success,
       "the model cannot author its own channel-context evidence");
@@ -192,6 +221,26 @@ async function main() {
     assert.notEqual(changed.sourceBriefFingerprint, accepted.sourceBriefFingerprint);
     assert.deepEqual(changed.arrangement, arrangement);
   }
+
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20 };
+  omitGrounding = true;
+  const beforeUngrounded = calls.length;
+  await assert.rejects(selected.execute(stageContext()), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+  assert.equal(calls.length, beforeUngrounded + 1, "a generic direction without traceable channel decisions is held after its single paid response");
+  omitGrounding = false;
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20, channelGrounding: [
+    { source: "channel_persona", cue: "invented identity cue", decisions: [
+      { dimension: "space", choice: "Keep the stereo image close and intimate, with no distant or arena-sized reverb." },
+      { dimension: "dynamics", choice: "Keep level and density restrained so no gesture becomes theatrical or attention seeking." },
+    ], sectionIds: flat.sections.map(section => section.id) },
+    { source: "episode_topic", cue: seedStore.topic, decisions: [
+      { dimension: "texture", choice: "Use a quiet, slowly changing upper haze that suggests a night horizon without literal sound effects." },
+      { dimension: "harmony", choice: "Hold a suspended open interval so the episode feels unresolved but calm rather than dramatic." },
+    ], sectionIds: flat.sections.map(section => section.id) },
+  ] };
+  const beforeInvented = calls.length;
+  await assert.rejects(selected.execute(stageContext()), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+  assert.equal(calls.length, beforeInvented + 1, "an invented identity cue cannot be accepted as grounding evidence");
 
   for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
     const musicIntent = { role, requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
@@ -222,8 +271,11 @@ async function main() {
     await assert.rejects(selected.execute({ ...stageContext(), params: { musicIntent } }),
       /PAID_STAGE_RECONCILIATION_REQUIRED[\s\S]*conflicts with explicit music intent/);
     assert.equal(calls.length, before + 1, "a conflicting paid output must not trigger another purchase");
+    const reviewContext = createMusicReviewContext({ topic: seedStore.topic, family: "music_loop",
+      channelName: seedStore.channelName, promptContext: `Channel persona: ${seedStore.persona}. Video topic: "${seedStore.topic}".` });
     await assert.rejects(musicArrangementPlan.run(stageContext({ topic: seedStore.topic, musicBrief: {
       musicPrompt: flat.direction, audio: { duckDb: -15, bedLufs: -20 }, arrangement: flat, musicIntent,
+      reviewContext, channelGrounding: channelGroundingFor(flat),
     } })), /conflicts with explicit music intent/, "planner also checks restored briefs independently");
   }
   fixtureChargeUsd = 0.07;

@@ -17,7 +17,7 @@ import {
   createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest, YuE2EvaluationClient,
 } from "@/lib/yue2Evaluation";
 
-const composerVersion = "2.0.0-accepted-arrangement";
+const composerVersion = "2.1.0-channel-grounding";
 const policy: PipelinePolicy = {
   id: "accepted-arrangement-cpu-handoff", version: "1.0.0", minimumCertification: "contract",
   requiredCapabilities: ["crew.composer_cue_sheet", "music.arrangement.accepted"],
@@ -61,7 +61,21 @@ function draft(role: AcceptedMusicArrangementDraft["role"], shaped = false): Acc
   };
 }
 
-function expectedStyle(arrangement: AcceptedMusicArrangementDraft): string {
+function groundingFor(arrangement: AcceptedMusicArrangementDraft) {
+  const sectionIds = arrangement.sections.map((section) => section.id);
+  return [
+    { source: "show_bible", cue: "Synthetic CPU test, not a production channel", decisions: [
+      { dimension: "instrumentation", choice: "Use glass harmonics and soft room-tone layers, with no percussion or vocals." },
+      { dimension: "space", choice: "Keep the image close and dry so the texture stays stable and intimate." },
+    ], sectionIds },
+    { source: "episode_topic", cue: seedStore.topic, decisions: [
+      { dimension: "texture", choice: "Keep a low-contrast upper haze that supports this episode without drawing focus." },
+      { dimension: "harmony", choice: "Use open suspended intervals rather than a dramatic cadence or triumphant resolution." },
+    ], sectionIds },
+  ];
+}
+
+function expectedStyle(arrangement: AcceptedMusicArrangementDraft, channelGrounding = groundingFor(arrangement)): string {
   return [
     `Role: ${arrangement.role}.`, `Requested duration: ${arrangement.requestedDurationSec} seconds.`,
     `Form: ${arrangement.form}.`, `Ending: ${arrangement.ending}.`, `Playback: ${arrangement.playback}.`,
@@ -70,6 +84,11 @@ function expectedStyle(arrangement: AcceptedMusicArrangementDraft): string {
     ...arrangement.sections.flatMap((section) => [
       `Section ${section.id}: ${section.label}; startFraction ${section.startFraction}; endFraction ${section.endFraction}; energy ${section.energy}.`,
       section.instruction,
+    ]),
+    "Grounded channel and episode decisions:",
+    ...channelGrounding.flatMap((entry) => [
+      `Source ${entry.source}: ${entry.cue}. Apply to sections: ${entry.sectionIds.join(", ")}.`,
+      ...entry.decisions.map((decision) => `${decision.dimension}: ${decision.choice}`),
     ]),
   ].join("\n");
 }
@@ -165,7 +184,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       draft("primary_music"), draft("narration_bed"), draft("meditation_bed"), draft("sleep_sound_bed"), draft("short_form_bed"),
       draft("narration_bed", true),
     ].entries()) {
-      response = { arrangement, duckDb: -12, bedLufs: -22 };
+      response = { arrangement, channelGrounding: groundingFor(arrangement), duckDb: -12, bedLufs: -22 };
       const { role, requestedDurationSec, form, ending, playback } = arrangement;
       const musicIntent = { role, requestedDurationSec, form, ending, playback };
       const intentEntries = entries.map(entry => entry.block === "composer_brief" ? { ...entry, params: { musicIntent } } : entry);
@@ -202,7 +221,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       assert.ok(acceptedRecord.inputArtifactIds.includes(briefRef.artifactId));
       const request = createYuE2AcceptedArrangementRequest({ arrangement: artifact, seed: 42, personalCreatorAcknowledged: true });
       assert.equal(request.programFingerprint, artifact.fingerprint);
-      assert.equal(request.job.style, expectedStyle(arrangement));
+      assert.equal(request.job.style, expectedStyle(arrangement, artifact.channelGrounding));
       assert.equal(request.job.style, projectAcceptedMusicArrangementToYuEStyle(artifact));
       assert.doesNotMatch(request.job.style, /Key\/scale:|BPM|melodic lead|climax|tonic|### Arrangement/);
       assert.equal(request.job.lyrics, "");
@@ -214,7 +233,8 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     assert.ok(prompts.slice(0, 5).every((prompt) => prompt.includes("continuous flat arrangement is valid")));
 
     for (const lease of ["missing", "denied"] as const) {
-      response = { arrangement: draft("primary_music"), duckDb: -12, bedLufs: -22 };
+      const primary = draft("primary_music");
+      response = { arrangement: primary, channelGrounding: groundingFor(primary), duckDb: -12, bedLufs: -22 };
       const callsBefore: number = llmCalls;
       const f = await execute(entries, `lease-${lease}`, lease);
       assert.equal(f.result.ok, false);

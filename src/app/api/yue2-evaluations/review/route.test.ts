@@ -31,6 +31,7 @@ const material = {
   request: { acceptedArrangement: {
     topic: "Quiet overnight rain", sourceBriefFingerprint: "b".repeat(64), fingerprint: "c".repeat(64),
     reviewContext: undefined as ReturnType<typeof createMusicReviewContext> | undefined,
+    channelGrounding: undefined as unknown[] | undefined,
     arrangement: { direction: "Steady, no startling changes", requestedDurationSec: 60, sections: [{ id: "opening" }] },
   } },
   quality: { status: "blocked", durationMatches: false, productionApproved: false },
@@ -135,8 +136,15 @@ async function main() {
     topic: "Quiet overnight rain", family: "music_loop", channelName: "Night rain",
     promptContext: "Unhurried rainfall, restrained texture, no sudden changes.",
   });
+  material.request.acceptedArrangement.channelGrounding = [{ source: "show_bible", cue: "Unhurried rainfall",
+    decisions: [{ dimension: "texture", choice: "Keep the rain-like upper layer sparse and low contrast." },
+      { dimension: "dynamics", choice: "Avoid abrupt swells so the bed remains stable through the full section." }], sectionIds: ["opening"] },
+  { source: "episode_topic", cue: "Quiet overnight rain", decisions: [
+    { dimension: "space", choice: "Use a close, soft stereo field without distant storm effects." },
+    { dimension: "harmony", choice: "Avoid a cadential arrival that would interrupt unattended listening." }], sectionIds: ["opening"] }];
   const withContext = await (await GET(request())).json();
   assert.deepEqual(withContext.review.brief.reviewContext, material.request.acceptedArrangement.reviewContext);
+  assert.deepEqual(withContext.review.brief.channelGrounding, material.request.acceptedArrangement.channelGrounding);
   assert.equal(withContext.review.brief.contextRetained, true);
   assert.equal(withContext.review.brief.channelPersonalityVerified, false, "retention is not a creative verdict");
   const audition = { candidateSha256: material.candidateSha256, verdict: "needs_work", listenedEntireSource: false,

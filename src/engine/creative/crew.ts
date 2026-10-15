@@ -18,7 +18,8 @@ import {
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
 import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema, MusicSymbolicScoreSchema,
-  MusicArrangementIntentSchema, MusicSymbolicScorePolicySchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
+  MusicArrangementIntentSchema, MusicChannelGroundingSchema, MusicSymbolicScorePolicySchema,
+  refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StyleDNA,
@@ -294,6 +295,7 @@ export async function briefComposer(
 
 const arrangementComposerResponseSchema = z.object({
   arrangement: AcceptedMusicArrangementDraftSchema,
+  channelGrounding: MusicChannelGroundingSchema,
   duckDb: z.number().finite(),
   bedLufs: z.number().finite(),
   voiceFx: z.literal("radio").optional(),
@@ -303,6 +305,7 @@ export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
+  channelGrounding: MusicChannelGroundingSchema,
   symbolicScore: MusicSymbolicScoreSchema.optional(),
   symbolicScorePolicy: MusicSymbolicScorePolicySchema.optional(),
   audio: z.object({
@@ -319,6 +322,16 @@ export const ComposerBriefWithArrangementSchema = z.object({
       message: "musicPrompt must equal the accepted arrangement direction",
       path: ["musicPrompt"],
     });
+  }
+  const sectionIds = new Set(brief.arrangement.sections.map((section) => section.id));
+  const groundingCoverage = new Set(brief.channelGrounding.flatMap((entry) => entry.sectionIds));
+  if (!brief.reviewContext || !brief.channelGrounding.some((entry) => entry.source === "episode_topic" && entry.cue === brief.reviewContext!.topic) ||
+      !brief.channelGrounding.some((entry) => entry.source !== "episode_topic") ||
+      brief.channelGrounding.some((entry) => !brief.reviewContext!.promptContext.toLocaleLowerCase().includes(entry.cue.toLocaleLowerCase()) ||
+        entry.sectionIds.some((id) => !sectionIds.has(id))) ||
+      [...sectionIds].some((id) => !groundingCoverage.has(id))) {
+    refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["channelGrounding"],
+      message: "channel grounding must quote frozen identity and episode cues and bind concrete decisions to every section" });
   }
 });
 
@@ -357,6 +370,10 @@ export async function briefComposerWithArrangement(
       `distinctive to this channel and episode, not a list of mood adjectives or a generic genre preset. ` +
       `Preserve constraints and exclusions explicitly; do not invent identity traits or preferences for fields that ` +
       `were not supplied. Every section must state what remains recognizable and what, if anything, is allowed to change. ` +
+      `Return channelGrounding with one episode_topic cue that exactly quotes the supplied video topic and at least one ` +
+      `channel identity cue (persona, style grammar, Show Bible, or authored audio identity) quoted exactly from the context. ` +
+      `For each cue provide at least two distinct dimensions from instrumentation, register, texture, harmony, rhythm, ` +
+      `dynamics, articulation, space, or development, with concrete audible choices and the section ids they govern. ` +
       `Choose role primary_music, narration_bed, meditation_bed, sleep_sound_bed, or short_form_bed from the supplied intent. ` +
       `sleep_sound_bed is for unattended sleep: stable low arousal, no pulse, melodic arrival, crescendo, or attention-catching event. ` +
       `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +
@@ -372,6 +389,9 @@ export async function briefComposerWithArrangement(
       `Return STRICT JSON {"arrangement":{"role":string,"direction":string,"requestedDurationSec":number,` +
       `"form":string,"ending":string,"playback":string,"sections":[{"id":string,"label":string,` +
       `"startFraction":number,"endFraction":number,"energy":number,"instruction":string}]},` +
+      `"channelGrounding":[{"source":"channel_persona|style_grammar|show_bible|audio_identity|episode_topic",` +
+      `"cue":string,"decisions":[{"dimension":"instrumentation|register|texture|harmony|rhythm|dynamics|articulation|space|development",` +
+      `"choice":string}],"sectionIds":[string]}],` +
       `"duckDb":number,"bedLufs":number,"voiceFx":string?${includeSymbolicScore ? ',"symbolicScore":string' : ""}}.` +
       (includeSymbolicScore ? `\n\nAuthor symbolicScore as a complete original YuE2 native ABC composition, not prose or Markdown. ` +
         `Bind every musical choice to this channel, topic, and the arrangement you just authored. The score is the ` +
@@ -447,6 +467,7 @@ export async function briefComposerWithArrangement(
       ...("symbolicScore" in raw ? { symbolicScore: MusicSymbolicScoreSchema.parse(raw.symbolicScore),
         symbolicScorePolicy: "instrumental" as const } : {}),
       musicPrompt: raw.arrangement.direction,
+      channelGrounding: raw.channelGrounding,
       audio: {
         duckDb: raw.duckDb,
         bedLufs: raw.bedLufs,

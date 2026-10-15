@@ -260,6 +260,38 @@ function retainedReviewContext(): void {
     "retaining review context does not silently rewrite the composer's accepted direction");
 }
 
+function channelGroundingBinding(): void {
+  const persona = "Quiet nocturnal field observer";
+  const context = createMusicReviewContext({ topic: input.topic, family: "music_loop", channelName: "Quiet hours",
+    promptContext: `Channel persona: ${persona}. Keep the sound intimate. Video topic: "${input.topic}".` });
+  const sectionIds = draft().sections.map((section) => section.id);
+  const channelGrounding = [
+    { source: "channel_persona", cue: persona, decisions: [
+      { dimension: "space", choice: "Keep the stereo image close with short, dry reflections and no distant hall." },
+      { dimension: "dynamics", choice: "Keep attacks soft and level movement narrow to preserve nocturnal calm." },
+    ], sectionIds },
+    { source: "episode_topic", cue: input.topic, decisions: [
+      { dimension: "texture", choice: "Use a sparse high register shimmer that suggests the topic without literal effects." },
+      { dimension: "harmony", choice: "Hold open suspended intervals without introducing a dramatic cadence." },
+    ], sectionIds },
+  ];
+  const accepted = createAcceptedMusicArrangement({ ...input, arrangement: draft(), sourceBrief: { reviewContext: context, channelGrounding } });
+  assert.deepEqual(accepted.channelGrounding, channelGrounding);
+  assert.match(projectAcceptedMusicArrangementToYuEStyle(accepted), /Keep the stereo image close with short, dry reflections/);
+  assert.notEqual(projectAcceptedMusicArrangementToYuEStyle(accepted), projectAcceptedMusicArrangementToYuEStyle(make()),
+    "grounded musical decisions change the exact provider-facing style");
+  assert.throws(() => createAcceptedMusicArrangement({ ...input, arrangement: draft(), sourceBrief: {
+    reviewContext: context, channelGrounding: [{ ...channelGrounding[0], cue: "invented brand identity" }, channelGrounding[1]],
+  } }), /frozen channel or episode context/);
+  assert.throws(() => createAcceptedMusicArrangement({ ...input, arrangement: draft(), sourceBrief: {
+    reviewContext: context, channelGrounding: [{ ...channelGrounding[0], sectionIds: ["unknown-section"] }, channelGrounding[1]],
+  } }), /unknown arrangement section/);
+  const changed = { ...accepted, channelGrounding: accepted.channelGrounding!.map((entry, index) => index === 0
+    ? { ...entry, decisions: entry.decisions.map((decision, choice) => choice === 0
+      ? { ...decision, choice: `${decision.choice} change` } : decision) } : entry) };
+  assert.throws(() => AcceptedMusicArrangementSchema.parse(changed), /fingerprint/);
+}
+
 function explicitIntent(): void {
   const musicIntent = { role: "meditation_bed", requestedDurationSec: 120, playback: "once", ending: "natural_cadence", form: "continuous" };
   const accepted = createAcceptedMusicArrangement({ ...input, sourceBrief: { ...input.sourceBrief, musicIntent }, arrangement: draft() });
@@ -282,6 +314,7 @@ function explicitIntent(): void {
 
 explicitIntent();
 retainedReviewContext();
+channelGroundingBinding();
 validation();
 fingerprints();
 projection();

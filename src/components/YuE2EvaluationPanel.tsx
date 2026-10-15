@@ -114,6 +114,15 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
       <summary>Channel intent</summary>
       {brief.reviewContext ? <p className={styles.context}>{brief.reviewContext.promptContext}</p>
         : <p className={styles.warning}>Original channel context is missing. Personality fit cannot be established from this record.</p>}
+      {brief.channelGrounding?.length ? <div>
+        <h3>Composer&apos;s musical translations</h3>
+        <ul className={styles.groundingList}>{brief.channelGrounding.map((entry, index) => <li className={styles.groundingEntry} key={`${entry.source}:${index}`}>
+          <div><strong>{label(entry.source)}: &quot;{entry.cue}&quot;</strong>
+            <ul>{entry.decisions.map((decision) => <li key={decision.dimension}>{label(decision.dimension)}: {decision.choice}</li>)}</ul>
+            <span className={styles.muted}>Applies to: {entry.sectionIds.map(id => arrangement.sections.find(section => section.id === id)?.label ?? id).join(", ")}</span>
+          </div>
+        </li>)}</ul>
+      </div> : <p className={styles.warning}>This candidate has no traceable channel-to-music decisions.</p>}
     </details>
     <div className={styles.arrangement}>
       <h3>Accepted arrangement</h3>

@@ -35,7 +35,7 @@ try {
     assert.ok(result.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const modules = result.compilation!.modules;
     assert.equal(modules.find(module => module.id === "music")?.version, "5.0.0-render-engine-yue2-scored-v2");
-    assert.equal(modules.find(module => module.id === "composer_brief")?.version, "3.0.0-yue2-score");
+    assert.equal(modules.find(module => module.id === "composer_brief")?.version, "3.1.0-yue2-score-grounding");
     assert.equal(modules.find(module => module.id === (family === "music_loop" ? "assemble" : "timeline_assemble"))?.version,
       playback === "once" ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop");
     assert.deepEqual(result.pipeline.find(entry => entry.block === "music")?.params, sourceParams);
@@ -66,7 +66,7 @@ try {
   assert.throws(() => selectYuE2Pipeline(baseline, { ...selection, musicIntent: { ...selection.musicIntent, playback: "once" } }), /narrated timeline/);
   assert.throws(() => selectYuE2Pipeline(baseline.filter(entry => entry.block !== "music"), selection), /exactly one music/);
   assert.throws(() => selectYuE2Pipeline([...baseline, baseline.find(entry => entry.block === "music")!], selection), /exactly one music/);
-  assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief" ? { ...entry, version: "2.0.0-accepted-arrangement" } : entry), selection), /explicitly pinned/);
+  assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief" ? { ...entry, version: "2.1.0-channel-grounding" } : entry), selection), /explicitly pinned/);
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "music" ? { ...entry, version: "4.0.0-owner-pinned" } : entry), selection), /explicitly pinned/,
     "only the canonical provider-backed Music pin may be replaced by explicit YuE2 selection");
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief"

@@ -15,8 +15,8 @@ import { agentJsonConfiguration } from "@/agents/mastra";
 import { arrangementComposerReservation, assertArrangementComposerAdmission } from "@/lib/arrangementComposerBudget";
 import { createComposerBriefBlock } from "./crewBlocks";
 
-export const ARRANGEMENT_COMPOSER_VERSION = "2.0.0-accepted-arrangement";
-export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.0.0-yue2-score";
+export const ARRANGEMENT_COMPOSER_VERSION = "2.1.0-channel-grounding";
+export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.1.0-yue2-score-grounding";
 
 export function createArrangementComposerManifest(legacy: ModuleManifest, includeSymbolicScore = false): ModuleManifest {
   if (legacy.id !== "composer_brief") throw new Error("arrangement composer requires composer_brief");

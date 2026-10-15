@@ -35,7 +35,24 @@ loader._load = function (id, ...args) {
     agentJson: async (request: Request) => {
       await request.beforeDispatch?.();
       calls.push(request);
-      return request.schema.parse(structuredClone(responses[request.role]));
+      const response = structuredClone(responses[request.role]) as Record<string, unknown>;
+      if (request.role === "composer_arrangement") {
+        const persona = /Channel persona: ([^\n]+)/u.exec(request.prompt)?.[1];
+        const topic = /Video topic: "([^"]+)"/u.exec(request.prompt)?.[1];
+        const sections = (response.arrangement as { sections: Array<{ id: string }> }).sections;
+        const sectionIds = sections.map((section) => section.id);
+        response.channelGrounding = [
+          { source: "channel_persona", cue: persona, decisions: [
+            { dimension: "space", choice: "Keep the stereo image close and intimate, avoiding distant or arena-sized reverb." },
+            { dimension: "dynamics", choice: "Limit dynamic growth so no gesture becomes theatrical or attention seeking." },
+          ], sectionIds },
+          { source: "episode_topic", cue: topic, decisions: [
+            { dimension: "texture", choice: "Use a restrained upper haze that evokes the named episode without literal effects." },
+            { dimension: "harmony", choice: "Hold open intervals without a triumphant cadence or sentimental arrival." },
+          ], sectionIds },
+        ];
+      }
+      return request.schema.parse(response);
     },
   };
   return originalLoad.call(this, id, ...args);
@@ -52,7 +69,7 @@ async function main() {
   const bible: ShowBible = { positioning: "Careful observation", vibe: "Patient", iconicMotif: "A horizon",
     worksInSpace: ["Understatement"], avoidInSpace: ["Hype"], refreshedAt: 1,
     activeCrew: ["director", "cinematographer", "editor", "composer", "critic"] };
-  const blocks = [...CREW_BLOCKS, getManifest("composer_brief", "3.0.0-yue2-score")!.block];
+  const blocks = [...CREW_BLOCKS, getManifest("composer_brief", "3.1.0-yue2-score-grounding")!.block];
   assert.equal(CREW_BLOCKS.length, 5);
   const stale = { channelName: "STALE HYPE BRAND", niche: "STALE CELEBRITY NICHE", persona: "STALE PERSONA",
     styleGrammar: "STALE GRAMMAR", channelSlug: "stale-slug", showBible: { ...bible, positioning: "STALE BIBLE" } };
