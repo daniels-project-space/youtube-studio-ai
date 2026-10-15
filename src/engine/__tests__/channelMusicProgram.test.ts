@@ -141,8 +141,23 @@ for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_s
     `${role} must send Music3's native instrumental control as well as the prose-free caption constraint`,
   );
 }
+assert.ok(history.minimaxLicense, "MiniMax programs carry their provider-specific license terms");
 assert.equal(history.minimaxLicense.uiAttribution, "MiniMax-Music3");
 assert.equal(history.minimaxLicense.generatedContentDisclosureRequired, true);
+
+for (const providerPreference of ["suno", "mureka"] as const) {
+  const providerProgram = createChannelMusicProgram({
+    channelId: `channel-${providerPreference}`,
+    channelIdentityFingerprint: sha("a"),
+    family: "narrated",
+    contentLaneKey: "documentary",
+    topic: "A provider-specific music brief",
+    providerPreference,
+  });
+  assert.equal(providerProgram.generation.providerPreference, providerPreference);
+  assert.equal(providerProgram.minimaxLicense, undefined,
+    `${providerPreference} programs must not claim MiniMax-only attribution or commercial requirements`);
+}
 
 const lofi = createChannelMusicProgram({
   channelId: "channel-rain",
@@ -409,6 +424,38 @@ assert.throws(
   () => ChannelMusicProgramSchema.parse(tooShortCaption),
   /structured caption must contain 250–450 words; received 4/u,
   "a MiniMax program cannot silently replace its creative brief with a weak one-line prompt",
+);
+
+const missingLicenseProgram = structuredClone(history);
+delete missingLicenseProgram.minimaxLicense;
+const { fingerprint: _missingLicenseFingerprint, ...missingLicenseBody } = missingLicenseProgram;
+void _missingLicenseFingerprint;
+assert.throws(
+  () => ChannelMusicProgramSchema.parse({
+    ...missingLicenseBody,
+    fingerprint: sha256Hex(canonicalJson(missingLicenseBody)),
+  }),
+  /MiniMax-Music3 programs require the provider-specific license and attribution terms/u,
+  "a MiniMax program cannot omit its provider-specific terms even with a valid content fingerprint",
+);
+
+const legacyMureka = structuredClone(createChannelMusicProgram({
+  channelId: "channel-legacy-mureka",
+  channelIdentityFingerprint: sha("a"),
+  family: "narrated",
+  contentLaneKey: "documentary",
+  topic: "Legacy provider record",
+  providerPreference: "mureka",
+}));
+legacyMureka.minimaxLicense = history.minimaxLicense;
+const { fingerprint: _legacyFingerprint, ...legacyBody } = legacyMureka;
+void _legacyFingerprint;
+assert.doesNotThrow(
+  () => ChannelMusicProgramSchema.parse({
+    ...legacyBody,
+    fingerprint: sha256Hex(canonicalJson(legacyBody)),
+  }),
+  "legacy fingerprinted provider records with the old extra terms remain readable",
 );
 
 console.log("CHANNEL MUSIC PROGRAM PASS: role-specific structure, mix, licensing, and listened quality gate");

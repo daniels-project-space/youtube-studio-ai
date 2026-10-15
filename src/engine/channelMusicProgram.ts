@@ -104,6 +104,8 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     sectionReviewRequired: z.literal(true),
     humanAuditionRequired: z.literal(true),
   }).strict(),
+  // Optional for legacy provider-neutral programs; new non-MiniMax programs
+  // must not inherit MiniMax-only attribution and commercial terms.
   minimaxLicense: z.object({
     uiAttribution: z.literal("MiniMax-Music3"),
     prominentCommercialAttributionRequired: z.literal(true),
@@ -111,7 +113,7 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     safeguardsRequired: z.literal(true),
     separateAuthorizationAboveAnnualRevenueUsd: z.literal(20_000_000),
     operatorAttestationRequiredBeforeEnablement: z.literal(true),
-  }).strict(),
+  }).strict().optional(),
 }).strict();
 
 type ChannelMusicProgramBody = z.infer<typeof ChannelMusicProgramBodyBaseSchema>;
@@ -144,6 +146,9 @@ function validateChannelMusicProgramBody(
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "narrated/short music beds must preserve narration priority" });
   }
   if (program.generation.providerPreference === "minimax_music3") {
+    if (!program.minimaxLicense) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, message: "MiniMax-Music3 programs require the provider-specific license and attribution terms" });
+    }
     const words = music3StructuredCaptionWordCount(program.generation.structuredCaption);
     if (words < MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS || words > MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS) {
       issue.addIssue({
@@ -643,15 +648,17 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       sectionReviewRequired: true,
       humanAuditionRequired: true,
     },
-    minimaxLicense: {
+  };
+  if (body.generation.providerPreference === "minimax_music3") {
+    body.minimaxLicense = {
       uiAttribution: "MiniMax-Music3",
       prominentCommercialAttributionRequired: true,
       generatedContentDisclosureRequired: true,
       safeguardsRequired: true,
       separateAuthorizationAboveAnnualRevenueUsd: 20_000_000,
       operatorAttestationRequiredBeforeEnablement: true,
-    },
-  };
+    };
+  }
   return Object.freeze(ChannelMusicProgramSchema.parse({
     ...body,
     fingerprint: musicProgramFingerprint(body),
