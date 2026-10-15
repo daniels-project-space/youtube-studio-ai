@@ -123,6 +123,13 @@ function validateChannelMusicProgramBody(
   program: ChannelMusicProgramBody,
   issue: z.RefinementCtx,
 ): void {
+  const routeOwnedRole = routeOwnedMusicRole(program.family, program.contentLaneKey);
+  if (routeOwnedRole && program.role !== routeOwnedRole) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `music role ${program.role} conflicts with route-owned role ${routeOwnedRole}`,
+    });
+  }
   const bpmRange = program.identity.bpmRange;
   if (bpmRange && bpmRange[0] > bpmRange[1]) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music BPM range is inverted" });
@@ -293,6 +300,21 @@ export function musicRoleForRoute(family: string, contentLaneKey: string): Chann
   if (/short|quiz|trivia/u.test(route)) return "short_form_bed";
   if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
   return "narration_bed";
+}
+
+function routeOwnedMusicRole(family: string, contentLaneKey: string): ChannelMusicRole | undefined {
+  const familyRoute = family.trim().toLowerCase();
+  const laneRoute = contentLaneKey.trim().toLowerCase();
+  const role = musicRoleForRoute(familyRoute, laneRoute);
+  if (
+    role === "sleep_sound_bed" ||
+    role === "meditation_bed" ||
+    role === "short_form_bed" ||
+    (familyRoute === "music_loop" && laneRoute === "music_loop")
+  ) {
+    return role;
+  }
+  return undefined;
 }
 
 function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
@@ -536,10 +558,10 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const family = input.family?.trim() || "unclassified";
   const contentLaneKey = input.contentLaneKey?.trim() || "unclassified";
   const routeRole = musicRoleForRoute(family, contentLaneKey);
-  const specializedRouteRole = routeRole === "sleep_sound_bed" || routeRole === "meditation_bed" ||
-    routeRole === "short_form_bed";
-  if (specializedRouteRole && input.role !== undefined && input.role !== routeRole) {
-    throw new Error(`music role ${input.role} conflicts with specialized route role ${routeRole}`);
+  const routeOwnedRole = routeOwnedMusicRole(family, contentLaneKey);
+  if (routeOwnedRole && input.role !== undefined && input.role !== routeOwnedRole) {
+    const routeKind = routeOwnedRole === "primary_music" ? "route-owned" : "specialized route";
+    throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }
   const role = input.role ?? routeRole;
   const roleDefaults = {

@@ -176,6 +176,27 @@ const lofi = createChannelMusicProgram({
 assert.equal(lofi.role, "primary_music");
 assert.equal(lofi.mix.bodyMusicVol, 1, "music-first channels cannot be accidentally ducked by a narrated preset");
 assert.equal(lofi.mix.targetLufs, -16, "music-forward programs retain their role default target");
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-lofi-role-conflict",
+  channelIdentityFingerprint: sha("b"),
+  family: "music_loop",
+  contentLaneKey: "music_loop",
+  topic: "Late tram through warm rain",
+  role: "narration_bed",
+}), /conflicts with route-owned role primary_music/u,
+"the Lo-Fi route must not be reassigned to a ducked narration-bed role");
+const { fingerprint: lofiFingerprint, ...lofiBody } = lofi;
+assert.match(lofiFingerprint, /^[a-f0-9]{64}$/u, "the forged-route case starts from a valid sealed program");
+const forgedLofiBody = {
+  ...lofiBody,
+  role: "narration_bed" as const,
+  mix: { ...lofiBody.mix, bodyMusicVol: 0.1026, narrationPriority: true },
+};
+assert.throws(() => ChannelMusicProgramSchema.parse({
+  ...forgedLofiBody,
+  fingerprint: sha256Hex(canonicalJson(forgedLofiBody)),
+}), /route-owned role primary_music/u,
+"persisted Lo-Fi programs must retain route-role ownership even with a recomputed fingerprint");
 assert.equal(lofi.generation.sections.length, 8, "a long Music3 form must map every extended passage to a reviewable arrangement job");
 assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
@@ -257,7 +278,8 @@ assert.doesNotMatch(
   "beatless sleep prompts must not simultaneously prescribe a tempo or tonal center, even when supplied by channel DNA/composer direction",
 );
 assert.doesNotMatch(sleep.generation.structuredCaption, /call-and-response|late lift|genuine contrast passage/u);
-const { fingerprint: _sleepFingerprint, ...sleepBody } = sleep;
+const { fingerprint: sleepFingerprint, ...sleepBody } = sleep;
+assert.match(sleepFingerprint, /^[a-f0-9]{64}$/u, "the historical sleep receipt starts from a valid sealed program");
 const legacySleepBody = {
   ...sleepBody,
   identity: { ...sleep.identity, bpmRange: [100, 100] as const },
