@@ -119,7 +119,8 @@ const dnaSchema = z.object({
     playlistStrategy: z.string(),
   }),
 });
-type RawDNA = z.infer<typeof dnaSchema>;
+export type StyleDNADraft = z.infer<typeof dnaSchema>;
+type RawDNA = StyleDNADraft;
 
 /** The different-model critic's verdict on a DNA draft (specificity + fidelity). */
 const critiqueSchema = z.object({
@@ -163,14 +164,29 @@ function nameWorldIssues(raw: RawDNA, channelName: string): string[] {
   return issues;
 }
 
-function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string): string[] {
+export function inspectStyleDNADraft(raw: StyleDNADraft, narrated: boolean, channelName: string): string[] {
   const issues: string[] = [];
   if (!raw.recurringSubject?.trim()) issues.push("recurringSubject is empty — the channel has no locked identity");
   if (!raw.setting?.trim()) issues.push("setting is empty — no recurring world to anchor every video");
+  if (!raw.composition?.trim()) issues.push("composition is empty — no repeatable framing identity");
+  if (!raw.colorGrade?.trim()) issues.push("colorGrade is empty — no repeatable visual treatment");
   if (clampHexes(raw.palette, 6).length < 2) issues.push("palette has fewer than 2 valid hex colors");
   if (clampStrs(raw.motifs, 8).length < 2) issues.push("fewer than 2 motifs — visual identity under-specified");
+  if (clampStrs(raw.variationAxes, 6).length < 1) issues.push("variationAxes has no approved variation");
+  if (clampStrs(raw.motionVocabulary, 8).length < 1) issues.push("motionVocabulary has no permitted motion");
+  if (!raw.motionDiscipline?.trim()) issues.push("motionDiscipline is empty");
+  if (clampStrs(raw.visualAvoid, 10).length < 1) issues.push("visualAvoid has no explicit anti-patterns");
   if (!raw.audio?.genre?.trim()) issues.push("audio.genre is empty");
-  if (narrated && !raw.narrative) issues.push("narrated family but no narrative block (voiceProfile/scriptStyle missing)");
+  if (clampStrs(raw.audio?.instrumentation, 8).length < 1) issues.push("audio.instrumentation is empty");
+  if (clampStrs(raw.audio?.textures, 4).length < 1) issues.push("audio.textures is empty");
+  if (!raw.audio?.moodArc?.trim()) issues.push("audio.moodArc is empty");
+  if (narrated && !raw.narrative) {
+    issues.push("narrated family but no narrative block (voiceProfile/scriptStyle missing)");
+  } else if (narrated && raw.narrative) {
+    for (const key of ["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const) {
+      if (!raw.narrative[key]?.trim()) issues.push(`narrative.${key} is empty`);
+    }
+  }
   const blob = JSON.stringify(raw).toLowerCase();
   for (const tell of GENERIC_TELLS) {
     if (blob.includes(tell)) issues.push(`generic phrasing "${tell}" — replace with something specific to THIS channel`);
@@ -409,7 +425,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
         });
       },
       critique: async (raw) => {
-        const det = deterministicIssues(raw, narrated, input.name);
+        const det = inspectStyleDNADraft(raw, narrated, input.name);
         let criticScore: unknown;
         let llmIssues: string[] = [];
         try {
