@@ -188,13 +188,18 @@ try {
     assert.match(failed.error, /SHA-256/);
     caseCount++;
   }
-  const vectors = ["Don't re-enter 2,157.", "-175 +175 −175 3.14", "rock'n'roll", "Here's\tV2", "İ K ẞ café Æsir", "123_456 /-/ ...", "", "O’Neil", "UPPER lower\nsecond line"];
+  const vectors = ["Don't re-enter 2,157.", "-175 +175 −175 3.14", "rock'n'roll", "Here's\tV2", "İ K ẞ café Æsir", "El nin\u0303o hablo\u0301 de corazo\u0301n. L’été Straße", "123_456 /-/ ...", "", "O’Neil", "UPPER lower\nsecond line"];
   const tokenResult = spawnSync("python3", [fixtureScript, producerScript], {
     cwd: repo, encoding: "utf8", timeout: 10_000,
     env: { ...process.env, NARRATION_PROOF_TEST_FIXTURE: JSON.stringify({ tokenVectors: vectors }) },
   });
   assert.equal(tokenResult.status, 0, tokenResult.stderr);
   assert.deepEqual(JSON.parse(tokenResult.stdout), vectors.map(narrationTranscriptLexicalTokens), "TS must exactly mirror the existing Python lexical policy");
+  assert.deepEqual(
+    narrationTranscriptLexicalTokens("El nin\u0303o hablo\u0301 de corazo\u0301n. L’été Straße"),
+    ["el", "niño", "habló", "de", "corazón", "l’été", "straße"],
+    "Unicode normalization must preserve accented speech tokens and joined names",
+  );
   assert.deepEqual(narrationTranscriptLexicalTokens("-175"), narrationTranscriptLexicalTokens("175"),
     "lexical coverage deliberately does not claim sign or raw-punctuation semantic equality");
   caseCount++;

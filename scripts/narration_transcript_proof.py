@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from collections import Counter
 from importlib.metadata import version
 
@@ -32,7 +33,8 @@ def sha256_file(path):
 
 
 def tokens(text):
-    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", text.lower())
+    normalized = unicodedata.normalize("NFKC", text).lower()
+    return re.findall(r"[^\W_]+(?:['’][^\W_]+)?", normalized, flags=re.UNICODE)
 
 
 def levenshtein(reference, hypothesis):

@@ -327,12 +327,12 @@ function runBakedNarrationTranscriptProof(command: string, args: readonly string
 }
 
 /**
- * Exact lexical policy used by narration_transcript_proof.py, not semantic
- * normalization. Punctuation/sign differences and words versus digits are not
- * resolved here; raw observations and existing WER/recall metrics stay intact.
+ * Exact lexical policy used by narration_transcript_proof.py. NFKC preserves
+ * accented names/words as one token while punctuation/sign differences and
+ * words-versus-digits remain outside this proof's claim.
  */
 export function narrationTranscriptLexicalTokens(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) ?? [];
+  return text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)?/gu) ?? [];
 }
 
 export function assertNarrationTranscriptProof(proof: NarrationTranscriptProof, expected: {

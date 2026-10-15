@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  narrationTranscriptLexicalTokens,
   NarrationTranscriptProofSchema,
   type NarrationTranscriptProof,
 } from "./narrationTranscriptProof";
@@ -52,10 +53,6 @@ export const NarrationCueTimingEvidenceSchema = z
 export type NarrationCueTimingEvidence = z.infer<
   typeof NarrationCueTimingEvidenceSchema
 >;
-
-function tokens(value: string): string[] {
-  return value.toLowerCase().match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) ?? [];
-}
 
 function round(value: number): number {
   return Number(value.toFixed(4));
@@ -124,7 +121,7 @@ export function assertNarrationCueTimingEvidence(args: {
   const words = proof.data.transcript.words
     .map((word) => ({
       ...word,
-      tokens: tokens(word.text),
+      tokens: narrationTranscriptLexicalTokens(word.text),
       midpointSec: (word.startMs + word.endMs) / 2000,
     }))
     .filter((word) => word.tokens.length > 0);
@@ -148,7 +145,7 @@ export function assertNarrationCueTimingEvidence(args: {
     previousWordEnd = word.endMs;
   }
 
-  const cueTokens = cues.data.map((cue) => tokens(cue.text));
+  const cueTokens = cues.data.map((cue) => narrationTranscriptLexicalTokens(cue.text));
   const expectedTokenCount = cueTokens.reduce(
     (count, values) => count + values.length,
     0,
