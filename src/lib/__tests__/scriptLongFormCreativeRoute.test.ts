@@ -65,6 +65,8 @@ async function main(): Promise<void> {
     const script = await synthScript({
       topic: "The bridge's warm final stone",
       maxSeconds: 421,
+      sentenceGapSec: 0.85,
+      ttsSpeed: 0.94,
       precraftedHook: crafted,
       narrative: { pacing: "Let each idea arrive slowly; leave room between discoveries." },
       channelVoice: {
@@ -88,6 +90,10 @@ async function main(): Promise<void> {
     }
     assert.equal(script.sections.length, 3);
     assert.ok(script.narrationText.includes("evidence400"));
+    const words = script.narrationText.split(/\s+/).filter(Boolean).length;
+    const effectiveWps = 1 / (1 / ((Number(process.env.NARRATION_WPS) || 3.1) * 0.94) + 0.85 / 14);
+    assert.equal(script.estDurationSec, Math.round(words / effectiveWps),
+      "long-form duration must include the actual sentence pauses and narration speed");
     await synthScript({ topic: "The bridge's warm final stone", maxSeconds: 421, precraftedHook: crafted });
     assert.equal(calls, 2);
     assert.doesNotMatch(prompt, /FROZEN CHANNEL CREATIVE IDENTITY/,

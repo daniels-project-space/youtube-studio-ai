@@ -524,6 +524,9 @@ async function synthFullScriptOneShot(
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         playbookFull(req),
         voiceTagClause(req),
+        req.priorIssues?.length
+          ? `A previous complete draft exceeded its duration ceiling. Write more concisely without dropping the central argument or ending: ${req.priorIssues.join("; ")}`
+          : "",
         CRAFT_RULES,
         ARC_RULES,
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
@@ -546,7 +549,8 @@ async function synthFullScriptOneShot(
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
-    let wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+    const hookWordCount = spoken(req, crafted.coldOpen).split(/\s+/).filter(Boolean).length;
+    let wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
     // TOP-UP before surrendering to the chunked path: the chunked fallback costs
     // 10-25 MORE Pro calls. If the one-shot under-delivered but got most of the
     // way there, ONE continuation call closes the gap far cheaper; accept ≥80%.
@@ -577,7 +581,7 @@ async function synthFullScriptOneShot(
           .filter((s) => s.narration.length > 0);
         // Splice the continuation in BEFORE the final (conclusion-shaped) section.
         sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
-        wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+        wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
       } catch (e) {
         log(`scriptGen one-shot top-up failed (${e instanceof Error ? e.message : e})`);
       }
@@ -604,8 +608,9 @@ async function synthFullScriptOneShot(
     const hook = spoken(req, crafted.coldOpen);
     const closingLine = normalizeScriptClosingLine(o.closing_line);
     const narrationText = assemble(hook, sections);
-    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+    const duration = estSeconds(narrationText, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${duration}s) ✓`);
+    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
     const detail = oneShotTimedOut
       ? `timed out after ${ONE_SHOT_TIMEOUT_MS}ms (provider request aborted)`
@@ -701,7 +706,7 @@ async function synthLongScript(
   if (queue.length === 0) throw new Error("scriptGen: long-form outline produced no sections");
 
   const sections: ScriptSection[] = [];
-  let total = 0;
+  let total = words(hookRaw);
   let i = 0;
   let refills = 0;
   while (total < targetWords && sections.length < 60) {
@@ -730,6 +735,9 @@ async function synthLongScript(
       styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
+      req.priorIssues?.length
+        ? `The previous complete draft exceeded its duration ceiling. Keep this section concise and do not repeat earlier material. Fix: ${req.priorIssues.join("; ")}`
+        : "",
       CRAFT_RULES,
       "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
       `Return STRICT JSON {"narration":string}.`,
@@ -801,8 +809,9 @@ async function synthLongScript(
   const hook = spoken(req, hookRaw);
   const closingLine = normalizeScriptClosingLine(closingRaw);
   const narrationText = assemble(hook, sections);
-  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+  const duration = estSeconds(narrationText, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: duration });
+  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -1089,7 +1098,8 @@ export async function synthScript(
   // continuation call splices extra body sections before the outro; still
   // short → fail LOUD (a thin script is a real failure, never a silent ship).
   const countWords = (t: string) => t.split(/\s+/).filter(Boolean).length;
-  let wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+  const hookWordCount = countWords(hook);
+  let wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
   const minWords = Math.round(wordBudget * 0.8);
   if (wordCount < minWords) {
     const missing = wordBudget - wordCount;
@@ -1119,7 +1129,7 @@ export async function synthScript(
         .filter((s) => s.narration.length > 0);
       // Splice the continuation in BEFORE the final (summary/outro-shaped) section.
       sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
-      wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+      wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
     } catch (e) {
       log(`scriptGen short: top-up failed (${e instanceof Error ? e.message : e})`);
     }

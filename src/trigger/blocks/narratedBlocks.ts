@@ -907,6 +907,17 @@ export function createScriptGenBlock(
             issues: [languageIssue],
           };
         }
+        const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+        if (!Number.isFinite(draft.estDurationSec) || draft.estDurationSec > durationLimitSec) {
+          const issue =
+            `script duration ${Math.round(draft.estDurationSec)}s exceeds the ${Math.round(durationLimitSec)}s ceiling; ` +
+            "tighten narration while preserving its argument and definitive ending";
+          ctx.log("script_gen: duration gate rejected draft before paid narrative critique", {
+            durationSec: draft.estDurationSec,
+            durationLimitSec,
+          });
+          return { score: 0, pass: false, issues: [issue] };
+        }
         const closingLineIssue = scriptClosingLineIssue(draft.closingLine);
         if (closingLineIssue) return { score: 0, pass: false, issues: [closingLineIssue] };
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
@@ -961,6 +972,13 @@ export function createScriptGenBlock(
     });
     if (loop.fatal) {
       throw new Error(`script_gen FAILED: channel-banned wording remains after the informed retry — ${loop.critique.issues.join("; ")}`);
+    }
+    const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+    if (!Number.isFinite(loop.value.estDurationSec) || loop.value.estDurationSec > durationLimitSec) {
+      throw new Error(
+        `script_gen FAILED: duration remained above the ${Math.round(durationLimitSec)}s ceiling after ` +
+        `the informed retry (${Math.round(loop.value.estDurationSec)}s)`,
+      );
     }
     if (critiqueEnabled) {
       assertScriptCritiqueAccepted({

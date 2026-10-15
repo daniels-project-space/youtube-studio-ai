@@ -73,8 +73,11 @@ async function main(): Promise<void> {
         assert.equal(body.max_tokens, 13000);
         if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         const attempt = requests.filter((request) => request.kind === "script").length + 1;
+        const overlong = currentLabel.startsWith("duration-overlong") &&
+          (currentLabel.endsWith("exhausted") || attempt === 1);
+        const excessWords = overlong ? ` ${Array.from({ length: 180 }, (_, index) => `extra${index}`).join(" ")}` : "";
         value = { sections: sections.map((section) => ({ ...section,
-          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
+          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${excessWords}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
           closing_line:
             currentLabel === "closing-line-exhausted" || (currentLabel === "closing-line-retry" && attempt === 1)
               ? "Carry the seed through the garden gate to find the hidden stream"
@@ -101,7 +104,7 @@ async function main(): Promise<void> {
       currentLabel = label; verdicts = values; requests = [];
       const stages: Array<{ block: string; status: string }> = [];
       const logs: string[] = [];
-      const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 45, style: "shorts" } }], ["topic", "niche"]), {
+      const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 75, style: "shorts" } }], ["topic", "niche"]), {
         ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
         seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords },
@@ -148,6 +151,24 @@ async function main(): Promise<void> {
       "script closing line exceeds 80 characters",
     ), "the character ceiling independently reaches the retry prompt");
     assert.equal((closingLineLengthRetry.result.store.script as Script).closingLine, "Follow the warm stone to the truth.");
+
+    const durationRetry = await run("duration-overlong-retry", [{ pass: true, issues: [] }]);
+    assert.equal(durationRetry.result.ok, true, durationRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "overlong narration is caught before critic spend and receives one informed retry");
+    assert.match(requests.filter((request) => request.kind === "script")[1].prompt, /exceeds the .* ceiling/,
+      "duration remediation reaches the regeneration prompt");
+    assert.ok((durationRetry.result.store.script as Script).estDurationSec <= 75 * 1.12,
+      "the accepted retry must meet the measured duration ceiling");
+    assert.ok((durationRetry.result.store.script as Script).narrationText.includes(sections[2].narration),
+      "duration correction preserves the decisive ending rather than trimming it off");
+
+    const durationExhausted = await run("duration-overlong-exhausted", []);
+    assert.equal(durationExhausted.result.ok, false);
+    assert.match(durationExhausted.result.error ?? "", /duration remained above the .* ceiling after the informed retry/);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script"],
+      "repeated overlong narration fails before paid critique and downstream work");
+    assert.equal(Object.hasOwn(durationExhausted.result.store, "narrationText"), false);
 
     const closingLineExhausted = await run("closing-line-exhausted", []);
     assert.equal(closingLineExhausted.result.ok, false);
