@@ -280,7 +280,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "narrativeSeriesRunSelector",
-      "plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool",
+      "plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool", "bannedWords",
       // A sealed program route constrains every selection path, including
       // planned and render-group-reused topics.
       "channelProgramRoute",
