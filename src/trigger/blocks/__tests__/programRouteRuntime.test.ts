@@ -217,7 +217,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       musicProgramPlan: planned.musicProgramPlan,
     },
   }));
-  assert.equal(scenes.sceneMusicPrompt, sealed.audio.direction);
+  assert.equal(scenes.sceneMusicPrompt, undefined, "scene planning does not publish an unconsumed music prompt");
   assert.equal(scenes.musicProgramMotionIntent, sealed.visual.motionIntent);
 
   const reused = await music(stageContext({

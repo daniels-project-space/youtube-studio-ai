@@ -5,7 +5,7 @@
  * Music is owned by the shared musicBlocks module and registered separately.
  * Data flow (store keys), in pipeline order:
  *   topic_select  → topic
- *   scene_planner → scenes sceneMusicPrompt
+ *   scene_planner → scenes musicProgramMotionIntent
  *   keyframes     → f1Url f1Key motionPrompt
  *   loop_clips    → loopRawKey loopRawUrl + two seam proofs
  *   upscale       → loopUnitKey loopUnitUrl loopUnitUpscaled loopUnitResolution
@@ -1057,7 +1057,7 @@ export function createScenePlannerBlock(planner: typeof planScenes = planScenes)
   return {
   id: "scene_planner",
   consumes: ["topic"],
-  produces: ["scenes", "sceneMusicPrompt", "musicProgramMotionIntent"],
+  produces: ["scenes", "musicProgramMotionIntent"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
     const musicProgram = musicProgramForCurrentRoute(ctx, topic);
@@ -1108,9 +1108,6 @@ export function createScenePlannerBlock(planner: typeof planScenes = planScenes)
     );
     return {
       scenes: plan.scenes,
-      // The route-owned plan is the binding instruction. The derived planner
-      // prompt remains a legacy fallback for historical pipelines only.
-      sceneMusicPrompt: musicProgram?.audio.direction ?? plan.musicPrompt ?? "",
       // loop_clips reads this before its generic scene prompt.  Passing the
       // sealed intent through is what makes the program’s motion constraint a
       // real renderer input rather than decorative planning metadata.
@@ -3381,11 +3378,10 @@ export const lofiBlocks: Block[] = [
 /**
  * Canonical lofi pipeline (ordered block entries) for a channel.
  *
- * Order:
- *   competitor_research → topic_select → scene_planner → music plan/music → keyframes
+ * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
+ *   competitor_research → music plan/music → scene_planner → keyframes
  *   → loop_clips(2×15s) → upscale(short source unit) → metadata
- *   → package_to_opening_plan → assemble(packet-looped 1–8h master)
- *   → qa_visual
+ *   → assemble(packet-looped 1–8h master) → qa_visual
  *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → upload_draft → notify
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
@@ -3400,14 +3396,13 @@ export const lofiBlocks: Block[] = [
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
-  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
   { block: "music_program_plan", params: { visualStyle: "lofi ambient" } },
+  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
   { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
-  { block: "package_to_opening_plan" },
   { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
