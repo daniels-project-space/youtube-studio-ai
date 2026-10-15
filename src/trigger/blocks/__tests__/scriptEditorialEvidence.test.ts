@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createEditorialEvidencePacket } from "@/engine/editorialEvidencePacket";
+import { assembleScriptNarration } from "@/engine/scriptNarration";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
@@ -39,7 +40,8 @@ async function main() {
     };
     await assert.rejects(qaScript.run({ ...context, store: {
       ...context.store,
-      script: { narrationText: "A different narration", hook: "metadata from the other script" },
+      script: { hook: "A different narration", sections: [],
+        narrationText: assembleScriptNarration("A different narration", []) },
     } }), /qa_script FAILED: narrationText differs from the script_gen output/);
     assert.equal(criticCalls, 0, "a mismatched script handoff fails before buying a critic verdict");
 

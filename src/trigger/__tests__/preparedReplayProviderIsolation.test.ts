@@ -9,6 +9,7 @@ import {
   planWeekPreparedImagesKey, planWeekPreparedImageKey, type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PREPARED_METADATA_READ } from "@/lib/preparedMediaStorage";
+import { assembleScriptNarration } from "@/engine/scriptNarration";
 
 const manifest: PlanWeekPreparationManifest = {
   version: "plan-week-preparation/inputs-v1", ownerId: "replay-owner", channelId: "replay-channel",
@@ -25,7 +26,7 @@ const payload = { ...manifest, manifestKey, manifestSha256, maxCostUsd: 2,
   shots: [{ id: "shot-1", prompt: "An old lock in the archive", candidateCount: 1 }] };
 const common = { ...manifest, topic: manifest.plan.topic, manifestSha256, createdAt: 2 };
 const script = { hook: "An old lock.", sections: [{ heading: "Archive", narration: "A missing pin.", role: "outro" }],
-  narrationText: "An old lock. A missing pin.", estDurationSec: 12 };
+  narrationText: assembleScriptNarration("An old lock.", [{ narration: "A missing pin." }]), estDurationSec: 12 };
 const scriptSha256 = sha256Hex(canonicalJson(script));
 const reviewBody = { version: "plan-week-script-review/v1", manifestSha256, scriptSha256,
   status: "approved", error: null, model: "google/gemini-3.7-flash", costUsd: 0.003, unpricedCalls: 0, calls: 1 };
