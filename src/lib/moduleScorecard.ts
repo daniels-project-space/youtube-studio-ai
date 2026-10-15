@@ -3,7 +3,7 @@ import { sha256Hex } from "@/lib/sha256";
 import type { ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 
 /** Versioned, append-only measurement emitted for every executed module stage. */
-export const MODULE_SCORECARD_VERSION = "module-scorecard/v7" as const;
+export const MODULE_SCORECARD_VERSION = "module-scorecard/v8" as const;
 
 export type ModuleScorecardStatus = "passed" | "failed";
 
@@ -28,6 +28,7 @@ export type ModuleScorecard = {
   /** Exact durable outputs measured by this stage; hashes only, never payloads. */
   outputArtifacts: ModuleScorecardArtifact[];
   /** The independent oracle may run later; null never means a passing score. */
+  oracleFingerprint: string | null;
   oracleScore: number | null;
   falsePasses: number | null;
   falseRejects: number | null;
@@ -166,6 +167,7 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
     inputFingerprint: requiredId(input.inputFingerprint, "input fingerprint"),
     configurationFingerprint: requiredId(input.configurationFingerprint, "configuration fingerprint"),
     outputArtifacts: outputArtifacts(input.outputArtifacts, runId, moduleId),
+    oracleFingerprint: input.oracleFingerprint,
     oracleScore: nullableScore(input.oracleScore),
     falsePasses: nullableNonNegative(input.falsePasses, "false passes"),
     falseRejects: nullableNonNegative(input.falseRejects, "false rejects"),
@@ -190,6 +192,14 @@ export function createModuleScorecard(input: ModuleScorecardInput): ModuleScorec
   }
   if (!/^[a-f0-9]{64}$/u.test(body.inputFingerprint) || !/^[a-f0-9]{64}$/u.test(body.configurationFingerprint)) {
     throw new Error("module scorecard measurement fingerprint is invalid");
+  }
+  if (body.oracleFingerprint !== null &&
+    (typeof body.oracleFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(body.oracleFingerprint))) {
+    throw new Error("module scorecard oracle fingerprint is invalid");
+  }
+  if (body.oracleFingerprint === null &&
+    [body.oracleScore, body.falsePasses, body.falseRejects].some((value) => value !== null)) {
+    throw new Error("module scorecard quality measurements require an oracle fingerprint");
   }
   if (body.status === "passed" && !body.outputValid) {
     throw new Error("a passed module scorecard cannot claim invalid output");
@@ -220,6 +230,7 @@ export type ModuleScorecardDelta = {
   oracleScoreDelta: number | null;
   falsePassesDelta: number | null;
   falseRejectsDelta: number | null;
+  oracleFingerprintChanged: boolean;
   wallTimeMs: number;
   providerCalls: number | null;
   inputTokens: number | null;
@@ -264,13 +275,16 @@ export function compareModuleScorecards(
     throw new Error("module scorecard comparison requires the same module");
   }
   const sameInputs = baseline.inputFingerprint === current.inputFingerprint;
+  const sameOracle = baseline.oracleFingerprint !== null && baseline.oracleFingerprint === current.oracleFingerprint;
+  const qualityComparable = sameInputs && sameOracle;
   return {
     moduleId: current.moduleId,
-    // Quality deltas need the same frozen input. Keep operational deltas
-    // visible across changed inputs, but never present them as an oracle gain.
-    oracleScoreDelta: sameInputs ? nullableScoreDelta(baseline.oracleScore, current.oracleScore) : null,
-    falsePassesDelta: sameInputs ? nullableDelta(baseline.falsePasses, current.falsePasses) : null,
-    falseRejectsDelta: sameInputs ? nullableDelta(baseline.falseRejects, current.falseRejects) : null,
+    // Quality deltas need the same frozen input and oracle. Keep operational
+    // deltas visible, but never present a changed test or judge as a gain.
+    oracleScoreDelta: qualityComparable ? nullableScoreDelta(baseline.oracleScore, current.oracleScore) : null,
+    falsePassesDelta: qualityComparable ? nullableDelta(baseline.falsePasses, current.falsePasses) : null,
+    falseRejectsDelta: qualityComparable ? nullableDelta(baseline.falseRejects, current.falseRejects) : null,
+    oracleFingerprintChanged: baseline.oracleFingerprint !== current.oracleFingerprint,
     wallTimeMs: current.wallTimeMs - baseline.wallTimeMs,
     providerCalls: nullableDelta(baseline.providerCalls, current.providerCalls),
     inputTokens: nullableDelta(baseline.inputTokens, current.inputTokens),

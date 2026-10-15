@@ -22,6 +22,7 @@ const base = {
     producerVersion: "3.0.0",
     payloadSha256: "a".repeat(64),
   }],
+  oracleFingerprint: null,
   oracleScore: null,
   falsePasses: null,
   falseRejects: null,
@@ -82,6 +83,7 @@ assert.deepEqual(compareModuleScorecards(scorecard, current), {
   oracleScoreDelta: null,
   falsePassesDelta: null,
   falseRejectsDelta: null,
+  oracleFingerprintChanged: false,
   wallTimeMs: -30,
   providerCalls: -1,
   inputTokens: -30,
@@ -141,6 +143,7 @@ assert.throws(
 const measuredDelta = compareModuleScorecards(
   createModuleScorecard({
     ...base,
+    oracleFingerprint: "b".repeat(64),
     oracleScore: 7.2,
     falsePasses: 3,
     falseRejects: 2,
@@ -152,6 +155,7 @@ const measuredDelta = compareModuleScorecards(
   }),
   createModuleScorecard({
     ...base,
+    oracleFingerprint: "b".repeat(64),
     oracleScore: 8.1,
     falsePasses: 1,
     falseRejects: 4,
@@ -184,13 +188,14 @@ assert.equal(compareModuleScorecards(scorecard, changedInputs).moduleVersionChan
 const changedInputQuality = createModuleScorecard({
   ...base,
   inputFingerprint: "d".repeat(64),
+  oracleFingerprint: "b".repeat(64),
   oracleScore: 9,
   falsePasses: 0,
   falseRejects: 0,
   wallTimeMs: 60,
 });
 const changedInputDelta = compareModuleScorecards(
-  createModuleScorecard({ ...base, oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
+  createModuleScorecard({ ...base, oracleFingerprint: "b".repeat(64), oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
   changedInputQuality,
 );
 assert.deepEqual(
@@ -203,10 +208,11 @@ assert.equal(changedInputDelta.wallTimeMs, -60,
 const changedConfiguration = createModuleScorecard({ ...base, configurationFingerprint: "f".repeat(64) });
 assert.equal(compareModuleScorecards(scorecard, changedConfiguration).configurationFingerprintChanged, true);
 const changedConfigQuality = compareModuleScorecards(
-  createModuleScorecard({ ...base, oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
+  createModuleScorecard({ ...base, oracleFingerprint: "b".repeat(64), oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
   createModuleScorecard({
     ...base,
     configurationFingerprint: "f".repeat(64),
+    oracleFingerprint: "b".repeat(64),
     oracleScore: 9,
     falsePasses: 0,
     falseRejects: 0,
@@ -216,6 +222,20 @@ assert.deepEqual(
   [changedConfigQuality.oracleScoreDelta, changedConfigQuality.falsePassesDelta, changedConfigQuality.falseRejectsDelta],
   [2, -2, -1],
   "same-input oracle changes remain measurable across module/configuration revisions",
+);
+const changedOracleQuality = compareModuleScorecards(
+  createModuleScorecard({ ...base, oracleFingerprint: "b".repeat(64), oracleScore: 7, falsePasses: 2, falseRejects: 1 }),
+  createModuleScorecard({ ...base, oracleFingerprint: "f".repeat(64), oracleScore: 9, falsePasses: 0, falseRejects: 0 }),
+);
+assert.deepEqual(
+  [changedOracleQuality.oracleScoreDelta, changedOracleQuality.falsePassesDelta, changedOracleQuality.falseRejectsDelta],
+  [null, null, null],
+  "quality deltas are unavailable when the oracle definition changes",
+);
+assert.equal(changedOracleQuality.oracleFingerprintChanged, true);
+assert.throws(
+  () => createModuleScorecard({ ...base, oracleScore: 7 }),
+  /quality measurements require an oracle fingerprint/,
 );
 const sameOutputDifferentRun = createModuleScorecard({
   ...base,
