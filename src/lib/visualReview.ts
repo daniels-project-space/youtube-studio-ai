@@ -1439,12 +1439,12 @@ function parseCreativeLockAssessments(
       continue;
     }
     const evidenceFrameIds = [...new Set(rawFrameIds as string[])];
-    const hasRelevantFrame = evidenceFrameIds.some((id) => {
+    const allFramesRelevant = evidenceFrameIds.every((id) => {
       const tSec = frameTimeById.get(id);
       return tSec !== undefined && tSec >= lock.startSec - VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC &&
         tSec <= lock.endSec + VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC;
     });
-    if (!hasRelevantFrame) {
+    if (!allFramesRelevant) {
       complete = false;
       continue;
     }

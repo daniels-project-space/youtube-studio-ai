@@ -334,6 +334,52 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
     cappedReview.reviewReceiptFingerprint,
     "the post-review receipt fingerprint must bind Story Spine lock assessments",
   );
+  const mixedEvidenceLock = [{
+    shotId: "mixed-evidence-beat",
+    startSec: 0.8,
+    endSec: 0.8,
+    expected: "Show the narrated action in the opening beat.",
+    acceptanceCriteria: ["Evidence must come from within this beat."],
+  }];
+  let citedUnrelatedFrameId: string | undefined;
+  const mixedEvidenceReview = await reviewRender(
+    join(process.cwd(), "public", "golden", "comic", "comic3d.mp4"),
+    18,
+    { title: "Reject unrelated beat evidence", creativeLocks: mixedEvidenceLock },
+    {
+      runId: "capped-story-spine-witnesses",
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+      reviewer: async (input) => {
+        const relevant = input.frames.find((frame) => frame.tSec >= 0.8 && frame.tSec <= 0.9);
+        if (!relevant) return JSON.stringify({ defects: [], summary: "No lock is sampled in this batch.", creativeLockAssessments: [] });
+        const unrelated = input.frames.find((frame) => Math.abs(frame.tSec - 0.8) > 0.25);
+        assert.ok(unrelated,
+          `the lock batch must also include an unrelated witness: ${JSON.stringify(input.frames.map((frame) => ({ id: frame.id, tSec: frame.tSec })))}`);
+        citedUnrelatedFrameId = unrelated.id;
+        return JSON.stringify({
+          defects: [],
+          summary: "Mixed-time evidence should not certify a single beat.",
+          creativeLockAssessments: [{
+            shotId: "mixed-evidence-beat",
+            verdict: "pass",
+            assessment: "One relevant frame was mixed with a frame from another beat.",
+            evidenceFrameIds: [relevant.id, unrelated.id],
+          }],
+        });
+      },
+    },
+  );
+  assert.ok(citedUnrelatedFrameId, "the counterexample must cite an actual outside-beat frame");
+  assert.equal(mixedEvidenceReview.verdict, "needs_human",
+    "a Story Spine beat must not pass when its evidence cites a frame from another time");
+  assert.deepEqual(mixedEvidenceReview.evidence.coverage.creativeLocks?.notObservableLockIds, ["mixed-evidence-beat"]);
+  assert.equal(
+    mixedEvidenceReview.evidence.coverage.creativeLocks?.assessments[0]?.evidenceFrameIds.includes(citedUnrelatedFrameId ?? ""),
+    false,
+    "invalid cross-beat citations must not survive into durable QA evidence",
+  );
   const generatedLane: HealableBlock[] = [
     { id: "generated_visuals", produces: ["videoLocalPath"], consumes: ["storySpine"] },
     { id: "qa_visual", produces: ["qaReport"], consumes: ["videoLocalPath"] },
