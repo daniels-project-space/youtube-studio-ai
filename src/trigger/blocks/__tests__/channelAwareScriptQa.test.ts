@@ -14,6 +14,11 @@ async function main() {
   const context: StageContext = { ownerId: "critic-owner", channelId: "critic-channel", runId: "critic-run",
     keyPrefix: "owner/critic-owner/", budgetUsd: 20, params: {}, log: () => {},
     store: { channelName: "Quiet Evening", persona: "Listeners winding down without dramatic stimulation.",
+      showBible: { positioning: "Quiet guided listening for people ending a demanding day.",
+        vibe: "Soft, spacious, and emotionally unforced.",
+        iconicMotif: "A brass telescope under a crescent moon.",
+        worksInSpace: ["Use sensory anchors from the immediate room."],
+        avoidInSpace: ["Avoid suspense hooks that raise arousal."] },
       styleGrammar: "Watercolor lighthouse illustrations with soft green borders.",
       styleDNA: { narrative: { scriptStyle: "Gentle invitations and deliberate repetition.",
         hookStyle: "A quiet arrival rather than suspense.", pacing: "Spacious pauses.",
@@ -59,6 +64,10 @@ async function main() {
       { ...context.store,
         narrationText: "Notice the support beneath you.\n\nLet the next breath arrive without effort.",
         channelName: "Measured Argument", persona: "Curious adults seeking a reasoned argument.",
+        showBible: { positioning: "Evidence-led arguments that test a clear claim against counterexamples.",
+          vibe: "Curious, exacting, and fair-minded.",
+          worksInSpace: ["State a falsifiable claim before adding context."],
+          avoidInSpace: ["Avoid presenting a disputed claim as settled fact."] },
         styleDNA: { narrative: { scriptStyle: "Specific thesis, counterexample, evidence and payoff.",
           pacing: "Build a careful argument.", hookStyle: "A concrete disputed observation.", delivery: "Measured and precise." } },
         criticDoctrine: "Require a clear midpoint challenge to the opening claim.",
@@ -67,6 +76,10 @@ async function main() {
           narrationText: "Notice the support beneath you.\n\nLet the next breath arrive without effort.",
           hookLoop: "Why did the second seed survive?" } },
       { ...context.store, channelName: "One Clear Minute", persona: "Busy viewers seeking one useful idea.",
+        showBible: { positioning: "One practical idea explained for viewers with a minute to spare.",
+          vibe: "Direct, warm, and brisk without rushing.",
+          worksInSpace: ["Demonstrate the idea with one everyday example."],
+          avoidInSpace: ["Avoid setup that consumes the entire short."] },
         styleDNA: { narrative: { scriptStyle: "Compact opening, concrete example and concise payoff.",
           pacing: "Concise without rushing.", hookStyle: "One useful question.", delivery: "Direct and friendly." } },
         criticDoctrine: "Reject setup that consumes the whole short." }]) {
@@ -75,12 +88,18 @@ async function main() {
       for (const key of ["channelName", "persona", "criticDoctrine"] as const) {
         assert.ok(prompt.includes(String(store[key])), `${key} must reach this channel's critic`);
       }
+      const showBible = store.showBible as { positioning: string; vibe: string; worksInSpace: string[]; avoidInSpace: string[] };
+      for (const field of [showBible.positioning, showBible.vibe, ...showBible.worksInSpace, ...showBible.avoidInSpace]) {
+        assert.ok(prompt.includes(field), `frozen Show Bible guidance must reach this channel's critic: ${field}`);
+      }
       const narrative = (store.styleDNA as { narrative: Record<string, string> }).narrative;
       for (const field of ["scriptStyle", "hookStyle", "pacing", "delivery"]) {
         assert.ok(prompt.includes(narrative[field]), `${field} must reach the critic from frozen narrative DNA`);
       }
       assert.doesNotMatch(prompt, /Watercolor lighthouse|Acoustic voice timbre/,
         "visual styling and acoustic voice casting must not become prose-quality requirements");
+      assert.doesNotMatch(prompt, /brass telescope under a crescent moon/i,
+        "the Show Bible's visual motif stays owned by visual modules");
       assert.doesNotMatch(prompt, /require a genuine, specific POINT OF VIEW|verify a deliberate MIDPOINT RE-HOOK exists/);
       assert.match(prompt, /Channel personality cannot waive the sealed route/);
       assert.match(prompt, /forbidden phrase/);
@@ -102,6 +121,16 @@ async function main() {
       const before = prompts.length;
       await assert.rejects(invoke(selected, { ...context, store: { ...context.store, styleDNA } }));
       assert.equal(prompts.length, before, "malformed narrative DNA must fail before buying a review");
+    }
+    for (const showBible of [
+      { positioning: 42 },
+      { positioning: "x".repeat(2001) },
+      { worksInSpace: Array.from({ length: 11 }, () => "bounded list") },
+      { avoidInSpace: ["x".repeat(501)] },
+    ]) {
+      const before = prompts.length;
+      await assert.rejects(invoke(selected, { ...context, store: { ...context.store, showBible } }));
+      assert.equal(prompts.length, before, "malformed Show Bible guidance must fail before buying a review");
     }
     for (const store of [{ narrationText: context.store.narrationText },
       { narrationText: context.store.narrationText, channelName: "Unnamed personality" },

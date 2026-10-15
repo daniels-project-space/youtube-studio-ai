@@ -10,6 +10,12 @@ import { createQaScriptBlock } from "./narratedBlocks";
 const scriptContextSchema = z.object({
   channelName: z.string().optional(), persona: z.string().optional(), criticDoctrine: z.string().optional(),
   bannedWords: z.array(z.string().min(1).max(160)).max(32).optional(),
+  showBible: z.object({
+    positioning: z.string().max(2000).optional(),
+    vibe: z.string().max(1000).optional(),
+    worksInSpace: z.array(z.string().max(500)).max(10).optional(),
+    avoidInSpace: z.array(z.string().max(500)).max(10).optional(),
+  }).nullish(),
   styleDNA: z.object({ narrative: z.object({
     scriptStyle: z.string().optional(), hookStyle: z.string().optional(),
     pacing: z.string().optional(), delivery: z.string().optional(),
@@ -20,9 +26,11 @@ function scriptCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
   // Visual grammar and acoustic casting are owned by other modules.
   const parsed = scriptContextSchema.parse({ channelName: ctx.store["channelName"],
     persona: ctx.store["persona"], criticDoctrine: ctx.store["criticDoctrine"],
-    bannedWords: ctx.store["bannedWords"], styleDNA: ctx.store["styleDNA"] });
+    bannedWords: ctx.store["bannedWords"], showBible: ctx.store["showBible"], styleDNA: ctx.store["styleDNA"] });
   const lane = ctx.store["contentLane"] as { key?: unknown } | null | undefined;
   return { channelName: parsed.channelName, persona: parsed.persona, criticDoctrine: parsed.criticDoctrine,
+    positioning: parsed.showBible?.positioning, vibe: parsed.showBible?.vibe,
+    worksInSpace: parsed.showBible?.worksInSpace, avoidInSpace: parsed.showBible?.avoidInSpace,
     bannedWords: parsed.bannedWords,
     narrative: parsed.styleDNA?.narrative,
     ...(typeof lane?.key === "string" ? { contentLaneKey: lane.key } : {}),
@@ -46,7 +54,8 @@ export function createChannelAwareScriptQaManifest(legacy: ModuleManifest): Modu
     consumes: { ...legacy.consumes, channelName: artifactContract("channelName") },
     optionalConsumes: { ...legacy.optionalConsumes,
       styleDNA: artifactContract("styleDNA"), criticDoctrine: artifactContract("criticDoctrine"),
-      contentLane: artifactContract("contentLane"), bannedWords: artifactContract("bannedWords") },
+      contentLane: artifactContract("contentLane"), bannedWords: artifactContract("bannedWords"),
+      showBible: artifactContract("showBible") },
     certification: { status: "contract",
       evidence: "Opt-in channel-conditioned critic policy; requires real-output evaluation before production qualification." },
     block, execute: block.run,

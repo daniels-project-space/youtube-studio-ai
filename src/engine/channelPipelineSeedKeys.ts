@@ -30,7 +30,7 @@ export function channelPipelineValidationSeedKeys(
     keys.push("channelProgramRoute");
   }
   if (pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) {
-    keys.push("channelName");
+    keys.push("channelName", "showBible");
   }
   if (pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script")) {
     keys.push("bannedWords");

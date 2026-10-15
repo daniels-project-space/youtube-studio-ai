@@ -27,7 +27,7 @@ try {
     assert.deepEqual(keys, [
       "contentLane", "channelProgramRoute",
       ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
-        ? ["channelName"] : []),
+        ? ["channelName", "showBible"] : []),
       ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
     ]);
     assert.equal(keys.includes("workedExampleRequest"), false, "no nonexistent producer can be claimed as a seed");
@@ -38,7 +38,7 @@ try {
     assert.deepEqual(withoutRoute, [
       "contentLane",
       ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
-        ? ["channelName"] : []),
+        ? ["channelName", "showBible"] : []),
       ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
     ]);
     if (family === "narrated_stock") {
@@ -63,8 +63,11 @@ try {
     { block: "music_program_plan", version: "2.1.0-yue2-frozen-identity" },
   ]), ["contentLane", "channelProfile"]);
   assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
+    { block: "script_gen" }, { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+  ]), ["contentLane", "channelName", "showBible", "bannedWords"]);
+  assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
     { block: "script_gen" }, { block: "qa_script" },
-  ]), ["contentLane", "bannedWords"]);
+  ]), ["contentLane", "bannedWords"], "legacy script QA does not gain new channel identity requirements");
   for (const version of [undefined, "2.0.0-yue2-intent"]) {
     assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
       { block: "music_program_plan", ...(version ? { version } : {}) },
