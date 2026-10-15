@@ -7,7 +7,7 @@ import type { YuE2DurableEvaluationInput } from "@/lib/yue2DurableEvaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
 
 const read = (name: string) => JSON.parse(readFileSync(`test-fixtures/music-composer/seaside-after/${name}.json`, "utf8"));
-const retained = read("gpu-material"), brief = read("brief").musicBrief;
+const retained = read("gpu-material");
 const arrangement = retained.request.acceptedArrangement;
 const policy = { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
   rate_source: "operator_configured", rate_reference: "synthetic admission policy", runtime_id: "fixture",
@@ -138,9 +138,11 @@ async function main() {
   assert.equal(waits, 8); assert.equal(calls.length, 9);
   assert.ok(calls.slice(1).every(call => call.recoverOnly === true));
 
-  registerManifest(manifestFromBlock({ id: "retained_brief_fixture", consumes: [], produces: ["musicBrief"],
-    run: async () => ({ musicBrief: structuredClone(brief) }) }, { capabilities: ["crew.accepted_music_arrangement"] }));
-  const entries = [{ block: "retained_brief_fixture" }, { block: "music_arrangement_plan" },
+  registerManifest(manifestFromBlock({ id: "retained_arrangement_fixture", consumes: [], produces: ["acceptedMusicArrangement"],
+    run: async () => ({ acceptedMusicArrangement: structuredClone(arrangement) }) }, {
+    capabilities: ["crew.accepted_music_arrangement", "music.arrangement.accepted"],
+  }));
+  const entries = [{ block: "retained_arrangement_fixture" },
     { block: "music", version: YUE2_MUSIC_CANDIDATE_VERSION, params }];
   const resolved = validatePipeline(entries, ["topic"]);
   for (const [consumer, seeds] of [["assemble", ["loopUnitKey"]],
@@ -154,7 +156,7 @@ async function main() {
     rehydrate: (block: string, outputs: Record<string, unknown>) => rehydrateOutputs(block, outputs, context.runId) };
   const result = await runPipeline(resolved, options);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store.acceptedMusicArrangement, arrangement, "actual planner seals the retained brief exactly");
+  assert.deepEqual(result.store.acceptedMusicArrangement, arrangement, "the source module receives the accepted arrangement unchanged");
   assert.equal(result.costTotal, 0.004208);
   assert.equal((result.store.yue2MusicCandidate as Record<string, unknown>).productionApproved, false);
   assert.equal(result.store.musicKey, undefined); assert.equal(result.store.musicUrl, undefined);

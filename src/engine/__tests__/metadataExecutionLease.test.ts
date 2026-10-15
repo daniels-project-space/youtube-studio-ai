@@ -17,7 +17,7 @@ const identity = {
 };
 type Request = typeof identity & { requestId: string };
 type Grant = { requestId: string; checkedAt: number; leaseExpiresAt: number };
-type Phase = "generator" | "judge" | "package" | "comment";
+type Phase = "generator" | "judge" | "package" | "memo";
 const title = "Roman Aqueducts Changed City Life";
 const loader = Module as unknown as { _load: (request: string, ...rest: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -90,15 +90,18 @@ async function main() {
     const prompt = body.messages.at(-1)!.content;
     const phase: Phase = prompt.startsWith("Write SEVEN") ? "generator"
       : prompt.startsWith("You are a YouTube CTR strategist") ? "judge"
-      : prompt.includes("description + tags") ? "package" : "comment";
+      : prompt.includes("description + tags") ? "package"
+      : prompt === "memo fixture" || prompt === "different request" || prompt === "coalesced fixture" ? "memo"
+      : (() => { throw new Error(`unexpected metadata request: ${prompt.slice(0, 120)}`); })();
     requests.push(phase); events.push("fetch");
     const output: unknown = phase === "generator" ? { candidates: [{ frame: "mechanism", title }] }
       : phase === "judge" ? {
         rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, viewerMotivation: 9,
           grounding: "supported", reason: "Fixture judgment, not model quality evidence." }],
         winner: 0, runnerUp: 0,
-      } : phase === "package" ? { description: "Roman aqueducts changed city life.", tagsCsv: "rome,water,aqueduct,engineering,history" }
-        : { comment: "Which engineering detail matters most?" };
+      } : phase === "package"
+        ? { description: "Roman aqueducts changed city life.", tagsCsv: "rome,water,aqueduct,engineering,history" }
+        : { memo: "fixture response" };
     if (revokeAfter === requests.length) run.executionAttempts++;
     if (phase === ambiguous) return Response.json({ error: { message: "ambiguous fixture dispatch" } }, { status: 503 });
     return Response.json({
@@ -138,8 +141,8 @@ async function main() {
   reset();
   const success = await execute();
   assert.equal(success.result.status, "completed");
-  assert.deepEqual(requests, ["generator", "judge", "package", "comment"]);
-  assert.deepEqual(events, Array.from({ length: 4 }, () => ["check", "fetch"]).flat());
+  assert.deepEqual(requests, ["generator", "judge", "package"]);
+  assert.deepEqual(events, Array.from({ length: 3 }, () => ["check", "fetch"]).flat());
 
   for (const state of ["stale", "expired", "cancelled"] as const) {
     reset();
@@ -168,7 +171,7 @@ async function main() {
   assert.equal(checks, 0); assert.equal(requests.length, 0);
   process.env.OPENROUTER_API_KEY = "fixture-only-no-network";
 
-  for (const count of [1, 2, 3]) {
+  for (const count of [1, 2]) {
     reset(); revokeAfter = count;
     const failed = await execute();
     assertBlocked(failed.result, count);
@@ -181,7 +184,7 @@ async function main() {
     reset(); invalidFirst = phase;
     const retried = await execute();
     assert.equal(retried.result.status, "completed");
-    assert.equal(requests.length, phase === "generator" ? 5 : 6);
+    assert.equal(requests.length, phase === "generator" ? 4 : 5);
     assert.deepEqual(events, Array.from({ length: requests.length }, () => ["check", "fetch"]).flat());
   }
   for (const phase of ["generator", "judge", "package"] as const) {

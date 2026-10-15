@@ -32,6 +32,26 @@ const response = {
       instruction: "Maintain the same unmetered drone and level.",
     })),
   },
+  channelGrounding: [
+    {
+      source: "episode_topic",
+      cue: "Steady unmetered night texture",
+      decisions: [
+        { dimension: "rhythm", choice: "Use no audible pulse or percussion; hold an even, unmetered bed." },
+        { dimension: "texture", choice: "Keep the texture stable so it supports a quiet night setting." },
+      ],
+      sectionIds: ["interval-1", "interval-2", "interval-3", "interval-4"],
+    },
+    {
+      source: "show_bible",
+      cue: "Original instrumental drone",
+      decisions: [
+        { dimension: "register", choice: "Keep the instrumental sound in a restrained, steady register." },
+        { dimension: "harmony", choice: "Avoid a build or harmonic change that would break the flat drone." },
+      ],
+      sectionIds: ["interval-1", "interval-2", "interval-3", "interval-4"],
+    },
+  ],
   duckDb: -12, bedLufs: -20,
 };
 
