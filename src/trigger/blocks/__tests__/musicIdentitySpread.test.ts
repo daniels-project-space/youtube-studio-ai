@@ -24,9 +24,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { musicFallbackPromptForRoute } from "../musicBlocks";
 
-const MUSIC = readFileSync(join(process.cwd(), "src/trigger/blocks/musicBlocks.ts"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 const ARCHETYPES = readFileSync(join(process.cwd(), "src/engine/archetypes.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
@@ -61,25 +60,16 @@ function main(): void {
   }
 
   // ---- lofi keeps its own sound -------------------------------------------
-  assert.match(
-    MUSIC,
-    /const isLoopFamily = musicRoute\?\.family === "music_loop";/,
-    "the loop family must be identified before the last resort is chosen",
-  );
-  assert.match(
-    MUSIC,
-    /isLoopFamily\s*\?\s*`warm cozy lofi hip-hop/,
-    "a lofi channel must still receive the lofi brief — its sound is the product",
-  );
-  assert.match(
-    MUSIC,
-    /spreadDefault\(seed, FALLBACK_UNDERSCORE_BRIEFS\)/,
-    "and everything else must draw from the range",
-  );
-  assert.ok(
-    !/\|\|\s*\n?\s*`warm cozy lofi hip-hop/.test(MUSIC),
-    "lofi must no longer be the unconditional final fallback for every family",
-  );
+  const lofiPrompt = musicFallbackPromptForRoute({
+    family: "music_loop", contentLaneKey: "music_loop", topic: "quiet harbor", channelIdentitySeed: "Seaside Ghibli",
+  });
+  assert.match(lofiPrompt, /warm cozy lofi hip-hop/,
+    "the exact loop route must retain its own sound — that sound is the product");
+  const narratedPrompts = channels.map((channelIdentitySeed) => musicFallbackPromptForRoute({
+    family: "narrated", contentLaneKey: "narrated_longform", topic: "a measured story", channelIdentitySeed,
+  }));
+  assert.ok(new Set(narratedPrompts).size >= 3,
+    "narrated channels must draw distinct identity-bound prompts rather than inherit Lo-Fi or one generic bed");
 
   // ---- the archetype must not hard-code one identity ----------------------
   assert.ok(

@@ -20,8 +20,8 @@ assert.match(
 );
 assert.match(
   source,
-  /musicQualityReviewStatus: usedProvider === "minimax_music3"[\s\S]*?"awaiting-human-audition"/,
-  "technical recovery must not forge or bypass the independent human musical audition",
+  /musicProvider: usedProvider,[\s\S]*?musicQualityReviewStatus: "awaiting-human-audition"/,
+  "a newly generated track must remain pending the independent human musical audition after technical recovery",
 );
 
 console.log("Lo-Fi MiniMax Music3 technical recovery wiring tests passed");
