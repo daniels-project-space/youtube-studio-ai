@@ -634,7 +634,7 @@ export const music: Block = {
     const trackCount = boundedInteger(ctx.params.trackCount, 2, 1, 8);
     const modelOverride = typeof ctx.params.model === "string" ? ctx.params.model.trim() : "";
     if (modelOverride.length > 12) throw new Error("music: provider model ID must be at most 12 characters");
-    const sunoModel = modelOverride || "V5";
+    const sunoModel = provider === "suno" && modelOverride ? modelOverride : "V5";
     const mixTitle = (String(ctx.store["channelName"] ?? "") || topic).slice(0, 60);
     const tmp = await makeRunTempDir(ctx.runId);
 
@@ -781,7 +781,7 @@ export const music: Block = {
           ctx.log(`music: suno ${sunoModel} generation ${g + 1}/${gens} (custom mode, WAV upgrade)…`);
           const res = await generateSuno({
             prompt: varied,
-            model: sunoModel,
+            model: prov === provider ? sunoModel : "V5",
             title: mixTitle,
             // WAV upgrade only when EXPLICITLY requested (lofi sets it): a
             // narrated bed sits ducked -22dB under voice — inaudible benefit,
@@ -799,7 +799,7 @@ export const music: Block = {
         ctx.log(`music: generating via ${prov}…`);
         const res = await generateMureka({
           prompt: providerPrompt,
-          model: modelOverride || undefined,
+          model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
           timeoutMs: 600_000,
         });
         generations = 1;

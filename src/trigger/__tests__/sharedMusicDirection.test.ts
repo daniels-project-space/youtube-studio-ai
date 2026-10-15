@@ -6,6 +6,7 @@ import { createOriginalMusicProgramPlan } from "@/engine/originalMusicProgram";
 import { ChannelMusicProgramSchema, music3StructuredCaptionWordCount, type ChannelMusicProgram } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { MusicError } from "@/lib/music";
 import { sha256Hex, sha256BytesHex } from "@/lib/sha256";
 import { PLAN_WEEK_PREPARATION_VERSION, planWeekPreparationKey, type PlanWeekPreparationManifest } from "@/lib/planWeekPreparation";
 import type { PlanWeekPreparedMusicArgs } from "../planWeekPreparedMusic";
@@ -13,6 +14,7 @@ import type { PlanWeekPreparedMusicArgs } from "../planWeekPreparedMusic";
 type Provider = "mureka" | "suno" | "minimax_music3";
 const boundaryStop = new Error("test stopped at paid provider boundary");
 let dispatched: { provider: Provider; prompt: string; model?: string; program?: ChannelMusicProgram }[] = [];
+let failureProvider: Provider | null = null;
 let persisted: ChannelMusicProgram | undefined;
 let manifestBytes: Uint8Array = new Uint8Array();
 let manifestKey = "";
@@ -20,11 +22,14 @@ const claims = new Map<string, Uint8Array>();
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
+const originalMurekaKey = process.env.MUREKA_API_KEY;
+const originalSunoKey = process.env.SUNO_API_KEY;
 let networkCalls = 0;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in direction tests"); };
 
 const dispatch = async (provider: Provider, input: { prompt?: string; model?: string; program?: ChannelMusicProgram }) => {
   dispatched.push({ provider, prompt: input.program?.generation.structuredCaption ?? input.prompt!, model: input.model, program: input.program });
+  if (provider === failureProvider) throw new MusicError("provider rejected before generation", { safeToFallback: true });
   throw boundaryStop;
 };
 loader._load = function (id, ...args) {
@@ -73,7 +78,14 @@ async function main() {
   const { planWeekPreparedMusicTask } = loadWithProviderFixtures("../planWeekPreparedMusic") as {
     planWeekPreparedMusicTask: { run: (args: PlanWeekPreparedMusicArgs) => Promise<unknown> };
   };
-  async function runtime(provider: Provider, prompt: string, store: Record<string, unknown> = {}, error?: RegExp, model?: string) {
+  async function runtime(
+    provider: Provider,
+    prompt: string,
+    store: Record<string, unknown> = {},
+    error?: RegExp,
+    model?: string,
+    expectedProviders: Provider[] = [provider],
+  ) {
     dispatched = []; persisted = undefined;
     const runtimeStore: Record<string, unknown> = { topic, channelProgramRoute: route, ...store };
     if (runtimeStore.channelProgramRoute === route && runtimeStore.musicProgramPlan === undefined) {
@@ -96,8 +108,7 @@ async function main() {
       return "";
     }
     await assert.rejects(music.run(ctx), /test stopped at paid provider boundary/);
-    assert.equal(dispatched.length, 1);
-    assert.equal(dispatched[0].provider, provider);
+    assert.deepEqual(dispatched.map(({ provider: used }) => used), expectedProviders);
     assert.ok(persisted);
     ChannelMusicProgramSchema.parse(persisted);
     if (provider === "minimax_music3") {
@@ -127,10 +138,25 @@ async function main() {
 
   const flat = "Keep a flat nocturnal pulse with no build, drop, or climax.";
   const active = "Propulsive championship percussion for high energy athletic training.";
+  process.env.MUREKA_API_KEY = "fixture-mureka";
+  process.env.SUNO_API_KEY = "fixture-suno";
   await runtime("mureka", "Warm instrumental detail.", {}, undefined, "  ");
   assert.equal(dispatched[0]!.model, undefined, "blank model control must preserve Mureka's provider default");
   await runtime("suno", "Warm instrumental detail.", {}, undefined, "  ");
   assert.equal(dispatched[0]!.model, "V5", "blank model control must preserve the existing Suno default");
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "MurekaX");
+  assert.equal(dispatched[0]!.model, "MurekaX", "Mureka's selected provider receives its model override");
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "SunoCustom");
+  assert.equal(dispatched[0]!.model, "SunoCustom", "Suno's selected provider receives its model override");
+  failureProvider = "mureka";
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "MurekaX", ["mureka", "suno"]);
+  assert.equal(dispatched[0]!.model, "MurekaX");
+  assert.equal(dispatched[1]!.model, "V5", "Mureka model IDs must not leak into Suno fallback");
+  failureProvider = "suno";
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "SunoCustom", ["suno", "mureka"]);
+  assert.equal(dispatched[0]!.model, "SunoCustom");
+  assert.equal(dispatched[1]!.model, undefined, "Suno model IDs must not leak into Mureka fallback");
+  failureProvider = null;
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
     const sleepPrompt = await runtime(provider, "Use a driving 120 BPM groove with a strong pulse.", {
       channelProgramRoute: sleepRoute,
@@ -230,4 +256,8 @@ async function main() {
 void main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   loader._load = originalLoad;
   globalThis.fetch = originalFetch;
+  if (originalMurekaKey === undefined) delete process.env.MUREKA_API_KEY;
+  else process.env.MUREKA_API_KEY = originalMurekaKey;
+  if (originalSunoKey === undefined) delete process.env.SUNO_API_KEY;
+  else process.env.SUNO_API_KEY = originalSunoKey;
 });
