@@ -3381,8 +3381,12 @@ export const lofiBlocks: Block[] = [
  * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
  *   competitor_research → music plan/music → scene_planner → keyframes
  *   → loop_clips(2×15s) → upscale(short source unit) → metadata
- *   → assemble(packet-looped 1–8h master) → qa_visual
- *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → upload_draft → notify
+ *   → assemble(packet-looped 1–8h master)
+ *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → qa_visual
+ *   → upload_draft → notify
+ *
+ * Final visual QA follows thumbnail generation because it reviews the finished
+ * master and its thumbnail together before the private draft can be uploaded.
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
  * seoDatabank / competitors are in the store before `metadata` optimises the
