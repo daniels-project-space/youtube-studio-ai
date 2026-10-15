@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { designPipeline } from "@/engine/designer";
 import { COMPOSER_MIX_ASSEMBLY_VERSION, selectComposerMixAssembly } from "@/engine/composerMixPipelineSelection";
-import { CHANNEL_AWARE_SCRIPT_QA_VERSION, selectChannelAwareScriptQa } from "@/engine/channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+  selectChannelAwareScriptQa,
+} from "@/engine/channelAwareScriptQaSelection";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
+import { contentLaneForFamily } from "@/engine/contentLane";
 import type { PipelineEntry } from "@/engine/types";
 
 const source: PipelineEntry[] = [
@@ -45,10 +51,16 @@ assert.equal(selectChannelAwareScriptQa([scriptSource[1], scriptSource[0]])[0].v
   "the channel critic is not selected before its script producer");
 
 const qaIndex = designed.pipeline.findIndex((entry) => entry.block === "qa_script");
-assert.ok(qaIndex > designed.pipeline.findIndex((entry) => entry.block === "script_gen"),
+const scriptIndex = designed.pipeline.findIndex((entry) => entry.block === "script_gen");
+assert.ok(qaIndex > scriptIndex,
   "real narrated design includes an ordered script critic");
 assert.equal(designed.pipeline[qaIndex].version, CHANNEL_AWARE_SCRIPT_QA_VERSION,
   "new narrated channel designs select the channel-conditioned critic");
+assert.equal(designed.pipeline[scriptIndex].version, CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  "new narrated channel designs pair identity-grounded writing with its channel-conditioned critic");
+assert.ok(channelPipelineValidationSeedKeys(contentLaneForFamily("narrated_stock")!, undefined, designed.pipeline)
+  .includes("showBible"),
+  "the selected production graph declares its frozen channel identity seed");
 assert.equal(loop.pipeline.some((entry) => entry.block === "qa_script"), false,
   "music-loop pipelines do not acquire a script critic they do not use");
 
