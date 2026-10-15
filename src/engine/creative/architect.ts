@@ -31,6 +31,7 @@ import { agentJson } from "@/agents/mastra";
 import { registerAllBlocks } from "@/engine/blocks";
 import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
 import type { PipelineEntry } from "@/engine/types";
 import {
@@ -528,6 +529,8 @@ export function applyArchitectPlan(
   // evaluated.
   const contentLane = resolveContentLane({ family: opts.family, pipeline: base });
   assertPipelineMatchesContentLane(contentLane, base);
+  const validationSeeds = (entries: readonly PipelineEntry[]) =>
+    channelPipelineValidationSeedKeys(contentLane, undefined, entries);
   const byBlock = new Map([...ARCHITECT_TOOLBOX, ...(opts.extraTools ?? [])].map((t) => [t.block, t]));
 
   let pipeline: PipelineEntry[] = base.map((e) => ({
@@ -541,7 +544,7 @@ export function applyArchitectPlan(
     try {
       const probe = next.map((e) => ({ ...e }));
       enforceInvariants(probe);
-      validatePipeline(probe);
+      validatePipeline(probe, validationSeeds(probe));
       assertPipelineMatchesContentLane(contentLane, probe);
       pipeline = probe;
       return true;
@@ -662,7 +665,8 @@ export function applyArchitectPlan(
   // Final invariant pass on the winning pipeline.
   enforceInvariants(pipeline);
   try {
-    validatePipeline(pipeline.map((e) => ({ ...e })));
+    const finalPipeline = pipeline.map((e) => ({ ...e }));
+    validatePipeline(finalPipeline, validationSeeds(finalPipeline));
     assertPipelineMatchesContentLane(contentLane, pipeline);
   } catch (e) {
     // Should be unreachable (incremental gates) — fall back to the floor.
