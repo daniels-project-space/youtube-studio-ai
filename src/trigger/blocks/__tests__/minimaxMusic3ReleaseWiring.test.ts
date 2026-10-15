@@ -5,6 +5,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const lofi = readFileSync(join(root, "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const music = readFileSync(join(root, "src/trigger/blocks/musicBlocks.ts"), "utf8");
+const releaseGate = readFileSync(join(root, "src/trigger/blocks/musicReleaseGate.ts"), "utf8");
 const panel = readFileSync(join(root, "src/components/ModuleConfigPanel.tsx"), "utf8");
 
 assert.match(
@@ -47,15 +48,17 @@ assert.match(
   "the durable stage handoff must expose the native WAV locator to the later owner-review checkpoint",
 );
 assert.match(
-  lofi,
+  releaseGate,
   /expectedNativeWavKey[\s\S]*?assertMusicAuditionNativeBytes\([\s\S]*?getObjectBytes\(nativeWavKey\)/u,
   "upload must re-read the exact content-addressed retained WAV, not trust only a stored worker receipt",
 );
 assert.match(
-  lofi,
+  releaseGate,
   /isMusicReviewStatusCompatible\(provider, reviewStatus\)[\s\S]*?music provider review state is missing or invalid[\s\S]*?provider !== "minimax_music3"/u,
   "the upload boundary must validate every provider's review-state handoff and fail closed on unknown or inconsistent routes",
 );
+assert.match(lofi, /await assertMusicQualityForPublish\(ctx\)/u,
+  "the shared release gate must remain connected to the upload boundary");
 assert.match(
   panel,
   /aria-label="MiniMax-Music3 attribution and generation disclosure"[\s\S]*Music generated with MiniMax-Music3/u,
