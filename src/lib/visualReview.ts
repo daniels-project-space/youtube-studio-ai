@@ -66,6 +66,7 @@ const VISUAL_REVIEW_CATEGORY_VALUES = [
 ] as const;
 export type VisualReviewCategory = (typeof VISUAL_REVIEW_CATEGORY_VALUES)[number];
 const VISUAL_REVIEW_CATEGORIES = new Set<string>(VISUAL_REVIEW_CATEGORY_VALUES);
+const VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC = 0.5;
 export type EvidenceReason = "intro" | "outro" | "scene" | "uniform" | "cue" | "overlay" | "focus";
 
 export type NormalizedRect = [number, number, number, number];
@@ -1417,7 +1418,7 @@ function parseModelDefects(
     };
   }
   const parsedReferenceCriteria = parseReferenceCriteriaReceipt(receipt, frames, requestedReferenceCriteria);
-  const known = new Set(frames.map((frame) => frame.descriptor.id));
+  const frameTimeById = new Map(frames.map((frame) => [frame.descriptor.id, frame.descriptor.tSec]));
   let complete = true;
   const defects = reportedDefects.flatMap((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -1460,12 +1461,21 @@ function parseModelDefects(
       !Array.isArray(rawFrameIds) ||
       ids.length !== rawFrameIds.length ||
       ids.length === 0 ||
-      ids.some((id) => !known.has(id))
+      ids.some((id) => !frameTimeById.has(id))
     ) {
       complete = false;
       return [];
     }
     const evidenceFrameIds = [...new Set(ids)];
+    const hasTemporallyRelevantEvidence = evidenceFrameIds.some((id) => {
+      const frameTime = frameTimeById.get(id);
+      return frameTime !== undefined && frameTime >= startSec - VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC &&
+        frameTime <= endSec + VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC;
+    });
+    if (!hasTemporallyRelevantEvidence) {
+      complete = false;
+      return [];
+    }
     const category = normalizeCategory(rawCategory, observed);
     const key = `${phase}|${category}|${roundTime(startSec)}|${observed.slice(0, 120)}`;
     return [{

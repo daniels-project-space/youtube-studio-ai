@@ -47,20 +47,23 @@ assert.match(
   /visual-review-wide-sample-quality\/v1/,
   "the opt-in broad quality score must carry a stable receipt-bound schema version",
 );
-const phraseReviewer = async () => JSON.stringify({
-  defects: [{
-    startSec: 6,
-    endSec: 10,
-    severity: "major",
-    category: "general_visual",
-    confidence: 0.9,
-    observed: "A large white rectangular overlay is covering the face and upper body of the main character.",
-    expected: "The face must remain visible.",
-    evidenceFrameIds: ["f001"],
-    suggestedRepair: "Move the overlay away from the face.",
-  }],
-  summary: "Known visual phrasing.",
-});
+const phraseReviewer = async (input: { frames: readonly { id: string; tSec: number }[] }) => {
+  const citedFrame = input.frames.find((frame) => frame.tSec >= 5.5 && frame.tSec <= 10.5);
+  return JSON.stringify({
+    defects: citedFrame ? [{
+      startSec: 6,
+      endSec: 10,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.9,
+      observed: "A large white rectangular overlay is covering the face and upper body of the main character.",
+      expected: "The face must remain visible.",
+      evidenceFrameIds: [citedFrame.id],
+      suggestedRepair: "Move the overlay away from the face.",
+    }] : [],
+    summary: "Known visual phrasing.",
+  });
+};
 
 function makeBadComic(input: string, output: string): void {
   // The two obvious faults are deliberately present only in the 6–10s window:
@@ -627,6 +630,30 @@ async function main(): Promise<void> {
   });
   assert.equal(unknownDefectCategory.verdict, "needs_human", "an unknown defect category must not be downgraded and marked complete");
   assert.equal(unknownDefectCategory.defects.length, 0, "an untyped defect must not lose its module-routing category");
+
+  const temporallyUnboundDefect = await reviewRender(fixture, 18, {
+    title: "Defect time and evidence mismatch fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-defect-time-evidence-mismatch",
+    reviewer: async (input) => {
+      const citedFrame = input.frames[0]!;
+      return JSON.stringify({
+        defects: [{
+          ...completeDefect,
+          startSec: citedFrame.tSec + 10,
+          endSec: citedFrame.tSec + 11,
+          evidenceFrameIds: [citedFrame.id],
+        }],
+        summary: "Defect time and evidence mismatch fixture.",
+      });
+    },
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(temporallyUnboundDefect.verdict, "needs_human", "a valid frame ID from another time must not support a defect");
+  assert.equal(temporallyUnboundDefect.defects.length, 0, "a temporally unbound defect must not route a repair to the wrong interval");
 
   const planned = planVisualReviewEvidence({
     durationSec: 18,

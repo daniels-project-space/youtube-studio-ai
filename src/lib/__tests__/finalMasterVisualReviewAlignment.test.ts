@@ -128,7 +128,42 @@ assert.throws(
 
 async function finalReviewerPromptWiringTest(): Promise<void> {
   const prompts: string[] = [];
-  let emittedSemanticDefects = false;
+  const emittedSemanticCategories = new Set<string>();
+  const semanticDefects = [
+    {
+      startSec: 5,
+      endSec: 6,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.96,
+      observed: "The visible prior scene contradicts the current narration cue and is temporally misplaced.",
+      expected: "The current spoken seed discovery is visible.",
+      suggestedRepair: "Replace the mistimed scene.",
+      inferredCategory: "narration_mismatch",
+    },
+    {
+      startSec: 9,
+      endSec: 10,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.95,
+      observed: "Mira's wardrobe visibly changes from a red coat to a different blue outfit, breaking continuity.",
+      expected: "Mira retains the locked wardrobe.",
+      suggestedRepair: "Restore the locked wardrobe.",
+      inferredCategory: "continuity_break",
+    },
+    {
+      startSec: 13,
+      endSec: 14,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.94,
+      observed: "The planned consequence reveal is missing and the sprout payoff is not visible.",
+      expected: "The authored sprout consequence visibly lands.",
+      suggestedRepair: "Restore the authored reveal.",
+      inferredCategory: "reveal_failure",
+    },
+  ];
   const reviewIntent = {
     title: "Final-master clock alignment fixture",
     expectTitleCard: false,
@@ -146,46 +181,31 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
       maxFocusFrames: 0,
       reviewer: async (input) => {
         prompts.push(input.prompt);
-        if (input.phase === "broad" && !emittedSemanticDefects) {
-          emittedSemanticDefects = true;
-          return JSON.stringify({
-            defects: [
-              {
-                startSec: 5,
-                endSec: 6,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.96,
-                observed: "The visible prior scene contradicts the current narration cue and is temporally misplaced.",
-                expected: "The current spoken seed discovery is visible.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Replace the mistimed scene.",
-              },
-              {
-                startSec: 9,
-                endSec: 10,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.95,
-                observed: "Mira's wardrobe visibly changes from a red coat to a different blue outfit, breaking continuity.",
-                expected: "Mira retains the locked wardrobe.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Restore the locked wardrobe.",
-              },
-              {
-                startSec: 13,
-                endSec: 14,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.94,
-                observed: "The planned consequence reveal is missing and the sprout payoff is not visible.",
-                expected: "The authored sprout consequence visibly lands.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Restore the authored reveal.",
-              },
-            ],
-            summary: "Typed semantic defect fixture.",
+        if (input.phase === "broad") {
+          const defects = semanticDefects.flatMap((defect) => {
+            if (emittedSemanticCategories.has(defect.inferredCategory)) return [];
+            const frame = input.frames.find((candidate) =>
+              candidate.tSec >= defect.startSec - 0.5 && candidate.tSec <= defect.endSec + 0.5);
+            if (!frame) return [];
+            emittedSemanticCategories.add(defect.inferredCategory);
+            return [{
+              startSec: defect.startSec,
+              endSec: defect.endSec,
+              severity: defect.severity,
+              category: defect.category,
+              confidence: defect.confidence,
+              observed: defect.observed,
+              expected: defect.expected,
+              suggestedRepair: defect.suggestedRepair,
+              evidenceFrameIds: [frame.id],
+            }];
           });
+          if (defects.length) {
+            return JSON.stringify({
+              defects,
+              summary: "Typed semantic defect fixture.",
+            });
+          }
         }
         return JSON.stringify({ defects: [], summary: "Aligned narration and Story Spine fixture." });
       },
