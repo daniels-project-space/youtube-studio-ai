@@ -85,20 +85,20 @@ export type NarrationTranscriptProof = z.infer<typeof NarrationTranscriptProofSc
 export function narrationTranscriptProofLanguagePreflightIssue(args: {
   entries: readonly { block: string; params?: unknown }[];
   inheritedLanguage?: unknown;
+  channelLanguage?: unknown;
 }): string | undefined {
   if (!args.entries.some((entry) => entry.block === "qa_visual")) return undefined;
 
   const declarations: Array<{ block: string; language: string }> = [];
-  if (
-    args.inheritedLanguage !== undefined &&
-    args.inheritedLanguage !== null &&
-    args.inheritedLanguage !== "" &&
-    typeof args.inheritedLanguage !== "string"
-  ) {
-    return "render-group narration language must be a string; refusing provider work";
-  }
-  if (typeof args.inheritedLanguage === "string" && args.inheritedLanguage.trim()) {
-    declarations.push({ block: "render-group", language: args.inheritedLanguage });
+  for (const [block, value] of [
+    ["render-group", args.inheritedLanguage],
+    ["channel", args.channelLanguage],
+  ] as const) {
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value !== "string") {
+      return `${block} narration language must be a string; refusing provider work`;
+    }
+    if (value.trim()) declarations.push({ block, language: value });
   }
   for (const entry of args.entries) {
     if (entry.block !== "script_gen" && entry.block !== "narration_tts") continue;

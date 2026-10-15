@@ -1861,6 +1861,9 @@ export const runPipelineTask = task({
         // plain Convex values/R2 keys; credentials and live publish policy are
         // deliberately excluded and continue to be rechecked at side effect time.
         seedStore = {
+          ...(typeof channel.language === "string" && channel.language.trim()
+            ? { channelLanguage: channel.language }
+            : {}),
           ...(channel.thumbnailer ? { thumbnailer: channel.thumbnailer } : {}),
           topicPool: channel.identity?.topicPool ?? [],
           styleGrammar: channel.identity?.styleGrammar ?? "",
@@ -2233,6 +2236,7 @@ export const runPipelineTask = task({
       const narrationLanguageIssue = narrationTranscriptProofLanguagePreflightIssue({
         entries: invocationCandidate.entries,
         inheritedLanguage: invocationCandidate.seedStore["reuseLanguage"],
+        channelLanguage: invocationCandidate.seedStore["channelLanguage"],
       });
       if (narrationLanguageIssue) {
         throw new ExecutionError(narrationLanguageIssue, {
