@@ -138,14 +138,30 @@ export function assertSyntheticScenarioOpeningDisclosure(
     .slice(0, 40)
     .join(" ")
     .toLocaleLowerCase();
-  if (!opening.includes(contract.visibleDisclosure.toLocaleLowerCase())) {
+  const disclosureText = contract.visibleDisclosure.toLocaleLowerCase();
+  const disclosureIndex = opening.indexOf(disclosureText);
+  if (disclosureIndex < 0) {
     throw new Error(
       `scenario_disclosure_gate: narration must say "${contract.visibleDisclosure}" within its first 40 spoken words`,
     );
   }
-  if (!/illustrative|assumption|fictional/u.test(opening)) {
+  const beforeDisclosure = opening.slice(0, disclosureIndex);
+  if (/\b(?:not|never|isn't|isnt)\s+(?:a\s+)?$/u.test(beforeDisclosure)) {
     throw new Error(
-      "scenario_disclosure_gate: the first 40 spoken words must say the scenario is illustrative assumptions, not a real simulation",
+      "scenario_disclosure_gate: the opening must affirm, not negate, the fictional-scenario disclosure",
+    );
+  }
+  if (!/\billustrative\b/u.test(opening) || !/\bassumptions?\b/u.test(opening)) {
+    throw new Error(
+      "scenario_disclosure_gate: the first 40 spoken words must describe the scenario as illustrative assumptions",
+    );
+  }
+  const disclaimsRealOutcome =
+    /\b(?:not|never|rather than|instead of)\s+(?:(?:a|an|the)\s+)?(?:(?:real|actual|measured|observed)(?:[- ]world)?\s+)?(?:simulation|result|outcome|event|finding|fact)s?\b/u.test(opening) ||
+    /\bnot\s+based\s+on\s+(?:a\s+)?(?:real|actual)\s+(?:simulation|event|outcome|finding|fact)s?\b/u.test(opening);
+  if (!disclaimsRealOutcome) {
+    throw new Error(
+      "scenario_disclosure_gate: the first 40 spoken words must say this is not a real simulation or real-world result",
     );
   }
   return {

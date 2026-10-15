@@ -34,6 +34,21 @@ for (const profile of ["ai_town", "ai_decision", "ai_pov"] as const) {
     () => assertSyntheticScenarioOpeningDisclosure(contract, "A long opening without a disclosure."),
     /must say "FICTIONAL AI SCENARIO"/,
   );
+  assert.throws(
+    () => assertSyntheticScenarioOpeningDisclosure(
+      contract,
+      "FICTIONAL AI SCENARIO. These illustrative assumptions describe a real simulation and measured outcomes.",
+    ),
+    /not a real simulation or real-world result/u,
+    "the exact disclosure phrase must not make the real-world disclaimer check tautological",
+  );
+  assert.throws(
+    () => assertSyntheticScenarioOpeningDisclosure(
+      contract,
+      "This is not a FICTIONAL AI SCENARIO. These illustrative assumptions are not a real simulation.",
+    ),
+    /must affirm, not negate/u,
+  );
 }
 
 const scenarioArtifact = artifactContract("syntheticScenario");

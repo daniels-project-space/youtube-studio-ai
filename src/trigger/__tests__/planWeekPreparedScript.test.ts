@@ -99,6 +99,11 @@ const syntheticScript = {
 assert.doesNotThrow(() => assertPreparedScriptRouteContracts(syntheticManifest, syntheticScript));
 assert.throws(() => assertPreparedScriptRouteContracts(syntheticManifest, {
   ...syntheticScript,
+  narrationText: "FICTIONAL AI SCENARIO. These illustrative assumptions describe what happens next.",
+}), /not a real simulation or real-world result/u,
+"week-ahead narration must explicitly disclaim real outcomes before paid TTS is dispatched");
+assert.throws(() => assertPreparedScriptRouteContracts(syntheticManifest, {
+  ...syntheticScript,
   narrationText: "A town faces a difficult choice in a simulated future.",
 }), /must say "FICTIONAL AI SCENARIO"/,
 "week-ahead narration must pass the same fictional disclosure gate before paid TTS is dispatched");
