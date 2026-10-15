@@ -140,7 +140,7 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
       const setting = [visual?.setting, visual?.world, visual?.footageQueries?.[0], ctx.params["setting"] as string | undefined,
         dna?.setting, identity ? identity.niche : ctx.store["niche"] as string | undefined]
         .map(value => value?.toString().trim()).find(Boolean);
-      const audioDirection = [
+      const channelAudioDirection = [
         `Original instrumental program for “${topic}”.`,
         dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
         dna?.audio?.bpmRange?.length === 2
@@ -149,8 +149,15 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
         dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
         dna?.audio?.moodArc ? `Preserve the channel's emotional arc: ${dna.audio.moodArc}.` : "",
-        audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
-        "No vocals, no lyrics, and a musically resolved seamless loop.",
+      ].filter(Boolean).join(" ");
+      const episodePrefix = "Episode mood movement: ";
+      const audioRequirements = "No vocals, no lyrics, and a musically resolved seamless loop.";
+      const episodeDirectionBudget = Math.max(0, 900 - channelAudioDirection.length - episodePrefix.length - audioRequirements.length - 3);
+      const episodeDirection = audio?.musicPrompt?.trim().slice(0, Math.min(520, episodeDirectionBudget));
+      const audioDirection = [
+        channelAudioDirection,
+        episodeDirection ? `${episodePrefix}${episodeDirection}.` : "",
+        audioRequirements,
       ].filter(Boolean).join(" ");
       const visualStyle = (ctx.params["visualStyle"] as string | undefined) ??
         (ctx.store["visualStyle"] as string | undefined) ?? visual?.promptStyle ?? dna?.colorGrade ??

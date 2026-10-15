@@ -125,6 +125,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const musicRoute = resolveChannelProgramRoute(musicBrief);
   const musicSeed = channelProgramRouteRunSeed({ route: musicRoute, programBrief: musicBrief });
   const topic = "Rainy city focus after midnight";
+  const episodeMusicCue = `${"The arrangement should keep a conversational, human-scale pulse while allowing the central motif to change color between sections. ".repeat(2)}FINAL_CHANNEL_CUE: let the felt piano answer the bass with a small unresolved phrase before the loop returns.`;
   const musicStyleDNA = {
     audio: {
       genre: "dusty jazz-hop",
@@ -141,6 +142,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
     store: {
       channelProgramRoute: musicSeed,
       topic,
+      musicBrief: { musicPrompt: episodeMusicCue },
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
       styleDNA: musicStyleDNA,
@@ -158,6 +160,10 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   assert.match(sealed.audio.direction, /felt piano, upright bass/u);
   assert.match(sealed.audio.direction, /soft vinyl noise/u);
   assert.match(sealed.audio.direction, /settle into focus, then resolve with quiet optimism/u);
+  assert.match(sealed.audio.direction, /FINAL_CHANNEL_CUE: let the felt piano answer the bass/u,
+    "the sealed program must preserve specific late episode direction beyond the old 260-character cutoff");
+  assert.match(sealed.audio.direction, /No vocals, no lyrics, and a musically resolved seamless loop\.$/u,
+    "bounded episode direction must never displace the hard audio requirements");
   assert.equal(sealed.audio.providerPreference, "minimax_music3");
   assert.equal(sealed.visual.visualStyle, "lofi");
 
