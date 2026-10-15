@@ -194,7 +194,7 @@ export interface LoopOptions<T> {
   critique: (candidate: T, iter: number) => Promise<Critique>;
   /** Accept once score ≥ threshold AND critique.pass. Default 0.8. */
   threshold?: number;
-  /** Hard cap on iterations. Default 3. */
+  /** Hard cap on iterations (1–8). Default 3. */
   maxIters?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
   /** Label for logs/observability. */
@@ -206,6 +206,8 @@ export interface LoopOptions<T> {
    */
   channel?: ChannelCritiqueContext;
 }
+
+export const MAX_CRITIQUE_LOOP_ITERATIONS = 8;
 
 export interface LoopResult<T> {
   value: T;
@@ -221,7 +223,13 @@ export async function produceAndCritique<T>(
   o: LoopOptions<T>,
 ): Promise<LoopResult<T>> {
   const threshold = o.threshold ?? 0.8;
-  const maxIters = Math.max(1, o.maxIters ?? 3);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new RangeError("critique loop threshold must be a finite number from 0 to 1");
+  }
+  const maxIters = o.maxIters ?? 3;
+  if (!Number.isSafeInteger(maxIters) || maxIters < 1 || maxIters > MAX_CRITIQUE_LOOP_ITERATIONS) {
+    throw new RangeError(`critique loop maxIters must be an integer from 1 to ${MAX_CRITIQUE_LOOP_ITERATIONS}`);
+  }
   const log = o.log ?? (() => {});
   const label = o.label ?? "loop";
 

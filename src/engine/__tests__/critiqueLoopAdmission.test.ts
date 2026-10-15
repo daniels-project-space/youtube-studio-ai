@@ -37,6 +37,35 @@ for (const invalid of [
 }
 
 async function main(): Promise<void> {
+  for (const invalidMaxIters of [0, -1, 1.5, 9, Number.POSITIVE_INFINITY]) {
+    let produced = 0;
+    await assert.rejects(() => produceAndCritique({
+      maxIters: invalidMaxIters,
+      produce: async () => { produced += 1; return "candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [] }),
+    }), /maxIters must be an integer from 1 to 8/u);
+    assert.equal(produced, 0, "invalid retry bounds must be rejected before generation");
+  }
+  for (const invalidThreshold of [Number.NaN, -0.01, 1.01, Number.POSITIVE_INFINITY]) {
+    let produced = 0;
+    await assert.rejects(() => produceAndCritique({
+      threshold: invalidThreshold,
+      maxIters: 1,
+      produce: async () => { produced += 1; return "candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [] }),
+    }), /threshold must be a finite number from 0 to 1/u);
+    assert.equal(produced, 0, "invalid quality thresholds must be rejected before generation");
+  }
+  let boundedProductions = 0;
+  const boundedLoop = await produceAndCritique({
+    threshold: 1,
+    maxIters: 8,
+    produce: async () => { boundedProductions += 1; return "candidate"; },
+    critique: async () => ({ score: 0.5, pass: false, issues: ["below threshold"] }),
+  });
+  assert.equal(boundedLoop.iterations, 8);
+  assert.equal(boundedProductions, 8, "the documented maximum remains available to quality-sensitive callers");
+
   let produced = 0;
   await assert.rejects(
     () => produceAndCritique({
