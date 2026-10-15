@@ -1291,8 +1291,9 @@ export function createQaScriptBlock(
       const persona = opt(ctx, "persona") ?? "";
       const channel = readChannelContext?.(ctx);
       if (channelAware && (!channel?.channelName?.trim() ||
-        ![channel.persona, channel.criticDoctrine, ...Object.values(channel.narrative ?? {})].some(value => value?.trim()))) {
-        throw new Error("qa_script FAILED: channel-aware review requires frozen channel name and authored personality or style guidance");
+        ![channel.positioning, channel.vibe, ...(channel.worksInSpace ?? []), ...(channel.avoidInSpace ?? [])]
+          .some(value => value?.trim()))) {
+        throw new Error("qa_script FAILED: channel-aware review requires a frozen channel name and authored Show Bible");
       }
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.

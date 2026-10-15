@@ -45,6 +45,10 @@ async function main() {
     const selectedWriter = getManifest("script_gen", CHANNEL_AWARE_SCRIPT_GEN_VERSION)!;
     assert.ok(selected); assert.notEqual(selected, legacy);
     assert.ok(selectedWriter); assert.notEqual(selectedWriter, legacyWriter);
+    assert.ok(Object.hasOwn(selected.consumes, "showBible"),
+      "the channel-aware critic must review the same authored Show Bible as its paired writer");
+    assert.equal(Object.hasOwn(selected.optionalConsumes, "showBible"), false,
+      "the selected critic cannot silently degrade to shallow channel guidance");
     assert.ok(Object.hasOwn(selectedWriter.consumes, "showBible"),
       "the identity-grounded writer must require the frozen Show Bible artifact");
     assert.equal(Object.hasOwn(selectedWriter.optionalConsumes, "showBible"), false,
@@ -74,7 +78,7 @@ async function main() {
       "baseline reproduces the dropped channel-specific standards");
     assert.doesNotMatch(baseline, /forbidden phrase|Forbidden channel wording/,
       "legacy prompt remains unchanged though deterministic QA still enforces language policy");
-    const selectedOnlyKeys = new Set(["channelName", "contentLane", "criticDoctrine", "styleGrammar", "styleDNA"]);
+    const selectedOnlyKeys = new Set(["channelName", "contentLane", "criticDoctrine", "styleGrammar", "styleDNA", "showBible"]);
     await invoke(legacy, { ...context, store: new Proxy(context.store, {
       get(target, key) {
         assert.equal(selectedOnlyKeys.has(String(key)), false, `legacy critic must not read selected-only input ${String(key)}`);
@@ -136,6 +140,7 @@ async function main() {
     assert.equal(prompts.length, beforeBannedText, "deterministic wording policy rejects before critic spend");
     assert.deepEqual(await invoke(selected, { ...context, store: new Proxy({
       narrationText: context.store.narrationText, channelName: "Narrative only", styleDNA: context.store.styleDNA,
+      showBible: context.store.showBible,
     }, { get(target, key) {
       assert.notEqual(key, "styleGrammar", "selected critic must not read visual grammar");
       return Reflect.get(target, key);
@@ -146,6 +151,10 @@ async function main() {
       assert.equal(prompts.length, before, "malformed narrative DNA must fail before buying a review");
     }
     for (const showBible of [
+      undefined,
+      {},
+      { positioning: "Only positioning." },
+      { positioning: "A distinct channel.", vibe: "Warm and measured.", worksInSpace: ["Use concrete details."] },
       { positioning: 42 },
       { positioning: "x".repeat(2001) },
       { worksInSpace: Array.from({ length: 11 }, () => "bounded list") },
@@ -155,16 +164,21 @@ async function main() {
       await assert.rejects(invoke(selected, { ...context, store: { ...context.store, showBible } }));
       assert.equal(prompts.length, before, "malformed Show Bible guidance must fail before buying a review");
     }
-    for (const store of [{ narrationText: context.store.narrationText },
-      { narrationText: context.store.narrationText, channelName: "Unnamed personality" },
-      { narrationText: context.store.narrationText, channelName: "Visual only", styleGrammar: "Oil painted cliffs." }]) {
-      const before = prompts.length;
-      await assert.rejects(invoke(selected, { ...context, store }), /requires frozen channel name and authored personality/);
-      assert.equal(prompts.length, before, "missing channel context cannot buy a generic substitute review");
-    }
+    const beforeMissingName = prompts.length;
+    await assert.rejects(invoke(selected, { ...context, store: {
+      narrationText: context.store.narrationText, showBible: context.store.showBible,
+    } }), /requires a frozen channel name and authored Show Bible/);
+    assert.equal(prompts.length, beforeMissingName, "missing channel name cannot buy a generic substitute review");
+    const beforeMissingBible = prompts.length;
+    await assert.rejects(invoke(selected, { ...context, store: {
+      narrationText: context.store.narrationText, channelName: "Visual only", styleGrammar: "Oil painted cliffs.",
+    } }), /requires an authored Show Bible/);
+    assert.equal(prompts.length, beforeMissingBible, "visual styling cannot substitute for authored channel identity");
 
     const entries = [{ block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION }, { block: "narration_tts" }];
     assert.throws(() => validatePipeline(entries, ["narrationText"]), /channelName/);
+    assert.throws(() => validatePipeline(entries, ["narrationText", "channelName"]), /showBible/);
+    assert.doesNotThrow(() => validatePipeline(entries, ["narrationText", "channelName", "showBible"]));
     const writerEntries = [{ block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION }];
     assert.throws(() => validatePipeline(writerEntries, ["topic"]), /showBible/);
     assert.doesNotThrow(() => validatePipeline(writerEntries, ["topic", "showBible"]));

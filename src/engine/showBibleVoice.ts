@@ -37,3 +37,21 @@ export function parseShowBibleVoice(value: unknown): ShowBibleVoice | undefined 
   if (value === undefined || value === null) return undefined;
   return showBibleVoiceSchema.parse(value);
 }
+
+export function requireAuthoredShowBibleVoice(value: unknown, consumer: string): ShowBibleVoice {
+  let voice: ShowBibleVoice | undefined;
+  try {
+    voice = parseShowBibleVoice(value);
+  } catch {
+    throw new Error(`${consumer} FAILED: requires an authored Show Bible with positioning, vibe, works, and anti-patterns`);
+  }
+  if (
+    !voice?.positioning?.trim() ||
+    !voice.vibe?.trim() ||
+    !voice.worksInSpace?.some((item) => item.trim()) ||
+    !voice.avoidInSpace?.some((item) => item.trim())
+  ) {
+    throw new Error(`${consumer} FAILED: requires an authored Show Bible with positioning, vibe, works, and anti-patterns`);
+  }
+  return voice;
+}
