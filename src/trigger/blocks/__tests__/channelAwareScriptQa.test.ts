@@ -7,7 +7,10 @@ import { runPipeline } from "@/engine/runner";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import type { StageContext } from "@/engine/types";
 import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "../channelAwareScriptQa";
-import { CHANNEL_AWARE_SCRIPT_GEN_VERSION } from "@/engine/channelAwareScriptQaSelection";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  selectChannelAwareScriptQa,
+} from "@/engine/channelAwareScriptQaSelection";
 
 async function main() {
   const originalFetch = globalThis.fetch, originalKey = process.env.OPENROUTER_API_KEY;
@@ -232,11 +235,15 @@ async function main() {
       worksInSpace: ["Ground the opening in a documented detail before interpreting it."],
       avoidInSpace: ["Never turn an evidence gap into a suspense claim."],
     };
-    const integrationGraph = validatePipeline([
-      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION,
-        params: { maxSeconds: 35, qualityProfile: "production" } },
+    const integrationPipeline = selectChannelAwareScriptQa([
+      { block: "script_gen", params: { maxSeconds: 35, qualityProfile: "production" } },
+      { block: "qa_script" },
+    ]);
+    assert.deepEqual(integrationPipeline.map(({ block, version }) => ({ block, version })), [
+      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
       { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
-    ], ["topic", "showBible", "channelName"]);
+    ], "fresh routes must receive the compatible writer/critic pair automatically");
+    const integrationGraph = validatePipeline(integrationPipeline, ["topic", "showBible", "channelName"]);
     const integrated = await runPipeline(integrationGraph, {
       ownerId: "writer-integration-owner", channelId: "writer-integration-channel",
       runId: "writer-integration-run", keyPrefix: "owner/writer-integration/", budgetUsd: 20,
