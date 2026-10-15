@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { canonicalJson } from "@/lib/canonicalJson";
+import { spreadDefault } from "@/lib/identitySpread";
 import { sha256Hex } from "@/lib/sha256";
 
 export const CHANNEL_MUSIC_PROGRAM_VERSION = "channel-music-program/v1" as const;
@@ -186,6 +187,64 @@ export interface CreateChannelMusicProgramInput {
   readonly composerDirection?: string;
   readonly targetLufs?: number;
   readonly bodyMusicVol?: number;
+}
+
+export interface PrimaryMusicFallbackProfile {
+  readonly genre: string;
+  readonly instrumentation: readonly string[];
+  readonly textures: readonly string[];
+  readonly moodArc: string;
+  readonly prompt: string;
+}
+
+const LOFI_PRIMARY_MUSIC_PROFILE: PrimaryMusicFallbackProfile = Object.freeze({
+  genre: "warm lo-fi instrumental",
+  instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
+  textures: ["natural room depth", "subtle tape warmth"],
+  moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
+  prompt: "warm cozy lofi hip-hop instrumental, mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle and tape warmth; calm, nostalgic, purely instrumental, no vocals, loop-friendly",
+});
+
+const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "cinematic post-rock instrumental",
+    instrumentation: ["electric piano", "bowed electric guitar", "restrained toms"],
+    textures: ["wide natural room", "soft tape saturation"],
+    moodArc: "a clear melodic motif grows through patient interplay, opens into a full but controlled lift, and returns with earned resolution",
+    prompt: "cinematic post-rock instrumental with electric piano, bowed electric guitar and restrained toms; patient melodic development, spacious dynamics and an earned lift; full music-forward arrangement, no vocals",
+  }),
+  Object.freeze({
+    genre: "organic acoustic instrumental",
+    instrumentation: ["fingerstyle acoustic guitar", "upright bass", "soft hand percussion"],
+    textures: ["close wooden resonance", "natural room air"],
+    moodArc: "a memorable acoustic motif travels through warm rhythmic variation and settles into a natural, satisfying return",
+    prompt: "organic acoustic instrumental led by fingerstyle guitar with upright bass and soft hand percussion; warm, rhythmic, melodic and fully arranged for attentive listening, no vocals",
+  }),
+  Object.freeze({
+    genre: "deep analog electronic instrumental",
+    instrumentation: ["analog synthesizer", "rounded electric bass", "restrained electronic percussion"],
+    textures: ["dimensional analog space", "subtle modular movement"],
+    moodArc: "a focused synth motif gains harmonic color and rhythmic depth, creates one meaningful contrast, then resolves without a generic drop",
+    prompt: "deep analog electronic instrumental with a distinctive synth motif, rounded bass and restrained electronic percussion; evolving harmony, dimensional sound design and a deliberate contrast, no vocals or generic EDM drop",
+  }),
+  Object.freeze({
+    genre: "modern chamber instrumental",
+    instrumentation: ["cello", "felt piano", "muted frame drum"],
+    textures: ["intimate chamber space", "soft bow detail"],
+    moodArc: "an intimate chamber theme develops through conversational strings and piano, finds a measured pulse, and closes with quiet conviction",
+    prompt: "modern chamber instrumental led by expressive cello and felt piano with a measured frame-drum pulse; intimate, melodic and dynamically alive, building through musical conversation rather than a preset loop, no vocals",
+  }),
+]);
+
+export function primaryMusicFallbackProfile(input: {
+  readonly family?: string;
+  readonly contentLaneKey?: string;
+  readonly channelIdentitySeed: string;
+}): PrimaryMusicFallbackProfile {
+  const family = input.family?.trim().toLowerCase() ?? "";
+  const lane = input.contentLaneKey?.trim().toLowerCase() ?? "";
+  if (family === "music_loop" && lane === "music_loop") return LOFI_PRIMARY_MUSIC_PROFILE;
+  return spreadDefault(input.channelIdentitySeed, PRIMARY_MUSIC_FALLBACK_PROFILES);
 }
 
 function cleanText(value: string | undefined, fallback: string, maximum: number): string {
@@ -455,13 +514,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     throw new Error(`music role ${input.role} conflicts with specialized route role ${routeRole}`);
   }
   const role = input.role ?? routeRole;
-  const defaults = {
-    primary_music: {
-      genre: "warm lo-fi instrumental",
-      instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
-      textures: ["natural room depth", "subtle tape warmth"],
-      moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
-    },
+  const roleDefaults = {
     narration_bed: {
       genre: "restrained documentary underscore",
       instrumentation: ["low strings", "soft piano", "muted low pulse"],
@@ -486,7 +539,14 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       textures: ["tight clean low end", "controlled stereo width"],
       moodArc: "establish one clear rhythmic idea quickly, add a small lift, and resolve cleanly before the cut",
     },
-  }[role];
+  };
+  const defaults = role === "primary_music"
+    ? primaryMusicFallbackProfile({
+        family,
+        contentLaneKey,
+        channelIdentitySeed: input.channelIdentityFingerprint,
+      })
+    : roleDefaults[role];
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);

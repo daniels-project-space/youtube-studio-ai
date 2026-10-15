@@ -44,6 +44,14 @@ async function main(): Promise<void> {
     channelIdentitySeed: "personal-channel",
   };
   assert.match(musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop" }), /lofi hip-hop/u);
+  const primaryMusicVideo = musicFallbackPromptForRoute({
+    ...fallbackInput,
+    family: "cinematic",
+    contentLaneKey: "music_video",
+  });
+  assert.match(primaryMusicVideo, /instrumental/u);
+  assert.doesNotMatch(primaryMusicVideo, /lofi|underscore|no percussion|no drums|very low dynamics/iu,
+    "non-Lo-Fi primary-music routes must not receive the shared narration-bed prompt");
   assert.doesNotMatch(
     musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop", role: "sleep_sound_bed" }),
     /lofi|boom-bap|vinyl crackle/iu,

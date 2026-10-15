@@ -10,6 +10,7 @@ import {
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
   music3StructuredCaptionWordCount,
   musicRoleForRoute,
+  primaryMusicFallbackProfile,
 } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
@@ -24,6 +25,18 @@ assert.equal(musicRoleForRoute("music_loop", "meditation"), "meditation_bed");
 assert.equal(musicRoleForRoute("music_loop", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
+assert.equal(musicRoleForRoute("cinematic", "music_video"), "primary_music");
+
+const generalPrimaryProfiles = ["Investory", "Chalk & Compound", "Stoic Truths", "Seaside Ghibli", "Drawn Past"]
+  .map((channelIdentity) => primaryMusicFallbackProfile({
+    family: "cinematic",
+    contentLaneKey: "music_video",
+    channelIdentitySeed: channelIdentity,
+  }));
+assert.ok(new Set(generalPrimaryProfiles.map((profile) => profile.genre)).size >= 3,
+  "unconfigured primary-music channels should get deterministic but meaningfully varied sound identities");
+assert.ok(generalPrimaryProfiles.every((profile) => !/lo-fi|lofi|underscore/iu.test(profile.genre)),
+  "non-Lo-Fi primary routes must not inherit the Lo-Fi sound or a narration-bed genre");
 
 const unclassified = createChannelMusicProgram({
   channelId: "channel-unclassified",
@@ -171,6 +184,28 @@ assert.match(
   /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*genuine contrast passage[\s\S]*Reintroduce the groove[\s\S]*opening harmony/u,
   "the long primary-music prompt must attach its extra Music3 form to distinct arrangement functions, not a stack of generic depth adjectives",
 );
+
+const defaultLofi = createChannelMusicProgram({
+  channelId: "channel-default-lofi",
+  channelIdentityFingerprint: sha("e"),
+  family: "music_loop",
+  contentLaneKey: "music_loop",
+  topic: "Rain at the last station",
+});
+assert.equal(defaultLofi.identity.genre, "warm lo-fi instrumental",
+  "the canonical Lo-Fi product keeps its channel-defining sound when no profile is configured");
+
+const defaultMusicVideo = createChannelMusicProgram({
+  channelId: "channel-default-music-video",
+  channelIdentityFingerprint: sha("f"),
+  family: "cinematic",
+  contentLaneKey: "music_video",
+  topic: "A city wakes before dawn",
+});
+assert.equal(defaultMusicVideo.identity.genre,
+  primaryMusicFallbackProfile({ family: "cinematic", contentLaneKey: "music_video", channelIdentitySeed: sha("f") }).genre);
+assert.notEqual(defaultMusicVideo.identity.genre, "warm lo-fi instrumental",
+  "generic primary-music routes need a music-forward, non-Lo-Fi program default");
 
 const sleep = createChannelMusicProgram({
   channelId: "channel-sleep",

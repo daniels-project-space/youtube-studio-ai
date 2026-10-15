@@ -15,6 +15,7 @@ import {
   ChannelMusicProgramSchema,
   ChannelMusicProviderSchema,
   musicRoleForRoute,
+  primaryMusicFallbackProfile,
   type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
@@ -185,10 +186,13 @@ export function musicFallbackPromptForRoute(input: {
   const family = input.family?.toLowerCase() ?? "";
   const contentLaneKey = input.contentLaneKey?.toLowerCase() ?? "";
   const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
-  if (role === "primary_music" && family === "music_loop" && contentLaneKey === "music_loop") {
-    return `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${input.topic}". ` +
-      "mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, " +
-      "calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly";
+  if (role === "primary_music") {
+    const profile = primaryMusicFallbackProfile({
+      family,
+      contentLaneKey,
+      channelIdentitySeed: input.channelIdentitySeed,
+    });
+    return `${profile.prompt}, evoking "${input.topic}"; no lyrics`;
   }
   return `${spreadDefault(input.channelIdentitySeed, FALLBACK_UNDERSCORE_BRIEFS)}, ` +
     `evoking "${input.topic}", no vocals, no lyrics`;
@@ -323,13 +327,20 @@ export const music: Block = {
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
     const musicRoute = channelProgramRouteFromContext(ctx);
-    const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
+    const route = musicRoute;
+    const channelIdentityFingerprint = sha256Hex(canonicalJson({
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId,
+      channelName: ctx.store["channelName"] ?? null,
+      routeFingerprint: route?.routeFingerprint ?? null,
+      styleDNA: dna,
+    }));
     const lastResort = musicFallbackPromptForRoute({
       family: musicRoute?.family,
       contentLaneKey: musicRoute?.contentLaneKey,
       role: composerBrief?.musicIntent?.role,
       topic,
-      channelIdentitySeed: seed,
+      channelIdentitySeed: channelIdentityFingerprint,
     });
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
@@ -343,15 +354,6 @@ export const music: Block = {
     ].filter(Boolean).join(" ");
     ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "default"}${studioAudioDirection ? " + approved Studio audio direction" : ""}`);
 
-    const route = channelProgramRouteFromContext(ctx);
-    const channelIdentityFingerprint = sha256Hex(canonicalJson({
-      ownerId: ctx.ownerId,
-      channelId: ctx.channelId,
-      channelName: ctx.store["channelName"] ?? null,
-      routeFingerprint: route?.routeFingerprint ?? null,
-      styleDNA: dna,
-      musicBrief: getMusicBrief(ctx.store) ?? null,
-    }));
     const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
