@@ -56,7 +56,7 @@ const SPECIALIST_EXPECTED: Record<
   documentary_collage_short: ["identity", "script", "voice", "footage", "captions", "pacing", "thumbnail"],
   loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
   quizyear: ["identity", "hook", "captions", "pacing", "thumbnail", "music"],
-  shorts: ["hook", "captions", "pacing", "thumbnail", "voice"],
+  shorts: ["identity", "hook", "captions", "pacing", "thumbnail", "voice"],
   whiteboard: ["identity", "script", "footage", "motion", "thumbnail", "voice"],
 };
 
@@ -98,6 +98,13 @@ const voice = buildQualityBar("narrated_stock", DNA, 123).dimensions.find(
 );
 assert.match(voice?.description ?? "", /measured documentary narrator/);
 assert.match(voice?.description ?? "", /delivery: calm and precise/);
+
+const shortsIdentity = buildQualityBar("shorts", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "identity",
+);
+assert.match(shortsIdentity?.description ?? "", /archivist at a brass desk/);
+assert.match(shortsIdentity?.description ?? "", /rain-lit records room/);
+assert.match(shortsIdentity?.description ?? "", /era\/weather/);
 
 const whiteboardMotion = buildQualityBar("whiteboard", {
   ...DNA,

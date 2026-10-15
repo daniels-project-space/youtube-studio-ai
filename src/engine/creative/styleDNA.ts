@@ -585,7 +585,7 @@ const FAMILY_DIMENSIONS: Record<FamilyKey, readonly QualityDimensionId[]> = {
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
   sleep: ["identity", "music", "voice", "thumbnail"],
   whiteboard: ["identity", "script", "footage", "motion", "thumbnail"],
-  shorts: ["hook", "captions", "pacing", "thumbnail"],
+  shorts: ["identity", "hook", "captions", "pacing", "thumbnail"],
   // The page renderer is self-contained, but its story, narration, visual
   // grammar, and constrained page/camera motion remain independently
   // inspectable in the render review.
