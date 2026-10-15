@@ -118,7 +118,7 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
   return {
     id: "music_program_plan",
     consumes: ["topic"],
-    produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
+    produces: ["musicProgramPlan"],
     run: async ctx => {
       const topic = str(ctx, "topic");
       const route = routeSeedForTopicSelection(ctx);
@@ -169,7 +169,7 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         }),
       });
       ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
-      return { musicProgramPlan: plan, musicProgramPlanFingerprint: plan.fingerprint };
+      return { musicProgramPlan: plan };
     },
   };
 }

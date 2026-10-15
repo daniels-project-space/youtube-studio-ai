@@ -152,10 +152,14 @@ async function main(): Promise<void> {
           /Required|expected object|musicProgramPlan/i,
           "the registry must preserve sealed-program admission before reuse",
         );
-        Object.assign(store, await require_("music_program_plan").run({
+        const planPatch = await require_("music_program_plan").run({
           ...ctx,
           params: { provider: "minimax_music3", visualStyle: "lofi" },
-        }));
+        });
+        assert.deepEqual(Object.keys(planPatch), ["musicProgramPlan"],
+          "the immutable program owns its fingerprint; do not publish a redundant fingerprint artifact");
+        assert.equal(typeof (planPatch.musicProgramPlan as { fingerprint?: unknown }).fingerprint, "string");
+        Object.assign(store, planPatch);
         await assert.rejects(
           require_("music").run({ ...ctx, params: { provider: "suno" } }),
           /does not match sealed music program provider/,
