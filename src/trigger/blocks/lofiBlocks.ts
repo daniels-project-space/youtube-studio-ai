@@ -113,6 +113,7 @@ import { parseJsonLoose } from "@/lib/gemini";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
+import { loadTopicSelectionIdentity } from "./topicIdentity";
 import { produceAndCritique, validateCritiqueResponse } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -646,23 +647,18 @@ export const topicSelect: Block = {
         ? "no_repeat"
         : "prefer_fresh";
 
-    // Channel identity (store seeds first; fall back to the channel doc).
-    const channel = await c
-      .query(api.channels.getChannel, { channelId })
-      .catch(() => null);
-    const id = (channel?.identity ?? {}) as {
-      persona?: string;
-      niche?: string;
-      styleGrammar?: string;
-      topicPool?: string[];
-      bannedWords?: string[];
-    };
-    const channelName = opt(ctx, "channelName") ?? channel?.name ?? "this channel";
-    const persona = opt(ctx, "persona") ?? id.persona ?? "";
-    const niche = opt(ctx, "niche") ?? id.niche ?? "";
-    const style = (ctx.store["styleGrammar"] as string | undefined) ?? id.styleGrammar ?? "";
-    const pool = (ctx.store["topicPool"] as string[] | undefined) ?? id.topicPool ?? [];
-    const bannedWords = (id.bannedWords ?? []).filter(Boolean);
+    // Use run-frozen identity and language policy. Older/direct invocations
+    // still fall back to the live channel row when their seed is incomplete.
+    const { channelName, persona, niche, style, pool, bannedWords } =
+      await loadTopicSelectionIdentity(ctx.store, () =>
+        c.query(api.channels.getChannel, { channelId }).catch((e) => {
+          ctx.log(
+            `topic_select: frozen channel identity unavailable; using channel-document fallback if present ` +
+              `(${e instanceof Error ? e.message : e})`,
+          );
+          return null;
+        }),
+      );
 
     // Used-topic history — FATAL if unreadable: selecting blind against an
     // unknown history is how channels repeat themselves. The content plan
