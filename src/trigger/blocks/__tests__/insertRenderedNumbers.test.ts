@@ -289,6 +289,23 @@ function main(): void {
     clean({ value: "-2%" }, "The change was negative two percent."),
     "an explicitly spoken negative remains admissible",
   );
+  assert.ok(
+    clean({ bars: [
+      { label: "Before", value: -2, display: "-2%" },
+      { label: "After", value: 5, display: "5%" },
+    ] }, "The two changes were minus two and five percent."),
+    "a trailing unit in a coordinated pair applies to both spoken values",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The changes were minus two, but five percent."),
+    "value",
+    "a unit must not cross an unrelated conjunction",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The changes were minus two and five percentage points."),
+    "value",
+    "a coordinated value cannot inherit a different explicit unit",
+  );
 
   // ---- quantity is pinned to its sentence; frame may cite the script -------
   const script =

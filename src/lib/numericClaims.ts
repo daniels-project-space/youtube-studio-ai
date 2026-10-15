@@ -215,11 +215,21 @@ export function unmatchedNumericUnits(rendered: string, source: string): string[
   const renderedMentions = numericMentions(rendered);
   if (!renderedMentions.length) return [];
   const sourceMentions = numericMentions(source);
+  const resolvedUnit = (input: string, mentions: NumericMention[], index: number): string | undefined => {
+    const mention = mentions[index]!;
+    const direct = explicitUnit(input, mention);
+    if (direct) return direct;
+    const next = mentions[index + 1];
+    if (!next || !explicitUnit(input, next)) return undefined;
+    const between = input.normalize('NFKC').toLowerCase().replace(/−/g, '-').slice(mention.end, next.start);
+    return /^\s+(?:and|or)\s+$/u.test(between) ? explicitUnit(input, next) : undefined;
+  };
   return renderedMentions
-    .filter((renderedMention) => {
-      const unit = explicitUnit(rendered, renderedMention);
-      return unit !== undefined && !sourceMentions.some((sourceMention) =>
-        sourceMention.key === renderedMention.key && explicitUnit(source, sourceMention) === unit,
+    .filter((renderedMention, index) => {
+      const unit = resolvedUnit(rendered, renderedMentions, index);
+      return unit !== undefined && !sourceMentions.some((sourceMention, sourceIndex) =>
+        sourceMention.key === renderedMention.key &&
+        resolvedUnit(source, sourceMentions, sourceIndex) === unit,
       );
     })
     .map((mention) => mention.raw);
