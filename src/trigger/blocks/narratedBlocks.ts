@@ -215,6 +215,7 @@ import {
 } from "@/lib/narrationTranscriptProof";
 import {
   deriveFinalMasterNarratedStoryCoverage,
+  finalMasterNarratedStoryCoverageReleaseIssues,
   type DerivedFinalMasterNarratedStoryCoverage,
 } from "@/lib/finalMasterNarratedStoryCoverage";
 import {
@@ -6315,14 +6316,9 @@ export const qaVisual: Block = {
           keyPrefix: ctx.keyPrefix,
           runId: ctx.runId,
         });
-        if (
-          finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio < 0.95
-        ) {
-          critical.push(
-            "final-master narrated Story Spine coverage " +
-              `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} is below required 0.950`,
-          );
-        }
+        critical.push(...finalMasterNarratedStoryCoverageReleaseIssues(
+          finalMasterNarratedStoryCoverage.receipt.coverage,
+        ));
         ctx.log(
           "qa_visual: final-master narrated Story Spine coverage " +
             `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} ` +

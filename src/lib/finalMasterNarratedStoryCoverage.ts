@@ -371,6 +371,23 @@ export function assertFinalMasterNarratedStoryCoverageReceipt(
   return receipt;
 }
 
+/** Independent release policy: a high weighted average cannot hide a failed beat. */
+export function finalMasterNarratedStoryCoverageReleaseIssues(value: unknown): string[] {
+  const coverage = coverageSummarySchema.parse(value);
+  const issues: string[] = [];
+  if (coverage.failingBeatCount > 0) {
+    issues.push(
+      `final-master narrated Story Spine has ${coverage.failingBeatCount} beat(s) below per-beat token/timing coverage minimums`,
+    );
+  }
+  if (coverage.coverageRatio < FINAL_MASTER_NARRATED_STORY_MIN_COVERAGE_RATIO) {
+    issues.push(
+      `final-master narrated Story Spine coverage ${coverage.coverageRatio.toFixed(3)} is below required ${FINAL_MASTER_NARRATED_STORY_MIN_COVERAGE_RATIO.toFixed(3)}`,
+    );
+  }
+  return issues;
+}
+
 function validateNarrationContext(args: {
   finalMasterNarration: unknown;
   narrationAudit: unknown;
