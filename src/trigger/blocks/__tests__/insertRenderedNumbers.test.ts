@@ -262,6 +262,25 @@ function main(): void {
     "symbol and spoken aliases for the same currency remain admissible",
   );
   assert.equal(
+    offender({ title: "$10" }, "Growth reached 10%.", "The cost was $10. Growth reached 10%."),
+    null,
+    "a frame may use an exact unit-bearing claim established elsewhere in the narration",
+  );
+  assert.equal(
+    offender({ title: "$10" }, "Growth reached 10%.", "The cost was 10%. Growth reached 10%."),
+    "title",
+    "frame units must match the full narration, not merely its numeric value",
+  );
+  assert.equal(
+    offender(
+      { bars: [{ label: "Growth", value: 10, display: "$10" }] },
+      "Growth reached 10%.",
+      "The cost was ten dollars. Growth reached 10%.",
+    ),
+    "bars[0].display",
+    "a quantity cannot borrow its matching unit from another narration sentence",
+  );
+  assert.equal(
     offender({ value: "-2%" }, "The change was two percent."),
     "value",
     "a rendered negative must not pass when narration states only a positive magnitude",
