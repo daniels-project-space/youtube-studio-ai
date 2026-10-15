@@ -628,6 +628,12 @@ export interface VisualReviewEvidence {
     requiredFocusFrameCount?: number;
     /** Missing required focus frames make the review fail closed. */
     missingFocusFrameCount?: number;
+    /** Sampled witness coverage only; this does not claim continuous shot realization. */
+    creativeLocks?: {
+      requestedCount: number;
+      observedCount: number;
+      missingLockIds: string[];
+    };
     musicLoop?: MusicLoopReviewCoverage;
   };
   manifestKey?: string;
@@ -1021,6 +1027,15 @@ export function planVisualReviewEvidence(input: {
     tSec: candidate.tSec,
     selectionReasons: sortedReasons(candidate.reasons),
   }));
+}
+
+export function missingVisualReviewCreativeLockIds(
+  locks: readonly VisualReviewCreativeLock[],
+  frames: readonly Pick<VisualReviewFrame, "tSec">[],
+): string[] {
+  return locks
+    .filter((lock) => !frames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec))
+    .map((lock) => lock.shotId);
 }
 
 /**
@@ -2086,6 +2101,7 @@ export async function reviewRender(
     broadBatchCount,
   );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
+  const missingCreativeLockIds = missingVisualReviewCreativeLockIds(intent.creativeLocks ?? [], allFrames);
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
     !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.01),
   ).length;
@@ -2109,6 +2125,15 @@ export async function reviewRender(
         ? {
             requiredFocusFrameCount: requiredFocusFrames.length,
             missingFocusFrameCount,
+          }
+        : {}),
+      ...((intent.creativeLocks?.length ?? 0) > 0
+        ? {
+            creativeLocks: {
+              requestedCount: intent.creativeLocks!.length,
+              observedCount: intent.creativeLocks!.length - missingCreativeLockIds.length,
+              missingLockIds: missingCreativeLockIds,
+            },
           }
         : {}),
     },
@@ -2165,9 +2190,10 @@ export async function reviewRender(
   const failedReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "fail");
   const unobservableReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "not_observable");
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
+  const creativeLockCoverageIncomplete = missingCreativeLockIds.length > 0;
   const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || coverageIncomplete
+    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || creativeLockCoverageIncomplete || coverageIncomplete
       ? "needs_human"
       : "pass";
   // This intentionally happens after `persistEvidence`: the receipt binds the
@@ -2211,6 +2237,9 @@ export async function reviewRender(
       : "",
     focusCoverageIncomplete
       ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
+      : "",
+    creativeLockCoverageIncomplete
+      ? `${missingCreativeLockIds.length}/${intent.creativeLocks?.length ?? 0} creative lock(s) had no reviewed evidence frame: ${missingCreativeLockIds.slice(0, 8).join(", ")}`
       : "",
   ].filter(Boolean).join(" | ").slice(0, 1000);
   // Record that the critique was channel-grounded: the review fingerprint

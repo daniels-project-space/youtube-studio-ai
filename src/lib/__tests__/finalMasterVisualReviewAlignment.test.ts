@@ -9,6 +9,7 @@ import {
 import { planHeal, type HealableBlock } from "@/engine/healer";
 import {
   finalMasterTranscriptCues,
+  missingVisualReviewCreativeLockIds,
   planVisualReviewEvidence,
   reviewRender,
   visualRepairSignals,
@@ -67,6 +68,27 @@ for (const lock of locks) {
     `Story Spine lock ${lock.shotId} must contribute a final-master review frame`,
   );
 }
+assert.deepEqual(
+  missingVisualReviewCreativeLockIds(locks, evidence),
+  [],
+  "every Story Spine visual lock must have at least one selected master-clock witness",
+);
+const cappedLocks = Array.from({ length: 12 }, (_, index) => ({
+  shotId: `capped-shot-${index + 1}`,
+  startSec: index * 5,
+  endSec: (index + 1) * 5,
+  expected: `Narrated beat ${index + 1}`,
+  acceptanceCriteria: ["The visible action supports this beat."],
+}));
+const cappedEvidence = planVisualReviewEvidence({
+  durationSec: 60,
+  creativeLocks: cappedLocks,
+  maxFrames: 8,
+});
+assert(
+  missingVisualReviewCreativeLockIds(cappedLocks, cappedEvidence).length > 0,
+  "a capped sample must expose Story Spine locks that received no review frame",
+);
 assert(
   evidence.some((frame) => frame.tSec >= narrationStartSec && frame.selectionReasons.includes("cue")),
   "the shifted narration map must contribute cue evidence on the master clock",
@@ -223,6 +245,33 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
     semanticSignals.every((signal) => signal.owner === "stock_footage" && signal.action === "resample_footage"),
     "semantic replacement is bounded to the real stock-footage resampling owner",
   );
+  const cappedReview = await reviewRender(
+    join(process.cwd(), "public", "golden", "comic", "comic3d.mp4"),
+    18,
+    {
+      title: "Capped Story Spine witness fixture",
+      creativeLocks: Array.from({ length: 12 }, (_, index) => ({
+        shotId: `capped-story-beat-${index + 1}`,
+        startSec: index * 1.5,
+        endSec: (index + 1) * 1.5,
+        expected: `Show the narrated action for beat ${index + 1}.`,
+        acceptanceCriteria: ["The visible action supports the current narration."],
+      })),
+    },
+    {
+      runId: "capped-story-spine-witnesses",
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+      reviewer: async () => JSON.stringify({ defects: [], summary: "No visible defects." }),
+    },
+  );
+  assert.equal(cappedReview.verdict, "needs_human");
+  assert(
+    (cappedReview.evidence.coverage.creativeLocks?.missingLockIds.length ?? 0) > 0,
+    "durable review coverage must identify locks dropped by the frame cap",
+  );
+  assert.match(cappedReview.summary, /creative lock\(s\) had no reviewed evidence frame/i);
   const generatedLane: HealableBlock[] = [
     { id: "generated_visuals", produces: ["videoLocalPath"], consumes: ["storySpine"] },
     { id: "qa_visual", produces: ["qaReport"], consumes: ["videoLocalPath"] },
