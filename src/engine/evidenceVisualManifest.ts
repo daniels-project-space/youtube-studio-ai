@@ -192,15 +192,74 @@ function containsUnitAlias(text: string, alias: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
 }
 
+function unitDirectlyBelongsToMention(
+  text: string,
+  mention: ReturnType<typeof numericMentions>[number],
+  alias: string,
+  mentions: ReturnType<typeof numericMentions>,
+): boolean {
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const symbol = ["%", "$", "€", "£", "mW", "MW"].includes(alias);
+  const pattern = symbol
+    ? new RegExp(escaped, "gu")
+    : new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu");
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index!;
+    const end = start + match[0].length;
+    if (alias === "percentage" && /^(?:\s+points?\b)/iu.test(text.slice(end))) continue;
+    const gap = end <= mention.start
+      ? text.slice(end, mention.start)
+      : mention.end <= start
+        ? text.slice(mention.end, start)
+        : undefined;
+    if (gap === undefined || gap.length > 2 || !/^[\s,:()[\]{}-]*$/u.test(gap)) continue;
+    const low = Math.min(start, mention.start), high = Math.max(end, mention.end);
+    if (mentions.some((other) => other !== mention && other.start < high && other.end > low)) continue;
+    return true;
+  }
+  return false;
+}
+
+function unitBelongsToMention(
+  text: string,
+  mention: ReturnType<typeof numericMentions>[number],
+  alias: string,
+  mentions: ReturnType<typeof numericMentions>,
+): boolean {
+  if (unitDirectlyBelongsToMention(text, mention, alias, mentions)) return true;
+  const hasAnyNearbyUnit = (candidate: ReturnType<typeof numericMentions>[number]) =>
+    UNIT_FAMILIES.some((family) => family.aliases.some((unit) =>
+      unitDirectlyBelongsToMention(text, candidate, unit, mentions),
+    ));
+  if (hasAnyNearbyUnit(mention)) return false;
+
+  let prior = mention;
+  const firstIndex = mentions.indexOf(mention);
+  for (const next of mentions.slice(firstIndex + 1)) {
+    const connector = text.slice(prior.end, next.start);
+    if (connector.length > 32 || !/^\s*(?:,|and|or|to|through|versus|vs\.?)\s*$/iu.test(connector)) break;
+    if (hasAnyNearbyUnit(next)) return unitDirectlyBelongsToMention(text, next, alias, mentions);
+    prior = next;
+  }
+  return false;
+}
+
 function unitMatchesEvidence(value: EvidenceVisualValue, spokenText: string): boolean {
   const unitKey = compact(value.unit);
   const family = UNIT_FAMILIES.find((candidate) => candidate.names.some((name) => compact(name) === unitKey));
   const displayedFamilies = UNIT_FAMILIES.filter((candidate) =>
     candidate.aliases.some((alias) => containsUnitAlias(value.display, alias)),
   );
+  const spoken = spokenText.normalize("NFKC").replace(/−/g, "-");
+  const spokenMentions = numericMentions(spoken);
+  const valueKey = numericMentions(plainNumericLiteral(value.value))[0]?.key;
+  const matchingMentions = spokenMentions.filter((mention) => mention.key === valueKey);
+  const boundToUnit = (alias: string) => matchingMentions.some((mention) =>
+    unitBelongsToMention(spoken, mention, alias, spokenMentions),
+  );
   if (!family) {
     if (displayedFamilies.length > 0 && !containsUnitAlias(value.display, value.unit)) return false;
-    return containsUnitAlias(value.display, value.unit) || containsUnitAlias(spokenText, value.unit);
+    return boundToUnit(value.unit);
   }
   if (family.id === "latitude" || family.id === "longitude") {
     return value.role === family.id && displayedFamilies.every((candidate) => candidate.id === family.id);
@@ -208,9 +267,7 @@ function unitMatchesEvidence(value: EvidenceVisualValue, spokenText: string): bo
   if (displayedFamilies.some((candidate) => candidate.id !== family.id)) return false;
   if (family.id === "year" && value.role === "x" && Number.isInteger(value.value) &&
       value.value >= 1_000 && value.value <= 9_999) return true;
-  return family.aliases.some((alias) =>
-    containsUnitAlias(value.display, alias) || containsUnitAlias(spokenText, alias),
-  );
+  return family.aliases.some(boundToUnit);
 }
 
 function plainNumericLiteral(value: number): string {

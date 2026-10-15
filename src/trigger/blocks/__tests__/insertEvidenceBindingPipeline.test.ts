@@ -75,6 +75,16 @@ async function main() {
     cases++;
     return rendered[0];
   }
+  async function rejectManifest(name: string, inputManifest: EvidenceVisualManifest, inputTimings: typeof timings) {
+    plan = stat; rendered = []; stored = []; prompts = [];
+    const context = { ownerId: 'fixture-owner', runId: 'fixture-binding', channelId: 'fixture-channel', keyPrefix: 'fixture/evidence/',
+      params: { insertTypes: ['big_stat', 'bar_compare', 'line_chart', 'annotated_line'], maxInserts: 1, minGapSec: 0,
+        dataStoryContract: DATA_STORY_CONTRACT_VERSION, requireNamedSource: true, requireSpokenNumericAnchor: true },
+      store: { sentenceTimings: inputTimings, dataStorySourceLedger, evidenceVisualManifests: [inputManifest], palette: ['#13252d', '#58c9b0', '#eef5f4'] }, log: () => {} };
+    await assert.rejects(() => visualInserts.run(context as never), /unit_mismatch/);
+    assert.equal(prompts.length + rendered.length + stored.length, 0, `${name}: invalid source units must fail before planning/render/storage`);
+    cases++;
+  }
   acceptedRenderInputs.push(await run('ID-only line', line, true));
   assert.deepEqual(rendered[0].series, [2, 4]);
   assert.deepEqual(rendered[0].seriesDisplays, ['2%', '4%']);
@@ -154,6 +164,17 @@ async function main() {
   };
   const mixed = { ...mixedBase, review: { ...manifest.review, reviewedManifestFingerprint: evidenceVisualManifestFingerprint(mixedBase) } };
   await run('different reviewed units on one scale', line, false, mixed, mixedTimings);
+  const separatedUnitSentence = 'According to the Example Statistics Office, output moved from 2% to 4 percentage points over 5 years.';
+  const separatedUnitTimings = [{ ...timings[0], text: separatedUnitSentence }, ...timings.slice(1)];
+  const separatedUnitBase = {
+    ...base,
+    narrationAnchors: base.narrationAnchors.map((anchor) => anchor.id === 'anchor-output'
+      ? { ...anchor, spokenText: separatedUnitSentence }
+      : anchor),
+  };
+  const separatedUnitManifest = { ...separatedUnitBase,
+    review: { ...manifest.review, reviewedManifestFingerprint: evidenceVisualManifestFingerprint(separatedUnitBase) } };
+  await rejectManifest('unit must bind to its own spoken quantity', separatedUnitManifest, separatedUnitTimings);
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 50, end: 60 }).ok, false, 'Identical sentence at a different time cannot borrow this anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 8, end: 4 }).ok, false, 'Inverted overlapping timing is not a valid anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: 'output', start: 0, end: 12 }).ok, false, 'A short fragment must not match a longer approved sentence backwards');
