@@ -56,11 +56,16 @@ async function main() {
     assert.equal(prompts.at(-1), baseline);
 
     for (const store of [context.store,
-      { ...context.store, channelName: "Measured Argument", persona: "Curious adults seeking a reasoned argument.",
+      { ...context.store,
+        narrationText: "Notice the support beneath you.\n\nLet the next breath arrive without effort.",
+        channelName: "Measured Argument", persona: "Curious adults seeking a reasoned argument.",
         styleDNA: { narrative: { scriptStyle: "Specific thesis, counterexample, evidence and payoff.",
           pacing: "Build a careful argument.", hookStyle: "A concrete disputed observation.", delivery: "Measured and precise." } },
         criticDoctrine: "Require a clear midpoint challenge to the opening claim.",
-        script: { narrationText: context.store.narrationText, hookLoop: "Why did the second seed survive?" } },
+        script: { hook: "Notice the support beneath you.",
+          sections: [{ narration: "Let the next breath arrive without effort." }],
+          narrationText: "Notice the support beneath you.\n\nLet the next breath arrive without effort.",
+          hookLoop: "Why did the second seed survive?" } },
       { ...context.store, channelName: "One Clear Minute", persona: "Busy viewers seeking one useful idea.",
         styleDNA: { narrative: { scriptStyle: "Compact opening, concrete example and concise payoff.",
           pacing: "Concise without rushing.", hookStyle: "One useful question.", delivery: "Direct and friendly." } },

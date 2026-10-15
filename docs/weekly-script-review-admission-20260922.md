@@ -24,7 +24,11 @@ still refuse rather than falling back to another implementation.
 
 The review consumes the retained script and frozen channel/route/evidence
 context. Its prompt, model, token ceiling and strict verdict parser remain the
-existing critic's. This does not silently select the new channel-aware version.
+existing critic's. It does not silently select a new version: versionless
+legacy manifests keep the default critic, while the exact explicitly pinned
+channel-aware version now runs through its registered context reader and must
+receive the frozen channel name/persona/style guidance. Unknown pins still fail
+closed.
 
 A create-only review claim precedes the actual OpenRouter dispatch. A separate
 immutable review receipt binds the full preparation-manifest digest and exact
@@ -79,3 +83,18 @@ No live model/GPU calls, channel migration, thumbnail generation, publishing,
 owner approval or production deployment occurred. Real model calibration,
 weekly originality/compliance parity before paid preparation, live prepared
 workflow qualification and the full module-first MVP/backlog remain open.
+
+## Explicit channel-aware pin parity — 15 October 2026
+
+Current designed pipelines pin `qa_script@2.0.0-channel-aware`, but weekly
+preparation rejected that exact pin and its review task constructed the
+versionless generic critic. This both blocked current week-ahead admission and
+made the selected module contract untruthful. Weekly admission now allows only
+that exact `qa_script` version, and the reviewer uses the same registered
+channel-aware block/context reader as normal pipeline execution. The frozen
+name, persona, critic doctrine, narrative DNA, and content lane are asserted in
+the real prepared-narration task test before the TTS boundary; arbitrary QA
+versions remain rejected. The direct module critic, weekly review/recovery,
+weekly version admission, channel-route admission, narration reuse wiring, and
+TypeScript checks pass. Provider transport is synthetic; this is not live model
+quality qualification, deployment, or full repository-suite completion.

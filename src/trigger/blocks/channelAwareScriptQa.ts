@@ -4,7 +4,7 @@ import { z } from "zod";
 import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import type { ChannelCritiqueContext } from "@/engine/critiqueLoop";
-import type { StageContext } from "@/engine/types";
+import type { Block, StageContext } from "@/engine/types";
 import { createQaScriptBlock } from "./narratedBlocks";
 
 const scriptContextSchema = z.object({
@@ -31,10 +31,16 @@ function scriptCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
 
 export { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 
+export function createChannelAwareScriptQaBlock(
+  beforeCritiqueDispatch?: (request: { prompt: string; maxTokens: number }) => Promise<void>,
+): Block {
+  return createQaScriptBlock(scriptCritiqueContext, beforeCritiqueDispatch);
+}
+
 /** Explicit revision: existing pipelines retain their original critic policy. */
 export function createChannelAwareScriptQaManifest(legacy: ModuleManifest): ModuleManifest {
   if (legacy.id !== "qa_script") throw new Error("channel-aware script QA requires qa_script");
-  const block = createQaScriptBlock(scriptCritiqueContext);
+  const block = createChannelAwareScriptQaBlock();
   return {
     ...legacy, version: CHANNEL_AWARE_SCRIPT_QA_VERSION,
     consumes: { ...legacy.consumes, channelName: artifactContract("channelName") },

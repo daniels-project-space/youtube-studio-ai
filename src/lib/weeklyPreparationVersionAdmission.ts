@@ -1,6 +1,7 @@
 import type { PlanWeekPreparationManifest } from "./planWeekPreparationContract";
 import { DELIVERY_METADATA_VERSION, MetadataDeliverySchema } from "./metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
+import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 
 /** Prepared producers remain unversioned; only exact, preserved downstream pins are admitted. */
 export function assertWeeklyPreparationVersionsSupported(
@@ -19,6 +20,9 @@ export function assertWeeklyPreparationVersionsSupported(
     // retain the exact mix ABI that will consume the prepared media. The pin is
     // preserved in the frozen manifest and covered by its content fingerprint.
     if (candidate.block === "timeline_assemble" && candidate.version === COMPOSER_MIX_ASSEMBLY_VERSION) return [];
+    // Weekly narration preparation runs the exact frozen script reviewer before
+    // TTS, so this pin is admitted only when it names that executable contract.
+    if (candidate.block === "qa_script" && candidate.version === CHANNEL_AWARE_SCRIPT_QA_VERSION) return [];
     const block = typeof candidate.block === "string" ? candidate.block : "<unknown block>";
     return [`${block}@${JSON.stringify(candidate.version)} (entry ${index})`];
   });

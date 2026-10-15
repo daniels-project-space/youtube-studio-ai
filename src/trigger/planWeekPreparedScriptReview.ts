@@ -9,9 +9,11 @@ import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { decodePreparedMetadata, PREPARED_METADATA_READ, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 import { assertPlanWeekPreparedScriptBinding, planWeekPreparedScriptKey, planWeekPreparationManifestSha256,
   type PlanWeekPreparationManifest, type PlanWeekPreparedScript } from "@/lib/planWeekPreparation";
 import { createQaScriptBlock } from "./blocks/narratedBlocks";
+import { createChannelAwareScriptQaBlock } from "./blocks/channelAwareScriptQa";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const receiptSchema = z.object({
@@ -28,7 +30,7 @@ export async function prepareWeeklyScriptReview(
 ): Promise<{ costUsd: number; chargedCostUsd: number; reused: boolean; fingerprint: string; receiptKey: string }> {
   assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "weekly script review");
   const script = assertPlanWeekPreparedScriptBinding({ prepared: rawScript, manifest });
-  const entries = manifest.execution.pipeline as Array<{ block?: string; params?: Record<string, unknown> }>;
+  const entries = manifest.execution.pipeline as Array<{ block?: string; version?: string; params?: Record<string, unknown> }>;
   const reviews = entries.filter(entry => entry.block === "qa_script");
   if (reviews.length !== 1 || entries.findIndex(entry => entry.block === "qa_script") >=
       entries.findIndex(entry => entry.block === "narration_tts")) {
@@ -55,7 +57,7 @@ export async function prepareWeeklyScriptReview(
   await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
   const model = openRouterModel("intelligence");
   let claimed = false;
-  const block = createQaScriptBlock(undefined, async request => {
+  const beforeCritiqueDispatch = async (request: { prompt: string; maxTokens: number }) => {
     // One token per UTF-8 byte plus framing is a reservation, not observed usage.
     const priced = priceModelUsage({ provider: "openrouter", model, kind: "text",
       inputTokens: Buffer.byteLength(request.prompt, "utf8") + 1024, outputTokens: request.maxTokens });
@@ -63,7 +65,10 @@ export async function prepareWeeklyScriptReview(
         priced.costUsd > maxCostUsd) throw new Error("weekly script review exceeds its remaining priced allowance");
     await claimPreparedGeneration("scriptReview", manifest, { ...identity, model, request });
     claimed = true;
-  });
+  };
+  const block = reviews[0].version === CHANNEL_AWARE_SCRIPT_QA_VERSION
+    ? createChannelAwareScriptQaBlock(beforeCritiqueDispatch)
+    : createQaScriptBlock(undefined, beforeCritiqueDispatch);
   const usage = createModelUsageScope();
   let failure: unknown;
   try {

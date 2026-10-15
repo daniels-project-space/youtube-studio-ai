@@ -12,6 +12,7 @@ import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparatio
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
+import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -110,6 +111,12 @@ async function main(): Promise<void> {
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "music" }, { block: "script_gen", version: undefined, params: { version: "provider-model" } },
     ], "test"));
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+    ], "test"), "weekly preparation executes the exact frozen channel-aware reviewer before TTS");
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "qa_script", version: "2.0.0-unqualified" },
+    ], "test"), /qa_script@"2\.0\.0-unqualified"/);
     assert.throws(() => assertWeeklyPreparationVersionsSupported([
       { block: "music", version: "1.0.0-migration" }, { block: "script_gen", version: "2.0.0" },
     ], "test"), (error: unknown) => {
