@@ -7,8 +7,9 @@ import {
   restorePipelineDurationContract,
 } from "@/engine/designerCore";
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
+import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/runtimeModuleConfig";
 import { validatePipeline } from "@/engine/validate";
-import { applyArchitectPlan, type ArchitectPlan } from "../architect";
+import { applyArchitectPlan, ARCHITECT_TOOLBOX, type ArchitectPlan } from "../architect";
 
 const emptyPlan: ArchitectPlan = {
   summary: "Keep the valid composition",
@@ -17,6 +18,17 @@ const emptyPlan: ArchitectPlan = {
   missingCapabilities: [],
   groundingActions: [],
 };
+
+const routeOwnedArchitectParams = ARCHITECT_TOOLBOX.flatMap((tool) =>
+  tool.params
+    .filter((param) => ROUTE_OWNED_RUNTIME_PARAM_KEYS[tool.block]?.includes(param.key))
+    .map((param) => `${tool.block}.${param.key}`),
+);
+assert.deepEqual(
+  routeOwnedArchitectParams,
+  [],
+  "the architect must not expose any parameter that runtime configuration treats as route-owned",
+);
 
 function blockOrder(entries: ReturnType<typeof designPipeline>["pipeline"]) {
   return entries.map(({ block }) => block);
