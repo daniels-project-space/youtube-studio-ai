@@ -587,7 +587,13 @@ export function attachReferenceQualityContract(
   assertReferenceQualityContracts();
   const contract = referenceQualityContractFor(family);
   const labels = new Map(contract.sources.map((item) => [item.id, item.label]));
-  const dimensions = qualityBar.dimensions.map((dimension) => ({ ...dimension }));
+  const MAX_DESCRIPTION_LENGTH = 780;
+  const dimensions = qualityBar.dimensions.map((dimension) => ({
+    ...dimension,
+    description: dimension.description.length <= MAX_DESCRIPTION_LENGTH
+      ? dimension.description
+      : dimension.description.slice(0, MAX_DESCRIPTION_LENGTH).trimEnd().replace(/\s+\S*$/u, ""),
+  }));
   // A family may already have a broad rubric that omitted an otherwise relevant
   // standard (for example voice in a whiteboard explainer). Attach one existing
   // dimension id from the requirement rather than leave the profile orphaned.
@@ -601,21 +607,42 @@ export function attachReferenceQualityContract(
       minScore: 1,
     });
   }
+  // Give each full standard and proof to the shortest eligible dimension first.
+  for (const item of contract.requirements) {
+    const sourceLabels = item.sourceIds.map((sourceId) => labels.get(sourceId) ?? sourceId).join(", ");
+    const referenceGuidance = [
+      `Reference-quality ${item.area} (${sourceLabels}; mechanics only, no automatic comparison): ${item.standard}`,
+      `Proof: ${item.evidence.join(", ")} (${item.verification}).`,
+    ].join(" ");
+    const candidates = dimensions
+      .filter((dimension) => item.dimensionIds.includes(dimension.id))
+      .sort((a, b) => a.description.length - b.description.length);
+    let target = candidates.find((dimension) =>
+      dimension.description.length + 1 + referenceGuidance.length <= MAX_DESCRIPTION_LENGTH,
+    );
+    if (!target) {
+      const fallbackId = item.dimensionIds.find((id) => !dimensions.some((dimension) => dimension.id === id));
+      if (fallbackId) {
+        const fallback = { id: fallbackId, description: "", minScore: 1 };
+        dimensions.push(fallback);
+        target = fallback;
+      }
+    }
+    if (!target) {
+      const shortest = candidates[0];
+      const baseBudget = MAX_DESCRIPTION_LENGTH - referenceGuidance.length - 1;
+      if (!shortest || baseBudget < 0) {
+        throw new Error(`${family}:${item.id} reference guidance exceeds the quality dimension limit`);
+      }
+      const clippedBase = shortest.description.slice(0, baseBudget).trimEnd().replace(/\s+\S*$/u, "");
+      shortest.description = `${clippedBase} ${referenceGuidance}`.trim();
+      continue;
+    }
+    target.description = `${target.description} ${referenceGuidance}`.trim();
+  }
   return {
     ...qualityBar,
-    dimensions: dimensions.map((dimension) => {
-      const matching = contract.requirements.filter((item) => item.dimensionIds.includes(dimension.id));
-      if (!matching.length) return { ...dimension };
-      const referenceGuidance = matching.map((item) => {
-        const sourceLabels = item.sourceIds.map((sourceId) => labels.get(sourceId) ?? sourceId).join(", ");
-        return [
-          `Reference-quality ${item.area} (${sourceLabels}; mechanics only, no automatic comparison): ${item.standard}`,
-          `Proof: ${item.evidence.join(", ")} (${item.verification}).`,
-        ].join(" ");
-      }).join(" ");
-      // Keep the stored rubric compatible with existing bounded renderer schemas.
-      return { ...dimension, description: `${dimension.description} ${referenceGuidance}`.slice(0, 780) };
-    }),
+    dimensions: dimensions.map((dimension) => ({ ...dimension })),
     referenceQuality: contract,
   };
 }

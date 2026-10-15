@@ -58,6 +58,41 @@ assert.deepEqual(
   [],
   "every current creator family must carry a source-bound quality standard rather than silently fall back to generic QA",
 );
+for (const family of FAMILY_KEYS) {
+  const contract = referenceQualityContractFor(family);
+  const bar = buildQualityBar(family, DNA, 123);
+  assert.ok(
+    bar.dimensions.every((dimension) => dimension.description.length <= 780),
+    `${family} reviewer dimensions must remain within the bounded schema`,
+  );
+  for (const requirement of contract.requirements) {
+    const mappedDimensions = bar.dimensions.filter((dimension) => requirement.dimensionIds.includes(dimension.id));
+    assert.ok(
+      mappedDimensions.some((dimension) =>
+        dimension.description.includes(requirement.standard)
+        && requirement.evidence.every((item) => dimension.description.includes(item))
+        && dimension.description.includes(requirement.verification),
+      ),
+      `${family}:${requirement.id} must reach a valid reviewer dimension complete with proof evidence`,
+    );
+  }
+}
+const verboseBar = buildQualityBar("whiteboard", {
+  ...DNA,
+  composition: "Channel-specific framing instruction. ".repeat(80),
+}, 123);
+assert.ok(
+  verboseBar.dimensions.every((dimension) => dimension.description.length <= 780),
+  "verbose channel DNA must not exceed the reviewer schema limit",
+);
+for (const requirement of verboseBar.referenceQuality?.requirements ?? []) {
+  assert.ok(
+    verboseBar.dimensions.some((dimension) => requirement.dimensionIds.includes(dimension.id)
+      && dimension.description.includes(requirement.standard)
+      && requirement.evidence.every((item) => dimension.description.includes(item))),
+    `${requirement.id} reference evidence must survive verbose channel DNA`,
+  );
+}
 
 const casefile = referenceQualityContractFor("documentary_collage_short");
 assert.equal(casefile.calibration, "calibrated");
