@@ -981,6 +981,7 @@ export async function synthScript(
     bannedWords: req.bannedWords,
     niche: req.niche,
     persona: req.persona,
+    channelVoice: req.channelVoice,
     narrative: req.narrative,
     style: req.style,
     playbookDigest: playbookFull(req) || undefined,

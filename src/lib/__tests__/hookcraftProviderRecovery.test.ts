@@ -17,6 +17,7 @@ let judgeMode: "known_failure" | "unknown" = "known_failure";
 let generatorCalls = 0;
 let judgeCalls = 0;
 const generationPrompts: string[] = [];
+const judgePrompts: string[] = [];
 
 const originalLoad = (Module as unknown as { _load: (...args: unknown[]) => unknown })._load;
 (Module as unknown as { _load: (...args: unknown[]) => unknown })._load = function patched(
@@ -34,8 +35,9 @@ const originalLoad = (Module as unknown as { _load: (...args: unknown[]) => unkn
       generationPrompts.push(input.prompt);
       return { candidates: [{ device: "result_first", hook, opening, loop: "Why the ignored test changed the night." }] };
     },
-    creativeTextJson: async () => {
+    creativeTextJson: async (input: { prompt: string }) => {
       judgeCalls++;
+      judgePrompts.push(input.prompt);
       if (judgeMode === "unknown") {
         throw new OpenRouterGenerationOutcomeUnknownError("judge connection closed after dispatch", { status: 503 });
       }
@@ -52,6 +54,12 @@ async function main(): Promise<void> {
       title: "Chernobyl's Ignored Safety Test",
       sourceGrounding: "Chernobyl's ignored safety test failed in 1986. Engineers disabled the alarm in Reactor Four at 1:23 a.m.",
       narrative: { pacing: "Measured, with a deliberate pause before each reveal." },
+      channelVoice: {
+        positioning: "Evidence-led histories about overlooked decisions and their human consequences.",
+        vibe: "Measured, humane, and exact.",
+        worksInSpace: ["Ground the opening in a documented detail before interpreting it."],
+        avoidInSpace: ["Never turn an evidence gap into a suspense claim."],
+      },
       log: () => {},
     };
 
@@ -63,11 +71,22 @@ async function main(): Promise<void> {
     assert.equal(judgeCalls, 2, "production retries the complete cold-open slate exactly once");
     assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
     assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
-      "a pacing-only channel identity must shape its cold open as well as the body script and critic");
+      "channel narrative DNA must shape its cold open as well as the body script and critic");
+    for (const guidance of [
+      "Evidence-led histories about overlooked decisions and their human consequences.",
+      "Measured, humane, and exact.",
+      "Ground the opening in a documented detail before interpreting it.",
+      "Never turn an evidence gap into a suspense claim.",
+    ]) {
+      assert.ok(generationPrompts[0]?.includes(guidance), `hookcraft must honor channel identity: ${guidance}`);
+      assert.ok(judgePrompts[0]?.includes(guidance), `hook judge must grade against channel identity: ${guidance}`);
+    }
 
-    const draftFailure = await craftHook({ ...args, qualityProfile: "draft" });
+    const draftFailure = await craftHook({ ...args, channelVoice: undefined, qualityProfile: "draft" });
     assert.equal(draftFailure.verdict.judged, false, "an explicit draft may retain a truthful lint-only preview");
     assert.equal(judgeCalls, 3, "the explicit draft preview makes one judge attempt, not a hidden retry");
+    assert.doesNotMatch(generationPrompts[2] ?? "", /FROZEN CHANNEL EDITORIAL IDENTITY/,
+      "legacy callers without a Show Bible keep the unconditioned cold-open prompt");
 
     judgeMode = "unknown";
     await assert.rejects(

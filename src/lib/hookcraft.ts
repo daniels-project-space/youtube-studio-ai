@@ -26,6 +26,8 @@ import {
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
+import type { ShowBibleVoice } from "@/engine/showBibleVoice";
+import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
 
 export function hasHookcraft(): boolean {
   return hasCreativeTextKey();
@@ -449,6 +451,8 @@ export interface HookCraftArgs {
   bannedWords?: string[];
   niche?: string;
   persona?: string;
+  /** Frozen editorial identity; visual signature remains owned by art modules. */
+  channelVoice?: ShowBibleVoice;
   /** Style-DNA narrative register (beats generic tone). */
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
@@ -553,10 +557,14 @@ function registerClause(a: HookCraftArgs): string {
       ].filter(Boolean).join(" | ")}`
     : "";
   const doctrine = resolveVoiceDoctrine(a.niche);
+  const channelVoice = showBibleVoicePromptLines(a.channelVoice);
   return [
     a.channelName ? `Channel: "${a.channelName}".` : "",
     a.niche ? `Niche: ${a.niche}.` : "",
     a.persona ? `Persona: ${a.persona}` : "",
+    channelVoice.length
+      ? `FROZEN CHANNEL EDITORIAL IDENTITY — honor this authored guide without copying it:\n${channelVoice.join("\n")}`
+      : "",
     reg,
     doctrine
       ? `VOICE ARCHETYPE "${doctrine.voice}" — how this kind of channel must SOUND: ${doctrine.tone}\n` +
