@@ -285,6 +285,16 @@ assert.throws(() => createChannelMusicProgram({
   instrumentation: ["soft sustained pad", "soft boom-bap drums"],
 }), /sleep soundscape cannot use rhythmic instrumentation: soft boom-bap drums/u,
 "sleep programs must reject a channel palette that contradicts their beatless role before generation");
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-sleep-genre-conflict",
+  channelIdentityFingerprint: sha("c"),
+  family: "sleep",
+  contentLaneKey: "music_loop",
+  topic: "Steady rain through a quiet night",
+  genre: "minimal drum and bass",
+  instrumentation: ["soft sustained pad"],
+}), /sleep soundscape cannot use a rhythmic genre: minimal drum and bass/u,
+"sleep programs must reject a channel genre that contradicts their beatless role before generation");
 const conflictingSleepProgram = {
   ...sleep,
   identity: { ...sleep.identity, instrumentation: ["soft sustained pad", "soft boom-bap drums"] },
@@ -302,6 +312,23 @@ const reloadedSleep = ChannelMusicProgramSchema.safeParse({
 assert.equal(reloadedSleep.success, false, "reloaded sleep programs must not admit role-conflicting instrumentation");
 assert.match(JSON.stringify(reloadedSleep.error?.issues), /sleep soundscape cannot use rhythmic instrumentation: soft boom-bap drums/u,
   "the persisted-program schema must report the role conflict, not only a changed fingerprint");
+const conflictingSleepGenreProgram = {
+  ...sleep,
+  identity: { ...sleep.identity, genre: "minimal drum and bass" },
+  generation: {
+    ...sleep.generation,
+    structuredCaption: sleep.generation.structuredCaption.replaceAll(sleep.identity.genre, "minimal drum and bass"),
+  },
+};
+const { fingerprint: sleepGenreFingerprint, ...conflictingSleepGenreBody } = conflictingSleepGenreProgram;
+assert.match(sleepGenreFingerprint, /^[a-f0-9]{64}$/u);
+const reloadedSleepGenre = ChannelMusicProgramSchema.safeParse({
+  ...conflictingSleepGenreBody,
+  fingerprint: sha256Hex(canonicalJson(conflictingSleepGenreBody)),
+});
+assert.equal(reloadedSleepGenre.success, false, "reloaded sleep programs must not admit a rhythmic genre");
+assert.match(JSON.stringify(reloadedSleepGenre.error?.issues), /sleep soundscape cannot use a rhythmic genre: minimal drum and bass/u,
+  "the persisted-program schema must report the rhythmic genre conflict");
 assert.equal(sleep.role, "sleep_sound_bed", "sleep intent takes precedence over a generic loop lane");
 assert.equal(sleep.identity.bpmRange, null,
   "sleep programs must not retain a contradictory BPM range from channel DNA or composer direction");

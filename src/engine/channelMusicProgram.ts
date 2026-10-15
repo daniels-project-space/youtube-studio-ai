@@ -145,6 +145,14 @@ function validateChannelMusicProgramBody(
       message: `sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`,
     });
   }
+  const rhythmicGenre = sleepSoundRhythmicGenre(program.role, program.identity.genre);
+  if (rhythmicGenre) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["identity", "genre"],
+      message: `sleep soundscape cannot use a rhythmic genre: ${rhythmicGenre}`,
+    });
+  }
   const sections = program.generation.sections;
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music sections must cover the full program from 0 to 1" });
@@ -419,10 +427,25 @@ function sleepSoundRhythmicCue(role: ChannelMusicRole, instrumentation: readonly
   );
 }
 
-function assertRoleCompatibleIdentity(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): void {
+function sleepSoundRhythmicGenre(role: ChannelMusicRole, genre: string | undefined): string | undefined {
+  if (role !== "sleep_sound_bed" || !genre) return undefined;
+  return /\b(?:techno|house|drum\s*(?:and|&)\s*bass|dnb|breakbeat|boom[-\s]?bap|hip[-\s]?hop|disco|funk|trap|dance)\b/iu.test(genre)
+    ? genre
+    : undefined;
+}
+
+function assertRoleCompatibleIdentity(
+  role: ChannelMusicRole,
+  instrumentation: readonly string[] | undefined,
+  genre: string | undefined,
+): void {
   const rhythmicCue = sleepSoundRhythmicCue(role, instrumentation);
   if (rhythmicCue) {
     throw new Error(`sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`);
+  }
+  const rhythmicGenre = sleepSoundRhythmicGenre(role, genre);
+  if (rhythmicGenre) {
+    throw new Error(`sleep soundscape cannot use a rhythmic genre: ${rhythmicGenre}`);
   }
 }
 
@@ -586,7 +609,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }
   const role = input.role ?? routeRole;
-  assertRoleCompatibleIdentity(role, input.instrumentation);
+  assertRoleCompatibleIdentity(role, input.instrumentation, input.genre);
   const roleDefaults = {
     narration_bed: {
       genre: "restrained documentary underscore",

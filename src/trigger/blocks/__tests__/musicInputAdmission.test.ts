@@ -89,6 +89,17 @@ async function main() {
   await assert.rejects(music.run(sleepContext), /sleep soundscape cannot use rhythmic instrumentation: boom-bap drums/u);
   assert.equal(storageCalls, 0, "a role-conflicting brief must fail before writing its sound program");
   assert.equal(networkCalls, 0, "a role-conflicting brief must fail before a provider request");
+  const rhythmicSleepGenreStore = {
+    topic: "Steady rain through a quiet night",
+    musicBrief: { musicIntent: { role: "sleep_sound_bed" } },
+    styleDNA: { audio: { genre: "minimal drum and bass", instrumentation: ["soft sustained pad"] } },
+  };
+  await assert.rejects(
+    music.run({ ...ctx, params: { provider: "suno" }, store: rhythmicSleepGenreStore }),
+    /sleep soundscape cannot use a rhythmic genre: minimal drum and bass/u,
+  );
+  assert.equal(storageCalls, 0, "a role-conflicting channel genre must fail before writing its sound program");
+  assert.equal(networkCalls, 0, "a role-conflicting channel genre must fail before a provider request");
   for (const provider of [undefined, "mureka", "suno", "minimax_music3"]) {
     const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store, reuseMusicKey: "retained.mp3" } });
     assert.equal(result.musicProvider, "reuse");
