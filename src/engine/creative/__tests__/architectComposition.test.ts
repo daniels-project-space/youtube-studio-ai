@@ -9,7 +9,9 @@ import {
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/runtimeModuleConfig";
 import { validatePipeline } from "@/engine/validate";
-import { applyArchitectPlan, ARCHITECT_TOOLBOX, type ArchitectPlan, type Tool } from "../architect";
+import {
+  applyArchitectPlan, ARCHITECT_TOOLBOX, renderArchitectToolbox, type ArchitectPlan, type Tool,
+} from "../architect";
 
 const emptyPlan: ArchitectPlan = {
   summary: "Keep the valid composition",
@@ -29,6 +31,21 @@ assert.deepEqual(
   [],
   "the architect must not expose any parameter that runtime configuration treats as route-owned",
 );
+
+const renderedLoopToolbox = renderArchitectToolbox("loop");
+assert.match(renderedLoopToolbox, /MODULE RESPONSIBILITY:/u,
+  "the architect must reason from the module's registered responsibility as well as a prompt-specific summary");
+assert.match(renderedLoopToolbox, /produces artifacts[^\n]*musicKey/u,
+  "the architect must see real output artifact keys, not capabilities alone");
+const treatmentTool: Tool = {
+  block: "children_video_treatment", purpose: "Test handoff", whenToUse: "Test exact downstream binding.",
+  addable: true, removable: true, appliesTo: "narrated", params: [],
+};
+const renderedTreatmentTool = renderArchitectToolbox("narrated", [treatmentTool]);
+assert.match(renderedTreatmentTool, /visuals\.scene_compiled=childrenVideoTreatment/u,
+  "the architect must see the exact renderer artifact bound to a required capability");
+assert.match(renderedTreatmentTool, /package\.thumbnail=childrenVideoTreatment/u,
+  "the architect must see the exact thumbnail artifact binding too");
 
 function blockOrder(entries: ReturnType<typeof designPipeline>["pipeline"]) {
   return entries.map(({ block }) => block);

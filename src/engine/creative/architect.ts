@@ -33,6 +33,7 @@ import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
+import { moduleCard } from "@/engine/moduleRegistry";
 import { FAMILY_KEYS, familyLengthCheckEnvelope, type FamilyKey } from "@/engine/families";
 import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/routeOwnedRuntimeParams";
 import type { PipelineEntry } from "@/engine/types";
@@ -702,7 +703,8 @@ export function applyArchitectPlan(
 
 /* ------------------------------ The agent ------------------------------ */
 
-function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
+export function renderArchitectToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
+  registerAllBlocks();
   return [...ARCHITECT_TOOLBOX, ...extra].filter((t) => !t.appliesTo || t.appliesTo === kind)
     .map((t) => {
       const params = t.params
@@ -716,6 +718,9 @@ function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
         .join("\n");
       const caps = [t.addable ? "addable" : "", t.removable ? "removable" : "core"].filter(Boolean).join(", ");
       const contract = MODULE_CONTRACTS[t.block];
+      const outputArtifacts = getBlock(t.block)?.produces ?? [];
+      const requiredDownstreamBindings = Object.entries(contract?.requiredDownstreamConsumes ?? {})
+        .map(([capability, artifact]) => `${capability}=${artifact}`);
       const contractLine = contract
         ? [
             (contract.requiredConsumes ?? []).length
@@ -727,12 +732,21 @@ function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
             contract.capabilities.length
               ? `provides ${(contract.capabilities ?? []).join(", ")}`
               : "provides no capability",
+            outputArtifacts.length
+              ? `produces artifacts ${outputArtifacts.join(", ")}`
+              : "produces no declared artifacts",
             (contract.requiredDownstreamCapabilities ?? []).length
               ? `hands off to ${(contract.requiredDownstreamCapabilities ?? []).join(", ")}`
               : "no required downstream handoff",
+            requiredDownstreamBindings.length
+              ? `exact handoff bindings ${requiredDownstreamBindings.join(", ")}`
+              : "no exact downstream artifact bindings",
           ].join("; ")
         : "ABI UNREGISTERED — do not add this tool until its typed contract is registered";
-      return `  ${t.block} (${caps}) — ${t.purpose}\n    WHEN: ${t.whenToUse}\n    ABI: ${contractLine}${params ? `\n${params}` : ""}`;
+      const responsibility = moduleCard(t.block)?.does;
+      return `  ${t.block} (${caps}) — ${t.purpose}` +
+        `${responsibility ? `\n    MODULE RESPONSIBILITY: ${responsibility}` : ""}` +
+        `\n    WHEN: ${t.whenToUse}\n    ABI: ${contractLine}${params ? `\n${params}` : ""}`;
     })
     .join("\n");
 }
@@ -814,7 +828,7 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
       : []),
     ``,
     `YOUR TOOLBOX (the ONLY modules and params that exist — bounds are enforced):`,
-    renderToolbox(kind, input.forgedTools),
+    renderArchitectToolbox(kind, input.forgedTools),
     ``,
     `INTERROGATE THE IDENTITY (answer each through your decisions):`,
     `1. Which optional modules does THIS content actually need (data viz? quotes? portraits? shorts?) — and which present ones don't fit and should be REMOVED?`,
