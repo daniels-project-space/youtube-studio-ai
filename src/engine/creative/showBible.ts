@@ -73,6 +73,42 @@ const DOCTRINE_BY_ROLE: Record<VideoCrewRole, keyof ShowBible> = {
   critic: "criticDoctrine",
 };
 
+const LOW_INFORMATION_WORDS = new Set([
+  "a", "about", "after", "all", "an", "and", "are", "as", "at", "audience", "avoid",
+  "be", "because", "before", "best", "but", "by", "channel", "clear", "compelling",
+  "content", "create", "each", "engaging", "ensure", "every", "for", "from", "good",
+  "great", "high", "in", "interesting", "into", "is", "it", "keep", "make", "never",
+  "of", "on", "or", "our", "over", "provide", "quality", "strong", "that", "the",
+  "their", "them", "there", "these", "this", "through", "to", "use", "valuable", "video",
+  "videos", "viewer", "viewers", "with", "without",
+]);
+
+function informativeWords(value: string): Set<string> {
+  return new Set(
+    (value.normalize("NFKC").toLocaleLowerCase("en-US").match(/[\p{L}\p{N}]{3,}/gu) ?? [])
+      .filter((word) => !LOW_INFORMATION_WORDS.has(word)),
+  );
+}
+
+function inspectGuidanceList(values: string[], label: string): string[] {
+  const issues: string[] = [];
+  const words = values.map(informativeWords);
+  values.forEach((value, index) => {
+    if (words[index]!.size < 3) issues.push(`${label} entry ${index + 1} lacks niche-specific substance`);
+    for (let prior = 0; prior < index; prior += 1) {
+      const left = words[index]!;
+      const right = words[prior]!;
+      if (left.size < 4 || right.size < 4) continue;
+      const overlap = [...left].filter((word) => right.has(word)).length;
+      const union = new Set([...left, ...right]).size;
+      if (union > 0 && overlap / union >= 0.85) {
+        issues.push(`${label} entries ${prior + 1} and ${index + 1} repeat the same guidance`);
+      }
+    }
+  });
+  return issues;
+}
+
 /** Deterministic admission checks for the channel-level creative contract. */
 export function inspectShowBibleQuality(bible: ShowBible, family: FamilyKey): string[] {
   const issues: string[] = [];
@@ -82,6 +118,7 @@ export function inspectShowBibleQuality(bible: ShowBible, family: FamilyKey): st
   for (const field of ["worksInSpace", "avoidInSpace"] as const) {
     const distinct = new Set(bible[field].map((item) => item.trim().toLowerCase()).filter(Boolean));
     if (distinct.size < 5) issues.push(`${field} has fewer than five distinct entries`);
+    issues.push(...inspectGuidanceList(bible[field], field));
   }
 
   const familyCrew = FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;

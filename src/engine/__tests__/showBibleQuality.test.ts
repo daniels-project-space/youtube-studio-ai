@@ -41,11 +41,55 @@ const cases: Array<{ candidate: ShowBible; issue: string }> = [
   { candidate: { ...bible, avoidInSpace: [" ", "bad", "bad", "worse", "worse"] }, issue: "avoidInSpace has fewer than five distinct entries" },
   { candidate: { ...bible, activeCrew: ["critic"] }, issue: "activeCrew is missing required director" },
   { candidate: { ...bible, directorDoctrine: " " }, issue: "director doctrine is empty" },
+  {
+    candidate: {
+      ...bible,
+      worksInSpace: [
+        "Use high-quality content", "Make engaging videos", "Create compelling content",
+        "Provide valuable videos", "Make great content",
+      ],
+    },
+    issue: "worksInSpace entry 1 lacks niche-specific substance",
+  },
+  {
+    candidate: {
+      ...bible,
+      worksInSpace: [
+        "Open each episode with a question about star color",
+        "Open every episode with a question about star color",
+        ...bible.worksInSpace.slice(2),
+      ],
+    },
+    issue: "worksInSpace entries 1 and 2 repeat the same guidance",
+  },
 ];
 
 for (const { candidate, issue } of cases) {
   assert.ok(inspectShowBibleQuality(candidate, "narrated_stock").includes(issue), issue);
 }
+
+const lofiBible: ShowBible = {
+  ...bible,
+  worksInSpace: [
+    "Anchor each loop in a single muted instrument motif",
+    "Leave harmonic space for uninterrupted study blocks",
+    "Introduce vinyl texture only between phrase boundaries",
+    "Keep percussion soft enough to recede beneath reading",
+    "Resolve chord motion slowly without dramatic lifts",
+  ],
+  avoidInSpace: [
+    "Bright lead synths that distract from written work",
+    "Sudden fills that interrupt long concentration sessions",
+    "Rapid chord changes that compete with quiet tasks",
+    "Loud transient samples at repeating loop boundaries",
+    "Melodic hooks that demand active listener attention",
+  ],
+};
+assert.deepEqual(
+  inspectShowBibleQuality(lofiBible, "music_loop"),
+  [],
+  "specific loop-production guidance should qualify for a different channel format",
+);
 
 assert.deepEqual(
   reconcileShowBibleCrew("narrated_stock", ["critic"]),
