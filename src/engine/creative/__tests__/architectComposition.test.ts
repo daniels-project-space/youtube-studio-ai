@@ -35,6 +35,10 @@ assert.deepEqual(
 const renderedLoopToolbox = renderArchitectToolbox("loop");
 assert.match(renderedLoopToolbox, /MODULE RESPONSIBILITY:/u,
   "the architect must reason from the module's registered responsibility as well as a prompt-specific summary");
+assert.match(renderedLoopToolbox, /foreground primary music/u,
+  "the architect must not reduce music-led routes to background-score generation");
+assert.match(renderedLoopToolbox, /visual loop generation belongs to visual modules/u,
+  "the music module must not take over visual-loop responsibilities");
 assert.match(renderedLoopToolbox, /produces artifacts[^\n]*musicKey/u,
   "the architect must see real output artifact keys, not capabilities alone");
 const treatmentTool: Tool = {

@@ -142,7 +142,7 @@ const MUSIC_MODULE: ModuleCard = {
   key: "music",
   title: "Music",
   stage: "audio",
-  does: "Generates the background score, crossfading distinct tracks into the mix.",
+  does: "Generates the sealed route-specific audio program: foreground primary music or a narration-aware music, meditation, or sleep bed; visual loop generation belongs to visual modules.",
   customization: {
     capabilities: ["provider choice", "channel sound program", "structured arrangement", "style-prompt steering", "multi-track crossfade mix"],
     knobs: [

@@ -205,8 +205,8 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "music",
-    purpose: "Generates a fingerprint-bound channel score with authored sections and transparent constant-gain mastering. Managed-provider failover is admission-safe; MiniMax-Music3 is explicit and never silently substituted.",
-    whenToUse: "Core. trackCount is the anti-repetition knob for longer videos (distinct tracks crossfaded vs one loop).",
+    purpose: "Generates the fingerprint-bound route-specific audio program with authored sections and transparent mastering; it owns audio only, not visual loops or footage.",
+    whenToUse: "Core when the route has an audio program. The sealed role sets foreground primary music or a narration-aware background, meditation, or sleep bed; trackCount controls distinct-track crossfades on longer videos.",
     addable: false,
     removable: false,
     params: [
