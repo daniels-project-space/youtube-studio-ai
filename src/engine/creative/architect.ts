@@ -34,6 +34,7 @@ import { validatePipeline } from "@/engine/validate";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
 import { FAMILY_KEYS, familyLengthCheckEnvelope, type FamilyKey } from "@/engine/families";
+import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/routeOwnedRuntimeParams";
 import type { PipelineEntry } from "@/engine/types";
 import {
   assertPipelineMatchesContentLane,
@@ -447,9 +448,10 @@ function validateParams(
 ): { clean: Record<string, unknown>; rejectedKeys: string[] } {
   const clean: Record<string, unknown> = {};
   const rejectedKeys: string[] = [];
+  const routeOwned = new Set(ROUTE_OWNED_RUNTIME_PARAM_KEYS[tool.block] ?? []);
   for (const [k, v] of Object.entries(raw)) {
     const spec = tool.params.find((p) => p.key === k);
-    if (!spec || v === undefined || v === null) {
+    if (routeOwned.has(k) || !spec || v === undefined || v === null) {
       rejectedKeys.push(k);
       continue;
     }

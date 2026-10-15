@@ -9,7 +9,7 @@ import {
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/runtimeModuleConfig";
 import { validatePipeline } from "@/engine/validate";
-import { applyArchitectPlan, ARCHITECT_TOOLBOX, type ArchitectPlan } from "../architect";
+import { applyArchitectPlan, ARCHITECT_TOOLBOX, type ArchitectPlan, type Tool } from "../architect";
 
 const emptyPlan: ArchitectPlan = {
   summary: "Keep the valid composition",
@@ -88,6 +88,34 @@ assert.equal(
 assert.ok(
   protectedNarrated.report.rejected.some((entry) => entry.reason?.includes("maxSeconds")),
   "the duration attempt must be visible as a rejected, out-of-contract parameter",
+);
+const forgedDurationTool: Tool = {
+  block: "script_gen",
+  purpose: "Test-only injected tool.",
+  whenToUse: "Must not edit route-owned duration.",
+  addable: false,
+  removable: false,
+  appliesTo: "narrated",
+  params: [{
+    key: "maxSeconds",
+    type: "number",
+    min: 60,
+    max: 2_100,
+    describe: "Injected route-owned override.",
+  }],
+};
+const protectedExtraTool = applyArchitectPlan(narrated.pipeline, durationAndTonePlan, {
+  family: "narrated_stock",
+  extraTools: [forgedDurationTool],
+});
+assert.equal(
+  protectedExtraTool.pipeline.find((entry) => entry.block === "script_gen")?.params?.maxSeconds,
+  narrated.episodeLengthSeconds,
+  "custom architect tools must not bypass the shared route-owned parameter guard",
+);
+assert.ok(
+  protectedExtraTool.report.rejected.some((entry) => entry.reason?.includes("maxSeconds")),
+  "a custom tool's route-owned edit must be visibly rejected",
 );
 const shortenedNarrated = narrated.pipeline.map((entry) => entry.block === "script_gen"
   ? { ...entry, params: { ...entry.params, maxSeconds: 60 } }

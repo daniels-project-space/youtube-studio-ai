@@ -3,6 +3,9 @@ import { moduleSurface, type ModuleConfigurationScope } from "./moduleRegistry";
 import type { PipelineEntry } from "./types";
 import { materializeRuntimePipelineParams } from "./pipelineCompiler";
 import { snapshotParamsByBlock } from "@/lib/pipelineInvocationSnapshot";
+import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "./routeOwnedRuntimeParams";
+
+export { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "./routeOwnedRuntimeParams";
 
 export type RuntimeModuleConfig = Readonly<Record<string, unknown>>;
 
@@ -41,33 +44,6 @@ export interface ResolvedPipelineModuleConfig {
  * must be validated and frozen with every invocation.
  */
 const VIRTUAL_RUNTIME_MODULE_IDS = new Set(["show-bible"]);
-
-/**
- * These values are set by the sealed Program Brief, selected route, and
- * family length contract. A module configuration can refine execution, but it
- * must never reopen the channel-format decision after pipeline design.
- *
- * Keep this list deliberately narrow: presentation and craft controls remain
- * configurable, while duration, serialized-program, and canonical panel
- * structure stay route owned.
- */
-export const ROUTE_OWNED_RUNTIME_PARAM_KEYS: Readonly<Record<string, readonly string[]>> = {
-  topic_select: ["targetSeconds", "seriesTitle", "seriesCount"],
-  director_brief: ["targetSeconds"],
-  dp_brief: ["targetSeconds"],
-  editor_brief: ["targetSeconds"],
-  composer_brief: ["targetSeconds"],
-  critic_spec: ["targetSeconds"],
-  script_gen: ["maxSeconds"],
-  length_check: ["minSeconds", "maxSeconds"],
-  assemble: ["durationSec"],
-  whiteboard_scribe: ["targetSeconds"],
-  lore_short: ["targetSeconds"],
-  motion_comic: ["targetSeconds", "panels"],
-  quiz_year: ["targetSeconds"],
-  short_strategy: ["targetSeconds"],
-  documotion_short: ["targetSeconds"],
-};
 
 function assertRouteOwnedRuntimeConfig(input: {
   readonly blockId: string;
