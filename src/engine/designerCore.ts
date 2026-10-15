@@ -11,6 +11,7 @@ import {
   CREW_ROLE_BLOCK,
   assertFamilyAutonomousPlanningPipeline,
   familyAutonomousPlanningCapability,
+  familyDurationContract,
   familyLengthCheckEnvelope,
   familyTimeScalingContract,
   resolveFamilyEpisodeLengthSeconds,
@@ -1487,6 +1488,57 @@ export function enforceLengthContract(
     return { ...e, params: Object.keys(p).length ? p : undefined };
   });
   return { pipeline: out, changed };
+}
+
+export function pipelineEpisodeLengthSeconds(
+  pipeline: readonly PipelineEntry[],
+  family: FamilyKey,
+): number {
+  const fields: ReadonlyArray<readonly [string, string]> = family === "music_loop"
+    ? [["assemble", "durationSec"], ["topic_select", "targetSeconds"]]
+    : family === "quizyear"
+      ? [["quiz_year", "targetSeconds"]]
+      : [
+          ["topic_select", "targetSeconds"],
+          ["script_gen", "maxSeconds"],
+          ["documentary_source_plan", "targetSeconds"],
+          ["short_strategy", "targetSeconds"],
+          ["whiteboard_scribe", "targetSeconds"],
+          ["lore_short", "targetSeconds"],
+          ["motion_comic", "targetSeconds"],
+          ["documotion_short", "targetSeconds"],
+          ["assemble", "durationSec"],
+        ];
+  for (const [block, key] of fields) {
+    const value = pipeline.find((entry) => entry.block === block)?.params?.[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`cannot preserve ${family} episode duration: ${block}.${key} is invalid`);
+    }
+    return family === "quizyear" ? familyDurationContract(family).defaultSeconds : value;
+  }
+  return familyDurationContract(family).defaultSeconds;
+}
+
+export function restorePipelineDurationContract(
+  baseline: readonly PipelineEntry[],
+  candidate: PipelineEntry[],
+  family: FamilyKey,
+): { pipeline: PipelineEntry[]; changed: string[] } {
+  const targetSeconds = pipelineEpisodeLengthSeconds(baseline, family);
+  const baselineGate = baseline.find((entry) => entry.block === "length_check")?.params;
+  const minSeconds = baselineGate?.minSeconds;
+  const maxSeconds = baselineGate?.maxSeconds;
+  const lengthEnvelope = typeof minSeconds === "number" && Number.isFinite(minSeconds) && minSeconds > 0 &&
+      typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds >= minSeconds
+    ? { minSeconds, maxSeconds }
+    : undefined;
+  return enforceLengthContract(
+    candidate,
+    targetSeconds,
+    family,
+    lengthEnvelope ? { lengthEnvelope } : undefined,
+  );
 }
 
 export { OPTIONAL_BLOCKS };

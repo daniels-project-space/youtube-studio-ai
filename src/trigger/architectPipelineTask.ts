@@ -9,6 +9,8 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { architectPipeline } from "@/engine/creative/architect";
+import { restorePipelineDurationContract } from "@/engine/designerCore";
+import { FAMILY_KEYS, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 import type { ShowBible, StyleDNA, QualityBar } from "@/engine/creative/types";
 
@@ -17,7 +19,7 @@ import type { ShowBible, StyleDNA, QualityBar } from "@/engine/creative/types";
  * before `family` was persisted (it collapses whiteboard/shorts/comic into
  * narrated_stock — the reason family is now a stored field).
  */
-function familyFromTemplate(template?: string): string {
+function familyFromTemplate(template?: string): FamilyKey {
   if (template === "C") return "music_loop";
   if (template === "E") return "sleep";
   return "narrated_stock";
@@ -39,6 +41,14 @@ export const architectPipelineTask = task({
     const channelId = payload.channelId as Id<"channels">;
     const channel = await convex.query(api.channels.getChannel, { channelId });
     if (!channel) throw new Error(`channel not found: ${payload.channelId}`);
+
+    const storedFamily = (channel as { family?: string }).family;
+    if (storedFamily && !FAMILY_KEYS.includes(storedFamily as FamilyKey)) {
+      throw new Error(`channel has unsupported persisted family: ${storedFamily}`);
+    }
+    const family = storedFamily as FamilyKey | undefined ??
+      familyFromTemplate((channel as { template?: string }).template);
+    const baselinePipeline = (channel.pipeline ?? []) as PipelineEntry[];
 
     const identity = channel.identity as
       | { niche?: string; persona?: string; creativeBrief?: ShowBible }
@@ -73,13 +83,11 @@ export const architectPipelineTask = task({
       // Persisted family is the source of truth; template letter is the
       // legacy-row fallback. Operator hard rail (disabledBlocks) rides along
       // so no later architect pass can re-add wizard-disabled modules.
-      family:
-        (channel as { family?: string }).family ??
-        familyFromTemplate((channel as { template?: string }).template),
+      family,
       channelName: channel.name,
       niche: identity?.niche,
       persona: identity?.persona,
-      pipeline: (channel.pipeline ?? []) as PipelineEntry[],
+      pipeline: baselinePipeline,
       dna,
       bible: identity?.creativeBrief ?? null,
       qualityBar: bar,
@@ -89,10 +97,20 @@ export const architectPipelineTask = task({
     });
     if (!arch) return { ok: false, reason: "architect agent failed (floor kept)" };
 
+    const durationRepair = restorePipelineDurationContract(
+      baselinePipeline,
+      arch.pipeline,
+      family,
+    );
+    const pipeline = durationRepair.pipeline;
+    if (durationRepair.changed.length) {
+      log(`operator duration contract re-pinned: ${durationRepair.changed.join(", ")}`);
+    }
+
     if (!payload.dryRun) {
       const write = await convex.mutation(api.channels.updateChannel, {
         channelId,
-        pipeline: arch.pipeline,
+        pipeline,
         architectReport: arch.report,
       });
       if ((write as { state?: string; blockId?: string }).state === "module_locked") {
@@ -103,7 +121,7 @@ export const architectPipelineTask = task({
       if ((write as { state?: string }).state === "channel_locked") {
         throw new Error("architect pipeline update refused: the owner locked this channel");
       }
-      log(`APPLIED: ${arch.report.applied.length} op(s); pipeline now ${arch.pipeline.length} blocks`);
+      log(`APPLIED: ${arch.report.applied.length} op(s); pipeline now ${pipeline.length} blocks`);
     } else {
       log("DRY RUN — nothing written");
     }
@@ -111,7 +129,7 @@ export const architectPipelineTask = task({
       ok: true,
       dryRun: Boolean(payload.dryRun),
       report: arch.report,
-      pipeline: arch.pipeline.map((e) => ({ ...e })),
+      pipeline: pipeline.map((e) => ({ ...e })),
     };
   },
 });

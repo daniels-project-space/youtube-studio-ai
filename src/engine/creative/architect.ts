@@ -144,12 +144,11 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   {
     block: "script_gen",
     purpose: "Writes the narration script in the channel's DNA register.",
-    whenToUse: "Core. Length and tone are the channel-defining knobs.",
+    whenToUse: "Core. The channel owns spoken length; tune tone and evidence controls only.",
     addable: false,
     removable: false,
     appliesTo: "narrated",
     params: [
-      { key: "maxSeconds", type: "number", min: 60, max: 2100, describe: "Target spoken length (sec). Drives the word budget; length_check band follows automatically." },
       { key: "style", type: "enum", options: ["generic", "crime", "shorts", "meditation"], describe: "Archetype tone UNDER the DNA register (DNA wins). crime=tension/withhold-reveal, meditation=slow guided, shorts=punchy." },
       { key: "endWithSummary", type: "boolean", describe: "Close with a recap section." },
       { key: "dataRich", type: "boolean", describe: "Force 3-6 concrete sourced figures into the narration (set automatically when visual_inserts is present)." },
@@ -293,12 +292,11 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   {
     block: "assemble",
     purpose: "Loops the upscaled unit under the full music mix with the deblur-title intro.",
-    whenToUse: "Core for loop channels. durationSec is the product decision (stream length).",
+    whenToUse: "Core for loop channels. Stream length is operator-owned; tune intro treatment only.",
     addable: false,
     removable: false,
     appliesTo: "loop",
     params: [
-      { key: "durationSec", type: "number", min: 3600, max: 28800, describe: "One to eight hour final runtime." },
       { key: "deblurIntro", type: "boolean", describe: "Focus-pull title intro (the classic lofi open)." },
     ],
   },
