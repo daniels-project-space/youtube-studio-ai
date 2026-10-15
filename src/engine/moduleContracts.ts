@@ -439,6 +439,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       const sunoGenerations = Math.ceil(tracks / 2);
       return (sunoGenerations + 1) * PRICE.musicTrackUsd;
     },
+    // The generated mix remains pending until the exact retained source has a
+    // byte-bound audition receipt; upload_draft independently enforces it.
+    qualityRequired: true,
   }),
   assemble: contract(["master.assembled"], {
     optionalConsumes: [

@@ -1192,7 +1192,14 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "module generates only the configured number of distinct tracks, crossfades them into one mastered " +
       "mix, persists the mix before downstream assembly, and accounts for accepted provider work exactly. " +
       "It is selected only for channels whose concrete pipeline contains the music block.",
-    gates: ["bounded track count", "provider receipt accounting", "persisted mix before assembly", "no implicit per-channel selection"],
+    gates: [
+      "bounded track count",
+      "provider receipt accounting",
+      "persisted mix before assembly",
+      "role-specific sound program",
+      "byte-bound source audition and quality receipt before release",
+      "no implicit per-channel selection",
+    ],
     status: "active",
   },
   {

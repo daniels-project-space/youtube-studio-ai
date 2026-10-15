@@ -671,8 +671,13 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     return {
       ...manifest,
       certification: { status: "golden" as const, evidence: "test promotion receipt" },
+      ...(id === "music" ? { qualityContract: { required: false, failClosed: false } } : {}),
     };
   });
+  assert.ok(manifests.find((manifest) => manifest.id === "music")?.qualityContract.required,
+    "the paid music generator must declare its own byte-bound audition/release quality contract");
+  assert.ok(musicModule.gates.includes("byte-bound source audition and quality receipt before release"),
+    "the Golden music standard must test the actual output-review boundary");
   const musicProof = proofFor({ ...musicModule, status: "reference" }, musicManifests);
   const musicDecision = assessGoldenPromotion({
     module: { ...musicModule, status: "reference" },
