@@ -42,6 +42,11 @@ for (const [blockId, card] of Object.entries(MODULE_REGISTRY)) {
   assert.ok(card.does?.trim(), `${blockId} must explain its bounded responsibility`);
 }
 
+assert.match(moduleCard("cinematic_case_sequence_draft")?.does ?? "", /caller-supplied cinematicCaseDirection/u,
+  "the pipeline designer must know the case draft depends on an external direction artifact");
+assert.match(moduleCard("cinematic_case_sequence_finalize")?.does ?? "", /human-signed cinematicSequenceEditorialReview/u,
+  "the pipeline designer must preserve the human signature gate rather than inventing an approval producer");
+
 const sharedReleaseFoundation = ["package_to_opening_plan", "thumbnail_gen", "qa_visual", "upload_draft"];
 
 for (const family of FAMILY_KEYS) {
