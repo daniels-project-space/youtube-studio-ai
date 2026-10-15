@@ -530,6 +530,42 @@ const preparedMusic = {
   },
   createdAt: Date.now() - 200,
 };
+const roleBoundMusicManifest = structuredClone(musicManifest);
+roleBoundMusicManifest.execution.seedStore = {
+  family: "narrated_stock",
+  contentLane: { key: "documentary" },
+  musicBrief: { musicIntent: { role: "meditation_bed" } },
+};
+const roleBoundMusicProgram = planWeekPreparedMusicProgram(roleBoundMusicManifest, "mureka");
+assert.equal(roleBoundMusicProgram.role, "meditation_bed",
+  "weekly preparation preserves the Composer's explicit role just like the runtime music module");
+assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.25,
+  "a prepared meditation bed uses the shared role default instead of full music-loop gain");
+assert.equal(roleBoundMusicProgram.mix.targetLufs, -18,
+  "a prepared meditation bed uses the shared role-specific master target");
+
+const guidedSleepMusicManifest = structuredClone(musicManifest);
+guidedSleepMusicManifest.execution.seedStore = {
+  family: "sleep",
+  contentLane: { key: "ambient_guided" },
+};
+const guidedSleepMusicProgram = planWeekPreparedMusicProgram(guidedSleepMusicManifest, "mureka");
+assert.equal(guidedSleepMusicProgram.role, "sleep_sound_bed");
+assert.equal(guidedSleepMusicProgram.mix.bodyMusicVol, 0.1026,
+  "prepared guided-sleep music keeps narration foreground priority");
+assert.equal(guidedSleepMusicProgram.mix.targetLufs, -20,
+  "prepared guided-sleep music uses the sleep-specific master target");
+
+const authoredMusicGainManifest = structuredClone(guidedSleepMusicManifest);
+authoredMusicGainManifest.execution.seedStore = {
+  ...guidedSleepMusicManifest.execution.seedStore,
+  styleDNA: { audio: { genre: "soft rain", bodyMusicVol: 0.16, loudnessLufs: -19 } },
+};
+const authoredMusicProgram = planWeekPreparedMusicProgram(authoredMusicGainManifest, "mureka");
+assert.equal(authoredMusicProgram.mix.bodyMusicVol, 0.16,
+  "prepared tracks preserve channel-authored music gain when explicitly configured");
+assert.equal(authoredMusicProgram.mix.targetLufs, -19,
+  "prepared tracks preserve the channel-authored loudness target");
 assert.equal(
   assertPlanWeekPreparedMusicBinding({ prepared: preparedMusic, manifest: musicManifest }).musicProgram.fingerprint,
   preparedMusic.musicProgram.fingerprint,

@@ -12,6 +12,10 @@ function finiteNumber(value: unknown, fallback: number, minimum: number, maximum
   return Math.max(minimum, Math.min(maximum, result));
 }
 
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function seedRecord(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
   const value = manifest.execution.seedStore;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly prepared music seed store is invalid");
@@ -42,7 +46,8 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
   const audio = styleAudio(manifest);
   const config = planWeekMusicConfig(manifest);
   const styleDNA = seed.styleDNA ?? null;
-  const composerDirection = getMusicBrief(seed)?.musicPrompt?.trim() ||
+  const musicBrief = getMusicBrief(seed);
+  const composerDirection = musicBrief?.musicPrompt?.trim() ||
     (typeof config.composerDirection === "string" ? config.composerDirection.trim() : "") ||
     (typeof config.musicPrompt === "string" ? config.musicPrompt.trim() : "");
   const explicitDirection = typeof config.prompt === "string" ? config.prompt.trim() : "";
@@ -83,6 +88,7 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
     family,
     contentLaneKey,
     topic: manifest.plan.topic,
+    role: musicBrief?.musicIntent?.role,
     providerPreference: provider,
     durationSec: finiteNumber(config.generationDurationSec ?? config.durationSec, 300, 10, 300),
     genre: typeof audio.genre === "string" ? audio.genre : undefined,
@@ -96,7 +102,7 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
       composerDirection || (!hasDna ? explicitDirection : ""),
       studioDirection,
     ].filter(Boolean).join(" ") || undefined,
-    targetLufs: finiteNumber(audio.loudnessLufs, -16, -23, -12),
-    bodyMusicVol: 1,
+    targetLufs: optionalFiniteNumber(audio.loudnessLufs),
+    bodyMusicVol: optionalFiniteNumber(audio.bodyMusicVol),
   }));
 }
