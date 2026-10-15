@@ -351,6 +351,10 @@ assert.deepEqual(
 );
 assert.equal(longMeditation.identity.genre, "slow spacious ambient meditation");
 assert.equal(longMeditation.mix.targetLufs, -18, "meditation retains a distinct target from sleep and primary music");
+assert.equal(longMeditation.mix.narrationPriority, true,
+  "guided meditation must preserve speech as the foreground even while retaining its meditative musical role");
+assert.equal(longMeditation.mix.bodyMusicVol, 0.1026,
+  "guided meditation defaults to the voice-safe bed gain; explicit channel mix settings remain authoritative");
 assert.deepEqual(longMeditation.identity.instrumentation, ["warm sustained pad", "sparse felt piano", "soft breathy flute"]);
 assert.match(longMeditation.identity.moodArc, /without a strong melodic arrival/u);
 assert.match(longMeditation.generation.structuredCaption, /BPM;.*Key\/scale:/u);
