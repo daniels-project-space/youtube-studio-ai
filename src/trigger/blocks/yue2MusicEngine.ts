@@ -79,7 +79,14 @@ const block: Block & { version: string } = {
     const sourceId = `studio-${createHash("sha256").update(`${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:${arrangement.fingerprint}`).digest("hex")}`;
     let charge: number | undefined;
     try {
-      await verifyRenderEngineYuE2ProjectIntegration(projectConfig);
+      try {
+        await verifyRenderEngineYuE2ProjectIntegration(projectConfig);
+      } catch {
+        throw new ExecutionError(
+          "RENDER_ENGINE_PROJECT_INTEGRATION_REQUIRED: Render Engine project integration is incompatible or unavailable; no workflow or music job was created. Resolve the project contract and rerun this block.",
+          { code: "RENDER_ENGINE_PROJECT_INTEGRATION_REQUIRED", retryable: false, phase: "preflight" },
+        );
+      }
       const workflow = await provisionRenderEngineYuE2Workflow(projectConfig);
       const request: RenderEngineYuE2Request = {
         version: 2,

@@ -8,10 +8,11 @@ const fixture = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-af
 const arrangement = fixture.request.acceptedArrangement;
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 
-test("unqualified Engine YuE2 jobs do not enter the Trigger status-poll loop", async () => {
+test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs are not polled", async () => {
   const originalLoad = loader._load;
   const previousSecret = process.env.MANAGEMENT_PROJECT_SECRET;
   const calls = { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 };
+  let failVerification = true;
   process.env.MANAGEMENT_PROJECT_SECRET = "s".repeat(64);
 
   loader._load = function (id, ...args) {
@@ -20,7 +21,10 @@ test("unqualified Engine YuE2 jobs do not enter the Trigger status-poll loop", a
         required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MANAGEMENT_PROJECT_SECRET"] });
     } };
     if (id === "@/lib/renderEngineYuE2StageClient") return {
-      verifyRenderEngineYuE2ProjectIntegration: async () => { calls.verify++; },
+      verifyRenderEngineYuE2ProjectIntegration: async () => {
+        calls.verify++;
+        if (failVerification) throw new Error("contract mismatch");
+      },
       provisionRenderEngineYuE2Workflow: async () => { calls.provision++; return {
         workflowId: "a".repeat(32), profileRevisionSha256: "d".repeat(64),
       }; },
@@ -44,7 +48,7 @@ test("unqualified Engine YuE2 jobs do not enter the Trigger status-poll loop", a
   try {
     const { createRenderEngineYuE2MusicManifest } = load("../yue2MusicEngine") as typeof import("../yue2MusicEngine");
     const run = createRenderEngineYuE2MusicManifest().block.run!;
-    const error = await run({
+    const runBlock = () => run({
       ownerId: arrangement.ownerId, channelId: arrangement.channelId, runId: arrangement.runId,
       keyPrefix: `owner/${arrangement.ownerId}/`,
       params: {
@@ -57,6 +61,16 @@ test("unqualified Engine YuE2 jobs do not enter the Trigger status-poll loop", a
       budgetUsd: 1, stageBudgetUsd: 0.04, assertInlinePaidExecutionLease: async () => {},
       store: { topic: arrangement.topic, acceptedMusicArrangement: arrangement }, log: () => {},
     } as never).then(() => null, caught => caught);
+
+    const preflightError = await runBlock();
+    assert.equal(preflightError?.code, "RENDER_ENGINE_PROJECT_INTEGRATION_REQUIRED");
+    assert.equal(preflightError?.phase, "preflight");
+    assert.match(preflightError?.message ?? "", /no workflow or music job was created/i);
+    assert.deepEqual(calls, { verify: 1, provision: 0, stage: 0, status: 0, output: 0, wait: 0 });
+
+    Object.assign(calls, { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 });
+    failVerification = false;
+    const error = await runBlock();
 
     assert.equal(error?.code, "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING");
     assert.match(error?.message ?? "", /b{32}/);
