@@ -20,6 +20,7 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
 import { readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
@@ -129,6 +130,31 @@ function routeSeed(manifest: PlanWeekPreparationManifest): ChannelProgramRouteRu
   return value === undefined ? undefined : parseChannelProgramRouteRunSeed(value);
 }
 
+export function preparedScriptFromDocumentaryEpisodePlan(
+  manifest: PlanWeekPreparationManifest,
+): Script | undefined {
+  const seed = seedRecord(manifest);
+  const rawPlan = seed.documentaryEpisodePlan;
+  if (rawPlan === undefined) return undefined;
+  const route = routeSeed(manifest);
+  if (!route) throw new Error("weekly prepared script: documentary episode requires its frozen program route");
+  const plan = assertDocumentarySourceEpisodePlan(rawPlan, route);
+  if (plan.topic !== manifest.plan.topic) {
+    throw new Error("weekly prepared script: topic differs from the reviewed documentary episode plan");
+  }
+  return {
+    hook: plan.narrationSegments[0],
+    sections: plan.narrationSegments.slice(1).map((narration, index, rows) => ({
+      heading: index === rows.length - 1 ? "What the record changes" : `Source beat ${index + 2}`,
+      narration,
+      role: index === rows.length - 1 ? "outro" : "body",
+    })),
+    narrationText: plan.narrationText,
+    estDurationSec: plan.targetDurationSec,
+    programRouteFingerprint: route.routeFingerprint,
+  };
+}
+
 function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
@@ -216,22 +242,29 @@ export const planWeekPreparedScriptTask = task({
       return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
     }
 
-    await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
-    const request = scriptRequest(manifest, payload);
-    await claimPreparedGeneration("script", manifest, { payload, request });
-    const usage = createModelUsageScope();
+    const documentaryScript = preparedScriptFromDocumentaryEpisodePlan(manifest);
     let script: Script;
-    await usage.run(async () => {
-      script = await synthScript(request);
-    });
-    const modelUsage = usage.snapshot();
-    if (modelUsage.unpricedCalls > 0) {
-      throw new Error("weekly prepared script usage is unpriced; refusing an automatic success");
+    let costUsd = 0;
+    if (documentaryScript) {
+      script = documentaryScript;
+    } else {
+      await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
+      const request = scriptRequest(manifest, payload);
+      await claimPreparedGeneration("script", manifest, { payload, request });
+      const usage = createModelUsageScope();
+      await usage.run(async () => {
+        script = await synthScript(request);
+      });
+      const modelUsage = usage.snapshot();
+      if (modelUsage.unpricedCalls > 0) {
+        throw new Error("weekly prepared script usage is unpriced; refusing an automatic success");
+      }
+      if (!Number.isFinite(modelUsage.costUsd) || modelUsage.costUsd > payload.maxCostUsd) {
+        throw new Error(`weekly prepared script cost ${modelUsage.costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
+      }
+      costUsd = modelUsage.costUsd;
     }
-    if (!Number.isFinite(modelUsage.costUsd) || modelUsage.costUsd > payload.maxCostUsd) {
-      throw new Error(`weekly prepared script cost ${modelUsage.costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
-    }
-    assertScriptLanguagePolicy(script!, request.bannedWords, "weekly prepared script");
+    assertScriptLanguagePolicy(script!, readChannelBannedWords(seedRecord(manifest).bannedWords), "weekly prepared script");
     const prepared: PlanWeekPreparedScript = {
       version: "plan-week-prepared-script/v1",
       manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -249,6 +282,6 @@ export const planWeekPreparedScriptTask = task({
     const body = new TextEncoder().encode(canonicalJson(prepared));
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-script": "v1" });
     const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
-    return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };
+    return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd, scriptSha256: prepared.scriptSha256 };
   },
 });
