@@ -418,6 +418,20 @@ assert.throws(
   "channel sound identity is fingerprint-bound",
 );
 
+const droppedSoundCue = structuredClone(history);
+droppedSoundCue.generation.structuredCaption = droppedSoundCue.generation.structuredCaption
+  .replaceAll("felt piano", "generic keyboard");
+const { fingerprint: _droppedCueFingerprint, ...droppedCueBody } = droppedSoundCue;
+void _droppedCueFingerprint;
+assert.throws(
+  () => ChannelMusicProgramSchema.parse({
+    ...droppedCueBody,
+    fingerprint: sha256Hex(canonicalJson(droppedCueBody)),
+  }),
+  /structured caption omits declared channel sound cue: felt piano/u,
+  "a validly refingerprinted program cannot silently lose a declared channel instrument from the provider prompt",
+);
+
 const tooShortCaption = structuredClone(history);
 tooShortCaption.generation.structuredCaption = "A generic ambient track.";
 assert.throws(
