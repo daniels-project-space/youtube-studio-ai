@@ -35,7 +35,13 @@ import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { createModelUsageScope } from "@/lib/modelUsage";
-import { assertScriptLanguagePolicy, synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
+import {
+  assertScriptLanguagePolicy,
+  assertScriptVoiceInputForRoute,
+  synthScript,
+  type Script,
+  type ScriptRequest,
+} from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 
 export interface PlanWeekPreparedScriptArgs {
@@ -183,7 +189,7 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
   const syntheticScenario = route?.syntheticScenarioProfile
     ? syntheticScenarioContract(route.syntheticScenarioProfile)
     : undefined;
-  return {
+  const request: ScriptRequest = {
     topic: manifest.plan.topic,
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
@@ -208,6 +214,8 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     playbook: seed.scriptPlaybook as ScriptRequest["playbook"],
     openingDeviceIdx: [...manifest.requestKey].reduce((sum, char) => sum + char.charCodeAt(0), 0),
   };
+  assertScriptVoiceInputForRoute(request);
+  return request;
 }
 
 async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): Promise<string> {

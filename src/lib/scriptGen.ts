@@ -938,10 +938,17 @@ export async function translateScript(
   };
 }
 
+export function assertScriptVoiceInputForRoute(req: ScriptRequest): void {
+  if (req.programRoute && !req.persona?.trim()) {
+    throw new Error("scriptGen: route-bound production script requires its frozen channel persona");
+  }
+}
+
 export async function synthScript(
   req: ScriptRequest,
   log: Logger = () => {},
 ): Promise<Script> {
+  assertScriptVoiceInputForRoute(req);
   const maxSeconds = req.maxSeconds ?? 240;
   const gapSec = req.sentenceGapSec ?? 0;
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget

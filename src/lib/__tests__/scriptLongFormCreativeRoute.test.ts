@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { assertScriptLanguagePolicy, synthScript } from "@/lib/scriptGen";
 import type { CraftedHook } from "@/lib/hookcraft";
 import { OPENROUTER_MODELS } from "@/lib/openRouter";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 
 const prose = Array.from({ length: 400 }, (_, index) => `evidence${index + 1}`).join(" ");
 const crafted = {
@@ -42,6 +44,23 @@ async function main(): Promise<void> {
         usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130, cost: 0.003 },
       });
     };
+
+    const brief = createChannelProgramBrief({
+      family: "documentary_collage_short",
+      nicheKey: "history",
+      locale: "en",
+      concept: "Evidence-led short documentaries that show how historic decisions changed ordinary lives.",
+    });
+    const route = channelProgramRouteRunSeed({
+      route: resolveChannelProgramRoute(brief),
+      programBrief: brief,
+    });
+    await assert.rejects(
+      synthScript({ topic: "The bridge's warm final stone", maxSeconds: 421, programRoute: route }),
+      /route-bound production script requires its frozen channel persona/u,
+      "route-bound writing must fail before any creative-text spend when the frozen channel voice is missing",
+    );
+    assert.equal(calls, 0, "missing route voice is rejected before any model call");
 
     const script = await synthScript({
       topic: "The bridge's warm final stone",
