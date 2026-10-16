@@ -327,6 +327,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "description": "intel · Topicraft — evidence-cited topic BETS (outlier bank + Reddit + autocomplete + competitor gaps), judge-gated portfolio",
     "paths": [
       "src/lib/__tests__/pipelineInvocationSnapshot.test.ts",
+      "src/lib/__tests__/scheduledPlanRuntime.test.ts",
       "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/documentaryCollageShortBlocks.ts",
       "src/trigger/blocks/intelligenceBlocks.ts",
@@ -355,6 +356,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "kind": "module",
     "description": "brief · Standalone Crew module — crew as DATA: a declarative role registry (director / cinematographer / editor / composer / critic) + a pure resolveCrew over the channel's Show Bible (authored doctrines) + a CustomizationSurface (role toggles + 6 style presets). Critic authors the ValidationSpec the verify stage enforces",
     "paths": [
+      "src/engine/__tests__/versionedParallelDependencies.test.ts",
       "src/trigger/blocks/crewBlocks.ts",
       "src/trigger/blocks/storySpineBlocks.ts"
     ]
@@ -402,6 +404,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
       "src/trigger/blocks/blockContext.ts",
       "src/trigger/blocks/musicArrangementBlocks.ts",
       "src/trigger/blocks/musicBlocks.ts",
+      "src/trigger/blocks/musicReleaseGate.ts",
       "src/trigger/blocks/yue2Music.ts",
       "src/trigger/blocks/yue2MusicEngine.ts"
     ]
@@ -487,6 +490,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
       "src/components/RunMediaWorkbench.test.tsx",
       "src/engine/__tests__/healerCostRecovery.test.ts",
       "src/engine/__tests__/healerPolicy.test.ts",
+      "src/engine/__tests__/moduleVersionPolicy.test.ts",
       "src/lib/__tests__/runCurrentThumbnail.test.ts",
       "src/lib/assembly/module.ts",
       "src/trigger/blocks/narratedBlocks.ts",
@@ -501,7 +505,7 @@ export const GENERATED_LOCKABLE_MODULES: readonly LockableEntity[] = [
     "paths": [
       "src/engine/__tests__/healerPolicy.test.ts",
       "src/lib/__tests__/finalMasterVisualReviewAlignment.test.ts",
-      "src/lib/__tests__/remoteStageReuse.test.ts",
+      "src/trigger/blocks/__tests__/musicInputAdmission.test.ts",
       "src/trigger/blocks/narratedBlocks.ts"
     ]
   },

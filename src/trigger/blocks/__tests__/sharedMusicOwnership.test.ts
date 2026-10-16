@@ -74,10 +74,13 @@ async function main(): Promise<void> {
   }
   const musicOwnerPaths = lockableModule("music")?.paths ?? [];
   assert.ok(musicOwnerPaths.includes("src/trigger/blocks/blockContext.ts") &&
-    musicOwnerPaths.includes("src/trigger/blocks/musicBlocks.ts"),
-  "the generated Music owner lock must protect the implementation and its shared guards");
+    musicOwnerPaths.includes("src/trigger/blocks/musicBlocks.ts") &&
+    musicOwnerPaths.includes("src/trigger/blocks/musicReleaseGate.ts"),
+  "the generated Music owner lock must protect its implementation and release policy");
   assert.ok(!musicOwnerPaths.includes("src/trigger/blocks/lofiBlocks.ts"),
     "the Music owner lock must not claim LoFi's visual implementation");
+  assert.ok(!lockableModule("lofi")?.paths.includes("src/trigger/blocks/musicReleaseGate.ts"),
+    "the Lo-Fi owner lock must not claim the shared Music release policy");
   for (const owner of ["lofi", "topic-intel", "ship", "shorts"]) {
     assert.ok(lockableModule(owner)?.paths.includes("src/trigger/blocks/blockContext.ts"),
       `${owner} must retain protection of helpers extracted from LoFi`);
