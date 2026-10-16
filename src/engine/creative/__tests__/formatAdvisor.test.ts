@@ -95,6 +95,26 @@ async function main(): Promise<void> {
     assert.equal(lowConfidence.family, tiedPool[0]!.family);
     assert.match(lowConfidence.fallbackReason ?? "", /below the .* floor/);
 
+    // A lower-ranked format is not an admissible tie-break alternative. A
+    // unique deterministic winner must avoid provider spend entirely.
+    let uniqueWinnerCall = false;
+    global.fetch = (async () => {
+      uniqueWinnerCall = true;
+      throw new Error("a unique top score must not dispatch an advisory call");
+    }) as typeof fetch;
+    const uniqueWinner = await adviseFormatSelection({
+      ...baseArgs,
+      candidates: [
+        { family: "narrated_stock", score: 3, matchedSignals: ["deep dive"] },
+        { family: "whiteboard", score: 2, matchedSignals: ["how does"] },
+        { family: "comic", score: 2, matchedSignals: [] },
+      ],
+    });
+    assert.equal(uniqueWinner.advisorApplied, false);
+    assert.equal(uniqueWinner.family, "narrated_stock");
+    assert.match(uniqueWinner.fallbackReason ?? "", /no top-score tie/);
+    assert.equal(uniqueWinnerCall, false, "lower-ranked candidates must not trigger provider spend");
+
     // ------------------------------------------------------------------
     // 4. A malformed/incomplete provider response falls back rather than
     // guessing.
@@ -150,7 +170,7 @@ async function main(): Promise<void> {
     });
     assert.equal(singleCandidate.advisorApplied, false);
     assert.equal(singleCandidate.family, tiedPool[0]!.family);
-    assert.match(singleCandidate.fallbackReason ?? "", /fewer than two candidates/);
+    assert.match(singleCandidate.fallbackReason ?? "", /no top-score tie/);
     assert.equal(singleCandidateCall, false);
 
     // ------------------------------------------------------------------
@@ -173,7 +193,8 @@ async function main(): Promise<void> {
         reasoning: "Matches the strongest deterministic signal.",
       })) as typeof fetch;
     const realResult = await adviseFormatSelection({ candidates: realRanked, selectionInput: { concept: "evidence-led archival documentary short" } });
-    assert.equal(realResult.advisorApplied, true);
+    const hasTopScoreTie = realRanked.filter((candidate) => candidate.score === realRanked[0]!.score).length > 1;
+    assert.equal(realResult.advisorApplied, hasTopScoreTie);
     assert.equal(realResult.family, realRanked[0]!.family);
 
     console.log("format advisor tests passed");
