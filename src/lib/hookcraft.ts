@@ -713,6 +713,12 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
             a.sourceGrounding?.trim() ?? "",
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",
+            a.topicPromise
+              ? `Topicraft opening promise (editorial intent, NOT evidence): "${a.topicPromise}". ` +
+                `Score whether the cold open honors it only where supported by the topic and admitted ` +
+                `sources. Score low for ignoring, contradicting, or overstating it; reward honest narrowing ` +
+                `when evidence cannot support it. Never treat the promise itself as proof.`
+              : "",
             registerClause(a),
             `Score EACH candidate cold open 1-10 per dimension:`,
             `- punch: would a scroller STOP inside the first sentence?`,
@@ -722,7 +728,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
               `teaches while it narrates; a finance channel sounds like a calm teacher-advisor; a ` +
               `chaos/drama channel fires the loudest verified fact immediately)?`,
             `- promise: by ~15 seconds (the first ~45 spoken words), does the viewer know EXACTLY what they ` +
-              `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}?`,
+              `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}` +
+              `${a.topicPromise ? ", while fulfilling or honestly narrowing Topicraft's opening promise" : ""}?`,
             `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?`,
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
             `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,

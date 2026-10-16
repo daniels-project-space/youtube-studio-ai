@@ -67,6 +67,11 @@ async function main(): Promise<void> {
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
+        if (currentLabel === "topic-promise") {
+          assert.ok(prompt.includes(topicPromise), "the independent retention judge receives Topicraft's promise");
+          assert.match(prompt, /editorial intent, NOT evidence/);
+          assert.match(prompt, /Score low for ignoring, contradicting, or overstating it/);
+        }
         assert.equal(body.max_tokens, 1400);
         // Four provider candidates intentionally collapse to one unique
         // survivor before judging; return exactly one verdict for the actual
