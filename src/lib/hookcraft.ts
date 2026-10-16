@@ -26,7 +26,7 @@ import {
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
-import { unmatchedTitleNumbers } from "@/lib/numericClaims";
+import { unmatchedTitleNumbers, unmatchedTitleUnits } from "@/lib/numericClaims";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
@@ -497,7 +497,7 @@ function isFictionRegister(niche?: string, style?: string): boolean {
 
 /**
  * Exact numeric-presence floor only. It is not semantic fact verification:
- * names, units, and causal entailment still belong to source-review modules.
+ * names and causal entailment still belong to source-review modules.
  */
 async function factCheckColdOpen(
   c: { hook: string; opening: string },
@@ -508,10 +508,15 @@ async function factCheckColdOpen(
     // source packet this creative-only module cannot verify factual claims.
     return { ok: true, problems: [], status: "unchecked" };
   }
-  const unsupported = unmatchedTitleNumbers(`${c.hook}\n${c.opening}`, a.sourceGrounding);
+  const coldOpen = `${c.hook}\n${c.opening}`;
+  const unsupportedNumbers = unmatchedTitleNumbers(coldOpen, a.sourceGrounding);
+  const unsupportedUnits = unmatchedTitleUnits(coldOpen, a.sourceGrounding);
   return {
-    ok: unsupported.length === 0,
-    problems: unsupported.map((number) => `numeric claim ${number} is absent from admitted source grounding`),
+    ok: unsupportedNumbers.length === 0 && unsupportedUnits.length === 0,
+    problems: [
+      ...unsupportedNumbers.map((number) => `numeric claim ${number} is absent from admitted source grounding`),
+      ...unsupportedUnits.map((number) => `numeric claim ${number} has an unsupported or mismatched unit in admitted source grounding`),
+    ],
     status: "unchecked",
   };
 }
