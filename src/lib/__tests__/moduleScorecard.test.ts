@@ -56,6 +56,15 @@ assert.deepEqual(assertModuleScorecard(scorecard), scorecard);
 
 const tampered = { ...scorecard, outputTokens: scorecard.outputTokens! + 1 };
 assert.throws(() => assertModuleScorecard(tampered), /fingerprint mismatch/);
+assert.throws(() => assertModuleScorecard({ ...scorecard, unversionedQualityFlag: true }), /unexpected field.*unversionedQualityFlag/);
+assert.throws(() => assertModuleScorecard({
+  ...scorecard,
+  outputArtifacts: [{ ...scorecard.outputArtifacts[0]!, unversionedOutputClaim: true }],
+}), /output artifact has unexpected field.*unversionedOutputClaim/);
+assert.throws(() => assertModuleScorecard({
+  ...scorecard,
+  critiqueEvidence: [{ ...scorecard.critiqueEvidence![0]!, hiddenOracleOverride: true }],
+}), /critique receipt has unexpected field.*hiddenOracleOverride/);
 assert.throws(
   () => createModuleScorecard({ ...base, status: "failed", outputValid: true }),
   /cannot claim valid output/,

@@ -58,6 +58,14 @@ function requiredId(value: unknown, label: string): string {
   return value.trim();
 }
 
+function exactKeys(value: Record<string, unknown>, keys: readonly string[], label: string): void {
+  const allowed = new Set(keys);
+  const unexpected = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unexpected.length) {
+    throw new Error(`module scorecard ${label} has unexpected field(s): ${unexpected.sort().join(", ")}`);
+  }
+}
+
 function nonNegative(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new Error(`module scorecard ${label} is invalid`);
@@ -86,6 +94,7 @@ function outputArtifacts(value: unknown, runId: string, moduleId: string): Modul
       throw new Error("module scorecard output artifact is invalid");
     }
     const artifact = item as Partial<ModuleScorecardArtifact>;
+    exactKeys(item as Record<string, unknown>, ["key", "artifactId", "type", "schemaVersion", "producerVersion", "payloadSha256"], "output artifact");
     const key = requiredId(artifact.key, "artifact key");
     const artifactId = requiredId(artifact.artifactId, "artifact id");
     const type = requiredId(artifact.type, "artifact type");
@@ -117,6 +126,7 @@ function critiqueEvidence(value: unknown): ModuleCritiqueReceipt[] | null {
       throw new Error("module scorecard critique receipt is invalid");
     }
     const receipt = item as Partial<ModuleCritiqueReceipt>;
+    exactKeys(item as Record<string, unknown>, ["label", "scores", "passes", "fatalIterations", "issueCounts", "accepted", "fatal", "completed"], "critique receipt");
     const label = requiredId(receipt.label, "critique label");
     if (label.length > 120 || !Array.isArray(receipt.scores) || receipt.scores.length > 64 ||
       !Array.isArray(receipt.passes) || !Array.isArray(receipt.fatalIterations) || !Array.isArray(receipt.issueCounts) ||
@@ -216,6 +226,13 @@ export function assertModuleScorecard(value: unknown): ModuleScorecard {
     throw new Error("module scorecard is invalid");
   }
   const candidate = value as Partial<ModuleScorecard>;
+  exactKeys(candidate as Record<string, unknown>, [
+    "version", "runId", "moduleId", "status", "outputValid", "moduleVersion", "inputFingerprint",
+    "configurationFingerprint", "outputArtifacts", "oracleFingerprint", "oracleScore", "falsePasses",
+    "falseRejects", "wallTimeMs", "providerCalls", "inputTokens", "outputTokens", "critiqueEvidence",
+    "triggerRuns", "triggerWaits", "convexReads", "convexWrites", "convexActions", "estimatedCostUsd",
+    "capturedAt", "fingerprint",
+  ], "record");
   const { fingerprint: _fingerprint, ...input } = candidate;
   void _fingerprint;
   const rebuilt = createModuleScorecard(input as ModuleScorecardInput);
