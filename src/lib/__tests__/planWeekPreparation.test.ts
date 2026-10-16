@@ -610,6 +610,13 @@ creationParamMusicManifest.execution.pipeline.push({ block: "music", params: { b
 const creationParamMusicProgram = planWeekPreparedMusicProgram(creationParamMusicManifest, "mureka");
 assert.equal(creationParamMusicProgram.mix.bodyMusicVol, 0.31,
   "week-ahead preparation preserves a Music control selected during channel creation");
+const malformedMusicParamsManifest = structuredClone(creationParamMusicManifest);
+malformedMusicParamsManifest.execution.pipeline = [
+  { block: "music", params: ["invalid"] },
+];
+malformedMusicParamsManifest.execution.moduleConfig.music = { bodyMusicVol: 0.24 };
+assert.equal(planWeekPreparedMusicProgram(malformedMusicParamsManifest, "mureka").mix.bodyMusicVol, 0.24,
+  "week-ahead preparation ignores malformed pipeline params while preserving explicit module config");
 assert.equal(authoredMusicProgram.mix.targetLufs, -19,
   "prepared tracks preserve the channel-authored loudness target");
 assert.equal(

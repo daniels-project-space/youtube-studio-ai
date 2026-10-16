@@ -33,7 +33,13 @@ export function planWeekMusicConfig(manifest: PlanWeekPreparationManifest): Reco
   const moduleConfig = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-  const musicParams = manifest.execution.pipeline.find((entry) => entry.block === "music")?.params ?? {};
+  const musicEntry = manifest.execution.pipeline.find((entry): entry is Record<string, unknown> =>
+    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) &&
+    (entry as Record<string, unknown>).block === "music");
+  const rawMusicParams = musicEntry?.params;
+  const musicParams = rawMusicParams && typeof rawMusicParams === "object" && !Array.isArray(rawMusicParams)
+    ? rawMusicParams as Record<string, unknown>
+    : {};
   return { ...musicParams, ...moduleConfig };
 }
 
