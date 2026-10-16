@@ -42,6 +42,7 @@ import { MetadataDeliverySchema, musicDeliveryClaims, type MetadataDelivery } fr
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 import type { AutomaticFrameStrategy } from "@/lib/automaticVideoPlan";
 import { resolveTitleProfile, TITLE_PROFILES, type TitleProfile, type TitleProfileId } from "@/lib/titleProfile";
+import { showBibleVoicePromptLines, type ShowBibleVoicePromptInput } from "@/engine/showBibleVoice";
 export { resolveTitleProfile, TITLE_PROFILES } from "@/lib/titleProfile";
 export type { TitleProfile, TitleProfileId } from "@/lib/titleProfile";
 
@@ -777,6 +778,7 @@ export interface MetaCraftArgs {
   channelName?: string;
   niche?: string;
   persona?: string;
+  channelVoice?: ShowBibleVoicePromptInput;
   language?: string;
   /** Complete spoken content, preserved without clipping. Takes precedence over an excerpt. */
   narrationText?: string;
@@ -1000,6 +1002,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     providedChars: sourceText.length,
     totalChars: fullNarration ? fullNarration.length : null,
   };
+  const authoredVoice = showBibleVoicePromptLines(a.channelVoice);
   // The exact same full brief reaches title generation and semantic judging.
   // Ancillary packaging only needs enough source to write a concise
   // description/comment after the title has already passed the full-source
@@ -1009,6 +1012,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       name: a.channelName, niche: a.niche, persona: a.persona, language: a.language,
       voiceArchetype: doctrine?.voice, titleFormula: a.titleFormula,
       profile: titleProfile.id, clickbaitLevel: clickbait,
+      ...(authoredVoice.length ? { authoredVoice } : {}),
     },
     episode: {
       topic: a.topic,
@@ -1030,6 +1034,9 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       : "") +
     `For partial or topic-only input, do not pretend missing details were narrated. ` +
     `Preserve the channel's language, audience and voice; factual support takes precedence over any formula.` +
+    (authoredVoice.length
+      ? ` Follow the authored channel voice and patterns above for wording and emotional register without changing what the source supports.`
+      : "") +
     (delivery ? ` Delivery is the final video's runtime, not its music source or a narrative event. ` +
       `It can support an honest runtime label only. Planned duration is not a measured finished video. ` +
       `Do not infer narrative facts, chapter positions, or a different runtime from it.` : "");

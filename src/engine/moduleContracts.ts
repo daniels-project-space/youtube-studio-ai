@@ -527,6 +527,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona", "planItemId",
       "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle", "hook",
+      "showBible",
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
       "clickbaitLevel",

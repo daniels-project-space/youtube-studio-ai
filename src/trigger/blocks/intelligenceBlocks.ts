@@ -15,6 +15,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
+import { parseShowBibleVoice } from "@/engine/showBibleVoice";
 import { filterDeliveryTimestamps } from "@/lib/metadataDelivery";
 import { childrenThumbnailDirection } from "@/engine/childrenVideoTreatment";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
@@ -481,6 +482,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
 
     const scriptDoc = ctx.store["script"] as { hook?: string; hookLoop?: string } | undefined;
     const packageHook = typeof ctx.store["hook"] === "string" ? String(ctx.store["hook"]).trim() : "";
+    const channelVoice = parseShowBibleVoice(ctx.store["showBible"]);
 
     const viewEstimate = async (tags: string[]) => {
       let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
@@ -581,6 +583,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
         },
         topic,
         channelName,
+        channelVoice,
         ...(delivery ? { delivery } : {}),
         niche,
         persona,

@@ -3189,6 +3189,7 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "plannedTitle",
         "script",
         "serializedProgramEpisodeContext",
+        "showBible",
         "styleDNA",
         "topicBet",
         "videoDurationSec"

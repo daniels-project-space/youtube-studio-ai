@@ -46,6 +46,12 @@ async function main() {
     topic: 'Roman aqueduct engineering', channelName: 'Water Archive', niche: 'history',
     persona: 'Patient engineering historian', competitors: [{ topVideos: [{ title: 'Roman water systems', views: 200 }] }],
     hook: 'The aqueduct carried water farther than the city could see.',
+    showBible: {
+      positioning: 'Patient, source-led histories of practical engineering.',
+      vibe: 'Quietly curious and exact.',
+      worksInSpace: ['Let physical details reveal the wider mechanism.'],
+      avoidInSpace: ['Do not inflate the discovery into a mystery.'],
+    },
     styleDNA: { seo: { titleFormula: 'State the engineering consequence' } },
   };
   const full = '  ' + 'Roman aqueducts moved water across difficult terrain. '.repeat(50) + '\nThe route carried water for 240 miles. 尾声 🌊\n';
@@ -74,6 +80,8 @@ async function main() {
     assert.equal(context.source.kind, 'full_narration');
     assert.equal(context.episode.packageHook, baseStore.hook,
       'MetaCraft must receive Hookcraft\'s reviewed package hook as a framing cue');
+    assert.ok(context.channel.authoredVoice.some((line: string) => line.includes('Quietly curious and exact')),
+      'MetaCraft generation, judging, and description must receive the authored channel voice');
     assert.equal(context.channel.persona, baseStore.persona);
     assert.equal(context.channel.titleFormula, baseStore.styleDNA.seo.titleFormula);
   }
