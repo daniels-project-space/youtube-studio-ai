@@ -23,7 +23,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { createChannelMusicProgram, musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
+import {
+  createChannelMusicProgram,
+  musicFallbackProfileForRole,
+  musicProviderPromptForProgram,
+} from "@/engine/channelMusicProgram";
 import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { selectChannelIdentityMusicProfile } from "@/engine/composerMixPipelineSelection";
 import type { PipelineEntry } from "@/engine/types";
@@ -105,6 +109,17 @@ function main(): void {
   });
   assert.equal(legacyProgram.identity.genre, legacyShortForm[0].genre,
     "unversioned program construction retains the established short-form profile");
+  const providerPrompts = channels.map((channelIdentitySeed, index) => {
+    const fingerprint = index.toString(16).padStart(64, "0");
+    const program = createChannelMusicProgram({
+      channelId: channelIdentitySeed, channelIdentityFingerprint: fingerprint, family: "shorts",
+      contentLaneKey: "shorts", topic: "one useful idea", role: "short_form_bed",
+      musicProfileVersion: "channel-identity-short-form/v1", durationSec: 45,
+    });
+    return musicProviderPromptForProgram(program);
+  });
+  assert.ok(new Set(providerPrompts).size >= 3,
+    "the actual provider prompt must preserve the versioned short-form identity differences");
   const selectable: PipelineEntry[] = [
     { block: "composer_brief" }, { block: "music" }, { block: "timeline_assemble" },
   ];
