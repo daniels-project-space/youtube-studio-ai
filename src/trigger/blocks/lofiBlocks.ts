@@ -1198,9 +1198,10 @@ export function createKeyframesBlock(
             providers: ["openrouter"], tier: "final",
           });
           const v = parseJsonLoose<{ score?: unknown; issues?: unknown } | null>(raw);
+          const hasNoRepairs = Array.isArray(v?.issues) && v.issues.length === 0;
           const admission = validateCritiqueResponse({
             score: v?.score,
-            pass: typeof v?.score === "number" && v.score >= 0.8,
+            pass: typeof v?.score === "number" && v.score >= 0.8 && hasNoRepairs,
             issues: v?.issues,
           });
           if (!admission.pass || !admission.critique) {
