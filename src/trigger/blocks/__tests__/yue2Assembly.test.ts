@@ -114,7 +114,8 @@ loader._load = function (id, ...args) {
     return { ...real,
     probe: async (path: string) => {
       if (nativeEncode) return real.probe(path);
-      const rendered = renders.find(input => input.outPath === path);
+      const rendered = renders.find(input => input.outPath === path) ??
+        (path.endsWith("video_norm.mp4") ? renders.at(-1) : undefined);
       const durationSec = rendered ? Number(rendered.durationSec ?? (Number(rendered.introSec) + Number(rendered.bodySec) + Number(rendered.tailSec))) + deliveredDurationOffset : 10;
       return { durationSec, width: 320, height: 176, hasAudio: true };
     },
@@ -310,9 +311,14 @@ async function main() {
   reset();
   await loopManifest.execute({ ...ctx, params: { durationSec: 3600, deblurIntro: false } });
   assert.equal(renders[0].introSec, 0); assert.equal(renders[0].bodySec, 3600);
-  for (const offset of [-1, 0.008, 5, NaN]) {
+  reset(); deliveredDurationOffset = 0.5 / 30;
+  const frameRounded = await loopManifest.execute({ ...ctx, params: { durationSec: 3600 } });
+  assert.equal(frameRounded.videoDurationSec, 3600 + 0.5 / 30,
+    "YuE2 assembly reports measured runtime when it is within one frame of the requested clock");
+  assert.equal(uploads, 1);
+  for (const offset of [-1, 2 / 30, 5, NaN]) {
     reset(); deliveredDurationOffset = offset;
-    await assert.rejects(loopManifest.execute({ ...ctx, params: { durationSec: 3600 } }), /rendered final duration/);
+    await assert.rejects(loopManifest.execute({ ...ctx, params: { durationSec: 3600 } }), /assemble final master duration/);
     assert.equal(uploads, 0, "a wrong physical output clock must be rejected before upload");
   }
   for (const introSec of [NaN, Infinity, -1, 0, 3600, 7200]) {

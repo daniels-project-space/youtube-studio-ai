@@ -33,6 +33,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
+import { assertFinalDurationMatchesTarget } from "@/lib/assembly/timeline";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
@@ -1733,9 +1734,8 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
 
     if (options?.exactFinalDuration) {
       const delivered = await probe(finalPath);
-      if (!Number.isFinite(delivered.durationSec) || Math.abs(delivered.durationSec - durationSec) > 0.001) {
-        throw new Error(`assemble: rendered final duration ${delivered.durationSec}s does not match ${durationSec}s`);
-      }
+      assertFinalDurationMatchesTarget(delivered.durationSec, durationSec, 30, "assemble final master");
+      videoDurationSec = delivered.durationSec;
     }
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await persistRenderedFile(videoKey, finalPath, { contentType: "video/mp4" }, {
