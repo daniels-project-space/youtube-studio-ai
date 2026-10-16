@@ -20,21 +20,18 @@
  * reference this repo is meant to protect.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   createChannelMusicProgram,
   musicFallbackProfileForRole,
+  musicRoleForRoute,
   musicProviderPromptForProgram,
 } from "@/engine/channelMusicProgram";
+import { ARCHETYPES } from "@/engine/archetypes";
 import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { selectChannelIdentityMusicProfile } from "@/engine/composerMixPipelineSelection";
 import type { PipelineEntry } from "@/engine/types";
 import { musicFallbackPromptForRoute } from "../musicBlocks";
-
-const ARCHETYPES = readFileSync(join(process.cwd(), "src/engine/archetypes.ts"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 function main(): void {
   // ---- the range actually differentiates ----------------------------------
@@ -155,11 +152,25 @@ function main(): void {
   assert.ok(new Set(versionedShortFormPrompts).size >= 3,
     "the real route prompt adapter must carry the selected short-form identity profile");
 
-  // ---- the archetype must not hard-code one identity ----------------------
+  // ---- meditation stays calm while retaining channel identity ------------
+  const meditationRole = musicRoleForRoute("meditation", "meditation");
+  assert.equal(meditationRole, "meditation_bed");
+  const meditationPrompts = channels.map((channelIdentitySeed) => musicFallbackPromptForRoute({
+    family: "meditation", contentLaneKey: "meditation", topic: "a quiet breath",
+    channelIdentitySeed,
+  }));
+  assert.ok(new Set(meditationPrompts).size >= 3,
+    "meditation channels must retain identity-specific fallback prompts");
+  for (const prompt of meditationPrompts) {
+    assert.match(prompt, /no percussion or dramatic build-ups, purely instrumental/);
+    assert.match(prompt, /no vocals, no lyrics$/);
+  }
+
+  // ---- archetypes must not hard-code one identity ------------------------
+  const meditationMusic = ARCHETYPES.meditation.pipeline.find(({ block }) => block === "music");
   assert.ok(
-    !/very calm, gentle ambient underscore/.test(ARCHETYPES),
-    "an archetype literal is copied onto every channel built from it — it must not " +
-      "override the three differentiating paths beneath it",
+    meditationMusic?.params?.prompt === undefined,
+    "the meditation archetype must leave its identity-bound music fallback selectable",
   );
 
   console.log("MUSIC IDENTITY PASS — channel-bound narration and short-form profiles; legacy short-form and Lo-Fi remain unchanged");

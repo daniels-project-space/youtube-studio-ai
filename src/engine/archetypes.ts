@@ -389,8 +389,6 @@ export const ARCHETYPES: Record<string, Archetype> = {
         block: "music",
         params: {
           provider: "mureka",
-          prompt:
-            "very calm ambient sleep music, soft pads, slow, peaceful, no drums, no vocals",
         },
       },
       { block: "narration_tts", params: { pace: "slow" } },
