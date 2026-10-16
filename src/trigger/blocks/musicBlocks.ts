@@ -88,6 +88,15 @@ export function musicTrackVariationDirection(role: ChannelMusicRole): string {
   }
 }
 
+export function musicDnaTempoDirection(input: {
+  role: ChannelMusicRole;
+  tempoMode?: "metered" | "unmetered";
+  bpmRange?: readonly [number, number];
+}): string {
+  if (input.role === "sleep_sound_bed" || input.tempoMode === "unmetered" || !input.bpmRange) return "";
+  return `${input.bpmRange[0]}-${input.bpmRange[1]} BPM`;
+}
+
 export async function generateMusicTrackSet(input: {
   prompt: string;
   trackCount: number;
@@ -410,6 +419,11 @@ export const music: Block = {
       ? ` Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
       : "";
     const a = dna?.audio;
+    const dnaTempoDirection = musicDnaTempoDirection({
+      role: selectedRole,
+      tempoMode: acceptedTempoMode ?? composerBrief?.musicIntent?.tempoMode,
+      bpmRange: a?.bpmRange,
+    });
     const dnaPrompt = a?.genre?.trim()
       ? [
           `${a.genre} instrumental, evoking "${topic}".`,
@@ -424,7 +438,7 @@ export const music: Block = {
           // first clause) — an author who wrote "opens tense, resolves
           // warmer" wants that shift reaching the model, not truncated away.
           a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim()}.` : "",
-          `${a.bpmRange?.[0] ?? 70}-${a.bpmRange?.[1] ?? 88} BPM, ${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
+          `${dnaTempoDirection ? `${dnaTempoDirection}, ` : ""}${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
         ].filter(Boolean).join(" ")
       : "";
     // BLEND, not override: the DNA is the channel's locked sound (identity
