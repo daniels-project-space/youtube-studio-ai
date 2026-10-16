@@ -50,6 +50,15 @@ export const MusicAuditionReviewReceiptSchema = MusicAuditionReviewBodySchema.ex
 
 export type MusicAuditionReviewReceipt = z.infer<typeof MusicAuditionReviewReceiptSchema>;
 
+export function musicAuditionReviewSummary(value: unknown) {
+  const receipt = MusicAuditionReviewReceiptSchema.parse(value);
+  return {
+    reviewedAt: receipt.reviewedAt,
+    sectionReviews: receipt.sectionReviews,
+    audition: receipt.audition,
+  };
+}
+
 export function createMusicAuditionReviewReceipt(input: {
   checkpoint: unknown;
   program: unknown;

@@ -188,6 +188,7 @@ export const getReviewForRun = query({
       checkpoint: {
         id: row._id, decision: row.decision, createdAt: row.createdAt,
         reviewerId: row.reviewerId, approvedAt: row.approvedAt, rejectedAt: row.rejectedAt,
+        reviewReceipt: row.reviewReceipt,
         blockedAt: row.blockedAt, blockedReason: row.blockedReason,
       },
       review: {

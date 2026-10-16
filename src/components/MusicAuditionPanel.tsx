@@ -9,10 +9,15 @@ type NativeQuality = {
   openingHighBand: { startSec: number; durationSec: number; meanDbfs: number };
   postOpeningHighBand: { startSec: number; durationSec: number; meanDbfs: number };
 };
+type SavedReview = {
+  reviewedAt: number;
+  sectionReviews: { sectionId: string; score: number; evidence: string }[];
+  audition: { emotionalDepthScore: number; arrangementDepthScore: number; hollowOrGeneric: boolean; verdict: "fail"; notes: string };
+};
 type Desk = {
   ok: boolean;
   error?: string;
-  checkpoint?: { id?: string; decision: "awaiting" | "approved" | "rejected" | "blocked"; blockedReason?: string } | null;
+  checkpoint?: { id?: string; decision: "awaiting" | "approved" | "rejected" | "blocked"; blockedReason?: string; savedReview?: SavedReview } | null;
   review?: { nativeWavUrl?: string; audioLabel?: string; durationSec?: number; sampleRateHz?: number; channels?: number; nativeQuality?: NativeQuality; sections?: Section[] };
 };
 
@@ -115,6 +120,12 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       <audio controls preload="metadata" src={data.review.nativeWavUrl} style={{ width: "100%", marginTop: "0.75rem" }} />
     </>}
     {data.error && <p style={{ color: "var(--color-failed)", marginBottom: 0 }}>{data.error}</p>}
+    {data.checkpoint.decision === "rejected" && data.checkpoint.savedReview && <details style={{ marginTop: "0.8rem" }}>
+      <summary style={{ cursor: "pointer", fontSize: "0.88rem" }}>Saved owner feedback</summary>
+      <p style={{ color: "var(--color-muted)", fontSize: "0.78rem" }}>Emotional depth {data.checkpoint.savedReview.audition.emotionalDepthScore.toFixed(2)} · arrangement depth {data.checkpoint.savedReview.audition.arrangementDepthScore.toFixed(2)} · hollow or generic {data.checkpoint.savedReview.audition.hollowOrGeneric ? "yes" : "no"}</p>
+      <p style={{ fontSize: "0.82rem", whiteSpace: "pre-wrap" }}>{data.checkpoint.savedReview.audition.notes}</p>
+      <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.78rem" }}>{data.checkpoint.savedReview.sectionReviews.map((item) => <li key={item.sectionId}>{item.sectionId}: {item.score.toFixed(2)} · {item.evidence}</li>)}</ul>
+    </details>}
     {data.checkpoint.decision === "awaiting" && <>
       <details style={{ marginTop: "0.8rem" }}>
         <summary style={{ cursor: "pointer", fontSize: "0.88rem" }}>Native WAV QC (measured from this take)</summary>

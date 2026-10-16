@@ -17,7 +17,7 @@ import {
   MusicProviderAuditionSourceSchema,
 } from "@/engine/musicAuditionCheckpoint";
 import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
-import { createMusicAuditionReviewReceipt } from "@/engine/musicAuditionReview";
+import { createMusicAuditionReviewReceipt, musicAuditionReviewSummary } from "@/engine/musicAuditionReview";
 
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
@@ -138,9 +138,11 @@ export async function GET(request: Request) {
       durationSec: output.durationSec,
     });
     const nativeWavUrl = await presignDownload(result.review.nativeWavKey, { expiresIn: 600 });
+    const { reviewReceipt, ...checkpointSummary } = result.checkpoint;
+    const savedReview = reviewReceipt ? musicAuditionReviewSummary(reviewReceipt) : undefined;
     return NextResponse.json({
       ok: true,
-      checkpoint: result.checkpoint,
+      checkpoint: { ...checkpointSummary, savedReview },
       review: {
         nativeWavKey: undefined, channelMusicProgramKey: undefined, musicRuntimeReceiptKey: undefined,
         checkpointFingerprint: undefined, immutableCheckpoint: undefined, nativeWavUrl,

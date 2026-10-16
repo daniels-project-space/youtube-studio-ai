@@ -17,6 +17,7 @@ import type { QueryCtx } from "../../../convex/_generated/server";
 import {
   assertMusicAuditionReviewReceiptForCheckpoint,
   createMusicAuditionReviewReceipt,
+  musicAuditionReviewSummary,
 } from "@/engine/musicAuditionReview";
 
 const retainedWavBytes = new TextEncoder().encode("RIFF-native-music3-wav-fixture".repeat(3));
@@ -74,6 +75,13 @@ const rejectedReview = createMusicAuditionReviewReceipt({
   audition: { emotionalDepthScore: 0.2, arrangementDepthScore: 0.3, hollowOrGeneric: true, verdict: "fail", notes: "No meaningful lift in the second half." },
 });
 assert.equal(assertMusicAuditionReviewReceiptForCheckpoint(rejectedReview, checkpoint, "owner-a").fingerprint, rejectedReview.fingerprint);
+assert.deepEqual(musicAuditionReviewSummary(rejectedReview), {
+  reviewedAt: rejectedReview.reviewedAt,
+  sectionReviews: rejectedReview.sectionReviews,
+  audition: rejectedReview.audition,
+});
+assert.equal("fingerprint" in musicAuditionReviewSummary(rejectedReview), false,
+  "the owner view gets only useful feedback, not the stored integrity envelope");
 assert.throws(() => assertMusicAuditionReviewReceiptForCheckpoint(rejectedReview, checkpoint, "owner-b"), /reviewer/u);
 assert.throws(() => createMusicAuditionReviewReceipt({
   checkpoint, program, reviewerId: "owner-a", reviewedAt: 1,
