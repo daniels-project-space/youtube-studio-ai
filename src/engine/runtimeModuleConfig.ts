@@ -61,6 +61,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const LEGACY_LOFI_MUSIC_CONFIG_KEYS = [
+  "provider",
+  "model",
+  "prompt",
+  "trackCount",
+  "generationDurationSec",
+  "bodyMusicVol",
+  "preset",
+] as const;
+
+function migrateLegacyLoFiMusicConfig(
+  entries: readonly PipelineEntry[],
+  moduleConfig: unknown,
+): unknown {
+  if (!isRecord(moduleConfig) || !entries.some((entry) => entry.block === "music") || !("lofi" in moduleConfig)) {
+    return moduleConfig;
+  }
+
+  const legacy = moduleConfig.lofi;
+  if (!isRecord(legacy)) {
+    throw new Error("moduleConfig[lofi] must be an object");
+  }
+  const current = moduleConfig.music;
+  if (current !== undefined && !isRecord(current)) {
+    throw new Error("moduleConfig[music] must be an object");
+  }
+
+  const migrated: Record<string, unknown> = {};
+  for (const key of LEGACY_LOFI_MUSIC_CONFIG_KEYS) {
+    if (key in legacy) migrated[key] = legacy[key];
+  }
+  const remaining = { ...moduleConfig };
+  delete remaining.lofi;
+  return {
+    ...remaining,
+    music: { ...migrated, ...(current ?? {}) },
+  };
+}
+
 function cloneParams(value: Readonly<Record<string, Record<string, unknown>>>): Record<string, Record<string, unknown>> {
   return Object.fromEntries(
     Object.entries(value).map(([blockId, params]) => [blockId, { ...params }]),
@@ -82,10 +121,11 @@ export function mergeRuntimeModuleConfig(input: {
   readonly moduleConfig?: unknown;
 }): RuntimeModuleConfigMerge {
   const paramsByBlock = cloneParams(input.paramsByBlock);
-  if (input.moduleConfig === undefined) {
+  const moduleConfig = migrateLegacyLoFiMusicConfig(input.entries, input.moduleConfig);
+  if (moduleConfig === undefined) {
     return { paramsByBlock, frozenModuleConfig: {}, skippedBlockIds: [], applied: [] };
   }
-  if (!isRecord(input.moduleConfig)) {
+  if (!isRecord(moduleConfig)) {
     throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
   }
 
@@ -93,7 +133,7 @@ export function mergeRuntimeModuleConfig(input: {
   const skippedBlockIds: string[] = [];
   const applied: RuntimeModuleConfigMerge["applied"][number][] = [];
   const frozenModuleConfig: Record<string, Record<string, unknown>> = {};
-  for (const [blockId, rawConfig] of Object.entries(input.moduleConfig)) {
+  for (const [blockId, rawConfig] of Object.entries(moduleConfig)) {
     const virtual = VIRTUAL_RUNTIME_MODULE_IDS.has(blockId);
     if (!selected.has(blockId) && !virtual) {
       skippedBlockIds.push(blockId);
@@ -188,13 +228,14 @@ export function resolvePipelineModuleConfig(input: {
   readonly moduleConfig?: unknown;
   readonly scope?: ModuleConfigurationScope;
 }): ResolvedPipelineModuleConfig {
+  const moduleConfig = migrateLegacyLoFiMusicConfig(input.entries, input.moduleConfig);
   if (
-    input.moduleConfig !== undefined &&
-    (typeof input.moduleConfig !== "object" || input.moduleConfig === null || Array.isArray(input.moduleConfig))
+    moduleConfig !== undefined &&
+    (typeof moduleConfig !== "object" || moduleConfig === null || Array.isArray(moduleConfig))
   ) {
     throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
   }
-  for (const [blockId, rawConfig] of Object.entries((input.moduleConfig ?? {}) as Record<string, unknown>)) {
+  for (const [blockId, rawConfig] of Object.entries((moduleConfig ?? {}) as Record<string, unknown>)) {
     const scopedSurface = moduleSurface(blockId, input.scope);
     if (!scopedSurface) {
       throw new Error(`moduleConfig[${blockId}] targets an unknown or non-configurable module`);
@@ -216,7 +257,7 @@ export function resolvePipelineModuleConfig(input: {
   const merged = mergeRuntimeModuleConfig({
     entries: input.entries,
     paramsByBlock: snapshotParamsByBlock(input.entries),
-    moduleConfig: input.moduleConfig,
+    moduleConfig,
   });
   return Object.freeze({
     effectivePipeline: Object.freeze(materializeRuntimePipelineParams(
