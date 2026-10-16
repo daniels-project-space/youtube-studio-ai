@@ -12,6 +12,7 @@ const hook = "The locked garden gate held Mira outside until a tiny seed reveale
 const opening = "Mira found the seed beside a cracked stone in the garden wall. She placed it in a pot and waited near the gate. Each morning she carried water from the well. Nothing changed until a green shoot bent toward the stone. Its roots were following a hidden stream. That small discovery would show her how to open the gate.";
 const loop = "Show how Mira discovers the stream and opens the locked garden gate.";
 const topicPromise = "Follow the hidden stream to learn how Mira opens the locked garden gate.";
+const mismatchedTopicPromise = "Find the brass key beneath the fountain that opens the garden gate.";
 const sections = [
   { heading: "The dry garden", narration: "Mira inspected the wall before touching the rusty latch. The soil beside it was dry and hard. Yet the little shoot stayed green through the afternoon heat. She pressed her fingers into the earth and found a cool patch beneath the stone. Water was moving where she could not see it." },
   { heading: "Following the roots", narration: "She carefully lifted the loose stone and followed the roots. They led toward a narrow channel hidden beneath the path. A fallen branch had blocked its entrance. Mira pulled the branch free, and water began to run again. The stream reached a small wooden wheel beside the gate and slowly turned it." },
@@ -57,8 +58,9 @@ async function main(): Promise<void> {
       let value: unknown;
       if (prompt.startsWith("You are the cold-open director.")) {
         kind = "candidates";
-        if (currentLabel === "topic-promise") {
-          assert.ok(prompt.includes(topicPromise), "the spoken cold-open prompt receives Topicraft's promise");
+        if (currentLabel.startsWith("topic-promise")) {
+          const expectedPromise = currentLabel === "topic-promise" ? topicPromise : mismatchedTopicPromise;
+          assert.ok(prompt.includes(expectedPromise), "the spoken cold-open prompt receives Topicraft's promise");
           assert.match(prompt, /strategic intent only, NOT evidence/);
           assert.match(prompt, /Existing cold-open fact checks remain authoritative/);
         }
@@ -67,8 +69,9 @@ async function main(): Promise<void> {
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
-        if (currentLabel === "topic-promise") {
-          assert.ok(prompt.includes(topicPromise), "the independent retention judge receives Topicraft's promise");
+        if (currentLabel.startsWith("topic-promise")) {
+          const expectedPromise = currentLabel === "topic-promise" ? topicPromise : mismatchedTopicPromise;
+          assert.ok(prompt.includes(expectedPromise), "the independent retention judge receives Topicraft's promise");
           assert.match(prompt, /editorial intent, NOT evidence/);
           assert.match(prompt, /Score low for ignoring, contradicting, or overstating it/);
         }
@@ -78,7 +81,10 @@ async function main(): Promise<void> {
         // candidate list so the strict hook admission contract is exercised
         // without manufacturing scores for removed candidates.
         value = { verdicts: Array.from({ length: 1 }, () => ({ punch: 9, specificity: 9, curiosity: 9,
-          voiceMatch: 9, promise: 9, honest: true, note: "Concrete fictional garden mystery." })), best: 0 };
+          voiceMatch: 9, promise: currentLabel === "topic-promise-mismatch" ? 1 : 9,
+          honest: true, note: currentLabel === "topic-promise-mismatch"
+            ? "This cold open does not fulfill the planned brass-key promise."
+            : "Concrete fictional garden mystery." })), best: 0 };
       } else if (prompt.startsWith("Write a YouTube narration script about:")) {
         kind = "script";
         assert.equal(body.max_tokens, 13000);
@@ -111,7 +117,7 @@ async function main(): Promise<void> {
         usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130, cost: 0.003 } });
     };
 
-    async function run(label: string, values: unknown[], bannedWords: string[] = [], includeTopicBet = false) {
+    async function run(label: string, values: unknown[], bannedWords: string[] = [], topicBetPromise?: string) {
       currentLabel = label; verdicts = values; requests = [];
       const stages: Array<{ block: string; status: string }> = [];
       const logs: string[] = [];
@@ -120,13 +126,19 @@ async function main(): Promise<void> {
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
         seedStore: {
           topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords,
-          ...(includeTopicBet ? { topicBet: { topic: "Mira and the locked garden gate", hookPromise: topicPromise } } : {}),
+          ...(topicBetPromise === undefined ? {} : {
+            topicBet: { topic: "Mira and the locked garden gate", hookPromise: topicBetPromise },
+          }),
         },
         sink: { async upsert(row) { stages.push({ block: row.block, status: row.status }); } },
         log: (message) => { logs.push(message); },
       });
-      assert.equal(requests.filter((request) => request.kind === "candidates").length, 1, `${label}: hook candidates generated exactly once`);
-      assert.equal(requests.filter((request) => request.kind === "judge").length, 1, `${label}: hook judge runs exactly once`);
+      const expectedHookAttempts = label === "topic-promise-mismatch" ? 2 : 1;
+      const expectedJudgeCalls = label === "topic-promise-mismatch" ? 1 : expectedHookAttempts;
+      assert.equal(requests.filter((request) => request.kind === "candidates").length, expectedHookAttempts,
+        `${label}: bounded Hookcraft candidate attempts`);
+      assert.equal(requests.filter((request) => request.kind === "judge").length, expectedJudgeCalls,
+        `${label}: judge provider calls match the expected bounded reuse path`);
       assert.ok(logs.some((line) => /4 generated, 1 unique, 1 pass lint/.test(line)), "real deterministic hook lint ran before duplicate candidates were judged");
       assert.equal(Object.hasOwn(result.store, "scriptApproved"), false, "generation never substitutes for independent qa_script approval");
       return { result, stages, logs };
@@ -144,9 +156,19 @@ async function main(): Promise<void> {
     assert.equal(good.result.store.narrationText, script.narrationText);
     assert.ok(good.logs.some((line) => /1 iter, accepted/.test(line)));
 
-    const promised = await run("topic-promise", [{ pass: true, issues: [] }], [], true);
+    const promised = await run("topic-promise", [{ pass: true, issues: [] }], [], topicPromise);
     assert.equal(promised.result.ok, true, promised.result.error);
     assert.equal(requests.filter((request) => request.kind === "candidates").length, 1);
+
+    const contradictedPromise = await run("topic-promise-mismatch", [], [], mismatchedTopicPromise);
+    assert.equal(contradictedPromise.result.ok, false, "a promise-mismatched cold open must fail closed");
+    assert.match(contradictedPromise.result.error ?? "", /planned brass-key promise/);
+    assert.ok(contradictedPromise.logs.some((line) => /attempt 2 rejected -> FAILING LOUD/.test(line)),
+      "the second generated slate exhausts Hookcraft's existing bounded repair policy");
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "candidates"],
+      "the byte-identical repeated judge prompt does not make a duplicate provider call");
+    assert.equal(requests.some((request) => request.kind === "script"), false,
+      "script synthesis cannot spend after both Hookcraft slates fail Topicraft promise review");
 
     const bannedRetry = await run("banned-word-retry", [{ pass: true, issues: [] }], ["forbidden phrase"]);
     assert.equal(bannedRetry.result.ok, true, bannedRetry.result.error);
