@@ -285,13 +285,36 @@ export interface PrimaryMusicFallbackProfile {
   readonly prompt: string;
 }
 
-const LOFI_PRIMARY_MUSIC_PROFILE: PrimaryMusicFallbackProfile = Object.freeze({
-  genre: "warm lo-fi instrumental",
-  instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
-  textures: ["natural room depth", "subtle tape warmth"],
-  moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
-  prompt: "warm cozy lofi hip-hop instrumental, mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle and tape warmth; calm, nostalgic, purely instrumental, no vocals, loop-friendly",
-});
+const LOFI_PRIMARY_MUSIC_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "warm lo-fi instrumental",
+    instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
+    textures: ["natural room depth", "subtle tape warmth"],
+    moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
+    prompt: "warm cozy lo-fi instrumental, mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl grain and tape warmth; calm, nostalgic, purely instrumental, loop-friendly",
+  }),
+  Object.freeze({
+    genre: "nocturnal lo-fi instrumental",
+    instrumentation: ["muted electric piano", "rounded sub-bass", "soft rim-click percussion"],
+    textures: ["dim late-night room tone", "soft cassette haze"],
+    moodArc: "a muted motif drifts through cool harmony, opens briefly, then settles into night",
+    prompt: "nocturnal lo-fi instrumental, muted electric piano, rounded sub-bass and soft rim clicks; intimate room tone, restrained cassette haze, gentle harmonic drift and no dramatic drop",
+  }),
+  Object.freeze({
+    genre: "sunlit lo-fi instrumental",
+    instrumentation: ["soft Rhodes piano", "nylon-string guitar", "light brushed drums"],
+    textures: ["open daylight room", "fine vinyl dust"],
+    moodArc: "a light motif gains warmth through guitar replies, then returns to calm",
+    prompt: "sunlit lo-fi instrumental, soft Rhodes piano, nylon-string guitar and light brushed drums; airy daylight room, fine vinyl dust, warm melodic replies and relaxed dynamics",
+  }),
+  Object.freeze({
+    genre: "jazzy lo-fi instrumental",
+    instrumentation: ["smoky jazz piano", "upright bass", "soft brush kit"],
+    textures: ["close wooden resonance", "faint tape grain"],
+    moodArc: "piano and bass trade phrases, open one harmony, then settle into a relaxed pocket",
+    prompt: "jazzy lo-fi instrumental, smoky piano voicings, upright bass and soft brush kit; close wooden resonance, faint tape grain, understated call-and-response and a relaxed pocket",
+  }),
+]);
 
 const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
   Object.freeze({
@@ -331,7 +354,9 @@ export function primaryMusicFallbackProfile(input: {
 }): PrimaryMusicFallbackProfile {
   const family = input.family?.trim().toLowerCase() ?? "";
   const lane = input.contentLaneKey?.trim().toLowerCase() ?? "";
-  if (family === "music_loop" && lane === "music_loop") return LOFI_PRIMARY_MUSIC_PROFILE;
+  if (family === "music_loop" && lane === "music_loop") {
+    return spreadDefault(input.channelIdentitySeed, LOFI_PRIMARY_MUSIC_PROFILES);
+  }
   return spreadDefault(input.channelIdentitySeed, PRIMARY_MUSIC_FALLBACK_PROFILES);
 }
 
@@ -549,12 +574,12 @@ function structuredCaption(input: {
   const beatlessSleep = input.role === "sleep_sound_bed";
   if (!beatlessSleep && !input.bpmRange) throw new Error("metered music caption requires a BPM range");
   const globalMetadata = beatlessSleep
-    ? `${input.genre}; unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
-      `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
+    ? `unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
+      `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
-    : `${input.genre}; ${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
+    : `${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
       `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
-      `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
+      `Topic: “${input.topic}”. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. ` +
       `Additional composer direction: ${input.composerDirection}`;
   const vocalDetails = beatlessSleep
@@ -562,10 +587,12 @@ function structuredCaption(input: {
       `Keep ${featuredPalette} as diffuse, sustained background texture; no featured or melodic lead.`
     : `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
       `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`;
+  const creativeFoundation = beatlessSleep
+    ? `${input.genre}: “${input.topic}”. Character: ${input.moodArc}. Keep ${featuredPalette} diffuse and sustained.`
+    : `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. Feature ${featuredPalette}.`;
   return [
     "### Creative Foundation",
-    `A ${input.moodArc} ${input.genre} instrumental${beatlessSleep ? "" : ` at ${tempo} BPM`}: “${input.topic}”. ` +
-    `Feature ${featuredPalette}.`,
+    creativeFoundation,
     "",
     "### Global Metadata",
     globalMetadata,

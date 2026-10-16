@@ -38,6 +38,46 @@ assert.ok(new Set(generalPrimaryProfiles.map((profile) => profile.genre)).size >
   "unconfigured primary-music channels should get deterministic but meaningfully varied sound identities");
 assert.ok(generalPrimaryProfiles.every((profile) => !/lo-fi|lofi|underscore/iu.test(profile.genre)),
   "non-Lo-Fi primary routes must not inherit the Lo-Fi sound or a narration-bed genre");
+const lofiFallbackProfiles = ["Investory", "Chalk & Compound", "Stoic Truths", "Seaside Ghibli", "Drawn Past"]
+  .map((channelIdentitySeed) => primaryMusicFallbackProfile({
+    family: "music_loop",
+    contentLaneKey: "music_loop",
+    channelIdentitySeed,
+  }));
+assert.ok(new Set(lofiFallbackProfiles.map((profile) => profile.genre)).size >= 3,
+  "unconfigured Lo-Fi channels should receive stable but distinct Lo-Fi sound identities");
+assert.ok(lofiFallbackProfiles.every((profile) => /lo-fi/iu.test(profile.genre)),
+  "channel-specific Lo-Fi fallbacks must preserve the music-loop family identity");
+assert.equal(
+  primaryMusicFallbackProfile({ family: "music_loop", contentLaneKey: "music_loop", channelIdentitySeed: "Seaside Ghibli" }).genre,
+  primaryMusicFallbackProfile({ family: "music_loop", contentLaneKey: "music_loop", channelIdentitySeed: "Seaside Ghibli" }).genre,
+  "the same channel identity must resolve to the same fallback on every run",
+);
+const lofiFallbackPrograms = ["Investory", "Chalk & Compound", "Stoic Truths", "Seaside Ghibli", "Drawn Past"]
+  .map((channelName) => createChannelMusicProgram({
+    channelId: channelName,
+    channelIdentityFingerprint: sha256Hex(channelName),
+    family: "music_loop",
+    contentLaneKey: "music_loop",
+    topic: "Evening session with its sealed recurring sound identity",
+    composerDirection: "Preserve a recurring melodic motif with changing phrases and restrained dynamics.",
+    durationSec: 300,
+  }));
+assert.ok(lofiFallbackPrograms.every((program) =>
+  program.role === "primary_music" && program.mix.bodyMusicVol === 1 &&
+  music3StructuredCaptionWordCount(program.generation.structuredCaption) <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
+), "every channel-specific Lo-Fi fallback must stay music-forward and inside the Music3 caption ceiling");
+const sameIdentityDifferentEpisode = createChannelMusicProgram({
+  channelId: "Investory",
+  channelIdentityFingerprint: sha256Hex("Investory"),
+  family: "music_loop",
+  contentLaneKey: "music_loop",
+  topic: "Another evening session",
+  composerDirection: "Preserve a recurring melodic motif with changing phrases and restrained dynamics.",
+  durationSec: 300,
+});
+assert.equal(musicSoundProfileFingerprint(lofiFallbackPrograms[0]!), musicSoundProfileFingerprint(sameIdentityDifferentEpisode),
+  "episode topic changes must not reshuffle a channel's fallback sound identity");
 
 const unclassified = createChannelMusicProgram({
   channelId: "channel-unclassified",
@@ -284,8 +324,8 @@ const defaultLofi = createChannelMusicProgram({
   contentLaneKey: "music_loop",
   topic: "Rain at the last station",
 });
-assert.equal(defaultLofi.identity.genre, "warm lo-fi instrumental",
-  "the canonical Lo-Fi product keeps its channel-defining sound when no profile is configured");
+assert.match(defaultLofi.identity.genre, /lo-fi/iu,
+  "the canonical Lo-Fi product keeps its family-defining sound when no profile is configured");
 
 const defaultMusicVideo = createChannelMusicProgram({
   channelId: "channel-default-music-video",
