@@ -552,6 +552,13 @@ for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
   frozen.execution.moduleConfig.music = { generationDurationSec: 120 };
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
     const musicProgram = planWeekPreparedMusicProgram(frozen, provider);
+    const expectedRole = family === "music_loop" ? "primary_music" : family === "sleep" ? "meditation_bed" :
+      family === "shorts" ? "short_form_bed" : "narration_bed";
+    const expectedBodyGain = expectedRole === "primary_music" ? 1 : expectedRole === "meditation_bed" ? 0.25 : 0.1026;
+    assert.equal(musicProgram.role, expectedRole);
+    assert.equal(musicProgram.mix.bodyMusicVol, expectedBodyGain,
+      `${family} must preserve the channel role's playback intent`);
+    assert.equal(musicProgram.mix.targetLufs, -18, "an authored channel loudness remains authoritative");
     const receipt = { ...preparedMusic, manifestSha256: planWeekPreparationManifestSha256(frozen),
       provider, musicProgram, minimax: provider === "minimax_music3" ? preparedMusic.minimax : undefined };
     assert.equal(assertPlanWeekPreparedMusicBinding({ prepared: receipt, manifest: frozen }).musicProgram.fingerprint,

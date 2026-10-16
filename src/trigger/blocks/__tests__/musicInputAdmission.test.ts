@@ -22,9 +22,14 @@ const originalLoad = loader._load, originalFetch = globalThis.fetch;
 let storageCalls = 0, networkCalls = 0;
 let transferMode = false;
 const reads: { key: string; options: unknown }[] = [];
+const sealedPrograms: unknown[] = [];
 loader._load = function (id, ...args) {
   if (id === "@/lib/storage") return {
-    putObject: async () => { storageCalls++; if (!transferMode) throw new Error("admitted-first-storage-write"); },
+    putObject: async (key: string, body: Uint8Array) => {
+      storageCalls++;
+      if (key.includes("channel-music-program-")) sealedPrograms.push(JSON.parse(Buffer.from(body).toString("utf8")));
+      if (!transferMode) throw new Error("admitted-first-storage-write");
+    },
     getObjectBytes: async (key: string, bucket: unknown, options: unknown) => {
       storageCalls++; assert.equal(bucket, undefined); reads.push({ key, options });
       if (!transferMode) throw new Error("unexpected-storage-read");
@@ -86,6 +91,20 @@ async function main() {
   }
   assert.equal(storageCalls, 0, "invalid inputs cannot persist a misleading program or read audio");
   assert.equal(networkCalls, 0, "invalid selection cannot silently buy from a default provider");
+  for (const [store, expectedRole, expectedGain] of [
+    [{ ...ctx.store, family: "narrated_stock" }, "narration_bed", 0.1026],
+    [{ ...ctx.store, family: "lofi" }, "primary_music", 1],
+    [{ ...ctx.store, contentLane: { key: "meditation", family: "ambient" } }, "meditation_bed", 0.25],
+  ] as const) {
+    const before = sealedPrograms.length;
+    await assert.rejects(music.run({ ...ctx, store }), /admitted-first-storage-write/);
+    const sealed = sealedPrograms[before] as { role: string; mix: { bodyMusicVol: number; targetLufs: number } };
+    assert.equal(sealed.role, expectedRole);
+    assert.equal(sealed.mix.bodyMusicVol, expectedGain, `${expectedRole} must preserve its role-specific gain`);
+    assert.equal(sealed.mix.targetLufs, expectedRole === "primary_music" ? -16 : -18,
+      `${expectedRole} must preserve its role-specific mastering target`);
+  }
+  storageCalls = 0;
   for (const provider of ["suno", "minimax_music3", "yue2", undefined]) {
     await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: { ...prepared, provider } } }), /provider does not match/);
   }

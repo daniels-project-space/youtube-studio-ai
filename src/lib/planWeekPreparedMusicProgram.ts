@@ -96,7 +96,6 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
       composerDirection || (!hasDna ? explicitDirection : ""),
       studioDirection,
     ].filter(Boolean).join(" ") || undefined,
-    targetLufs: finiteNumber(audio.loudnessLufs, -16, -23, -12),
-    bodyMusicVol: 1,
+    targetLufs: audio.loudnessLufs === undefined ? undefined : finiteNumber(audio.loudnessLufs, -16, -23, -12),
   }));
 }
