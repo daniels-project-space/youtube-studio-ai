@@ -15,6 +15,23 @@ export function parseScriptCritique(value: unknown): { pass: boolean; issues: st
   return { pass: row.pass, issues: row.issues.map((issue: string) => issue.trim()) };
 }
 
+export function parseHookCritique(value: unknown): { pass: boolean; score: number; issues: string[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("malformed hook critique: expected an object with pass, score and issues");
+  }
+  const row = value as Record<string, unknown>;
+  if (
+    Object.keys(row).length !== 3 ||
+    typeof row.pass !== "boolean" ||
+    typeof row.score !== "number" || !Number.isFinite(row.score) || row.score < 0 || row.score > 1 ||
+    !Array.isArray(row.issues) || row.issues.length > 4 ||
+    row.issues.some((issue) => typeof issue !== "string" || !issue.trim() || issue.length > 140)
+  ) {
+    throw new Error("malformed hook critique: expected an explicit verdict, finite 0–1 score and bounded text issues");
+  }
+  return { pass: row.pass, score: row.score, issues: row.issues.map((issue: string) => issue.trim()) };
+}
+
 export function assertScriptCritiqueAccepted(input: {
   accepted: boolean;
   issues?: readonly string[];

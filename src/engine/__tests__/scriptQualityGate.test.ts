@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseHookCritique,
   parseScriptCritique,
 } from "@/engine/scriptQualityGate";
 
@@ -11,6 +12,24 @@ assert.deepEqual(parseScriptCritique({ pass: true, issues: [] }), { pass: true, 
 assert.deepEqual(parseScriptCritique({ pass: false, issues: ["  Weak payoff.  "] }), { pass: false, issues: ["Weak payoff."] });
 for (const invalid of [{}, { pass: "true", issues: [] }, { pass: true }, { pass: true, issues: [false] }]) {
   assert.throws(() => parseScriptCritique(invalid), /malformed script critique/);
+}
+
+assert.deepEqual(
+  parseHookCritique({ pass: true, score: 0.91, issues: [] }),
+  { pass: true, score: 0.91, issues: [] },
+);
+for (const invalid of [
+  {},
+  { score: 1, issues: [] },
+  { pass: true, issues: [] },
+  { pass: true, score: Number.NaN, issues: [] },
+  { pass: true, score: 1.01, issues: [] },
+  { pass: "true", score: 1, issues: [] },
+  { pass: false, score: 0.5, issues: [" "] },
+  { pass: false, score: 0.5, issues: ["x".repeat(141)] },
+  { pass: true, score: 1, issues: [], extra: "untrusted" },
+]) {
+  assert.throws(() => parseHookCritique(invalid), /malformed hook critique/);
 }
 
 assert.doesNotThrow(() => assertScriptCritiqueAccepted({ accepted: true }));

@@ -53,6 +53,42 @@ async function main(): Promise<void> {
     assert.equal(Object.hasOwn(unreviewed.store, "hook"), false, "no unreviewed fallback may be persisted");
 
     process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
+    providerCalls = 0;
+    globalThis.fetch = async (_url, init) => {
+      providerCalls++;
+      const request = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+      const prompt = request.messages?.at(-1)?.content ?? "";
+      const content = prompt.includes("Write ONE scroll-stopping hook line")
+        ? JSON.stringify({ hook: "A warning stopped the line before anyone was hurt." })
+        : JSON.stringify({});
+      return Response.json({
+        id: "hook-critic-schema-fixture",
+        model: "google/gemini-3.7-flash",
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      });
+    };
+    const malformedCritic = await runPipeline(
+      validatePipeline([{ block: "hook_craft", params: {} }], ["narrationText"]),
+      {
+        ownerId: "owner-hook-recovery-test",
+        channelId: "channel-hook-recovery-test",
+        runId: "run-hook-malformed-critic-test",
+        keyPrefix: "owners/owner-hook-recovery-test/",
+        budgetUsd: 1,
+        defaultRetries: 0,
+        seedStore: {
+          narrationText: "A factory inspection found a cracked valve before the pressure reached its limit.",
+        },
+        sink: { async upsert() {} },
+      },
+    );
+    assert.equal(malformedCritic.ok, false, "a verdict without pass/score/issues must not admit a hook");
+    assert.match(malformedCritic.error ?? "", /independent hook critic unavailable.*malformed hook critique/);
+    assert.equal(providerCalls, 2, "one hook draft and one malformed critic response should be observed");
+    assert.equal(Object.hasOwn(malformedCritic.store, "hook"), false, "a malformed verdict must not persist its draft");
+
+    providerCalls = 0;
     globalThis.fetch = async (url) => {
       assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
       providerCalls++;

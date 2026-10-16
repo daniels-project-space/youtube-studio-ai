@@ -103,6 +103,7 @@ import {
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseHookCritique,
   parseScriptCritique,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
@@ -1078,7 +1079,7 @@ export const hookCraft: Block = {
         }
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+          const verdict = parseHookCritique(await creativeTextJson<unknown>({
             prompt:
               `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
@@ -1097,16 +1098,14 @@ export const hookCraft: Block = {
             // trailing delimiter after the JSON block.
             maxTokens: 2500,
             temperature: 0.3,
-          });
+          }));
           observedCostUsd += PRICE.boundedTextPassUsd;
-          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          const rejected = verdict.pass === false;
+          const issues = verdict.issues;
+          const rejected = !verdict.pass;
           const rejectionIssues = issues.length
             ? issues
             : ["independent hook critic rejected the line without usable remediation"];
-          const score = Number.isFinite(verdict.score)
-            ? Math.max(0, Math.min(1, Number(verdict.score)))
-            : rejected ? 0.4 : 1;
+          const score = verdict.score;
           if (rejected) {
             ctx.log(
               `hook_craft: candidate ${iter} rejected by the critic` +
