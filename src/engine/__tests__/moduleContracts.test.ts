@@ -453,9 +453,9 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
 
 /**
  * Exercise whole-graph mutations in addition to individual edge mutations.
- * The automatic composer must reject an unknown module and duplicate producer,
- * and a real family graph must reject removal of one required producer. These
- * are structural checks only; no provider or paid stage is executed.
+ * The automatic composer must reject an unknown module, duplicate producer,
+ * malformed module params, and removal of one required producer. These are
+ * structural checks only; no provider or paid stage is executed.
  */
 function wholePipelineMutationGuards(): void {
   let coveredFamilies = 0;
@@ -470,6 +470,19 @@ function wholePipelineMutationGuards(): void {
     coveredFamilies++;
     const seeds = channelPipelineValidationSeedKeys(design.contentLane);
     const valid = validatePipeline(design.pipeline, seeds);
+
+    const configIndex = valid.manifests.findIndex((manifest) =>
+      !manifest.configSchema.safeParse([]).success,
+    );
+    assert.ok(configIndex >= 0, `${family}: mutation fixture needs an object-shaped module config`);
+    const malformedParams = design.pipeline.map((entry, index) => index === configIndex
+      ? { ...entry, params: [] as unknown as Record<string, unknown> }
+      : entry);
+    assert.throws(
+      () => compilePipeline(validatePipeline(malformedParams, seeds)),
+      /expected record|expected object|received array|invalid_type/i,
+      `${family}: malformed module params must be rejected before execution`,
+    );
 
     assert.throws(
       () => validatePipeline([...design.pipeline, { block: "__missing_module__" }], seeds),
@@ -521,7 +534,7 @@ function wholePipelineMutationGuards(): void {
     );
   }
   assert.ok(coveredFamilies >= 8, `whole-pipeline corpus unexpectedly small: ${coveredFamilies} families`);
-  console.log(`whole-pipeline mutation corpus passed: ${coveredFamilies} families`);
+  console.log(`whole-pipeline mutation corpus passed: ${coveredFamilies} families × malformed config`);
 }
 
 function producerIndexBefore(
