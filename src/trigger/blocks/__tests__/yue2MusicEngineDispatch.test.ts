@@ -95,19 +95,24 @@ test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs
     assert.match(error?.message ?? "", /b{32}/);
     assert.deepEqual(calls, { verify: 1, provision: 1, stage: 1, status: 0, output: 0, wait: 0 });
 
-    Object.assign(calls, { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 });
-    bootstrapCalls = 0;
-    route = { family: "sleep", contentLaneKey: "ambient_guided", requiredBlocks: [] };
-    inputArrangement = arrangement;
-    const wrongRole = await runBlock();
-    assert.match(wrongRole?.message ?? "", /requires a sleep_sound_bed arrangement/);
-    assert.equal(bootstrapCalls, 0, "route-role mismatch refuses before vault hydration or Engine calls");
-    inputArrangement = arrangementWithRole("meditation_bed");
+    const soundRoutes = [
+      { family: "narrated_stock", contentLaneKey: "background_music", role: "narration_bed" },
+      { family: "sleep", contentLaneKey: "ambient_guided", role: "sleep_sound_bed" },
+      { family: "meditation", contentLaneKey: "meditation", role: "meditation_bed" },
+    ] as const;
     failVerification = false;
-    const guidedMeditation = await runBlock();
-    assert.equal(guidedMeditation?.code, "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING");
-    assert.deepEqual(calls, { verify: 1, provision: 1, stage: 1, status: 0, output: 0, wait: 0 },
-      "the permitted meditation override reaches the existing non-dispatching qualification hold");
+    for (const soundRoute of soundRoutes) {
+      Object.assign(calls, { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 });
+      bootstrapCalls = 0;
+      route = { family: soundRoute.family, contentLaneKey: soundRoute.contentLaneKey, requiredBlocks: [] };
+      inputArrangement = arrangementWithRole(soundRoute.role);
+      const staged = await runBlock();
+      assert.equal(staged?.code, "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING",
+        `${soundRoute.contentLaneKey} reaches the shared YuE2 route and remains held before dispatch`);
+      assert.equal(bootstrapCalls, 1);
+      assert.deepEqual(calls, { verify: 1, provision: 1, stage: 1, status: 0, output: 0, wait: 0 },
+        `${soundRoute.contentLaneKey} stages exactly once and does not poll or render before qualification`);
+    }
   } finally {
     loader._load = originalLoad;
     if (previousSecret === undefined) delete process.env.MANAGEMENT_PROJECT_SECRET;
