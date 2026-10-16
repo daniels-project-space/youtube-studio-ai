@@ -167,12 +167,36 @@ async function main(): Promise<void> {
         keyPrefix: "owners/owner-hook-critique-contract-test/",
         budgetUsd: 1,
         defaultRetries: 2,
-        seedStore: { narrationText: longNarration },
+        seedStore: {
+          narrationText: longNarration,
+          channelName: "Quiet Garden Stories",
+          persona: "Gentle, low-arousal reflections for listeners winding down.",
+          showBible: {
+            positioning: "A quiet place to notice one small detail at a time.",
+            vibe: "Tender, calm, and precise.",
+            worksInSpace: ["Let the listener arrive without urgency."],
+            avoidInSpace: ["Never manufacture suspense."],
+          },
+          styleDNA: { narrative: {
+            scriptStyle: "Quiet, concrete observations.",
+            hookStyle: "A gentle invitation grounded in the scene.",
+            pacing: "Leave room for each detail to settle.",
+            delivery: "Warm and unhurried.",
+            voiceProfile: "Acoustic timbre belongs to narration, not hook writing.",
+          } },
+          styleGrammar: "Watercolor lighthouse artwork with teal borders.",
+        },
         sink: { async upsert() {} },
       },
     );
     assert.equal(longScript.ok, true);
     for (const prompt of [producerPrompts[0], criticPrompts[0]]) {
+      assert.match(prompt, /A quiet place to notice one small detail at a time/);
+      assert.match(prompt, /Tender, calm, and precise/);
+      assert.match(prompt, /Never manufacture suspense/);
+      assert.match(prompt, /A gentle invitation grounded in the scene/);
+      assert.doesNotMatch(prompt, /Watercolor lighthouse artwork|teal borders|Acoustic timbre belongs/,
+        "text Hookcraft must receive channel voice without visual grammar or acoustic casting details");
       assert.ok(prompt.includes("OPENING SCRIPT CONTEXT"));
       assert.ok(prompt.includes("MIDDLE PAYOFF EVIDENCE"));
       assert.ok(prompt.includes("CLOSING PAYOFF EVIDENCE"));

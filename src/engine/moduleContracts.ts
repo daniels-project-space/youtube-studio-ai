@@ -612,14 +612,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation", "preparedScript",
-      "bannedWords",
+      "bannedWords", "showBible",
       "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan", "topicBet",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
     optionalConsumes: [
             // Per-channel grounding for the hook produce→critique loop (P1-4).
-      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "showBible", "styleDNA",
       // Topicraft's promise is only a strategy hint; Hookcraft verifies it against narration.
       "topic", "topicBet",
     ],
@@ -696,7 +696,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   entity_imagery: contract(["visuals.entities"], {
     optionalConsumes: [
       // Per-channel grounding for the entity-selection produce→critique loop (P1-4).
-      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment",
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment", "showBible",
     ],
   }),
   intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey"] }),

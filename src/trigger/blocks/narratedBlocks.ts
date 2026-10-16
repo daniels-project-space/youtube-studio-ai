@@ -90,6 +90,7 @@ import {
   MINIMAX_H3_RUNTIME_ID,
 } from "@/lib/minimaxH3";
 import {
+  channelCreatorDirection,
   channelCritiqueBrief,
   produceAndCritique,
   validateCritiqueResponse,
@@ -167,7 +168,7 @@ import {
   translateScript,
   type Script,
 } from "@/lib/scriptGen";
-import type { ShowBibleVoice } from "@/engine/showBibleVoice";
+import { parseShowBibleVoice, type ShowBibleVoice } from "@/engine/showBibleVoice";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -676,12 +677,19 @@ function readDeclaredHealClasses(raw: unknown, blockId: string): HealClass[] {
  * this file reads it from here, so there is exactly one place to change what a
  * per-channel critic is told.
  */
-function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
+function channelCritiqueContext(
+  ctx: StageContext,
+  options: { includeVisualStyleGrammar?: boolean } = {},
+): ChannelCritiqueContext {
   const laneKey = (ctx.store["contentLane"] as { key?: unknown } | null | undefined)?.key;
+  const showBibleVoice = parseShowBibleVoice(ctx.store["showBible"]);
   return {
     ...(opt(ctx, "channelName") ? { channelName: opt(ctx, "channelName") } : {}),
     ...(opt(ctx, "persona") ? { persona: opt(ctx, "persona") } : {}),
-    ...(opt(ctx, "styleGrammar") ? { styleGrammar: opt(ctx, "styleGrammar") } : {}),
+    ...(showBibleVoice ?? {}),
+    ...(options.includeVisualStyleGrammar && opt(ctx, "styleGrammar")
+      ? { styleGrammar: opt(ctx, "styleGrammar") }
+      : {}),
     ...(opt(ctx, "criticDoctrine") ? { criticDoctrine: opt(ctx, "criticDoctrine") } : {}),
     ...(typeof laneKey === "string" && laneKey ? { contentLaneKey: laneKey } : {}),
     laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis,
@@ -872,18 +880,19 @@ export function createScriptGenBlock(
     // an unreviewed script.
     const critiqueEnabled = hasCreativeTextKey();
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const authoredChannel = channelCritiqueContext(ctx);
     const scriptChannel: ChannelCritiqueContext = {
-      ...channelCritiqueContext(ctx),
+      ...authoredChannel,
       narrative: req.narrative ? {
         scriptStyle: req.narrative.scriptStyle,
         hookStyle: req.narrative.hookStyle,
         pacing: req.narrative.pacing,
         delivery: req.narrative.delivery,
       } : undefined,
-      positioning: req.channelVoice?.positioning,
-      vibe: req.channelVoice?.vibe,
-      worksInSpace: req.channelVoice?.worksInSpace,
-      avoidInSpace: req.channelVoice?.avoidInSpace,
+      positioning: req.channelVoice?.positioning ?? authoredChannel.positioning,
+      vibe: req.channelVoice?.vibe ?? authoredChannel.vibe,
+      worksInSpace: req.channelVoice?.worksInSpace ?? authoredChannel.worksInSpace,
+      avoidInSpace: req.channelVoice?.avoidInSpace ?? authoredChannel.avoidInSpace,
       bannedWords: req.bannedWords,
     };
 
@@ -1071,7 +1080,21 @@ export const hookCraft: Block = {
     //   - A critic outage fails the stage closed instead of accepting an
     //     unreviewed promise or blind-spending another draft.
     //   - Cap 2 (one informed retry), the established convention here.
-    const hookChannel = channelCritiqueContext(ctx);
+    const channelDna = ctx.store["styleDNA"] as {
+      narrative?: ChannelCritiqueContext["narrative"];
+    } | null | undefined;
+    const dnaNarrative = channelDna?.narrative;
+    const hookChannel: ChannelCritiqueContext = {
+      ...channelCritiqueContext(ctx),
+      ...(dnaNarrative ? {
+        narrative: {
+          ...(typeof dnaNarrative.scriptStyle === "string" ? { scriptStyle: dnaNarrative.scriptStyle } : {}),
+          ...(typeof dnaNarrative.hookStyle === "string" ? { hookStyle: dnaNarrative.hookStyle } : {}),
+          ...(typeof dnaNarrative.pacing === "string" ? { pacing: dnaNarrative.pacing } : {}),
+          ...(typeof dnaNarrative.delivery === "string" ? { delivery: dnaNarrative.delivery } : {}),
+        },
+      } : {}),
+    };
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/hook-checkpoints`;
@@ -1108,6 +1131,7 @@ export const hookCraft: Block = {
           const out = await creativeTextJson<{ hook?: string }>({
             prompt:
               "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
+              "Make it compelling in the authored channel register; do not mistake attention for higher arousal or more suspense. " +
               "It must be concrete and must promise ONLY something this narration actually " +
               "delivers — a hook the video does not pay off is a failure, not a win. " +
               (priorIssues.length
@@ -1117,7 +1141,7 @@ export const hookCraft: Block = {
                 ? `Topicraft's planned viewer promise is intent only, not evidence: "${plannedPromise}". ` +
                   "Preserve its intended payoff when the narration supports it; otherwise discard or narrow the promise. "
                 : "") +
-              channelCritiqueBrief(hookChannel) +
+              channelCreatorDirection(hookChannel) +
               'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
               scriptCritiqueExcerpt(narration),
             // MEASURED, not chosen: scripts/measure-single-field-ceiling.ts runs
@@ -1175,7 +1199,8 @@ export const hookCraft: Block = {
         try {
           const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
             prompt:
-              `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
+              `Judge ONE hook line written for a YouTube title/thumbnail in the authored channel register. ` +
+              `Do not reward urgency or suspense that conflicts with that voice. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
               `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
               `about what the video delivers. A planned topic promise is not evidence; when supported, ` +
@@ -2685,7 +2710,7 @@ export const entityImagery: Block = {
     //     retried: paying again to be told the same true thing is pure waste.
     //   - A critic outage accepts the current set rather than blind-spending.
     //   - Cap 2 (one informed retry).
-    const entityChannel = channelCritiqueContext(ctx);
+    const entityChannel = channelCritiqueContext(ctx, { includeVisualStyleGrammar: true });
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/entity-checkpoints`;

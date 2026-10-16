@@ -126,6 +126,15 @@ async function main(): Promise<void> {
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
         seedStore: {
           topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords,
+          channelName: "Quiet Garden Stories",
+          persona: "Patient, gentle stories for reflective listeners.",
+          showBible: {
+            positioning: "Patient stories that reveal meaning through small, observed details.",
+            vibe: "Gentle, grounded, and quietly curious.",
+            worksInSpace: ["Let the scene breathe before explaining its meaning."],
+            avoidInSpace: ["Do not force a suspense cliffhanger."],
+          },
+          styleGrammar: "Watercolor lighthouse artwork with teal borders.",
           ...(topicBetPromise === undefined ? {} : {
             topicBet: { topic: "Mira and the locked garden gate", hookPromise: topicBetPromise },
           }),
@@ -148,6 +157,11 @@ async function main(): Promise<void> {
     assert.equal(good.result.ok, true, good.result.error);
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic"]);
     const script = good.result.store.script as Script;
+    const internalCriticPrompt = requests.find((request) => request.kind === "critic")?.prompt ?? "";
+    assert.match(internalCriticPrompt, /Patient stories that reveal meaning through small, observed details/);
+    assert.match(internalCriticPrompt, /Let the scene breathe before explaining its meaning/);
+    assert.doesNotMatch(internalCriticPrompt, /Watercolor lighthouse artwork|teal borders/,
+      "script critique must not grade prose against the visual module's style grammar");
     assert.equal(script.crafted?.verdict.judged, true, "the actual hook judge admitted this fixture");
     assert.equal(script.crafted.hook, hook);
     assert.ok(script.hook.startsWith(hook));
