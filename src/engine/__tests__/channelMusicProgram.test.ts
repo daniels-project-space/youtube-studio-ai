@@ -19,6 +19,18 @@ assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "meditation_bed");
 assert.equal(musicRoleForRoute("quiz_year", "quiz_short"), "short_form_bed");
 assert.equal(musicRoleForRoute("narrated", "documentary"), "narration_bed");
 
+for (const durationSec of [9, 301, 7200, 60.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+  assert.throws(() => createChannelMusicProgram({
+    channelId: "channel-duration-boundary",
+    channelIdentityFingerprint: sha("z"),
+    family: "music_loop",
+    contentLaneKey: "music_loop",
+    topic: "Duration boundary",
+    durationSec,
+  }), /music source duration must be an integer from 10 to 300 seconds/u,
+  `invalid music source duration ${String(durationSec)} must fail instead of silently changing the program`);
+}
+
 const history = createChannelMusicProgram({
   channelId: "channel-stoic-history",
   channelIdentityFingerprint: sha("a"),

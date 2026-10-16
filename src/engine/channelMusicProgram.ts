@@ -436,7 +436,10 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     "generic trailer booms and risers",
     "melody that masks narration",
   ];
-  const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
+  const durationSec = input.durationSec ?? (role === "short_form_bed" ? 60 : 120);
+  if (!Number.isSafeInteger(durationSec) || durationSec < 10 || durationSec > 300) {
+    throw new Error("music source duration must be an integer from 10 to 300 seconds; final video duration belongs to assembly");
+  }
   const sections = roleSections(role, durationSec);
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "primary_music" ? -16 : -18)));
   const bodyMusicVol = role === "primary_music"

@@ -577,6 +577,32 @@ for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
     }
   }
 }
+for (const musicConfig of [
+  { generationDurationSec: 301 },
+  { generationDurationSec: 30.5 },
+]) {
+  const invalidDuration = structuredClone(musicManifest);
+  invalidDuration.execution.moduleConfig.music = musicConfig;
+  assert.throws(
+    () => planWeekPreparedMusicProgram(invalidDuration, "mureka"),
+    /weekly music source duration must be an integer from 10 to 300 seconds/u,
+    `prepared music must reject ambiguous or out-of-range duration config ${JSON.stringify(musicConfig)}`,
+  );
+}
+const legacyLongVideoMusic = structuredClone(musicManifest);
+legacyLongVideoMusic.execution.moduleConfig.music = { durationSec: 7200 };
+assert.equal(
+  planWeekPreparedMusicProgram(legacyLongVideoMusic, "mureka").generation.durationSec,
+  300,
+  "a legacy final-video duration on music must not become or reject a long source-track request",
+);
+const oversizedSourceMusic = structuredClone(musicManifest);
+oversizedSourceMusic.execution.moduleConfig.music = { generationDurationSec: 7200 };
+assert.throws(
+  () => planWeekPreparedMusicProgram(oversizedSourceMusic, "mureka"),
+  /weekly music source duration must be an integer from 10 to 300 seconds/u,
+  "an explicit oversized source-track target must fail instead of being clamped",
+);
 assert.throws(
   () => assertPlanWeekPreparedMusicBinding({
     prepared: { ...preparedMusic, musicKey: "owner/foreign/music.mp3" },
