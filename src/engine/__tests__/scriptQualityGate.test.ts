@@ -55,8 +55,10 @@ assert.match(narratedBlocks, /assertScriptCritiqueAccepted\(\{/);
 assert.match(narratedBlocks, /script_gen FAILED: independent narrative critic unavailable/);
 assert.match(narratedBlocks, /scriptCritiqueExcerpt\(draft\.narrationText\)/);
 assert.match(narratedBlocks, /scriptCritiqueExcerpt\(narration\)/);
-assert.match(narratedBlocks, /const scriptChannel: ChannelCritiqueContext = \{[\s\S]*?narrative: req\.narrative/,
-  "the independent script critic must receive the same channel narrative DNA as the writer");
+assert.match(narratedBlocks, /narrative: req\.narrative \? \{[\s\S]*?scriptStyle: req\.narrative\.scriptStyle,[\s\S]*?delivery: req\.narrative\.delivery/,
+  "the independent script critic must receive prose-owned Style DNA fields");
+assert.doesNotMatch(narratedBlocks, /narrative: req\.narrative\s*[,}]/,
+  "the script critic must not take ownership of acoustic casting in voiceProfile");
 assert.match(narratedBlocks, /qa_script FAILED: independent narrative critic unavailable/);
 assert.match(narratedBlocks, /hook_craft FAILED: independent hook critic unavailable/);
 assert.match(narratedBlocks, /stage: "hook_craft"/);

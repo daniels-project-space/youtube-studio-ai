@@ -167,7 +167,7 @@ export interface ScriptRequest {
    * The channel's Style-DNA narrative spec — the per-channel register the
    * script must be written in (beats the generic per-archetype tone).
    */
-  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; voiceProfile?: string; delivery?: string };
+  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Frozen channel identity language the narration must not contain. */
   bannedWords?: string[];
   /**

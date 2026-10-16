@@ -858,7 +858,7 @@ export function createScriptGenBlock(
       // The channel's locked narrative register (Style DNA) — outranks the
       // generic archetype tone in the prompt.
       narrative: (ctx.store["styleDNA"] as
-        | { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; voiceProfile?: string; delivery?: string } }
+        | { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string } }
         | null)?.narrative,
       // Script Lab playbook (distilled from WATCHING the niche's top videos).
       // The opening device rotates deterministically per run — openings never
@@ -874,7 +874,12 @@ export function createScriptGenBlock(
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const scriptChannel: ChannelCritiqueContext = {
       ...channelCritiqueContext(ctx),
-      narrative: req.narrative,
+      narrative: req.narrative ? {
+        scriptStyle: req.narrative.scriptStyle,
+        hookStyle: req.narrative.hookStyle,
+        pacing: req.narrative.pacing,
+        delivery: req.narrative.delivery,
+      } : undefined,
       positioning: req.channelVoice?.positioning,
       vibe: req.channelVoice?.vibe,
       worksInSpace: req.channelVoice?.worksInSpace,
