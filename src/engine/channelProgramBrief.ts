@@ -19,7 +19,7 @@ import type { FormatSelectionInput } from "@/engine/creative/selectFormat";
 import { CHANNEL_PROGRAM_BRIEF_VERSION } from "./channelContractVersions";
 
 export { CHANNEL_PROGRAM_BRIEF_VERSION } from "./channelContractVersions";
-export const CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS = 1_200;
+export const CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS = 4_000;
 
 const MAX_LOCALE_CHARS = 64;
 const MAX_SUBCATEGORY_CHARS = 240;
@@ -548,16 +548,7 @@ function nicheDisplayName(brief: ChannelProgramBrief): string {
   return brief.subcategory ? `${niche.label} — ${brief.subcategory}` : niche.label;
 }
 
-function appendBounded(current: string, segment: string): string {
-  if (current.length >= CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS) return current;
-  const separator = current ? "\n" : "";
-  const available = CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS - current.length - separator.length;
-  if (available <= 0) return current;
-  if (segment.length <= available) return `${current}${separator}${segment}`;
-  return `${current}${separator}${segment.slice(0, Math.max(0, available - 1)).trimEnd()}…`;
-}
-
-/** Deterministic, bounded text for positioning prompts and audit displays. */
+/** Deterministic, complete text for positioning prompts and audit displays. */
 export function channelProgramBriefPositioningText(value: unknown): string {
   const brief = assertCanonicalChannelProgramBrief(value);
   const segments = [
@@ -566,8 +557,18 @@ export function channelProgramBriefPositioningText(value: unknown): string {
     `Locale: ${brief.locale}`,
     ...(brief.audience ? [`Audience: ${brief.audience}`] : []),
     ...(brief.sampleTopics?.length ? [`Sample topics: ${brief.sampleTopics.join(" | ")}`] : []),
+    ...(brief.programIntent ? [`Program intent: ${JSON.stringify(brief.programIntent)}`] : []),
+    ...(brief.serializedProgram
+      ? [`Serialized program: ${brief.serializedProgram.seriesTitle}${
+        brief.serializedProgram.seriesCount === undefined ? "" : ` (${brief.serializedProgram.seriesCount} parts)`
+      }`]
+      : []),
   ];
-  return segments.reduce(appendBounded, "");
+  const text = segments.join("\n");
+  if (text.length > CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS) {
+    throw new Error("canonical channel program brief exceeds the complete positioning context limit");
+  }
+  return text;
 }
 
 /** Adapter only: keeps the format advisor's existing input contract intact. */

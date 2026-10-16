@@ -312,9 +312,20 @@ assert.ok(positioning.length <= CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS
 
 const longPositioning = channelProgramBriefPositioningText(createChannelProgramBrief({
   ...canonical,
+  family: "quizyear",
   concept: "A ".repeat(300),
   sampleTopics: Array.from({ length: 12 }, (_, index) => `A distinct thoroughly scoped sample topic number ${index + 1} with enough detail`),
+  programIntent: { kind: "certified_quiz", profile: "world_geography" },
+  serializedProgram: {
+    version: SERIALIZED_PROGRAM_VERSION,
+    seriesTitle: "World geography, one verified landmark at a time",
+    seriesCount: 100,
+  },
 }));
 assert.ok(longPositioning.length <= CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS);
+assert.match(longPositioning, /Audience: Curious adults/);
+assert.match(longPositioning, /sample topic number 12 with enough detail/);
+assert.match(longPositioning, /Program intent: \{"kind":"certified_quiz","profile":"world_geography"\}/);
+assert.match(longPositioning, /Serialized program: World geography, one verified landmark at a time \(100 parts\)/);
 
 console.log("channel program brief contract tests passed");
