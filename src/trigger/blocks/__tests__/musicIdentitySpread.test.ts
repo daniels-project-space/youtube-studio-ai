@@ -49,14 +49,14 @@ function main(): void {
     "the same channel must always resolve to the same brief",
   );
   const unnamedChannels = ["channel-101", "channel-202", "channel-303", "channel-404", "channel-505"];
-  const unnamedPrompts = unnamedChannels.map((id) => fallbackMusicPrompt("  ", id, "Market history", false));
+  const unnamedPrompts = unnamedChannels.map((id) => fallbackMusicPrompt("  ", id, "Market history", "narrated_stock"));
   assert.ok(
     new Set(unnamedPrompts).size >= 4,
     "blank names must fall back to each channel ID instead of collapsing onto the empty seed",
   );
   assert.equal(
-    fallbackMusicPrompt("  Investory ", "other-id", "Market history", false),
-    fallbackMusicPrompt("Investory", "different-id", "Market history", false),
+    fallbackMusicPrompt("  Investory ", "other-id", "Market history", "narrated_stock"),
+    fallbackMusicPrompt("Investory", "different-id", "Market history", "narrated_stock"),
     "a valid channel name, not a storage ID, must anchor its stable sound",
   );
 
@@ -76,10 +76,24 @@ function main(): void {
     assert.match(prompt, /no build-ups/);
     assert.ok(/no percussion|no drums|no rhythm section/.test(prompt));
   }
+  const sleepChannels = ["Quiet Tide", "Night Lantern", "Soft Current", "Restful Hours", "Moonlit Room"];
+  const sleepPrompts = sleepChannels.map((name, index) =>
+    fallbackMusicPrompt(name, `sleep-${index}`, "A safe place to rest", "sleep"),
+  );
+  assert.ok(
+    new Set(sleepPrompts).size >= 3,
+    "sleep channels need stable sonic variety without borrowing the Lo-Fi identity",
+  );
+  for (const prompt of sleepPrompts) {
+    assert.match(prompt, /sleep soundscape|meditation soundscape/i);
+    assert.match(prompt, /no abrupt|no sudden/);
+    assert.match(prompt, /no vocals/);
+    assert.doesNotMatch(prompt, /lofi hip-hop|boom-bap/i);
+  }
 
   // ---- lofi keeps its own sound -------------------------------------------
-  assert.match(MUSIC, /fallbackMusicPrompt\(ctx\.store\["channelName"\], ctx\.channelId, topic, isLoopFamily\)/);
-  const lofiPrompt = fallbackMusicPrompt("", "lofi-1", "Night rain", true);
+  assert.match(MUSIC, /fallbackMusicPrompt\(ctx\.store\["channelName"\], ctx\.channelId, topic, musicRoute\?\.family\)/);
+  const lofiPrompt = fallbackMusicPrompt("", "lofi-1", "Night rain", "music_loop");
   assert.match(lofiPrompt, /warm cozy lofi hip-hop/);
   assert.match(lofiPrompt, /boom-bap drums/);
   assert.doesNotMatch(lofiPrompt, /no percussion|no drums/);

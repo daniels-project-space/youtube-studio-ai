@@ -181,8 +181,7 @@ export const music: Block = {
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
     const musicRoute = channelProgramRouteFromContext(ctx);
-    const isLoopFamily = musicRoute?.family === "music_loop";
-    const lastResort = fallbackMusicPrompt(ctx.store["channelName"], ctx.channelId, topic, isLoopFamily);
+    const lastResort = fallbackMusicPrompt(ctx.store["channelName"], ctx.channelId, topic, musicRoute?.family);
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||

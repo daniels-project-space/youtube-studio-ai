@@ -1,3 +1,5 @@
+import type { FamilyKey } from "@/engine/families";
+
 /**
  * IDENTITY SPREAD — resolve an unset creative value across a range, not onto a
  * point.
@@ -151,14 +153,29 @@ export const FALLBACK_UNDERSCORE_BRIEFS = [
   "restrained and serious, no percussion, no build-ups, purely instrumental",
 ] as const;
 
+export const FALLBACK_SLEEP_SOUNDSCAPES = [
+  "very quiet sleep soundscape, long soft analogue pad tones, slow harmonic drift, deep but gentle low end, " +
+    "steady low dynamics, no percussion, no drums, no vocals, no abrupt changes, no build-ups, purely instrumental",
+  "spacious meditation soundscape, soft distant bell-like overtones used sparingly, warm sustained pads, " +
+    "almost motionless harmony, steady low dynamics, no percussion, no drums, no vocals, no sudden changes, " +
+    "no build-ups, purely instrumental",
+  "calm sleep soundscape, smooth low drone beneath faint airy textures, gradual tonal movement only, " +
+    "steady low dynamics, no percussion, no drums, no vocals, no abrupt changes, no build-ups, purely instrumental",
+  "gentle nighttime sleep soundscape, rounded soft tones with long quiet tails, minimal harmonic motion, " +
+    "steady low dynamics, no percussion, no drums, no vocals, no sudden changes, no build-ups, purely instrumental",
+  "subtle restorative meditation soundscape, warm soft-focus pads and faint high harmonics, " +
+    "slow and even, steady low dynamics, no percussion, no drums, no vocals, no abrupt changes, " +
+    "no build-ups, purely instrumental",
+] as const;
+
 /** Resolve the shared music block's final prompt without losing unnamed channel identity. */
 export function fallbackMusicPrompt(
   channelName: unknown,
   channelId: unknown,
   topic: string,
-  isLoopFamily: boolean,
+  family: FamilyKey | undefined,
 ): string {
-  if (isLoopFamily) {
+  if (family === "music_loop") {
     return `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
       `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
       `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`;
@@ -167,6 +184,9 @@ export function fallbackMusicPrompt(
   const namedChannel = typeof channelName === "string" ? channelName.trim() : "";
   const id = typeof channelId === "string" || typeof channelId === "number" ? String(channelId).trim() : "";
   const seed = namedChannel || id || "youtube-studio-channel";
+  if (family === "sleep") {
+    return `${spreadDefault(seed, FALLBACK_SLEEP_SOUNDSCAPES)}, evoking "${topic}", no lyrics`;
+  }
   return `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
 }
 
