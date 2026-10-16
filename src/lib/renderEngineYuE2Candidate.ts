@@ -239,7 +239,7 @@ async function fetchVerified(url: string, expected: { bytes: number; sha256: str
   return bytes;
 }
 
-function allocationFromStatus(status: Record<string, unknown>, maxCostUsd: number) {
+export function allocationFromStatus(status: Record<string, unknown>, maxCostUsd: number) {
   const value = status.allocationUsage;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Render Engine YuE2 allocation receipt is missing");
   const usage = value as Record<string, unknown>;

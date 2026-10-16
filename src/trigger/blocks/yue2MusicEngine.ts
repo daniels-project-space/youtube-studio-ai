@@ -8,7 +8,7 @@ import { manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { deriveRenderEngineProjectCapability } from "@/lib/renderEngineProjectCapability";
-import { materializeRenderEngineYuE2Candidate } from "@/lib/renderEngineYuE2Candidate";
+import { allocationFromStatus, materializeRenderEngineYuE2Candidate } from "@/lib/renderEngineYuE2Candidate";
 import {
   getRenderEngineYuE2Job,
   getRenderEngineYuE2Output,
@@ -29,6 +29,13 @@ function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: Render Engine YuE2 ${reason}; recover the same job, never regenerate`,
     { code: "PAID_STAGE_RECONCILIATION_REQUIRED", retryable: false }),
   charge === undefined ? {} : { additionalObservedCostUsd: charge });
+}
+
+export function terminalRenderEngineYuE2Error(status: Record<string, unknown>, maxCostUsd: number): Error | undefined {
+  if (status.status !== "failed" && status.status !== "cancelled") return undefined;
+  let charge: number | undefined;
+  try { charge = allocationFromStatus(status, maxCostUsd).costUsd; } catch { /* unresolved receipts must not invent cost */ }
+  return hold(`job ${status.status}`, charge);
 }
 
 export function assertRenderEngineYuE2DispatchEnabled(stage: RenderEngineYuE2Stage): void {
@@ -115,8 +122,9 @@ const block: Block & { version: string } = {
       let status: Record<string, unknown> | undefined;
       for (let index = 0; index <= checks; index++) {
         status = await getRenderEngineYuE2Job(projectConfig, stage.jobId);
+        const terminalError = terminalRenderEngineYuE2Error(status, params.maxCostUsd);
+        if (terminalError) throw terminalError;
         if (status.status === "completed") break;
-        if (status.status === "failed" || status.status === "cancelled") throw hold(`job ${status.status}`, charge);
         if (index === checks) break;
         ctx.log(`music: Render Engine YuE2 job ${stage.jobId} is ${String(status.status)}; observing the same request`);
         await wait.for({ seconds: 120, idempotencyKey: `${source.job.job_id}:engine-yue2-observe:${index}` });
@@ -127,11 +135,7 @@ const block: Block & { version: string } = {
         }
       }
       if (!status || status.status !== "completed") throw hold("job did not reach verified completion within its frozen execution window", charge);
-      const allocation = status.allocationUsage;
-      if (allocation && typeof allocation === "object" && !Array.isArray(allocation) &&
-          typeof (allocation as Record<string, unknown>).costUsd === "number") {
-        charge = (allocation as Record<string, number>).costUsd;
-      }
+      charge = allocationFromStatus(status, params.maxCostUsd).costUsd;
       const readback = await getRenderEngineYuE2Output(projectConfig, stage.jobId);
       const material = await materializeRenderEngineYuE2Candidate({
         scope: { ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId },
