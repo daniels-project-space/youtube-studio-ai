@@ -46,19 +46,17 @@
  *                                  optionalConsumes would change where the
  *                                  compiler auto-inserts the block, which is a
  *                                  real behaviour change for a naming nicety.
- *   cinematicCaseDirection         NEEDS AN OWNER DECISION. Neither has a
- *   cinematicSequenceEditorialReview  producer or a payload field, so
- *                                  cinematic_case_sequence_draft/_finalize
- *                                  cannot run outside their tests. They are not
- *                                  wired here because the second is a human
- *                                  editor's SIGNATURE on a crime-recreation
- *                                  draft: handing a caller a field that supplies
- *                                  one is an authorization decision, not a
- *                                  wiring fix. Neither block is in any of the 12
- *                                  families' composed pipelines, so nothing is
- *                                  failing today.
+ *   cinematicCaseDirection         INTENTIONAL PRIVATE-RELEASE GAP. Neither
+ *   cinematicSequenceEditorialReview  has a producer or general run-payload
+ *                                  field. Their draft/finalize blocks are
+ *                                  explicitly private-review-only; adding a
+ *                                  human-signature payload to ordinary pipeline
+ *                                  intake is an authorization change, not a
+ *                                  wiring fix. These remain visible below and
+ *                                  are not counted as seeds or executable routes.
  */
 import { registerAllBlocks } from "@/engine/blocks";
+import { catalogExecutionBinding } from "@/engine/goldenExecution";
 import { allManifests } from "@/engine/registry";
 import { PAYLOAD_SEED_INPUT_KEYS } from "@/lib/payloadSeedInputs";
 
@@ -89,6 +87,17 @@ const KNOWN_SEEDS = new Set<string>([
   "narrativeSeriesRunSelector",
 ]);
 
+const PRIVATE_RELEASE_INPUTS = new Map<string, { catalogKey: string; reason: string }>([
+  ["cinematic_case_sequence_draft:cinematicCaseDirection", {
+    catalogKey: "cinematic-case-sequence",
+    reason: "caller-authored direction has no general pipeline intake",
+  }],
+  ["cinematic_case_sequence_finalize:cinematicSequenceEditorialReview", {
+    catalogKey: "cinematic-case-sequence",
+    reason: "human editor signature has no general pipeline intake",
+  }],
+]);
+
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
@@ -101,23 +110,41 @@ function main(): void {
 
   const unknown: { block: string; key: string }[] = [];
   const seeds: { block: string; key: string }[] = [];
+  const privateReleaseGaps: { block: string; key: string; reason: string }[] = [];
   let requiredTotal = 0;
 
   for (const m of manifests) {
     for (const key of Object.keys(m.consumes ?? {})) {
       requiredTotal++;
       if (produced.has(key)) continue;
-      (KNOWN_SEEDS.has(key) ? seeds : unknown).push({ block: m.id, key });
+      if (KNOWN_SEEDS.has(key)) {
+        seeds.push({ block: m.id, key });
+        continue;
+      }
+      const external = PRIVATE_RELEASE_INPUTS.get(`${m.id}:${key}`);
+      if (external) {
+        const binding = catalogExecutionBinding(external.catalogKey);
+        if (binding.kind === "registered-private-release" && binding.executableIds.includes(m.id)) {
+          privateReleaseGaps.push({ block: m.id, key, reason: external.reason });
+          continue;
+        }
+      }
+      unknown.push({ block: m.id, key });
     }
   }
 
   unknown.sort((a, b) => a.key.localeCompare(b.key) || a.block.localeCompare(b.block));
+  privateReleaseGaps.sort((a, b) => a.key.localeCompare(b.key) || a.block.localeCompare(b.block));
   console.log(`required consumes across all blocks: ${requiredTotal}`);
-  console.log(`required, but no registered block produces them: ${unknown.length + seeds.length}`);
+  console.log(`required, but no registered block produces them: ${unknown.length + seeds.length + privateReleaseGaps.length}`);
   console.log(`  of those, recognised run seeds: ${seeds.length}`);
+  console.log(`  intentional private-release gaps: ${privateReleaseGaps.length}`);
   console.log(`  unaccounted for: ${unknown.length}\n`);
   for (const f of unknown) console.log(`  ${f.block} requires ${f.key}, which nothing produces`);
-  if (!unknown.length) console.log("  none");
+  for (const f of privateReleaseGaps) {
+    console.log(`  PRIVATE ${f.block} requires ${f.key}: ${f.reason}`);
+  }
+  if (!unknown.length) console.log("  none unaccounted");
   console.log(
     `\nAn unaccounted-for entry is either a seed nobody listed here, or a block promising\n` +
       `an input the compiler will never supply — in which case it reads undefined at run\n` +
