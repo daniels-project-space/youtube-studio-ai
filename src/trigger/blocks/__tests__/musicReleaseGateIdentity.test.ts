@@ -56,11 +56,8 @@ loader._load = function (id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { appendMusicGenerationDisclosure, assertMusicQualityForPublish } =
-  require("../musicReleaseGate") as typeof import("../musicReleaseGate");
-
 async function main() {
+  const { appendMusicGenerationDisclosure, assertMusicQualityForPublish } = await import("../musicReleaseGate");
   const foreignProgramContext: StageContext = {
     ...ctx,
     store: {
