@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   let producerCalls = 0;
   const responses: unknown[] = [];
   const producerPrompts: string[] = [];
+  const criticPrompts: string[] = [];
   loader._load = function (name, ...args) {
     if (name === "@/lib/storage") return {
       getObjectBytes: async () => { throw missing(); },
@@ -39,7 +40,7 @@ async function main(): Promise<void> {
             : "A cracked valve warning stopped the factory before pressure became dangerous",
         })
         : prompt.startsWith("Judge ONE hook line")
-          ? responses[responseIndex++]
+          ? (criticPrompts.push(prompt), responses[responseIndex++])
           : assert.fail(`unexpected Hookcraft request: ${String(prompt).slice(0, 100)}`);
       return Response.json({
         id: `fixture-hook-${responseIndex}`,
@@ -147,6 +148,36 @@ async function main(): Promise<void> {
     assert.equal(staleBet.ok, false, "a topic promise bound to another topic fails before Hookcraft runs");
     assert.match(staleBet.error ?? "", /topicBet does not belong to the selected topic/u);
     assert.equal(producerCalls, 0, "a stale cross-module handoff causes no provider request");
+
+    const longNarration =
+      "OPENING SCRIPT CONTEXT. ".padEnd(5_200, "H") +
+      "MIDDLE PAYOFF EVIDENCE. ".padEnd(5_200, "M") +
+      "CLOSING PAYOFF EVIDENCE.";
+    responseIndex = 0;
+    producerCalls = 0;
+    producerPrompts.length = 0;
+    criticPrompts.length = 0;
+    responses.splice(0, responses.length, { pass: true, score: 0.95, issues: [] });
+    const longScript = await runPipeline(
+      validatePipeline([{ block: "hook_craft", params: {} }], ["narrationText"]),
+      {
+        ownerId: "owner-hook-critique-contract-test",
+        channelId: "channel-hook-critique-contract-test",
+        runId: "run-hook-critique-long-script-evidence",
+        keyPrefix: "owners/owner-hook-critique-contract-test/",
+        budgetUsd: 1,
+        defaultRetries: 2,
+        seedStore: { narrationText: longNarration },
+        sink: { async upsert() {} },
+      },
+    );
+    assert.equal(longScript.ok, true);
+    for (const prompt of [producerPrompts[0], criticPrompts[0]]) {
+      assert.ok(prompt.includes("OPENING SCRIPT CONTEXT"));
+      assert.ok(prompt.includes("MIDDLE PAYOFF EVIDENCE"));
+      assert.ok(prompt.includes("CLOSING PAYOFF EVIDENCE"));
+      assert.ok(prompt.includes("[... OMITTED ...]"), "long source remains bounded while preserving distant evidence");
+    }
 
     console.log("HOOK_CRAFT CRITIQUE CONTRACT PASS: malformed verdicts rejected and contradictory passing defects repaired");
   } finally {

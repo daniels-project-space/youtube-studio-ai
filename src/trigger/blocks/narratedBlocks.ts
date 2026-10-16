@@ -1119,7 +1119,7 @@ export const hookCraft: Block = {
                 : "") +
               channelCritiqueBrief(hookChannel) +
               'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
-              narration.slice(0, 2000),
+              scriptCritiqueExcerpt(narration),
             // MEASURED, not chosen: scripts/measure-single-field-ceiling.ts runs
             // this exact prompt at a ladder of ceilings. At 200 and 400 it threw
             // on every trial; at 700 it succeeded on every trial. So at the old
@@ -1186,7 +1186,7 @@ export const hookCraft: Block = {
               channelCritiqueBrief(hookChannel) +
               ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
               `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
-              narration.slice(0, 2500),
+              scriptCritiqueExcerpt(narration),
             // Reasoning route: the ceiling covers the THINKING and the answer, and a
             // findings list is the expensive verdict — a clean pass is cheap to emit,
             // a rejection must enumerate why. At the old ceiling this gate was
