@@ -13,7 +13,9 @@ async function main(): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.OPENROUTER_API_KEY;
   let responseIndex = 0;
+  let producerCalls = 0;
   const responses: unknown[] = [];
+  const producerPrompts: string[] = [];
   loader._load = function (name, ...args) {
     if (name === "@/lib/storage") return {
       getObjectBytes: async () => { throw missing(); },
@@ -31,7 +33,11 @@ async function main(): Promise<void> {
       const body = JSON.parse(String(init?.body));
       const prompt = body.messages.at(-1).content;
       const value = prompt.startsWith("Write ONE scroll-stopping hook line")
-        ? { hook: "The cracked valve warning that stopped an entire factory" }
+        ? (producerPrompts.push(prompt), {
+          hook: producerCalls++ === 0
+            ? "The cracked valve saved every worker from a deadly explosion"
+            : "A cracked valve warning stopped the factory before pressure became dangerous",
+        })
         : prompt.startsWith("Judge ONE hook line")
           ? responses[responseIndex++]
           : assert.fail(`unexpected Hookcraft request: ${String(prompt).slice(0, 100)}`);
@@ -74,7 +80,42 @@ async function main(): Promise<void> {
       assert.equal(Object.hasOwn(result.store, "hook"), false, "malformed evidence never persists a hook");
     }
 
-    console.log("HOOK_CRAFT CRITIQUE CONTRACT PASS: 6 malformed provider verdicts rejected before hook admission");
+    const repairIssue = "The narration does not establish that every worker was saved from an explosion.";
+    responseIndex = 0;
+    producerCalls = 0;
+    producerPrompts.length = 0;
+    responses.splice(0, responses.length,
+      { pass: true, score: 0.96, issues: [repairIssue] },
+      { pass: true, score: 0.9, issues: [] },
+    );
+    const repaired = await runPipeline(
+      validatePipeline([{ block: "hook_craft", params: {} }], ["narrationText"]),
+      {
+        ownerId: "owner-hook-critique-contract-test",
+        channelId: "channel-hook-critique-contract-test",
+        runId: "run-hook-critique-contradictory-pass",
+        keyPrefix: "owners/owner-hook-critique-contract-test/",
+        budgetUsd: 1,
+        defaultRetries: 2,
+        seedStore: {
+          narrationText: "A factory inspection found a cracked valve before pressure reached its limit. The crew stopped the line before anyone was hurt.",
+        },
+        sink: { async upsert() {} },
+      },
+    );
+    assert.equal(repaired.ok, true, "a clean repaired hook is admitted");
+    assert.equal(responseIndex, 2, "a passing verdict with defects must be retried once");
+    assert.ok(
+      producerPrompts[1]?.includes(repairIssue),
+      "the contradictory verdict's defect must inform the repaired draft",
+    );
+    assert.equal(
+      repaired.store.hook,
+      "A cracked valve warning stopped the factory before pressure became dangerous",
+      "the clean retry, not the higher-scoring defective hook, becomes the stage output",
+    );
+
+    console.log("HOOK_CRAFT CRITIQUE CONTRACT PASS: malformed verdicts rejected and contradictory passing defects repaired");
   } finally {
     loader._load = originalLoad;
     globalThis.fetch = originalFetch;

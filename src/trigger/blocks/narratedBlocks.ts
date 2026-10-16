@@ -1148,7 +1148,8 @@ export const hookCraft: Block = {
               `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
               `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
-              `about what the video delivers.` +
+              `about what the video delivers. If any actionable defect remains, pass must be false and ` +
+              `issues must name each defect; if pass is true, issues must be empty.` +
               channelCritiqueBrief(hookChannel) +
               ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
               `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
@@ -1173,7 +1174,7 @@ export const hookCraft: Block = {
             throw new Error("malformed hook critique — issues must contain at most 4 strings under 140 characters");
           }
           const issues = critique.issues.slice(0, 4);
-          const rejected = !critique.pass;
+          const rejected = !critique.pass || issues.length > 0;
           const rejectionIssues = issues.length
             ? issues
             : ["independent hook critic rejected the line without usable remediation"];
