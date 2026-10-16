@@ -11,6 +11,15 @@ const cleared = resolveStyleDNAReview({ deterministicIssues: [], criticScore: 0.
 assert.equal(cleared.pass, true);
 assert.equal(cleared.score, 0.86);
 
+const contradictoryCritic = resolveStyleDNAReview({
+  deterministicIssues: [],
+  criticScore: 0.94,
+  criticIssues: ["The recurring motif is generic and could describe any astronomy channel."],
+});
+assert.equal(contradictoryCritic.pass, false,
+  "a passing score cannot override a concrete repair issue from the independent identity critic");
+assert.ok(contradictoryCritic.issues.some((issue) => issue.includes("identified repair issues")));
+
 const deterministicFailure = resolveStyleDNAReview({
   deterministicIssues: ["setting is empty"],
   criticScore: 0.96,

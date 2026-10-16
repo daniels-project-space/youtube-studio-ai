@@ -244,9 +244,13 @@ export function resolveStyleDNAReview(input: {
   } else if (criticScore < 0.8 && !(input.criticIssues?.length)) {
     issues.push(`independent identity critic score ${criticScore.toFixed(2)} is below the 0.80 acceptance bar`);
   }
+  if (criticResponded && criticScore >= 0.8 && input.criticIssues?.length) {
+    issues.push("independent identity critic identified repair issues despite its passing score");
+  }
   return {
     score,
-    pass: input.deterministicIssues.length === 0 && criticResponded && criticScore >= 0.8,
+    pass: input.deterministicIssues.length === 0 && criticResponded && criticScore >= 0.8 &&
+      !(input.criticIssues?.length),
     issues,
   };
 }
