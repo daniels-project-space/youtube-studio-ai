@@ -18,7 +18,13 @@ const fieldNotes: ChannelCritiqueContext = {
   worksInSpace: ["Follow one real detail closely", "Let silence carry weight"],
   avoidInSpace: ["Urgent trailer language", "Grand claims from small evidence"],
   styleGrammar: "Measured sentences; concrete sensory detail",
-  narrative: { scriptStyle: "observational", hookStyle: "a precise question", pacing: "unhurried" },
+  narrative: {
+    scriptStyle: "observational",
+    hookStyle: "a precise question",
+    pacing: "unhurried",
+    voiceProfile: "warm low register, close-mic, never announcer-like",
+    delivery: "patient wonder without dramatization",
+  },
   criticDoctrine: "Prefer truthful restraint over manufactured drama.",
   contentLaneKey: "narrated_documentary",
   laneEmphasis: ["claim-to-source traceability", "no invented scene detail"],
@@ -51,6 +57,8 @@ assert.notEqual(fieldBrief, motionBrief, "different channel identities must not 
 assert.notEqual(fieldCreator, motionCreator, "different channels must receive distinct writer direction");
 for (const value of ["Quiet Field Notes", "Audience:", "Promise:", "Let silence carry weight", "Avoid:", "miracle"])
   assert.ok(fieldCreator.includes(value), `creator direction must retain ${value}`);
+for (const value of ["observational", "a precise question", "unhurried", "warm low register", "patient wonder"])
+  assert.ok(fieldCreator.includes(value), `creator direction must retain authored narrative preference ${value}`);
 assert.equal(channelCreatorDirection(), "", "unconfigured callers retain the no-direction legacy prompt");
 assert.ok(channelCreatorDirection({ criticDoctrine: "x".repeat(2_000) }).length < 700,
   "creator direction must stay bounded");
@@ -63,6 +71,8 @@ for (const value of [
   "claim-to-source traceability",
   "Forbidden channel wording",
   "miracle",
+  "warm low register",
+  "patient wonder without dramatization",
 ]) assert.ok(fieldBrief.includes(value), `field-notes grounding must retain ${value}`);
 for (const value of [
   "Motion Lab",
@@ -94,7 +104,18 @@ const guardedInputs = {
   styleGrammar: "Concrete, direct language",
   criticDoctrine: "Never trade evidence for spectacle.",
   showBible,
-  styleDNA: { colorGrade: "soft natural light", motifs: ["field notebook"], visualAvoid: ["glowing diagrams"] },
+  styleDNA: {
+    colorGrade: "soft natural light",
+    motifs: ["field notebook"],
+    visualAvoid: ["glowing diagrams"],
+    narrative: {
+      scriptStyle: "evidence-led observation",
+      hookStyle: "a concrete unanswered question",
+      pacing: "slow enough to notice small changes",
+      voiceProfile: "calm, close, and softly textured",
+      delivery: "curious but never breathless",
+    },
+  },
   contentLane: { key: "whiteboard_explainer" },
   bannedWords: ["miracle"],
 };
@@ -104,6 +125,7 @@ for (const moduleId of ["whiteboard_scribe", "motion_comic", "lore_short", "self
   const guardedStore = declaredArtifactStore(manifest, guardedInputs, new Set());
   const context = channelCritiqueContextFromStore(guardedStore, ["illustrate the exact claim"]);
   const brief = channelCritiqueBrief(context);
+  const creatorDirection = channelCreatorDirection(context);
   for (const value of [
     showBible.positioning,
     showBible.vibe,
@@ -111,7 +133,16 @@ for (const moduleId of ["whiteboard_scribe", "motion_comic", "lore_short", "self
     showBible.avoidInSpace[0]!,
     guardedInputs.criticDoctrine,
     guardedInputs.bannedWords[0]!,
+    guardedInputs.styleDNA.narrative.voiceProfile,
+    guardedInputs.styleDNA.narrative.delivery,
   ]) assert.ok(brief.includes(value), `${moduleId} must pass authored channel guidance through its guarded store: ${value}`);
+  for (const value of [
+    guardedInputs.styleDNA.narrative.scriptStyle,
+    guardedInputs.styleDNA.narrative.hookStyle,
+    guardedInputs.styleDNA.narrative.pacing,
+    guardedInputs.styleDNA.narrative.voiceProfile,
+    guardedInputs.styleDNA.narrative.delivery,
+  ]) assert.ok(creatorDirection.includes(value), `${moduleId} producer direction must preserve StyleDNA narrative preference: ${value}`);
 }
 
 console.log("CHANNEL CRITIQUE GROUNDING PASS — distinct identities and lane-specific doctrine survive the shared module boundary");

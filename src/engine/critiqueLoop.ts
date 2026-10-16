@@ -134,7 +134,13 @@ export interface ChannelCritiqueContext {
   worksInSpace?: readonly string[];
   avoidInSpace?: readonly string[];
   styleGrammar?: string;
-  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
+  narrative?: {
+    scriptStyle?: string;
+    hookStyle?: string;
+    pacing?: string;
+    voiceProfile?: string;
+    delivery?: string;
+  };
   /** Operator/Showrunner-authored stance for THIS channel's critic. */
   criticDoctrine?: string;
   /** Durable content-lane key; drives lane-tuned thresholds + emphases. */
@@ -176,6 +182,13 @@ export function channelCritiqueContextFromStore(
     colorGrade?: unknown;
     motifs?: unknown;
     visualAvoid?: unknown;
+    narrative?: {
+      scriptStyle?: unknown;
+      hookStyle?: unknown;
+      pacing?: unknown;
+      voiceProfile?: unknown;
+      delivery?: unknown;
+    };
   } | null | undefined;
   const lane = store["contentLane"] as { key?: unknown } | null | undefined;
   const laneKey = typeof lane?.key === "string" ? compact(lane.key, 60) : undefined;
@@ -185,6 +198,7 @@ export function channelCritiqueContextFromStore(
   const persona = textFromStore(store, "persona", 180);
   const styleGrammar = textFromStore(store, "styleGrammar", 240);
   const criticDoctrine = textFromStore(store, "criticDoctrine", 600);
+  const narrative = dna?.narrative;
   const worksInSpace = showBible?.worksInSpace?.length
     ? showBible.worksInSpace
     : stringListFromStore(dna?.motifs, 10, 140);
@@ -199,6 +213,15 @@ export function channelCritiqueContextFromStore(
     ...(worksInSpace ? { worksInSpace } : {}),
     ...(avoidInSpace ? { avoidInSpace } : {}),
     ...(styleGrammar ? { styleGrammar } : {}),
+    ...(narrative ? {
+      narrative: {
+        ...(typeof narrative.scriptStyle === "string" ? { scriptStyle: compact(narrative.scriptStyle, 240) } : {}),
+        ...(typeof narrative.hookStyle === "string" ? { hookStyle: compact(narrative.hookStyle, 240) } : {}),
+        ...(typeof narrative.pacing === "string" ? { pacing: compact(narrative.pacing, 240) } : {}),
+        ...(typeof narrative.voiceProfile === "string" ? { voiceProfile: compact(narrative.voiceProfile, 240) } : {}),
+        ...(typeof narrative.delivery === "string" ? { delivery: compact(narrative.delivery, 240) } : {}),
+      },
+    } : {}),
     ...(criticDoctrine ? { criticDoctrine } : {}),
     ...(laneKey ? { contentLaneKey: laneKey } : {}),
     ...(bannedWords ? { bannedWords } : {}),
@@ -223,7 +246,7 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
     compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
     ...showBibleVoicePromptLines(channel),
     compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
-    ...(["scriptStyle", "hookStyle", "pacing", "delivery"] as const).map(field => {
+    ...(["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const).map(field => {
       const value = compact(channel.narrative?.[field], 240);
       return value ? `Narrative ${field}: ${value}` : "";
     }),
@@ -263,6 +286,10 @@ export function channelCreatorDirection(channel?: ChannelCritiqueContext): strin
     compact(channel.positioning, 240) ? `Promise: ${compact(channel.positioning, 240)}` : "",
     compact(channel.vibe, 180) ? `Voice and mood: ${compact(channel.vibe, 180)}` : "",
     compact(channel.styleGrammar, 240) ? `Writing style: ${compact(channel.styleGrammar, 240)}` : "",
+    ...(["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const).map(field => {
+      const value = compact(channel.narrative?.[field], 240);
+      return value ? `Narrative ${field}: ${value}` : "";
+    }),
     channel.worksInSpace?.length ? `Lean into: ${channel.worksInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
     channel.avoidInSpace?.length ? `Avoid: ${channel.avoidInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
     compact(channel.criticDoctrine, 400) ? `Standing creative direction: ${compact(channel.criticDoctrine, 400)}` : "",
