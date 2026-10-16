@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { briefCritic, type CrewContext } from "@/engine/creative/crew";
 import type { ShowBible } from "@/engine/creative/types";
+import { assessProductionValidationAcceptance, runValidationSpec } from "@/engine/creative/validate";
 
 const bible: ShowBible = {
   positioning: "A field guide to overlooked astronomy for curious beginners.",
@@ -65,6 +66,20 @@ async function main() {
     const result = await briefCritic(bible, context);
     assert.equal(result?.assertions.length, 2);
     assert.ok(result?.assertions.some((assertion) => assertion.severity === "block"));
+
+    const rejected = await runValidationSpec(result, {
+      metrics: {},
+      visionJudge: async (assertion) => assertion.id !== "claim-grounding",
+    });
+    assert.equal(rejected.passed, false, "a failed blocking assertion must fail the actual validation outcome");
+    assert.equal(assessProductionValidationAcceptance(rejected).ready, false);
+
+    const accepted = await runValidationSpec(result, {
+      metrics: {},
+      visionJudge: async () => true,
+    });
+    assert.equal(assessProductionValidationAcceptance(accepted).ready, true,
+      "a fully evaluated passing spec remains production-acceptable");
   } finally {
     globalThis.fetch = originalFetch;
     if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY;
