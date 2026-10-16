@@ -3301,6 +3301,7 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "topic"
       ],
       "optionalInputs": [
+        "channelName",
         "channelProgramRoute"
       ],
       "outputs": [

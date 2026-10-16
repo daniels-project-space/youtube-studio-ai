@@ -309,6 +309,21 @@ async function main() {
         sampleTopics: [seedStore.topic],
       });
       const mismatchedRoute = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(musicLoopBrief), programBrief: musicLoopBrief });
+      const sourceBrief = result.store.musicBrief as {
+        reviewContext: { topic: string; promptContext: string };
+      };
+      const staleNameContext = createMusicReviewContext({
+        topic: sourceBrief.reviewContext.topic,
+        family: "sleep",
+        channelName: "A different channel",
+        promptContext: sourceBrief.reviewContext.promptContext,
+      });
+      await assert.rejects(musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic,
+          musicBrief: { ...sourceBrief, reviewContext: staleNameContext },
+          channelProgramRoute: route }),
+      }), /review context does not match the current channel name/,
+      "a retained channel-personality review cannot be accepted for another channel name");
       await assert.rejects(musicArrangementPlan.run({
         ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
           channelProgramRoute: mismatchedRoute }),

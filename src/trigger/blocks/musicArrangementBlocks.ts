@@ -101,6 +101,10 @@ export const musicArrangementPlan: Block = {
       throw new Error("music_arrangement_plan requires a non-empty topic");
     }
     if (!ctx.channelId) throw new Error("music_arrangement_plan requires a channel id");
+    const currentChannelName = ctx.store["channelName"];
+    if (currentChannelName !== undefined && brief.reviewContext?.channelName !== currentChannelName) {
+      throw new Error("music_arrangement_plan review context does not match the current channel name");
+    }
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
       if (brief.reviewContext?.family !== route.family) {

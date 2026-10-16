@@ -378,7 +378,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   music_arrangement_plan: contract(["music.arrangement.accepted"], {
     requiredConsumes: ["topic", "musicBrief"],
-    optionalConsumes: ["channelProgramRoute"],
+    optionalConsumes: ["channelProgramRoute", "channelName"],
     requiredCapabilities: ["crew.accepted_music_arrangement"],
     providerProfiles: [local],
     qualityRequired: true,
