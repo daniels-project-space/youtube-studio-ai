@@ -162,3 +162,31 @@ export function completeVisualReviewFocusTimes(
   }
   return [...candidates.values()].sort((left, right) => left - right);
 }
+
+/** Merge sealed full-window evidence with exact event frames using review's timestamp identity. */
+export function completeVisualReviewEvidenceTimes(
+  durationSec: unknown,
+  windows: readonly CompleteVisualReviewWindow[],
+  exactFrameTimes: readonly unknown[],
+  maxFrames = COMPLETE_VISUAL_REVIEW_MAX_FRAMES,
+): number[] {
+  const duration = Math.max(0, finite(durationSec, 0));
+  const candidates = new Map<string, number>();
+  const add = (raw: unknown) => {
+    const time = Number(raw);
+    if (!Number.isFinite(time) || time < 0 || time > duration) {
+      throw new Error("complete visual-review evidence frame falls outside the final master");
+    }
+    const rounded = roundedTenth(time);
+    candidates.set(rounded.toFixed(1), rounded);
+    if (candidates.size > maxFrames) {
+      throw new Error(
+        `complete visual-review focus plan exceeds its ${maxFrames}-frame safety limit; ` +
+          "refusing to silently downsample or start an unbounded review loop",
+      );
+    }
+  };
+  for (const time of completeVisualReviewFocusTimes(duration, windows, maxFrames)) add(time);
+  for (const time of exactFrameTimes) add(time);
+  return [...candidates.values()].sort((left, right) => left - right);
+}

@@ -107,7 +107,10 @@ import {
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
-import { qaVisualReviewFrameLimits } from "@/engine/visualReviewBudget";
+import {
+  completeVisualReviewEvidenceTimes,
+  qaVisualReviewFrameLimits,
+} from "@/engine/visualReviewBudget";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { visualTreatmentReferenceCriteria } from "@/engine/visualTreatmentCatalog";
 import {
@@ -4938,6 +4941,13 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: self-contained visual plan review locks skipped in draft: ${detail}`);
       }
     }
+    const completeStorySpineFrames = productionQa
+      ? storySpineVisualLocks.map((lock) => ({ tSec: (lock.startSec + lock.endSec) / 2 }))
+      : [];
+    const requiredVisualReviewFrames = [
+      ...selfContainedStoryVisualPlan.requiredEvidenceFrames,
+      ...completeStorySpineFrames,
+    ];
     // A selected treatment has to be explicitly assessed against every
     // canonical treatment benchmark. Prompt/creative locks alone are not
     // evidence that the final master retained clay, brick, anime, or drawn
@@ -5021,15 +5031,6 @@ export const qaVisual: Block = {
         })
       : undefined;
     const cinematicFinalMasterQaAdmission = cinematicFinalMasterQaReviewPlan?.admission;
-    // The exact lock/cut count was admitted before Novita rendered. Charge the
-    // same sealed complete-focus envelope here so the runner's stage ceiling,
-    // recorded QA spend, and actual provider batch authority cannot diverge.
-    qaCost = qaVisualCost(
-      ctx.params,
-      cinematicFinalMasterQaAdmission?.reviewCostUsd,
-      (cinematicFinalMasterQaReviewPlan?.completeFocusFrameCount ?? 0) +
-        selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
-    );
     const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
       ? Number(ctx.store["introSec"])
       : 0;
@@ -5042,6 +5043,17 @@ export const qaVisual: Block = {
       : { creativeLocks: [], focusWindows: [] };
     const cinematicReviewLocks = cinematicQaEvidence.creativeLocks;
     const cinematicFocus = cinematicQaEvidence.focusWindows;
+    const requiredCompleteFocusFrameCount = completeVisualReviewEvidenceTimes(
+      p.durationSec,
+      cinematicFocus,
+      requiredVisualReviewFrames.map((frame) => frame.tSec),
+    ).length;
+    // Reserve and charge the exact deduplicated frame plan sent to review.
+    qaCost = qaVisualCost(
+      ctx.params,
+      cinematicFinalMasterQaAdmission?.reviewCostUsd,
+      requiredCompleteFocusFrameCount,
+    );
     // A Casefile cinematic sequence is stronger evidence than a family label:
     // it has source-admission and claim→shot-map receipts. Apply the existing
     // Fern-calibrated documentary mechanics to that final review only in this
@@ -5452,18 +5464,19 @@ export const qaVisual: Block = {
       // planned join. Its final review must inspect every one at 2fps; the
       // ordinary cap still applies to untrusted reactive defect windows.
       requireCompleteFocusCoverage:
-        cinematicSequencePresent || selfContainedStoryVisualPlan.requiredEvidenceFrames.length > 0,
+        cinematicSequencePresent || requiredVisualReviewFrames.length > 0,
       ...(cinematicFinalMasterQaReviewPlan
         ? {
             completeFocusWindows: cinematicFocus,
-            expectedCompleteFocusFrameCount: cinematicFinalMasterQaReviewPlan.completeFocusFrameCount,
           }
         : {}),
-      ...(selfContainedStoryVisualPlan.requiredEvidenceFrames.length
+      ...(requiredVisualReviewFrames.length
         ? {
-            completeFocusFrames: selfContainedStoryVisualPlan.requiredEvidenceFrames,
-            expectedCompleteFocusFrameCount: selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
+            completeFocusFrames: requiredVisualReviewFrames,
           }
+        : {}),
+      ...(cinematicFinalMasterQaReviewPlan || requiredVisualReviewFrames.length
+        ? { expectedCompleteFocusFrameCount: requiredCompleteFocusFrameCount }
         : {}),
       log: (message) => ctx.log(message),
     });

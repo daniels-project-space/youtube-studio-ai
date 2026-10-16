@@ -171,9 +171,8 @@ export function qaVisualCost(
     throw new Error("complete-focus frame count must be a non-negative integer");
   }
   // The evidence review performs a broad pass plus a regular/reactive re-watch.
-  // A cinematic route adds every sealed cut/lock frame; a whiteboard route
-  // adds one exact hand-trace frame per layer and one completed state per
-  // panel. The provider limit is shared with execution, so an explicit block
+  // Sealed cinematic, Story Spine, and whiteboard events add required focus
+  // frames. The provider limit is shared with execution, so an explicit block
   // cost covers every permitted call rather than a larger hidden batch.
   const evidenceBatches = qaVisualReviewProviderCallCount({
     broadFrames,

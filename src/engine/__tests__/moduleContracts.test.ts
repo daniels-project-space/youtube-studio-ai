@@ -762,6 +762,22 @@ function configurationSpecificCostEnvelopes(): void {
     "thumbnail reservation must cover concept, one text-free scene, and one publishing alarm",
   );
 
+  const qaResolver = MODULE_CONTRACTS.qa_visual.maxCostUsdFor;
+  assert.ok(qaResolver, "qa_visual must declare its exact frame-dependent cost envelope");
+  const storyQaCost = qaResolver({}, {
+    entries: [{ block: "qa_visual", params: {} }],
+    index: 0,
+    store: {
+      storySpineFingerprint: "sealed-story-spine",
+      shotList: [{ t0: 0, t1: 3 }, { t0: 3, t1: 6 }],
+    },
+  });
+  assert.equal(
+    storyQaCost,
+    qaVisualCost({}, 0, 2),
+    "pre-dispatch qa_visual reservation must include one complete-focus frame per sealed Story Spine shot",
+  );
+
   const narrationCharacters =
     180 * 20 +
     2 * NARRATION_COLD_OPEN_MAX_CHARS +

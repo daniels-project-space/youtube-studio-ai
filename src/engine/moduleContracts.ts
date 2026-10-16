@@ -805,21 +805,26 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "packageToOpening", "packageToOpeningOmission",
     ],
     providerProfiles: [managed, local],
-    // Cinematic cuts and whiteboard layers both carry exact pre-authored review
-    // evidence. The larger ceiling preserves complete review for the maximum
-    // 16-panel/24-layer receipt instead of silently truncating later drawings.
+    // Cinematic cuts, Story Spine shots, and whiteboard events carry exact
+    // pre-authored review evidence; this ceiling keeps their admitted frames
+    // inside the same bounded provider-call budget as runtime review.
     maxCostUsd: 12,
     maxCostUsdFor: (params, context) => {
       const cinematicPlan = cinematicFinalMasterQaVisualReviewPlanFromStore(context?.store);
-      const whiteboardFrameCount = context?.store?.["whiteboardRenderSchedule"] === undefined
+      const store = context?.store;
+      const whiteboardFrameCount = store?.["whiteboardRenderSchedule"] === undefined
         ? 0
         : whiteboardRenderScheduleRequiredEvidenceFrameCount(
-            context.store["whiteboardRenderSchedule"],
+            store["whiteboardRenderSchedule"],
           );
+      const storySpineFrameCount = typeof store?.["storySpineFingerprint"] === "string" &&
+        Array.isArray(store["shotList"])
+        ? store["shotList"].length
+        : 0;
       return qaVisualCost(
         params,
         cinematicPlan?.admission.reviewCostUsd,
-        (cinematicPlan?.completeFocusFrameCount ?? 0) + whiteboardFrameCount,
+        (cinematicPlan?.completeFocusFrameCount ?? 0) + whiteboardFrameCount + storySpineFrameCount,
       );
     },
     qualityRequired: true,
