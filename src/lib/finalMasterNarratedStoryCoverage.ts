@@ -17,6 +17,8 @@ import {
   type FinalMasterNarrationTranscriptAudit,
 } from "@/lib/narrationTranscriptProof";
 import {
+  NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO,
+  NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO,
   NarrationCueTimingEvidenceSchema,
   type NarrationCueTimingEvidence,
 } from "@/lib/narrationCueTiming";
@@ -404,7 +406,8 @@ function validateNarrationContext(args: {
   if (cueTiming.sourceSha256 !== semantic.narration.sourceSha256) {
     throw new Error("final-master narrated-story coverage cue timing belongs to a different narration source");
   }
-  if (cueTiming.matchedTokenRatio < 0.68 || cueTiming.timingAlignedTokenRatio < 0.85) {
+  if (cueTiming.matchedTokenRatio < NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO ||
+      cueTiming.timingAlignedTokenRatio < NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO) {
     throw new Error("final-master narrated-story coverage requires passing source narration cue timing");
   }
   return { semantic, audit, cueTiming };
