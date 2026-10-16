@@ -21,15 +21,27 @@ function compact(value: string | undefined, max: number): string | undefined {
   return result || undefined;
 }
 
+function compactGuidance(values: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values ?? []) {
+    const item = compact(value, 140);
+    const key = item?.toLocaleLowerCase("en-US");
+    if (!item || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+    if (result.length === 10) break;
+  }
+  return result;
+}
+
 export function showBibleVoicePromptLines(voice?: ShowBibleVoicePromptInput): string[] {
   if (!voice) return [];
   return [
     compact(voice.positioning, 350) ? `Channel positioning: ${compact(voice.positioning, 350)}` : "",
     compact(voice.vibe, 160) ? `Channel tonal signature: ${compact(voice.vibe, 160)}` : "",
-    ...(voice.worksInSpace ?? []).slice(0, 4).map((item) => compact(item, 140))
-      .filter((item): item is string => Boolean(item)).map((item) => `Channel pattern to preserve: ${item}`),
-    ...(voice.avoidInSpace ?? []).slice(0, 4).map((item) => compact(item, 140))
-      .filter((item): item is string => Boolean(item)).map((item) => `Channel anti-pattern to reject: ${item}`),
+    ...compactGuidance(voice.worksInSpace).map((item) => `Channel pattern to preserve: ${item}`),
+    ...compactGuidance(voice.avoidInSpace).map((item) => `Channel anti-pattern to reject: ${item}`),
   ].filter(Boolean);
 }
 
