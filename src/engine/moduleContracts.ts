@@ -429,15 +429,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "acceptedMusicArrangement", "channelProgramRoute", "reuseMusicKey", "reuseMusicReceipt", "preparedMusic", "musicQualityReceiptKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
     providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
-    // Reserve both the requested generation count and one alternate-provider
-    // failover. A partially completed primary attempt must never be invisible.
+    // Reserve the larger complete provider path. Mureka may need one accepted
+    // job per requested clip; Suno returns up to two clips per generation.
+    // Quota failover is allowed only before any paid primary job is accepted.
     maxCostUsdFor: (params) => {
       if (params["provider"] === "minimax_music3") {
         return boundedNumber(params["maxCostUsd"], 5, 0.01, 10);
       }
       const tracks = Math.ceil(boundedNumber(params["trackCount"], 2, 1, 8));
       const sunoGenerations = Math.ceil(tracks / 2);
-      return (sunoGenerations + 1) * PRICE.musicTrackUsd;
+      return Math.max(tracks, sunoGenerations) * PRICE.musicTrackUsd;
     },
     // The generated mix remains pending until the exact retained source has a
     // byte-bound audition receipt; upload_draft independently enforces it.

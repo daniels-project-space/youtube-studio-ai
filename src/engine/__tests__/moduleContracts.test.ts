@@ -973,6 +973,16 @@ function configurationSpecificCostEnvelopes(): void {
       2 * comicPanels * PRICE.visionGraderUsd,
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
   );
+  assert.equal(
+    envelope("music", { provider: "mureka", trackCount: 4 }),
+    4 * PRICE.musicTrackUsd,
+    "Mureka music reservation must cover additional jobs needed to honor the requested track count",
+  );
+  assert.equal(
+    envelope("music", { provider: "suno", trackCount: 4 }),
+    4 * PRICE.musicTrackUsd,
+    "music reservation must cover the larger provider path without reserving unreachable quota failover spend",
+  );
 
   const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
   const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;

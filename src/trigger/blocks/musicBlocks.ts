@@ -73,6 +73,33 @@ import {
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
 const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
 
+export async function generateMurekaTrackSet(input: {
+  prompt: string;
+  trackCount: number;
+  model?: string;
+  generate?: typeof generateMureka;
+  onCompletedGeneration?: () => void;
+}): Promise<{ tracks: MusicTrack[]; jobIds: string[]; generationCount: number }> {
+  if (!Number.isSafeInteger(input.trackCount) || input.trackCount < 1 || input.trackCount > 8) {
+    throw new Error("music: Mureka track count must be an integer between 1 and 8");
+  }
+  const generate = input.generate ?? generateMureka;
+  const tracks: MusicTrack[] = [];
+  const jobIds: string[] = [];
+  while (tracks.length < input.trackCount) {
+    const generationIndex = jobIds.length;
+    const prompt = generationIndex === 0
+      ? input.prompt
+      : `${input.prompt}\nPart ${generationIndex + 1}: preserve the channel sound and instrumentation, with a distinct melodic progression.`;
+    const result = await generate({ prompt, model: input.model, timeoutMs: 600_000 });
+    input.onCompletedGeneration?.();
+    if (!result.tracks.length) throw new Error("music: Mureka generation returned no tracks");
+    jobIds.push(result.jobId);
+    tracks.push(...result.tracks.slice(0, input.trackCount - tracks.length));
+  }
+  return { tracks, jobIds, generationCount: jobIds.length };
+}
+
 async function retainProviderMusicAuditionSource(input: {
   ctx: StageContext;
   provider: "mureka" | "suno";
@@ -489,12 +516,6 @@ export const music: Block = {
         `music: MiniMax caption budget kept ${bestCount}/${words.length} words of supplemental module direction; locked identity and role requirements were preserved`,
       );
     }
-    const prompt = [
-      musicProgram?.audio.direction,
-      basePrompt,
-      modulePromptDirection,
-      studioAudioDirection,
-    ].filter(Boolean).join(" ");
     ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "route-aware default"}` +
       `${modulePromptDirection ? " + supplemental module direction" : ""}` +
       `${sleepBed && configuredPrompt ? " + sleep contract suppresses free-form module direction" : ""}` +
@@ -669,12 +690,10 @@ export const music: Block = {
         ].filter(Boolean).join(" "), 900,
         (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true);
 
-    // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
-    // longer than a few minutes. trackCount asks for N distinct clips that get
-    // crossfade-concatenated (3s tri — the proven legacy-autostudio recipe)
-    // into one continuous mix before looping. A Suno generation returns TWO
-    // clips for one credit, so cost = ceil(N/2) generations. Default 2 = double
-    // the unique audio at the old single-track price.
+    // MULTI-TRACK MIX: a single looped track reads as stale on long videos.
+    // trackCount asks for N distinct clips, crossfade-concatenated before the
+    // final mix is looped. Suno returns up to two clips per generation; Mureka
+    // is called again until its accepted choices fill the requested count.
     // NaN here produced NaN, so the track loop ran zero times and the video
     // shipped with no music at all — the quietest possible failure.
     const trackCount = boundedInteger(ctx.params.trackCount, 2, 1, 8);
@@ -842,17 +861,19 @@ export const music: Block = {
           tracks.push(...res.tracks.slice(0, trackCount - tracks.length));
         }
       } else {
-        ctx.log(`music: generating via ${prov}…`);
-        const res = await generateMureka({
+        ctx.log(`music: generating ${trackCount} requested Mureka tracks…`);
+        const result = await generateMurekaTrackSet({
           prompt: providerPrompt,
+          trackCount,
           model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
-          timeoutMs: 600_000,
+          onCompletedGeneration: () => {
+            generations += 1;
+            billedGenerations += 1;
+          },
         });
-        generations = 1;
-        billedGenerations++;
-        usedProvider = res.provider;
-        jobIds = [res.jobId];
-        tracks = res.tracks;
+        jobIds = result.jobIds;
+        tracks = result.tracks;
+        usedProvider = "mureka";
       }
     };
 
