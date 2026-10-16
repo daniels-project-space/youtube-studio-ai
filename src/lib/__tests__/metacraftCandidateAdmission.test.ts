@@ -17,6 +17,7 @@ let generatedTitles: string[] | undefined;
 let preferredTitle = '';
 let forceCollapsedFirstSlate = false;
 let collapsedSlateAttempts = 0;
+let forceUncitedContradictionFirstJudge = false;
 const loader = Module as unknown as { _load: (request: string, ...rest: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (request, ...rest) {
@@ -31,6 +32,13 @@ loader._load = function (request, ...rest) {
     if (prompt.startsWith('You are a YouTube CTR strategist')) {
       judgeCalls++;
       const rows = prompt.split('CANDIDATES:\n')[1].split('\n\n')[0].split('\n');
+      if (forceUncitedContradictionFirstJudge && judgeCalls === 1) {
+        return { rankings: rows.map((_, idx) => ({
+          idx, clickScore: 9, direct: 9, identityFit: 9, viewerMotivation: 9,
+          grounding: idx === 0 ? 'contradicted' : 'insufficient',
+          reason: 'The source does not establish this candidate.',
+        })) };
+      }
       return { rankings: rows.map((row, idx) => ({ idx, clickScore: preferredTitle && row.endsWith(preferredTitle) ? 10 : 9, direct: 9, identityFit: 9, viewerMotivation: 9,
         grounding: row.endsWith(rejectedTitle) && rejectedTitle ? 'insufficient' : 'supported',
         reason: 'Controlled admission response, not model-quality evidence.' })) };
@@ -87,6 +95,25 @@ async function main() {
   assert.equal(reviewed.titleDecision.candidates.length, 2, 'Both meanings must reach the source-aware judge');
   assert.equal(generatorCalls, 1);
   assert.equal(judgeCalls, 1);
+
+  // An unsupported claim is not a contradiction. The real engine must reject
+  // an uncited verdict and use its bounded repair instead of sealing it.
+  rejectedTitle = '';
+  generatedTitles = ['Taxes Fund Public Schools', 'Where School Tax Money Goes'];
+  preferredTitle = generatedTitles[0];
+  forceUncitedContradictionFirstJudge = true;
+  generatorCalls = judgeCalls = 0;
+  const repairedGrounding = await craftMetadata({
+    topic: 'Taxes and public schools',
+    narrationText: 'Taxes fund public schools. School tax money goes to teachers and maintenance.',
+    competitorTitles: [{ title: 'Frozen evidence', views: 100 }],
+  });
+  assert.equal(repairedGrounding.title, generatedTitles[0]);
+  assert.equal(repairedGrounding.titleDecision.attempts, 2,
+    'the rejected contradiction must not be persisted as the selected decision');
+  assert.equal(generatorCalls, 2, 'the malformed semantic response gets one bounded slate repair');
+  assert.equal(judgeCalls, 2, 'the repaired slate receives one fresh semantic judgment');
+  forceUncitedContradictionFirstJudge = false;
 
   // All valid candidates remain auditable. The runner-up skips a filler-only
   // variant only after the semantic scores establish which version is best.
