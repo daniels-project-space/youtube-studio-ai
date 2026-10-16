@@ -92,6 +92,8 @@ import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } f
 
 export interface DesignOptions {
   family: FamilyKey;
+  /** New channel admissions may use the channel-grounded critic; legacy graphs stay pinned. */
+  channelAwareScriptQa?: boolean;
   /** Supervised source selection only; does not grant listening or release approval. */
   yue2Music?: YuE2PipelineSelection;
   nicheKey?: string;
@@ -1309,6 +1311,21 @@ export function designPipelineCore(
     }
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
+  }
+  if (opts.channelAwareScriptQa === true) {
+    const qaIndexes = pipeline.flatMap((entry, index) => entry.block === "qa_script" ? [index] : []);
+    if (qaIndexes.length > 1) {
+      throw new Error("channel-aware script QA selection requires exactly one qa_script module");
+    }
+    if (qaIndexes.length === 1) {
+      const index = qaIndexes[0]!;
+      const current = pipeline[index]!;
+      const version = "2.0.0-channel-aware";
+      if (current.version !== undefined && current.version !== version) {
+        throw new Error(`channel-aware script QA cannot replace explicitly pinned qa_script@${current.version}`);
+      }
+      pipeline[index] = { ...current, version };
+    }
   }
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);

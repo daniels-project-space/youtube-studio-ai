@@ -1807,6 +1807,7 @@ export async function executeDesignChannel(
 
   const designOptions: DesignOptions = {
     family: payload.family,
+    channelAwareScriptQa: !existingAtStart,
     nicheKey: programBrief.nicheKey,
     subcategory: programBrief.subcategory,
     programBrief,

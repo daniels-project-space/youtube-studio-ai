@@ -227,6 +227,30 @@ function compileRepresentativeFamilies(): void {
   }
 }
 
+function channelAwareScriptQaIsNewChannelOnlyByDefault(): void {
+  const legacy = designPipeline({ family: "narrated_stock", nicheKey: "motivation" });
+  assert.equal(legacy.pipeline.find((entry) => entry.block === "qa_script")?.version, undefined);
+
+  const nonNarrated = designPipeline({ family: "music_loop", nicheKey: "lofi", channelAwareScriptQa: true });
+  assert.equal(nonNarrated.pipeline.some((entry) => entry.block === "qa_script"), false);
+
+  const selected = designPipeline({
+    family: "narrated_stock",
+    nicheKey: "motivation",
+    channelAwareScriptQa: true,
+  });
+  assert.equal(selected.pipeline.find((entry) => entry.block === "qa_script")?.version, "2.0.0-channel-aware");
+  assert.equal(
+    selected.compilation?.modules.find((manifest) => manifest.id === "qa_script")?.version,
+    "2.0.0-channel-aware",
+  );
+  assert.ok(channelPipelineValidationSeedKeys(selected.contentLane, undefined, selected.pipeline).includes("channelName"));
+  assert.ok(
+    getManifest("qa_script", "2.0.0-channel-aware")?.consumes.channelName,
+    "the selected critic must require the new channel's frozen name",
+  );
+}
+
 function defaultBudgetsCoverCompilerReservations(): void {
   for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
     const design = designPipeline({ family, publishMode: "draft" });
@@ -949,6 +973,7 @@ function main(): void {
   calibratedDirectContractAudit();
   contractInputDeclarationsAreUnambiguous();
   compileRepresentativeFamilies();
+  channelAwareScriptQaIsNewChannelOnlyByDefault();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
   runtimeConfigurationIsCompiledBeforeSpendReservation();
