@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests, get as getBlock, getManifest } from "@/engine/registry";
@@ -69,6 +69,47 @@ function literalStrings(property: ts.ObjectLiteralElementLike | undefined): stri
     .map((element) => element.text);
 }
 
+function importedSourcePath(sourcePath: string, moduleName: string): string | undefined {
+  const candidate = moduleName.startsWith("@/")
+    ? join(process.cwd(), "src", `${moduleName.slice(2)}.ts`)
+    : resolvePath(dirname(sourcePath), `${moduleName}.ts`);
+  return existsSync(candidate) ? candidate : undefined;
+}
+
+function resolveStringConstant(
+  name: string,
+  source: ts.SourceFile,
+  seen = new Set<string>(),
+): string | undefined {
+  const key = `${source.fileName}:${name}`;
+  if (seen.has(key)) return undefined;
+  seen.add(key);
+
+  for (const statement of source.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || declaration.name.text !== name || !declaration.initializer) continue;
+        if (ts.isStringLiteral(declaration.initializer)) return declaration.initializer.text;
+        if (ts.isIdentifier(declaration.initializer)) {
+          const local = resolveStringConstant(declaration.initializer.text, source, seen);
+          if (local !== undefined) return local;
+        }
+      }
+    }
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.importClause?.namedBindings || !ts.isNamedImports(statement.importClause.namedBindings)) continue;
+    const imported = statement.importClause.namedBindings.elements.find(element => element.name.text === name);
+    if (!imported) continue;
+    const path = importedSourcePath(source.fileName, statement.moduleSpecifier.text);
+    if (!path) continue;
+    const importedSource = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const importedName = imported.propertyName?.text ?? imported.name.text;
+    const resolved = resolveStringConstant(importedName, importedSource, seen);
+    if (resolved !== undefined) return resolved;
+  }
+  return undefined;
+}
+
 function directContractAudit(additionalSources: Record<string, string> = {}): void {
   const blockDir = join(process.cwd(), "src/trigger/blocks");
   const extras: string[] = [];
@@ -76,8 +117,9 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
   const sources = Object.fromEntries(readdirSync(blockDir).filter(name => name.endsWith(".ts"))
     .map(file => [file, readFileSync(join(blockDir, file), "utf8")]));
   for (const [file, text] of Object.entries({ ...sources, ...additionalSources })) {
+    const sourcePath = file.includes("/") ? join(process.cwd(), file) : join(blockDir, file);
     const source = ts.createSourceFile(
-      file,
+      sourcePath,
       text,
       ts.ScriptTarget.Latest,
       true,
@@ -98,15 +140,7 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
       if (versionProperty && ts.isPropertyAssignment(versionProperty)) {
         const expression = versionProperty.initializer;
         if (ts.isStringLiteral(expression)) version = expression.text;
-        else if (ts.isIdentifier(expression)) {
-          for (const statement of source.statements) {
-            if (!ts.isVariableStatement(statement)) continue;
-            for (const declaration of statement.declarationList.declarations) {
-              if (ts.isIdentifier(declaration.name) && declaration.name.text === expression.text &&
-                declaration.initializer && ts.isStringLiteral(declaration.initializer)) version = declaration.initializer.text;
-            }
-          }
-        }
+        else if (ts.isIdentifier(expression)) version = resolveStringConstant(expression.text, source);
         assert.ok(version, `cannot resolve explicit ${id} version in ${file}`);
       }
       const manifest = getManifest(id, version);
@@ -204,6 +238,11 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
 
 function calibratedDirectContractAudit(): void {
   directContractAudit();
+  assert.doesNotThrow(() => directContractAudit({ "imported-version-fixture.ts": `
+    import { YUE2_SCORED_MUSIC_VERSION as selectedVersion } from "@/engine/musicModuleVersions";
+    const block = { id: "music", version: selectedVersion, produces: [],
+      run: ctx => { const topic = ctx.store["topic"]; void topic; return {}; } };
+  ` }), "the source audit must resolve imported version constants without weakening input checks");
   assert.throws(() => directContractAudit({ "version-negative-fixture.ts": `
     const block = { id: "music", version: "3.0.0-yue2-candidate", produces: [],
       run: ctx => { const illegal = ctx.store["undeclared_fixture_input"]; } };
