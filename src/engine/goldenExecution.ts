@@ -173,7 +173,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     note: "Provider-free shared factual-evidence admission only. It binds a human-reviewed source/claim/snapshot packet and lets Episode Graph reject mismatched factual visual manifests before local rendering; it neither replaces Casefile safeguards nor admits automatic factual production.",
   },
   "cinematic-case-sequence": {
-    kind: "pipeline-module",
+    kind: "registered-private-release",
     executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
     note: "Provider-free cinematic direction draft → human signature → strict admission. It converts the admitted Casefile map and Story Spine into a source-bound multi-shot/EDL handoff for the existing Novita renderer, but cannot mint its own crime-editor approval or auto-admit a crime family.",
   },
