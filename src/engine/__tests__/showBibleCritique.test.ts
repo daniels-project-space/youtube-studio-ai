@@ -57,7 +57,7 @@ async function main() {
     calls.push({ prompt, kind: critic ? "critic" : "writer" });
     const content = critic
       ? JSON.stringify(++criticCalls === 1
-        ? { score: 0.55, issues: ["The first draft's channel persona is too generic."] }
+        ? { score: 0.94, issues: ["The first draft's channel persona is too generic."] }
         : { score: 0.94, issues: [] })
       : JSON.stringify((++writerCalls === 1
         ? { ...bible, vibe: "Calm, consistent, broadly accessible, and carefully considered." }
