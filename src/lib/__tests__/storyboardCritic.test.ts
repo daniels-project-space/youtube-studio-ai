@@ -45,6 +45,21 @@ async function main(): Promise<void> {
     assert.equal(calls, 1);
 
     global.fetch = async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"score":0.94,"pass":true,"issues":["Panel 2: show the causal change."]}' } }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    assert.deepEqual(await critiqueStoryboardText({
+      label: "contradictory verdict",
+      topic: "topic",
+      candidate: "candidate",
+      rubric: "Judge only the causal sequence.",
+      costWarning: "Rendering costs money.",
+    }), {
+      score: 0.94,
+      pass: false,
+      issues: ["Panel 2: show the causal change."],
+    }, "a storyboard critic cannot pass while listing concrete repairs");
+
+    global.fetch = async () => new Response(JSON.stringify({
       choices: [{ message: { content: '{"score":"bad","pass":true,"issues":[]}' } }],
     }), { status: 200, headers: { "content-type": "application/json" } });
     assert.equal(
