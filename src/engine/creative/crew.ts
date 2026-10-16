@@ -296,10 +296,10 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
 /* ------------------------------ Composer ------------------------------- */
 
 const composerSchema = z.object({
-  musicPrompt: z.string().default(""),
-  duckDb: z.number().default(-12),
-  bedLufs: z.number().default(-22),
-  voiceFx: z.string().optional(),
+  musicPrompt: z.string().trim().min(1),
+  duckDb: z.number().finite().default(-12),
+  bedLufs: z.number().finite().default(-22),
+  voiceFx: z.enum(["radio"]).optional(),
 });
 
 export async function briefComposer(
