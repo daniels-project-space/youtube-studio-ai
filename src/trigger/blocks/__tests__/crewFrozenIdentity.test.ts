@@ -10,15 +10,20 @@ import { arrangementComposerReservation } from "@/lib/arrangementComposerBudget"
 type Request = { role: string; prompt: string; schema: z.ZodType; beforeDispatch?: () => Promise<void> };
 const calls: Request[] = [];
 const arrangement = {
-  role: "primary_music", direction: "Quiet original instrumental music.", requestedDurationSec: 30,
+  role: "primary_music", tempoMode: "metered", direction: "Quiet original instrumental music.", requestedDurationSec: 30,
   form: "continuous", ending: "natural_cadence", playback: "repeat",
   sections: Array.from({ length: 4 }, (_, index) => ({ id: `section-${index}`, label: `Section ${index}`,
     startFraction: index / 4, endFraction: (index + 1) / 4, energy: 0.2, instruction: "Keep the texture steady." })),
 };
 const responses: Record<string, unknown> = {
   crew_director: { hook: "A quiet opening", beats: [{ name: "Opening", intentSec: 30, note: "Observe." }] },
-  cinematographer: { footageQueries: ["quiet forest morning"], promptStyle: "Natural light" },
-  editor: { sections: [{ name: "Opening", cutsPerMin: 3 }], transitions: "crossfade" },
+  cinematographer: {
+    footageQueries: ["quiet forest morning", "mist between trees", "sunlight through leaves", "dew on fern",
+      "woodland path dawn", "river under canopy", "branches in breeze", "forest floor detail"],
+    promptStyle: "Natural light", palette: ["#29483A"], motion: "Slow observational drift", avoid: ["fast cuts"],
+  },
+  editor: { sections: [{ name: "Opening", cutsPerMin: 3 }], transitions: "crossfade",
+    captionStyle: "Small restrained lower-third", overlayRule: "Keep text clear of the subject" },
   composer: { musicPrompt: "Quiet original instrumental music.", duckDb: -12, bedLufs: -22 },
   critic: { assertions: [{ id: "duration", description: "Positive duration", check: "deterministic",
     metric: "durationSec", op: ">", threshold: 0, severity: "block" }] },

@@ -358,6 +358,22 @@ const arrangementComposerResponseSchema = z.object({
   voiceFx: z.literal("radio").optional(),
 }).strict();
 
+function requireExplicitArrangementTempo<T extends z.infer<typeof arrangementComposerResponseSchema>>(
+  schema: z.ZodType<T>,
+) {
+  return schema.superRefine((response, issue) => {
+    if (response.arrangement.tempoMode === undefined) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, path: ["arrangement", "tempoMode"],
+        message: "new Composer responses must explicitly choose metered or unmetered tempoMode" });
+    }
+  });
+}
+
+const arrangementComposerResponseWithTempoSchema = requireExplicitArrangementTempo(arrangementComposerResponseSchema);
+const scoredArrangementComposerResponseSchema = requireExplicitArrangementTempo(
+  arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema }),
+);
+
 export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
   musicIntent: MusicArrangementIntentSchema.optional(),
@@ -402,14 +418,9 @@ export async function briefComposerWithArrangement(
   const musicIntent = ctx.musicIntent === undefined ? undefined : MusicArrangementIntentSchema.parse(ctx.musicIntent);
   const config = agentJsonConfiguration("composer_arrangement");
   assertArrangementComposerAdmission(config.model, admission, includeSymbolicScore);
-  const responseSchema = (includeSymbolicScore
-    ? arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema })
-    : arrangementComposerResponseSchema).superRefine((response, issue) => {
-      if (response.arrangement.tempoMode === undefined) {
-        issue.addIssue({ code: z.ZodIssueCode.custom, path: ["arrangement", "tempoMode"],
-          message: "new Composer responses must explicitly choose metered or unmetered tempoMode" });
-      }
-    });
+  const responseSchema = includeSymbolicScore
+    ? scoredArrangementComposerResponseSchema
+    : arrangementComposerResponseWithTempoSchema;
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
     musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",

@@ -24,7 +24,7 @@ const seedStore = {
 };
 const response = {
   arrangement: {
-    role: "primary_music", direction: "Unmetered steady drone without a build or drop.",
+    role: "meditation_bed", tempoMode: "unmetered", direction: "Unmetered steady drone without a build or drop.",
     requestedDurationSec: 180, form: "continuous", ending: "seamless_wrap", playback: "repeat",
     sections: Array.from({ length: 4 }, (_, index) => ({
       id: `interval-${index + 1}`, label: `Interval ${index + 1}`,

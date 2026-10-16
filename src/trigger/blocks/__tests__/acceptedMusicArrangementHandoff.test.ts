@@ -53,7 +53,8 @@ function draft(role: AcceptedMusicArrangementDraft["role"], shaped = false): Acc
     ? ["Sparse opening texture.", "Introduce the authored soft pulse.", "Withdraw the pulse beneath speech.", "Let the accepted texture end naturally."]
     : Array.from({ length: 4 }, () => "Maintain the same texture and level throughout this interval.");
   return {
-    role, direction: "Synthetic evaluation: glass harmonics and soft room texture; no percussion or vocals.",
+    role, tempoMode: role === "sleep_sound_bed" ? "unmetered" : "metered",
+    direction: "Synthetic evaluation: glass harmonics and soft room texture; no percussion or vocals.",
     requestedDurationSec: role === "short_form_bed" ? 20 : 120,
     form: shaped ? "through_composed" : "continuous",
     ending: shaped ? "natural_cadence" : "seamless_wrap", playback: shaped ? "once" : "repeat",
