@@ -17,6 +17,7 @@ import {
   MusicProviderAuditionSourceSchema,
 } from "@/engine/musicAuditionCheckpoint";
 import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
+import { createMusicAuditionReviewReceipt } from "@/engine/musicAuditionReview";
 
 export const runtime = "nodejs";
 const headers = { "Cache-Control": "private, no-store" };
@@ -36,6 +37,19 @@ const QualitySubmissionSchema = z.object({
   audition: z.object({
     emotionalDepthScore: z.number().finite(), arrangementDepthScore: z.number().finite(),
     hollowOrGeneric: z.boolean(), verdict: z.enum(["pass", "fail"]), notes: z.string().trim().min(1).max(1_600),
+  }).strict(),
+}).strict();
+
+const RejectionSubmissionSchema = z.object({
+  action: z.literal("reject"),
+  checkpointId: z.string().trim().min(1).max(500),
+  runId: RunIdSchema,
+  sectionReviews: z.array(z.object({
+    sectionId: z.string().trim().min(1).max(80), score: z.number().finite(), evidence: z.string().trim().min(1).max(600),
+  }).strict()).min(4).max(8),
+  audition: z.object({
+    emotionalDepthScore: z.number().finite(), arrangementDepthScore: z.number().finite(),
+    hollowOrGeneric: z.boolean(), verdict: z.literal("fail"), notes: z.string().trim().min(1).max(1_600),
   }).strict(),
 }).strict();
 
@@ -237,13 +251,41 @@ export async function POST(request: Request) {
       } as never);
       return NextResponse.json({ ok: true, result: mutationResult, approvalFingerprint: approval.approvalFingerprint }, { headers });
     }
-    if (body.action !== "reject" || typeof body.checkpointId !== "string" || !body.checkpointId.trim() || Object.keys(body).some((key) => key !== "action" && key !== "checkpointId")) {
+    if (body.action === "reject") {
+      const submission = RejectionSubmissionSchema.parse(body);
+      const convex = client();
+      const result = musicReviewResult(await convex.query(musicAuditionApi.getReviewForRun, {
+        ownerId: actor.ownerId, runId: submission.runId as Id<"runs">,
+      } as never));
+      if (String(result.checkpoint.id ?? "") !== submission.checkpointId) throw new Error("music audition rejection checkpoint/run mismatch");
+      const checkpoint = AnyMusicAuditionCheckpointSchema.parse(result.review.immutableCheckpoint);
+      if (checkpoint.ownerId !== actor.ownerId || checkpoint.runId !== submission.runId) {
+        throw new Error("music audition rejection ownership/run mismatch");
+      }
+      const output = checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.nativeOutput : checkpoint.auditionOutput;
+      const wavKey = checkpoint.version === "music-audition-checkpoint/v1" ? checkpoint.musicNativeWavKey : checkpoint.auditionWavKey;
+      assertOwnedKey(actor.ownerId, wavKey, "music audition WAV");
+      assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
+      const [programBytes, auditionWavBytes] = await Promise.all([
+        getObjectBytes(result.review.channelMusicProgramKey), getObjectBytes(wavKey),
+      ]);
+      const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
+      if (program.fingerprint !== checkpoint.programFingerprint) throw new Error("music audition frozen program identity mismatch");
+      assertMusicAuditionNativeBytes({ expected: output, bytes: auditionWavBytes });
+      const reviewReceipt = createMusicAuditionReviewReceipt({
+        checkpoint, program, reviewerId: actor.ownerId, sectionReviews: submission.sectionReviews,
+        audition: submission.audition, reviewedAt: Date.now(),
+      });
+      const mutationResult = await convex.mutation(musicAuditionApi.reject, {
+        ownerId: actor.ownerId, checkpointId: submission.checkpointId as Id<"musicAuditionCheckpoints">,
+        reviewerId: actor.ownerId, reviewReceipt, now: reviewReceipt.reviewedAt,
+      } as never);
+      return NextResponse.json({ ok: true, result: mutationResult, reviewFingerprint: reviewReceipt.fingerprint }, { headers });
+    }
+    if (body.action !== "reject") {
       return NextResponse.json({ ok: false, error: "Invalid audition request" }, { status: 400, headers });
     }
-    const result = await client().mutation(musicAuditionApi.reject, {
-      ownerId: actor.ownerId, checkpointId: body.checkpointId, reviewerId: actor.ownerId, now: Date.now(),
-    } as never);
-    return NextResponse.json({ ok: true, result }, { headers });
+    return NextResponse.json({ ok: false, error: "Invalid audition request" }, { status: 400, headers });
   } catch (error) {
     const status = error instanceof StudioAuthError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
     return NextResponse.json({ ok: false, error: status === 400 ? "Invalid audition request" : status === 503

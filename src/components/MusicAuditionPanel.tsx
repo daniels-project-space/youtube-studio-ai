@@ -45,6 +45,13 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
   const [arrangementDepthScore, setArrangementDepthScore] = useState("");
   const [hollowOrGeneric, setHollowOrGeneric] = useState(false);
   const [notes, setNotes] = useState("");
+  const sections = data?.review?.sections;
+  const completeReview = (sections?.length ?? 0) >= 4 && (sections ?? []).every((section) => {
+    const review = sectionReviews[section.id];
+    const score = Number(review?.score);
+    return review?.score.trim() !== "" && Number.isFinite(score) && score >= 0 && score <= 1 && Boolean(review?.evidence.trim());
+  }) && emotionalDepthScore.trim() !== "" && Number.isFinite(Number(emotionalDepthScore)) && Number(emotionalDepthScore) >= 0 && Number(emotionalDepthScore) <= 1 &&
+    arrangementDepthScore.trim() !== "" && Number.isFinite(Number(arrangementDepthScore)) && Number(arrangementDepthScore) >= 0 && Number(arrangementDepthScore) <= 1 && Boolean(notes.trim());
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/music-audition-checkpoints?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
@@ -64,14 +71,21 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
     return () => window.clearTimeout(timer);
   }, [load]);
   const reject = useCallback(async () => {
-    if (!data?.checkpoint?.id || rejecting) return;
+    if (!data?.checkpoint?.id || rejecting || !completeReview) return;
     setRejecting(true);
     try {
-      const response = await fetch("/api/music-audition-checkpoints", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reject", checkpointId: data.checkpoint.id }) });
+      const response = await fetch("/api/music-audition-checkpoints", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reject", checkpointId: data.checkpoint.id, runId,
+          sectionReviews: (sections ?? []).map((section) => ({ sectionId: section.id, score: Number(sectionReviews[section.id]?.score), evidence: sectionReviews[section.id]?.evidence ?? "" })),
+          audition: { emotionalDepthScore: Number(emotionalDepthScore), arrangementDepthScore: Number(arrangementDepthScore), hollowOrGeneric, verdict: "fail", notes },
+        }),
+      });
       const body = await response.json() as Desk;
       if (!response.ok || !body.ok) setData({ ...data, error: body.error ?? "Music rejection was not accepted" }); else await load();
     } finally { setRejecting(false); }
-  }, [data, load, rejecting]);
+  }, [completeReview, data, emotionalDepthScore, arrangementDepthScore, hollowOrGeneric, load, notes, rejecting, runId, sectionReviews, sections]);
   const approve = useCallback(async () => {
     if (!data?.checkpoint?.id || approving) return;
     setApproving(true);
@@ -127,7 +141,7 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       </details>
       <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.75rem" }}>
         <button type="button" disabled={approving} onClick={() => void approve()}>{approving ? "Recording QC…" : "Approve QC"}</button>
-        <button type="button" disabled={rejecting} onClick={() => void reject()}>{rejecting ? "Rejecting…" : "Reject"}</button>
+        <button type="button" disabled={rejecting || !completeReview} onClick={() => void reject()}>{rejecting ? "Rejecting…" : "Reject"}</button>
       </div>
     </>}
   </section>;

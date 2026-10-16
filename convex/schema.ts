@@ -3196,6 +3196,8 @@ export default defineSchema({
     reviewerId: v.optional(v.string()),
     approvedAt: v.optional(v.number()),
     rejectedAt: v.optional(v.number()),
+    reviewReceipt: v.optional(v.any()),
+    reviewFingerprint: v.optional(v.string()),
     qualityReceiptKey: v.optional(v.string()),
     qualityReceiptFingerprint: v.optional(v.string()),
     approvalFingerprint: v.optional(v.string()),

@@ -68,9 +68,16 @@ async function main() {
   await check(await POST(post("[]")), 400);
   await check(await POST(post(JSON.stringify({ action: "approve", runId: "invalid.id" }))), 400);
   await check(await POST(post(JSON.stringify({ action: "unknown" }))), 400);
-  await check(await POST(post(reject)), 503);
+  await check(await POST(post(reject)), 400);
+  const completeReject = JSON.stringify({
+    action: "reject", checkpointId: "checkpoint", runId: "review-run",
+    sectionReviews: ["intro", "build", "peak", "outro"].map((sectionId) => ({ sectionId, score: 0.3, evidence: "No development" })),
+    audition: { emotionalDepthScore: 0.2, arrangementDepthScore: 0.3, hollowOrGeneric: true, verdict: "fail", notes: "The arrangement feels static." },
+  });
+  await check(await POST(post(completeReject)), 503);
   unavailable = false;
-  assert.deepEqual(await check(await POST(post(reject)), 200), { ok: true, result: { rejected: true } });
+  await check(await POST(post(completeReject)), 503);
+  assert.equal(mutations, 0, "a rejection without an owned immutable checkpoint must fail closed before mutation");
   console.log("Music audition route: private responses, sanitized errors, input admission and owner-only decisions passed");
 }
 

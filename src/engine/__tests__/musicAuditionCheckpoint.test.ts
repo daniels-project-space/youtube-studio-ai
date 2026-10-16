@@ -12,8 +12,12 @@ import {
   MusicAuditionCheckpointSchema,
 } from "@/engine/musicAuditionCheckpoint";
 import { sha256BytesHex } from "@/lib/sha256";
-import { getApprovedMusicAuditionResume } from "../../../convex/musicAuditionCheckpoints";
+import { getApprovedMusicAuditionResume, reject as rejectMusicAudition } from "../../../convex/musicAuditionCheckpoints";
 import type { QueryCtx } from "../../../convex/_generated/server";
+import {
+  assertMusicAuditionReviewReceiptForCheckpoint,
+  createMusicAuditionReviewReceipt,
+} from "@/engine/musicAuditionReview";
 
 const retainedWavBytes = new TextEncoder().encode("RIFF-native-music3-wav-fixture".repeat(3));
 const retainedWavIntegrity = {
@@ -64,6 +68,18 @@ const checkpoint = createMusicAuditionCheckpoint({
   },
 });
 assert.equal(checkpoint.programFingerprint, program.fingerprint);
+const rejectedReview = createMusicAuditionReviewReceipt({
+  checkpoint, program, reviewerId: "owner-a", reviewedAt: 1_700_000_000_000,
+  sectionReviews: program.generation.sections.map((section) => ({ sectionId: section.id, score: 0.2, evidence: "melody repeats without development" })),
+  audition: { emotionalDepthScore: 0.2, arrangementDepthScore: 0.3, hollowOrGeneric: true, verdict: "fail", notes: "No meaningful lift in the second half." },
+});
+assert.equal(assertMusicAuditionReviewReceiptForCheckpoint(rejectedReview, checkpoint, "owner-a").fingerprint, rejectedReview.fingerprint);
+assert.throws(() => assertMusicAuditionReviewReceiptForCheckpoint(rejectedReview, checkpoint, "owner-b"), /reviewer/u);
+assert.throws(() => createMusicAuditionReviewReceipt({
+  checkpoint, program, reviewerId: "owner-a", reviewedAt: 1,
+  sectionReviews: program.generation.sections.map((section) => ({ sectionId: section.id, score: 2, evidence: "invalid score" })),
+  audition: { emotionalDepthScore: 0, arrangementDepthScore: 0, hollowOrGeneric: true, verdict: "fail", notes: "invalid" },
+}));
 assert.throws(() => MusicAuditionCheckpointSchema.parse({ ...checkpoint, musicNativeWavKey: "owner/owner-a/runs/run-a/audio/not-the-native.wav" }), /content-addressed/);
 const providerProgram = createChannelMusicProgram({
   channelId: "channel-a", channelIdentityFingerprint: "a".repeat(64), family: "music_loop",
@@ -200,4 +216,47 @@ async function testRegisteredResumeQuery() {
   console.log("MUSIC AUDITION REGISTERED QUERY PASS: authenticated approval and rejected auth/owner/receipt/stage substitutions");
 }
 
-testRegisteredResumeQuery().catch((error) => { console.error(error); process.exitCode = 1; });
+async function testRegisteredRejectionMutation() {
+  const checkpointRow = {
+    _id: "checkpoint-a", ownerId: "owner-a", channelId: "channel-a", runId: "run-a",
+    checkpoint, checkpointFingerprint: checkpoint.checkpointFingerprint, decision: "awaiting",
+  } as Record<string, unknown>;
+  const runRow = {
+    _id: "run-a", ownerId: "owner-a", channelId: "channel-a", status: "awaiting_music_audition",
+    musicAuditionCheckpointId: "checkpoint-a", musicAuditionCheckpointFingerprint: checkpoint.checkpointFingerprint,
+  } as Record<string, unknown>;
+  const rows: Record<string, Record<string, unknown>> = { "checkpoint-a": checkpointRow, "run-a": runRow };
+  const ctx = {
+    auth: { getUserIdentity: async () => ({ role: "service", owner_id: "owner-a", subject: "owner-a" }) },
+    db: {
+      get: async (id: string) => rows[id] ?? null,
+      patch: async (id: string, patch: Record<string, unknown>) => { Object.assign(rows[id], patch); },
+    },
+  } as never;
+  const registered = rejectMusicAudition as unknown as {
+    isMutation: boolean;
+    _handler: (context: never, input: Record<string, unknown>) => Promise<unknown>;
+  };
+  assert.equal(registered.isMutation, true);
+  const args = {
+    ownerId: "owner-a", checkpointId: "checkpoint-a", reviewerId: "owner-a",
+    reviewReceipt: rejectedReview, now: rejectedReview.reviewedAt,
+  };
+  assert.deepEqual(await registered._handler(ctx, args), {
+    kind: "rejected", reused: false, reviewFingerprint: rejectedReview.fingerprint,
+  });
+  assert.equal(checkpointRow.reviewFingerprint, rejectedReview.fingerprint);
+  assert.equal(runRow.status, "music_audition_rejected");
+  assert.deepEqual(await registered._handler(ctx, args), {
+    kind: "rejected", reused: true, reviewFingerprint: rejectedReview.fingerprint,
+  });
+  const changedReview = createMusicAuditionReviewReceipt({
+    checkpoint, program, reviewerId: "owner-a", reviewedAt: rejectedReview.reviewedAt,
+    sectionReviews: rejectedReview.sectionReviews,
+    audition: { ...rejectedReview.audition, notes: "Different findings." },
+  });
+  await assert.rejects(registered._handler(ctx, { ...args, reviewReceipt: changedReview }), /replay changed its immutable review/u);
+  console.log("MUSIC AUDITION REGISTERED MUTATION PASS: rejection receipt persists, replay is idempotent, changed feedback is refused");
+}
+
+Promise.all([testRegisteredResumeQuery(), testRegisteredRejectionMutation()]).catch((error) => { console.error(error); process.exitCode = 1; });

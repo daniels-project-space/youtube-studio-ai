@@ -7,6 +7,7 @@ import {
   AnyMusicAuditionCheckpointSchema,
   createMusicAuditionApproval,
 } from "../src/engine/musicAuditionCheckpoint";
+import { assertMusicAuditionReviewReceiptForCheckpoint } from "../src/engine/musicAuditionReview";
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { verifiedWorkerDeploymentFields, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
@@ -523,7 +524,10 @@ export async function terminalizeMusicAuditionResumeForLease(
 /** A declined native track is terminal for this frozen run; it cannot quietly
  * re-enter assembly or be replaced under the same checkpoint identity. */
 export const reject = mutation({
-  args: { ownerId: v.string(), checkpointId: v.id("musicAuditionCheckpoints"), reviewerId: v.string(), now: v.optional(v.number()) },
+  args: {
+    ownerId: v.string(), checkpointId: v.id("musicAuditionCheckpoints"), reviewerId: v.string(),
+    reviewReceipt: v.any(), now: v.optional(v.number()),
+  },
   returns: v.any(),
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "music audition rejection");
@@ -531,15 +535,26 @@ export const reject = mutation({
     if (!Number.isSafeInteger(now) || now < 0 || !args.reviewerId.trim()) throw new Error("music audition rejection is invalid");
     const row = await ctx.db.get(args.checkpointId);
     if (!row || row.ownerId !== args.ownerId) throw new Error("music audition checkpoint not found");
+    const checkpoint = AnyMusicAuditionCheckpointSchema.parse(row.checkpoint);
+    if (row.checkpointFingerprint !== checkpoint.checkpointFingerprint) throw new Error("music audition checkpoint fingerprint mismatch");
+    const reviewReceipt = assertMusicAuditionReviewReceiptForCheckpoint(args.reviewReceipt, checkpoint, args.reviewerId);
+    if (reviewReceipt.reviewedAt !== now) throw new Error("music audition review timestamp does not match its receipt");
     const run = await ctx.db.get(row.runId);
     if (!run || run.ownerId !== args.ownerId || run.channelId !== row.channelId) throw new Error("music audition run ownership mismatch");
-    if (row.decision === "rejected") return { kind: "rejected", reused: true };
+    if (run.musicAuditionCheckpointId !== row._id || run.musicAuditionCheckpointFingerprint !== checkpoint.checkpointFingerprint) {
+      throw new Error("music audition checkpoint is not bound to its run");
+    }
+    if (row.decision === "rejected") {
+      if (row.reviewFingerprint !== reviewReceipt.fingerprint) throw new Error("music audition rejection replay changed its immutable review");
+      return { kind: "rejected", reused: true, reviewFingerprint: reviewReceipt.fingerprint };
+    }
     if (row.decision !== "awaiting" || run.status !== "awaiting_music_audition") {
       throw new Error("music audition checkpoint is no longer awaiting rejection");
     }
     const reason = "music audition rejected by the owner; create a fresh immutable track before assembly";
     await ctx.db.patch(row._id, {
       decision: "rejected", reviewerId: args.reviewerId, rejectedAt: now,
+      reviewReceipt, reviewFingerprint: reviewReceipt.fingerprint,
       blockedAt: now, blockedReason: reason,
     });
     await ctx.db.patch(run._id, {
@@ -548,6 +563,6 @@ export const reject = mutation({
       musicAuditionResumeQueueDeadlineAt: undefined, musicAuditionResumeLastError: reason,
       finishedAt: now, heartbeatAt: now, ...clearExecutionLeasePatch(),
     });
-    return { kind: "rejected", reused: false };
+    return { kind: "rejected", reused: false, reviewFingerprint: reviewReceipt.fingerprint };
   },
 });
