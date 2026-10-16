@@ -103,6 +103,9 @@ export const musicArrangementPlan: Block = {
     if (!ctx.channelId) throw new Error("music_arrangement_plan requires a channel id");
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
+      if (brief.reviewContext?.family !== route.family) {
+        throw new Error("music_arrangement_plan review context does not match the current channel route family");
+      }
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
       if (!isMusicRoleAllowedForRoute(
         route.family,

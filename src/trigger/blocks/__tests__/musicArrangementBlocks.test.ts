@@ -163,7 +163,8 @@ async function main() {
   assert.equal(calls.length, callsBeforeValidation, "legacy pairing is rejected during graph validation before any text purchase");
 
   for (const arrangement of [flat, developing, unmeteredMeditation, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
-    const family = arrangement.role === "narration_bed" ? "narrated_stock" : "music_loop";
+    const family = arrangement.role === "narration_bed" ? "narrated_stock"
+      : arrangement.role === "meditation_bed" ? "sleep" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const outputs: Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0][] = [];
     const resolved = validatePipeline([
@@ -280,9 +281,10 @@ async function main() {
       requestedDurationSec: 90, playback: role === "meditation_bed" ? "repeat" as const : "once" as const,
       ending: "seamless_wrap" as const };
     const arrangement = { ...flat, ...musicIntent };
+    const family = role === "meditation_bed" ? "sleep" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const result = await runPipeline(validatePipeline([
-      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent, family: "music_loop" } },
+      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent, family } },
       { block: "music_arrangement_plan" },
     ], Object.keys(seedStore)), { ...stageContext(), seedStore, defaultRetries: 0, sink: { upsert: async () => {} } });
     assert.equal(result.ok, true, result.error);
@@ -301,6 +303,17 @@ async function main() {
         sampleTopics: [seedStore.topic],
       });
       const route = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(brief), programBrief: brief });
+      const musicLoopBrief = createChannelProgramBrief({
+        family: "music_loop", nicheKey: "lofi", locale: "en-US",
+        concept: "Original instrumental focus sessions with calm visual loops.",
+        sampleTopics: [seedStore.topic],
+      });
+      const mismatchedRoute = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(musicLoopBrief), programBrief: musicLoopBrief });
+      await assert.rejects(musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
+          channelProgramRoute: mismatchedRoute }),
+      }), /review context does not match the current channel route family/,
+      "a sleep composer receipt cannot be accepted under a Lo-Fi route");
       const planned = await musicArrangementPlan.run({
         ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
           channelProgramRoute: route }),
