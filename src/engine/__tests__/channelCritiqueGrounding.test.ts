@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   channelCritiqueBrief,
+  channelCreatorDirection,
   channelCritiqueContextFromStore,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -43,8 +44,16 @@ const motionLab: ChannelCritiqueContext = {
 
 const fieldBrief = channelCritiqueBrief(fieldNotes);
 const motionBrief = channelCritiqueBrief(motionLab);
+const fieldCreator = channelCreatorDirection(fieldNotes);
+const motionCreator = channelCreatorDirection(motionLab);
 
 assert.notEqual(fieldBrief, motionBrief, "different channel identities must not collapse to a shared generic critic brief");
+assert.notEqual(fieldCreator, motionCreator, "different channels must receive distinct writer direction");
+for (const value of ["Quiet Field Notes", "Audience:", "Promise:", "Let silence carry weight", "Avoid:", "miracle"])
+  assert.ok(fieldCreator.includes(value), `creator direction must retain ${value}`);
+assert.equal(channelCreatorDirection(), "", "unconfigured callers retain the no-direction legacy prompt");
+assert.ok(channelCreatorDirection({ criticDoctrine: "x".repeat(2_000) }).length < 700,
+  "creator direction must stay bounded");
 for (const value of [
   "Quiet Field Notes",
   "Small, specific discoveries in familiar landscapes",

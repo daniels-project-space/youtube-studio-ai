@@ -89,6 +89,8 @@ export interface WhiteboardSyncBrief {
   channelName?: string;
   /** Channel Style-DNA rendering language, used as a text-native style lock. */
   artStyle?: string;
+  /** Frozen writer-facing channel direction. */
+  channelDirection?: string;
   /** Fish voice id (default "sleepless_historian") — used when provider is Fish. */
   voiceId?: string;
   /** TTS engine: "fish" (default) | "elevenlabs". Lets a cast ElevenLabs voice narrate. */
@@ -741,6 +743,7 @@ function planContract(brief: WhiteboardSyncBrief, nPanels: number, words: number
     : "";
   return (
     `Design a punchy, INFORMATIVE ~60-second WHITEBOARD explainer. TOPIC: ${brief.topic}\n${facts}` +
+    (brief.channelDirection ?? "") +
     `Think like a motion-designer. Each panel is a STACK OF LAYERS drawn one at a time on a whiteboard, building an argument.\n` +
     `Output STRICT JSON: {"title":"...","panels":[ {"narration":"<~2 spoken sentences (~${Math.round(words / nPanels)} words), end with a small beat>",` +
     `"layers":[ {"kind":"art","role":"hero|evidence|reaction","draw":"<the required relationship-rich drawing; NO text/words in the art>",` +

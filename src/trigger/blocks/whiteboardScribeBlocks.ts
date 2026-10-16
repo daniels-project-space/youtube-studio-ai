@@ -49,6 +49,7 @@ import {
 } from "@/lib/storyboardCritic";
 import {
   channelCritiqueContextFromStore,
+  channelCreatorDirection,
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -367,6 +368,7 @@ export async function planScribeWithCritique(
   brief: WhiteboardSyncBrief,
 ): Promise<CritiquedWhiteboardStoryboard> {
   const channel = scribeCritiqueChannel(ctx);
+  const channelDirection = channelCreatorDirection(channel);
   const wantPanels = whiteboardPanelCount(brief.panels);
   const targetWords = Number(brief.targetWords ?? 0) || 0;
   const checkpointKey = storyboardCheckpointKey(ctx, {
@@ -379,6 +381,7 @@ export async function planScribeWithCritique(
     styleId: brief.styleId ?? null,
     artStyle: brief.artStyle ?? null,
     criticDoctrine: channel.criticDoctrine ?? null,
+    channelDirection,
     contentLaneKey: channel.contentLaneKey ?? null,
   });
 
@@ -399,7 +402,7 @@ export async function planScribeWithCritique(
     channel,
     // TEXT ONLY. planWhiteboardStoryboard reaches no image or TTS provider, so
     // no iteration here can spend render money.
-    produce: (priorIssues) => planWhiteboardStoryboard(brief, (m) => ctx.log(`wb-plan: ${m}`), priorIssues),
+    produce: (priorIssues) => planWhiteboardStoryboard({ ...brief, channelDirection }, (m) => ctx.log(`wb-plan: ${m}`), priorIssues),
     critique: async (plan, iter) => {
       const hard = whiteboardStoryboardDefects(plan, wantPanels, targetWords);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });

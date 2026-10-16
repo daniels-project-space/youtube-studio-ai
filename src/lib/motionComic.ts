@@ -81,6 +81,8 @@ export interface MotionComicBrief {
    *  seconds; the writer needs an explicit word budget, not vibes. */
   targetSeconds?: number;
   style?: string;
+  /** Frozen writer-facing channel direction. */
+  channelDirection?: string;
   width?: number;
   height?: number;
   musicPrompt?: string;
@@ -1306,6 +1308,7 @@ function storyPrompt(brief: MotionComicBrief, nPanels: number): string {
   const cast = ROSTER.map((r) => `  ${r.id}  — ${r.name} (${r.g}): ${r.note}`).join("\n");
   return (
     `You are the writer + director of a COMIC-BOOK short. Topic: ${brief.topic}${facts}${seriesContinuity}\n` +
+    (brief.channelDirection ?? "") +
     `Write a genuinely GOOD, COHERENT story across exactly ${nPanels} panels with a real dramatic arc: a strong hook, ` +
     `rising tension, a turn, and a resonant ending. It is narrated: a NARRATOR carries the through-line in vivid prose, and ` +
     `CHARACTERS speak short, in-scene lines that will appear as comic SPEECH BUBBLES. Make every panel advance the story.\n\n` +

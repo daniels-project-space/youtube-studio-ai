@@ -254,6 +254,23 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
   );
 }
 
+/** Bounded writer-facing channel identity, separate from critic instructions. */
+export function channelCreatorDirection(channel?: ChannelCritiqueContext): string {
+  if (!channel) return "";
+  const lines = [
+    compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
+    compact(channel.persona, 180) ? `Audience: ${compact(channel.persona, 180)}` : "",
+    compact(channel.positioning, 240) ? `Promise: ${compact(channel.positioning, 240)}` : "",
+    compact(channel.vibe, 180) ? `Voice and mood: ${compact(channel.vibe, 180)}` : "",
+    compact(channel.styleGrammar, 240) ? `Writing style: ${compact(channel.styleGrammar, 240)}` : "",
+    channel.worksInSpace?.length ? `Lean into: ${channel.worksInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
+    channel.avoidInSpace?.length ? `Avoid: ${channel.avoidInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
+    compact(channel.criticDoctrine, 400) ? `Standing creative direction: ${compact(channel.criticDoctrine, 400)}` : "",
+    channel.bannedWords?.length ? `Do not use these words: ${JSON.stringify(channel.bannedWords.slice(0, 24))}` : "",
+  ].filter(Boolean);
+  return lines.length ? `\nCHANNEL CREATIVE DIRECTION — make this feel authored for this channel:\n${lines.map(x => `- ${x}`).join("\n")}\n` : "";
+}
+
 export interface LoopOptions<T> {
   produce: (priorIssues: string[], iter: number) => Promise<T>;
   critique: (candidate: T, iter: number) => Promise<Critique>;
