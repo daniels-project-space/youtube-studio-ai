@@ -129,7 +129,7 @@ type RawDNA = StyleDNADraft;
 
 /** The different-model critic's verdict on a DNA draft (specificity + fidelity). */
 const critiqueSchema = z.object({
-  score: z.number(),
+  score: z.number().finite().min(0).max(1),
   issues: z.array(z.string()),
 });
 
@@ -160,7 +160,7 @@ export function styleDNAConfidence(input: {
   if (input.hasTitles) confidence += 0.15;
   if (input.hasDatabank) confidence += 0.1;
   if (!input.accepted) confidence = Math.min(confidence * 0.7, ESTABLISHED_CONFIDENCE - 0.01);
-  return Math.min(1, Number(confidence.toFixed(2)));
+  return Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100;
 }
 
 /**

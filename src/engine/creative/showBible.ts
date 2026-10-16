@@ -282,7 +282,7 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
           role: "critic",
           schema: bibleCritiqueSchema,
           log: (m) => log(m),
-          maxTokens: 1800,
+          maxTokens: 2000,
           temperature: 0.2,
           prompt: [
             `Independently review this channel's Show Bible before it becomes durable guidance for every downstream module.`,

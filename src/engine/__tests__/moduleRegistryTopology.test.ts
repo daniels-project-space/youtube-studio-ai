@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { registerAllBlocks } from "@/engine/blocks";
 import { designPipeline } from "@/engine/designer";
 import { FAMILY_KEYS, familyDurationContract } from "@/engine/families";
-import { MODULE_REGISTRY, moduleCard, moduleSurface } from "@/engine/moduleRegistry";
+import { configurableModules, MODULE_REGISTRY, moduleCard, moduleSurface } from "@/engine/moduleRegistry";
+import { validateCustomizationSurface } from "@/engine/customization";
 import { allManifests } from "@/engine/registry";
 import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
 
@@ -40,6 +41,14 @@ for (const [blockId, card] of Object.entries(MODULE_REGISTRY)) {
   assert.ok(card.role, `${blockId} must declare one bounded pipeline responsibility`);
   assert.ok(card.title.trim(), `${blockId} must have a human-readable title`);
   assert.ok(card.does?.trim(), `${blockId} must explain its bounded responsibility`);
+}
+
+for (const { blockId, surface } of configurableModules()) {
+  assert.deepEqual(
+    validateCustomizationSurface(surface),
+    [],
+    `${blockId} must publish valid defaults, knobs, styles, and presets`,
+  );
 }
 
 assert.match(moduleCard("cinematic_case_sequence_draft")?.does ?? "", /caller-supplied cinematicCaseDirection/u,

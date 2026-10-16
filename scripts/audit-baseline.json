@@ -6,9 +6,9 @@
   "audit-inert-consumes": 6,
   "audit-dead-capability-gates": 11,
   "audit-unbounded-normalized": 2,
-  "audit-inert-produces": 64,
+  "audit-inert-produces": 63,
   "audit-unchecked-number-clamps": 3,
   "audit-contract-consumes-drift": 0,
-  "audit-unproducible-consumes": 2,
+  "audit-unproducible-consumes": 0,
   "audit-undeclared-store-reads": 0
 }

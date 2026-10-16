@@ -23,6 +23,7 @@ function surfaceValidation(): void {
   assert.equal(validateKnobs(ASSEMBLY_SURFACE, { aspect: "9:16" }).values.cutEnergy, "steady", "omitted knobs fall to default");
   assert.ok(!validateKnobs(ASSEMBLY_SURFACE, { aspect: "4:3" }).ok, "illegal enum rejected");
   assert.ok(!validateKnobs(ASSEMBLY_SURFACE, { targetLufs: -30 }).ok, "out-of-range number rejected");
+  assert.ok(!validateKnobs(ASSEMBLY_SURFACE, { targetLufs: Number.POSITIVE_INFINITY }).ok, "non-finite number rejected");
   assert.ok(!validateKnobs(ASSEMBLY_SURFACE, { chapterCards: "yes" }).ok, "wrong type rejected");
   assert.ok(!validateKnobs(ASSEMBLY_SURFACE, { bogusKnob: 1 }).ok, "unknown knob rejected");
   console.log("SURFACE VALIDATION PASS: enum/range/type/unknown all fail loud, defaults fill");
@@ -32,6 +33,8 @@ function presetResolution(): void {
   assert.equal(resolveKnobs(ASSEMBLY_SURFACE, "shorts").values.aspect, "9:16", "preset applied");
   assert.equal(resolveKnobs(ASSEMBLY_SURFACE, "shorts", { aspect: "16:9" }).values.aspect, "16:9", "override beats preset");
   assert.ok(!resolveKnobs(ASSEMBLY_SURFACE, "nope").ok, "unknown preset rejected");
+  assert.ok(!resolveKnobs(ASSEMBLY_SURFACE, "").ok, "empty preset rejected");
+  assert.ok(!resolveKnobs(ASSEMBLY_SURFACE, "toString").ok, "prototype properties are not presets");
   // every shipped preset must be internally valid
   for (const name of Object.keys(ASSEMBLY_SURFACE.presets)) {
     assert.ok(resolveKnobs(ASSEMBLY_SURFACE, name).ok, `preset '${name}' must contain only valid knob values`);
