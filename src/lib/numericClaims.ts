@@ -241,9 +241,22 @@ export function unmatchedTitleUnits(title: string, source: string): string[] {
 }
 
 /** Compare complete numeric quantities; unit, causal and alias checks are separate. */
-export function unmatchedTitleNumbers(title: string, source: string): string[] {
-  const claimed = numericMentions(title).filter((mention) => mention.digit);
+function unmatchedNumbers(claimed: readonly NumericMention[], source: string): NumericMention[] {
   if (!claimed.length) return [];
   const available = new Set(numericMentions(source).map((mention) => mention.key));
-  return claimed.filter((mention) => !available.has(mention.key)).map((mention) => mention.raw);
+  return claimed.filter((mention) => !available.has(mention.key));
+}
+
+/** Cold-open grounding ignores idiomatic unitless "one" but checks explicit digits and quantities. */
+export function unmatchedSpokenNumericClaims(text: string, source: string): string[] {
+  const claimed = numericMentions(text).filter((mention) =>
+    mention.digit || mention.key !== "1:0" || explicitUnit(text, mention) !== undefined,
+  );
+  return unmatchedNumbers(claimed, source).map((mention) => mention.raw);
+}
+
+/** Titles retain their calibrated digit-claim scope; opening prose checks spoken quantities too. */
+export function unmatchedTitleNumbers(title: string, source: string): string[] {
+  return unmatchedNumbers(numericMentions(title).filter((mention) => mention.digit), source)
+    .map((mention) => mention.raw);
 }

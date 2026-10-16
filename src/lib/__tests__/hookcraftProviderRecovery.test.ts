@@ -135,14 +135,31 @@ async function main(): Promise<void> {
     assert.equal(generatorCalls, 5, "the source mismatch receives only Hookcraft's existing single bounded retry");
     hook = "Chernobyl's ignored safety test failed in 1986.";
 
+    hook = "Chernobyl's ignored safety test affected thirteen nearby workers.";
+    await assert.rejects(
+      () => craftHook(args),
+      /numeric claim thirteen is absent from admitted source grounding/u,
+      "a spelled-out quantity must not bypass numeric source grounding",
+    );
+    assert.equal(judgeCalls, 7, "a spelled-out numeric mismatch is checked after judging and receives one bounded retry");
+    assert.equal(generatorCalls, 7, "a spelled-out source mismatch gets only Hookcraft's existing one retry");
+    hook = "Chernobyl's ignored safety test affected twelve nearby workers.";
+    const spokenNumberControl = await craftHook(args);
+    assert.equal(spokenNumberControl.hook, hook,
+      "a spelled-out quantity must match its equivalent digit-form source evidence");
+    assert.equal(spokenNumberControl.verdict.factCheck, "unchecked",
+      "numeric presence still must not be represented as full semantic fact verification");
+    assert.equal(generatorCalls, 8, "an equivalent spoken quantity passes without an unnecessary regeneration");
+    hook = "Chernobyl's ignored safety test failed in 1986.";
+
     hook = "Chernobyl's ignored safety test affected 12 percent of the district.";
     await assert.rejects(
       () => craftHook(args),
       /numeric claim 12 has an unsupported or mismatched unit/u,
       "a sourced number cannot be reassigned to a different unit merely because the digits match",
     );
-    assert.equal(judgeCalls, 7, "a mismatched unit remains gated after each judge-approved slate");
-    assert.equal(generatorCalls, 7, "a mismatched unit receives only the existing one retry");
+    assert.equal(judgeCalls, 10, "a mismatched unit remains gated after each judge-approved slate");
+    assert.equal(generatorCalls, 10, "a mismatched unit receives only the existing one retry");
     hook = "Chernobyl's ignored safety test failed in 1986.";
 
     generatedHooks = [
@@ -153,13 +170,13 @@ async function main(): Promise<void> {
     const laterGroundedCandidate = await craftHook(args);
     assert.equal(laterGroundedCandidate.hook, generatedHooks[2],
       "numeric source checks must cover later judge-ranked candidates, not only the first two");
-    assert.equal(generatorCalls, 8, "two rejected numeric candidates do not trigger unnecessary regeneration when a grounded candidate remains");
+    assert.equal(generatorCalls, 11, "two rejected numeric candidates do not trigger unnecessary regeneration when a grounded candidate remains");
     generatedHooks = undefined;
 
     const groundedControl = await craftHook(args);
     assert.equal(groundedControl.verdict.factCheck, "unchecked",
       "matching a sourced year does not upgrade the limited numeric check into a fact-check verdict");
-    assert.equal(generatorCalls, 9, "a valid sourced numeric claim passes on the first attempt");
+    assert.equal(generatorCalls, 12, "a valid sourced numeric claim passes on the first attempt");
 
     judgeMode = "unknown";
     await assert.rejects(
@@ -167,8 +184,8 @@ async function main(): Promise<void> {
       (error: unknown) => error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown",
       "an ambiguous judge outcome must propagate to execution recovery instead of becoming lint-only success",
     );
-    assert.equal(judgeCalls, 10, "the ambiguous judge outcome must not be automatically replayed");
-    assert.equal(generatorCalls, 10, "each requested hook reaches exactly one generation call per attempt");
+    assert.equal(judgeCalls, 13, "the ambiguous judge outcome must not be automatically replayed");
+    assert.equal(generatorCalls, 13, "each requested hook reaches exactly one generation call per attempt");
     console.log("HOOKCRAFT PROVIDER RECOVERY PASS — production refusal, draft diagnostics, and ambiguity remain distinct");
   } finally {
     (Module as unknown as { _load: typeof originalLoad })._load = originalLoad;

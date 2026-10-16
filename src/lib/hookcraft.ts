@@ -26,7 +26,7 @@ import {
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
-import { unmatchedTitleNumbers, unmatchedTitleUnits } from "@/lib/numericClaims";
+import { unmatchedSpokenNumericClaims, unmatchedTitleUnits } from "@/lib/numericClaims";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
@@ -509,7 +509,7 @@ async function factCheckColdOpen(
     return { ok: true, problems: [], status: "unchecked" };
   }
   const coldOpen = `${c.hook}\n${c.opening}`;
-  const unsupportedNumbers = unmatchedTitleNumbers(coldOpen, a.sourceGrounding);
+  const unsupportedNumbers = unmatchedSpokenNumericClaims(coldOpen, a.sourceGrounding);
   const unsupportedUnits = unmatchedTitleUnits(coldOpen, a.sourceGrounding);
   return {
     ok: unsupportedNumbers.length === 0 && unsupportedUnits.length === 0,
