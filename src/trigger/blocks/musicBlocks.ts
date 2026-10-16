@@ -398,10 +398,9 @@ export const music: Block = {
       (composerPrompt && composerPrompt.trim()) ||
       configuredPrompt ||
       lastResort;
+    const moduleDirectionPrefix = "Additional module direction, subordinate to the locked channel sound and route contract:";
     let modulePromptDirection = configuredPrompt && !sleepBed && (dnaPrompt || composerPrompt?.trim())
-      ? provider === "minimax_music3"
-        ? `Also: ${configuredPrompt}`
-        : `Additional module direction, subordinate to the locked channel sound and route contract: ${configuredPrompt}`
+      ? `${moduleDirectionPrefix} ${configuredPrompt}`
       : "";
     const stableComposerDirection = [
       musicProgram?.audio.direction,
@@ -443,7 +442,7 @@ export const music: Block = {
       while (low <= high) {
         const middle = Math.floor((low + high) / 2);
         const retained = words.slice(0, middle).join(" ");
-        const direction = retained ? `Also: ${retained}` : "";
+        const direction = retained ? `${moduleDirectionPrefix} ${retained}` : "";
         let candidate: ChannelMusicProgram;
         try {
           candidate = makeChannelMusicProgram(direction);
@@ -461,7 +460,7 @@ export const music: Block = {
         }
       }
       const retained = words.slice(0, bestCount).join(" ");
-      modulePromptDirection = retained ? `Also: ${retained}` : "";
+      modulePromptDirection = retained ? `${moduleDirectionPrefix} ${retained}` : "";
       channelMusicProgram = bestProgram;
       if (bestCount < words.length) ctx.log(
         `music: MiniMax caption budget kept ${bestCount}/${words.length} words of supplemental module direction; locked identity and role requirements were preserved`,

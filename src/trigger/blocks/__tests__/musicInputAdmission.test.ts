@@ -57,6 +57,14 @@ loader._load = function (id, ...args) {
     },
     withMusicGenerationCost: (error: unknown) => error,
   };
+  if (id === "@/lib/minimaxMusic3") {
+    const minimax = originalLoad.call(this, id, ...args) as Record<string, unknown>;
+    return {
+      ...minimax,
+      hasQualifiedMiniMaxMusic3: () => true,
+      generateMiniMaxMusic3: async () => { throw new Error("provider boundary reached; no generation in this contract test"); },
+    };
+  }
   if (id === "./blockContext") return { ...originalLoad.call(this, id, ...args) as object, recordAsset: async () => {} };
   // This test checks transfer admission, not audio decoding or musical quality.
   if (id === "@/lib/files") return {
@@ -205,6 +213,24 @@ async function main() {
   };
   assert.equal(moduleGainProgram.mix.bodyMusicVol, 0.22,
     "the real music producer applies a configured Music-module gain ahead of Style DNA");
+  const modulePrompt = "Add a delicate bell accent to the final phrase.";
+  await assert.rejects(music.run({
+    ...ctx,
+    budgetUsd: 1,
+    params: { provider: "minimax_music3", prompt: modulePrompt },
+    store: { ...ctx.store, channelProgramRoute, styleDNA, musicBrief: {
+      musicPrompt: "A measured, spacious meditation bed.",
+    } },
+  }), /provider boundary reached/u);
+  const minimaxProgramEntry = [...writtenObjects.entries()].find(([key]) =>
+    key.includes("channel-music-program-") && key !== programEntry[0] && key !== moduleGainEntry[0]);
+  assert.ok(minimaxProgramEntry, "MiniMax direction is frozen in the shared Music program before provider dispatch");
+  const minimaxProgram = JSON.parse(Buffer.from(minimaxProgramEntry[1]).toString("utf8")) as {
+    generation: { structuredCaption: string };
+  };
+  assert.match(minimaxProgram.generation.structuredCaption,
+    /Additional module direction, subordinate to the locked channel sound and route contract: Add a delicate bell accent to the final phrase\./u,
+    "MiniMax receives manual module direction as subordinate to channel identity, matching other providers");
   storageCalls = 0;
   networkCalls = 0;
   await assert.rejects(music.run({
