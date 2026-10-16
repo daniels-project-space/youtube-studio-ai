@@ -125,7 +125,7 @@ async function main(): Promise<void> {
       "musicQualityReviewStatus",
     ]);
 
-    for (const family of [undefined, "narrated_stock", "music_loop"] as const) {
+    for (const family of [undefined, "narrated_stock", "music_loop", "sleep"] as const) {
       const store: Record<string, unknown> = {
         topic: "Quiet focus after midnight",
         reuseMusicKey: "owner/test/base/music.mp3",
@@ -268,7 +268,7 @@ async function main(): Promise<void> {
     globalThis.fetch = originalFetch;
     _resetBlocks();
   }
-  console.log("SHARED MUSIC OWNERSHIP PASS: registry ABI, admission and executable reuse across channel families");
+  console.log("SHARED MUSIC OWNERSHIP PASS: registry ABI, admission and executable reuse across narration, Lo-Fi and sleep routes");
 }
 
 void main().catch((error) => {

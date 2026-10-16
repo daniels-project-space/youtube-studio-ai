@@ -589,6 +589,27 @@ const guidedSleep = createChannelMusicProgram({
 assert.equal(guidedSleep.role, "sleep_sound_bed", "guided sleep keeps the beatless sleep-source contract");
 assert.equal(guidedSleep.mix.narrationPriority, true, "guided sleep's narration retains foreground priority");
 assert.equal(guidedSleep.mix.bodyMusicVol, 0.1026, "guided sleep defaults to the established narrated-bed gain");
+const guidedMeditationOnAmbientRoute = createChannelMusicProgram({
+  channelId: "channel-guided-meditation-ambient-route",
+  channelIdentityFingerprint: sha("a"),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  role: "meditation_bed",
+  topic: "A quiet guided breathing meditation",
+});
+assert.equal(guidedMeditationOnAmbientRoute.role, "meditation_bed",
+  "the ambient-guided route must honor the Composer's explicit meditation role while retaining sleep as its default");
+assert.equal(guidedMeditationOnAmbientRoute.mix.narrationPriority, true);
+assert.equal(guidedMeditationOnAmbientRoute.mix.bodyMusicVol, 0.16);
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-invalid-primary-on-ambient-route",
+  channelIdentityFingerprint: sha("b"),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  role: "primary_music",
+  topic: "A quiet guided breathing meditation",
+}), /conflicts with specialized route role sleep_sound_bed/u,
+"the explicit meditation exception must not open the ambient route to unrelated music roles");
 assert.equal(sleep.mix.narrationPriority, false, "standalone sleep sound remains a primary listening program");
 assert.equal(sleep.mix.bodyMusicVol, 1);
 assert.ok(
