@@ -16,6 +16,7 @@
  * to gain a "text" variant first — tracked as a follow-up.
  */
 import type { ModuleCard } from "./moduleRegistry";
+import { TITLE_PROFILES, type TitleProfileId } from "@/lib/titleProfile";
 
 const SCRIPT_MODULE: ModuleCard = {
   key: "script_gen",
@@ -326,10 +327,16 @@ const METADATA_MODULE: ModuleCard = {
   customization: {
     capabilities: [
       "seven framed title candidates judged against the live feed",
+      "format-specific title profile for search, browse, serialized, music, and short-form discovery",
       "per-channel clickbait intensity",
       "runner-up retained for a click-through swap",
     ],
     knobs: [
+      {
+        id: "titleProfile", type: "enum", values: Object.keys(TITLE_PROFILES) as TitleProfileId[], default: "general",
+        describes: "title length envelope and discovery framing; leave unset to keep the channel/family auto-profile",
+        servesStyles: ["documentary", "search", "serialized", "motivational", "children", "music", "shorts"],
+      },
       // 0-3 rather than a boolean. It was a binary tied to one voice archetype,
       // so ten of eleven archetypes shared identical, maximally restrained
       // rules — the same single-constant collapse that made every thumbnail
@@ -342,9 +349,14 @@ const METADATA_MODULE: ModuleCard = {
       },
     ],
     presets: {
-      documentary: { clickbaitLevel: 1 },
-      meditation: { clickbaitLevel: 0 },
-      commentary: { clickbaitLevel: 3 },
+      documentary: { titleProfile: "searchable_long", clickbaitLevel: 1 },
+      meditation: { titleProfile: "general", clickbaitLevel: 0 },
+      commentary: { titleProfile: "browse_long", clickbaitLevel: 3 },
+      serialized_lore: { titleProfile: "serialized_lore", clickbaitLevel: 1 },
+      children_quiz: { titleProfile: "children_quiz", clickbaitLevel: 0 },
+      music: { titleProfile: "music_loop", clickbaitLevel: 1 },
+      shorts: { titleProfile: "short_form", clickbaitLevel: 2 },
+      motivational: { titleProfile: "motivational", clickbaitLevel: 2 },
     },
   },
 };

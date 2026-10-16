@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MODULE_REGISTRY } from "@/engine/moduleRegistry";
+import { TITLE_PROFILES } from "@/lib/titleProfile";
 
 const source = readFileSync(join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"), "utf8");
 
@@ -40,6 +42,31 @@ async function main(): Promise<void> {
       /planned title held out \(not evaluated\)/,
       "the operator must be told why the plan title was not used",
     );
+
+    const titleProfileKnob = MODULE_REGISTRY.metadata?.customization?.knobs.find((knob) => knob.id === "titleProfile");
+    assert.deepEqual(titleProfileKnob?.values, Object.keys(TITLE_PROFILES),
+      "the module surface must expose the authoritative format-profile set");
+    const longTopic = "How Roman Aqueducts Carried Fresh Water Across Long Distances Without Modern Pumps";
+    const shortProfileOut = await metadataOptimized.run({
+      ownerId: "owner-test",
+      runId: "run-test-short-profile",
+      channelId: "channel-test",
+      keyPrefix: "owner/test/",
+      params: { titleProfile: "short_form" },
+      store: {
+        topic: longTopic,
+        plannedTitle,
+        channelName: "Inked Histories",
+        niche: "history",
+        persona: "documentary narrator",
+      },
+      budgetUsd: 5,
+      log: (message: string) => logs.push(message),
+    } as never) as { title: string };
+    assert.ok(shortProfileOut.title.length <= TITLE_PROFILES.short_form.hardMaxChars,
+      "the persisted module knob must control the real deterministic title fallback");
+    assert.notEqual(shortProfileOut.title, longTopic,
+      "a profile-specific title envelope must not silently fall back to the channel's general profile");
   } finally {
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalKey;
