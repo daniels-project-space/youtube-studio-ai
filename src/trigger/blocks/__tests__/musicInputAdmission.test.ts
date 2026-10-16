@@ -147,8 +147,8 @@ async function main() {
       styleDNA: { audio: { genre: "ambient", instrumentation: ["soft sustained pad"] } },
     },
   }), /admitted-first-storage-write/u);
-  assert.match(sleepLogs.join("\n"), /approved Studio audio direction withheld by the locked beatless sleep contract/u,
-    "sleep prompt handling must not claim a direction was used when the safety contract withholds it");
+  assert.match(sleepLogs.join("\n"), /Studio audio direction withheld by this legacy sleep-module version/u,
+    "legacy sleep module must report that Studio audio direction is withheld");
   for (const provider of ["mureka", "suno"] as const) {
     const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store,
       reuseMusicKey: reusedKey,

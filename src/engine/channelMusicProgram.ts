@@ -290,6 +290,7 @@ export interface CreateChannelMusicProgramInput {
   readonly bpmRange?: readonly [number, number];
   readonly moodArc?: string;
   readonly composerDirection?: string;
+  readonly studioTextureDirection?: string;
   readonly targetLufs?: number;
   readonly bodyMusicVol?: number;
 }
@@ -962,11 +963,23 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const moodArc = role === "sleep_sound_bed"
     ? defaults.moodArc
     : cleanText(input.moodArc, defaults.moodArc, 600);
+  const studioTextureDirection = input.studioTextureDirection?.replace(/\s+/gu, " ").trim() ?? "";
+  if (studioTextureDirection.length > 420) {
+    throw new Error("sleep Studio texture direction exceeds the 420-character bound");
+  }
+  if (studioTextureDirection && role !== "sleep_sound_bed") {
+    throw new Error("Studio texture direction is reserved for the beatless sleep role");
+  }
   // Other roles preserve authored episode direction in full. Sleep is a
   // specialized beatless soundscape, so its role contract overrides groove,
   // meter, and movement directions while retaining the channel sound palette.
   const composerDirection = role === "sleep_sound_bed"
-    ? "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes."
+    ? [
+        "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes.",
+        studioTextureDirection
+          ? `Approved Studio texture direction (timbre or spatial detail only, and only when compatible with the beatless sleep contract): ${studioTextureDirection}. Do not change pulse, melody, harmony, arousal, or level.`
+          : "",
+      ].filter(Boolean).join(" ")
     : input.composerDirection?.trim().replace(/\s+/gu, " ") ||
       "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
   const exclusions = role === "sleep_sound_bed"

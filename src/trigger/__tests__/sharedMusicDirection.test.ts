@@ -3,6 +3,7 @@ import Module, { createRequire } from "node:module";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { createOriginalMusicProgramPlan } from "@/engine/originalMusicProgram";
+import { MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY } from "@/engine/musicModuleVersions";
 import { ChannelMusicProgramSchema, music3StructuredCaptionWordCount, type ChannelMusicProgram } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -85,6 +86,7 @@ async function main() {
     error?: RegExp,
     model?: string,
     expectedProviders: Provider[] = [provider],
+    preserveStudioDirection = false,
   ) {
     dispatched = []; persisted = undefined;
     const runtimeStore: Record<string, unknown> = { topic, channelProgramRoute: route, ...store };
@@ -99,7 +101,11 @@ async function main() {
     const ctx: StageContext = {
       ownerId: "owner-direction", channelId: "channel-direction", runId: "run-direction",
       keyPrefix: "owner/direction/channel/music/", budgetUsd: 5, log: () => {},
-      params: { provider, prompt, ...(model === undefined ? {} : { model }) }, store: runtimeStore,
+      params: {
+        provider, prompt,
+        ...(model === undefined ? {} : { model }),
+        ...(preserveStudioDirection ? { [MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY]: true } : {}),
+      }, store: runtimeStore,
     };
     if (error) {
       await assert.rejects(music.run(ctx), error);
@@ -160,6 +166,7 @@ async function main() {
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
     const sleepPrompt = await runtime(provider, "Use a driving 120 BPM groove with a strong pulse.", {
       channelProgramRoute: sleepRoute,
+      studioAudioRecipeProjection: studio,
       styleDNA: { audio: {
         genre: "soft nocturnal ambient",
         instrumentation: ["warm sustained pad", "distant piano harmonics"],
@@ -168,12 +175,14 @@ async function main() {
         moodArc: "A driving 120 BPM groove with a strong pulse.",
         loopable: true,
       } },
-    });
+    }, undefined, undefined, [provider], true);
     assert.equal(persisted!.mix.targetLufs, -20, "an unconfigured sleep route must retain the sleep-specific mastering target");
     assert.equal(persisted!.mix.narrationPriority, true, "the canonical guided-sleep route gives narration foreground priority");
     assert.equal(persisted!.mix.bodyMusicVol, 0.1026, "the canonical guided-sleep route defaults to narrated-bed gain");
     assert.match(sleepPrompt, /unmetered and beatless/u);
     assert.match(sleepPrompt, /diffuse, sustained background texture/u);
+    assert.match(sleepPrompt, /Approved Studio texture direction \(timbre or spatial detail only/u);
+    assert.ok(sleepPrompt.includes(studioCore.promptAddenda[0]), "the strict sleep module preserves its approved Studio audio texture direction");
     assert.doesNotMatch(sleepPrompt, /The melodic lead belongs/u);
     assert.match(sleepPrompt, /warm sustained pad/u);
     assert.doesNotMatch(sleepPrompt, /\b120\s*BPM\b|driving orchestral percussion|strong pulse|resolves back to the tonic/iu);

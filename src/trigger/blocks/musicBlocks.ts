@@ -418,6 +418,8 @@ export const music: Block = {
     const studioAudioDirection = studioAudioRecipe.promptAddenda.length
       ? ` Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
       : "";
+    const preserveRequiredStudioDirection =
+      (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true;
     const a = dna?.audio;
     const dnaTempoDirection = musicDnaTempoDirection({
       role: selectedRole,
@@ -510,6 +512,9 @@ export const music: Block = {
       textures: a?.textures,
       bpmRange: a?.bpmRange,
       moodArc: a?.moodArc,
+      studioTextureDirection: sleepBed && preserveRequiredStudioDirection
+        ? studioAudioRecipe.promptAddenda.join(" ")
+        : undefined,
       // DNA is already represented by the structured identity fields. Carry
       // its episode nuance, or the selected non-DNA prompt, without duplicating it.
       composerDirection: [stableComposerDirection, moduleDirection].filter(Boolean).join(" ") || undefined,
@@ -557,7 +562,9 @@ export const music: Block = {
       `${sleepBed && configuredPrompt ? " + sleep contract suppresses free-form module direction" : ""}` +
       `${studioAudioDirection
         ? sleepBed
-          ? " + approved Studio audio direction withheld by the locked beatless sleep contract"
+          ? preserveRequiredStudioDirection
+            ? " + approved Studio texture direction constrained by the beatless sleep contract"
+            : " + Studio audio direction withheld by this legacy sleep-module version"
           : " + approved Studio audio direction"
         : ""}`);
     const channelMusicProgramKey =
