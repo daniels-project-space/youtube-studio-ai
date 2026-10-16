@@ -8,6 +8,7 @@ import { all, getManifest, require_ } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { lockableModule } from "@/lib/ownerLockRegistry";
+import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
 import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
 import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
@@ -124,6 +125,36 @@ async function main(): Promise<void> {
       "musicNativeWavKey", "musicAuditionSourceKey", "musicAuditionWavKey",
       "musicQualityReviewStatus",
     ]);
+
+    const providerBrief = createChannelProgramBrief({
+      family: "music_loop",
+      nicheKey: "lofi",
+      locale: "en",
+      concept: "Distinct night-rain listening sessions with a calm recurring sound.",
+    });
+    const providerRoute = resolveChannelProgramRoute(providerBrief);
+    const providerConfigured = resolvePipelineModuleConfig({
+      entries: [{ block: "music_program_plan" }, { block: "music" }],
+      moduleConfig: { music: { provider: "suno" } },
+    });
+    const plannerParams = providerConfigured.effectivePipeline.find(
+      (entry) => entry.block === "music_program_plan",
+    )?.params;
+    const sealedPlanResult = await musicProgramPlan.run({
+      ownerId: "owner-music-provider-test",
+      channelId: "channel-music-provider-test",
+      runId: "run-music-provider-test",
+      keyPrefix: "owner/test/channel/music-provider/",
+      params: plannerParams ?? {},
+      store: {
+        topic: "Rain on a quiet greenhouse",
+        channelProgramRoute: channelProgramRouteRunSeed({ route: providerRoute, programBrief: providerBrief }),
+      },
+      budgetUsd: 0,
+      log: () => {},
+    } as StageContext) as { musicProgramPlan: { audio: { providerPreference: string } } };
+    assert.equal(sealedPlanResult.musicProgramPlan.audio.providerPreference, "suno",
+      "the executable music planner must seal the provider chosen on the shared module surface");
 
     for (const family of [undefined, "narrated_stock", "music_loop", "sleep"] as const) {
       const store: Record<string, unknown> = {
