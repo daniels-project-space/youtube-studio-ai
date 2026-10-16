@@ -229,6 +229,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "topic_select", params: { policy: "no_repeat" } },
       { block: "script_gen", params: { style: "crime" } },
       { block: "hook_craft" },
+      { block: "qa_script" },
       ...NARRATED.slice(4),
     ],
   },
@@ -243,6 +244,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "topic_select" },
       { block: "script_gen", params: { style: "shorts", maxSeconds: 50 } },
       { block: "hook_craft" },
+      { block: "qa_script" },
       { block: "originality_gate" },
       { block: "compliance_check" },
       {
@@ -331,30 +333,30 @@ export const ARCHETYPES: Record<string, Archetype> = {
       "Multiple-choice 'guess the year': a CC0 Wikidata fact, four year options, a depleting timer, then the correct option locks in.",
     template: "A",
     thumbnailTemplate: "banana",
-    // SELF-CONTAINED: `quiz_year` sources its own facts, writes its own
-    // questions and renders the finished video, so there is deliberately no
-    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    // The Quiz Year modules own the complete route: they plan and safety-check
+    // a curated topic, certify the QA bounds, write metadata, then source facts
+    // and render. There is no script_gen / narration_tts / footage chain here.
     //
-    // topic_select IS kept, with a clear division of responsibility: it frames
-    // the EPISODE (the title, the thumbnail promise, the crew brief — all of
-    // which consume `topic`), while the ROUNDS are chosen by quiz_year from
-    // Wikidata by notability. An LLM never picks a fact and never picks a year.
+    // quiz_topic_plan owns the episode subject and the certified round plan;
+    // one curated choice drives both metadata and sourced questions. An LLM
+    // never picks a fact and never picks a year.
     //
     // originality_gate is omitted: the questions are deliberately templated
     // around third-party facts, which is what this format IS rather than a
-    // plagiarism signal. compliance_check still gates before the engine runs.
+    // plagiarism signal. quiz_topic_safety owns the curated deterministic gate.
     pipeline: [
       { block: "competitor_research" },
-      { block: "topic_select", params: { targetSeconds: 80 } },
-      { block: "compliance_check" },
+      { block: "quiz_topic_plan", params: { targetSeconds: 80 } },
+      { block: "quiz_topic_safety" },
+      { block: "quiz_critic_spec" },
+      { block: "quiz_metadata" },
       // No `categories` param → the block uses the full default mix, so a
       // channel created from this archetype gets a genuinely mixed trivia video
       // (years, capitals, currencies, symbols, general knowledge) rather than
-      // eight rounds of the same question type. `topic` still steers only the
-      // guess-the-year share of the mix.
-      { block: "quiz_year", params: { topic: "science_discovery", targetSeconds: 80 } },
+      // eight rounds of the same question type. The planner's curated topic
+      // steers fact sourcing without allowing a second selector to overwrite it.
+      { block: "quiz_year", params: { targetSeconds: 80 } },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
-      { block: "metadata" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
@@ -372,6 +374,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     pipeline: [
       { block: "topic_select" },
       { block: "script_gen", params: { style: "meditation" } },
+      { block: "qa_script" },
       { block: "originality_gate" },
       { block: "compliance_check" },
       {

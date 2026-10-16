@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import { ARCHETYPES } from "../archetypes";
+import { registerAllBlocks } from "../blocks";
+import { validatePipeline } from "../validate";
+
+registerAllBlocks();
+
+for (const archetype of Object.values(ARCHETYPES)) {
+  const stages = archetype.pipeline.map((entry) => entry.block);
+  const narrationIndex = stages.indexOf("narration_tts");
+  const scriptIndex = stages.indexOf("script_gen");
+  if (scriptIndex < 0 || narrationIndex < 0) continue;
+
+  const approvalIndex = stages.lastIndexOf("qa_script", narrationIndex);
+  assert.ok(
+    approvalIndex > scriptIndex,
+    `${archetype.key} must approve generated narration before TTS`,
+  );
+  if (!stages.includes("curriculum_episode_seed")) {
+    assert.doesNotThrow(
+      () => validatePipeline(archetype.pipeline.slice(0, narrationIndex + 1)),
+      `${archetype.key} must compile through the approved narration handoff`,
+    );
+  }
+
+  const hookIndex = stages.lastIndexOf("hook_craft", narrationIndex);
+  if (hookIndex > scriptIndex) {
+    assert.ok(
+      approvalIndex > hookIndex,
+      `${archetype.key} must approve the final hook-edited script`,
+    );
+  }
+}
+
+const quizStages = ARCHETYPES["quiz-year"].pipeline.map((entry) => entry.block);
+const quizModules = [
+  "quiz_topic_plan",
+  "quiz_topic_safety",
+  "quiz_critic_spec",
+  "quiz_metadata",
+  "quiz_year",
+];
+assert.deepEqual(
+  quizStages.filter((stage) => quizModules.includes(stage)),
+  quizModules,
+  "Quiz Year must run its planner, safety, critic, and metadata modules before rendering",
+);
+assert.ok(!quizStages.includes("topic_select"), "Quiz Year must not duplicate its curated topic planner");
+assert.ok(!quizStages.includes("compliance_check"), "Quiz Year safety fields must have one deterministic owner");
+assert.ok(!quizStages.includes("metadata"), "Quiz Year must not overwrite its certified metadata");
+const quizRendererIndex = quizStages.indexOf("quiz_year");
+assert.doesNotThrow(
+  () => validatePipeline(ARCHETYPES["quiz-year"].pipeline.slice(0, quizRendererIndex + 1)),
+  "Quiz Year must compile its plan, safety, compliance, and QA artifacts before rendering",
+);
+
+console.log("archetype script gates and Quiz Year module handoffs pass");
