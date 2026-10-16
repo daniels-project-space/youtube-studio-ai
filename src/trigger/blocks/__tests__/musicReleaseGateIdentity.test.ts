@@ -30,6 +30,7 @@ const objects = new Map([
   ["quality.json", Buffer.from("{}")],
 ]);
 const objectReads: string[] = [];
+let minimaxReceiptAdmitted = false;
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -47,7 +48,8 @@ loader._load = function (id, ...args) {
   if (id === "@/lib/minimaxMusic3") {
     return {
       assertPinnedMiniMaxMusic3Receipt: () => {
-        throw new Error("runtime receipt validation must not run for a foreign program");
+        if (!minimaxReceiptAdmitted) throw new Error("runtime receipt validation must not run for a foreign program");
+        return { license: { uiAttribution: "MiniMax-Music3" }, requestKey: "0123456789abcdef" };
       },
     };
   }
@@ -55,7 +57,8 @@ loader._load = function (id, ...args) {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { assertMusicQualityForPublish } = require("../musicReleaseGate") as typeof import("../musicReleaseGate");
+const { appendMusicGenerationDisclosure, assertMusicQualityForPublish } =
+  require("../musicReleaseGate") as typeof import("../musicReleaseGate");
 
 async function main() {
   const foreignProgramContext: StageContext = {
@@ -76,6 +79,23 @@ async function main() {
   );
   assert.deepEqual(objectReads, ["program.json", "runtime.json", "quality.json"],
     "a foreign MiniMax program must fail before any native audio bytes are read");
+
+  const disclosureContext: StageContext = { ...ctx, store: {
+    musicProvider: "minimax_music3", channelMusicProgramKey: "program.json", musicRuntimeReceiptKey: "runtime.json",
+  } };
+  const baseDescription = "A factual video description.";
+  await assert.rejects(appendMusicGenerationDisclosure(disclosureContext, baseDescription),
+    /runtime receipt validation must not run/u,
+    "provider attribution must stop when the durable runtime receipt is not admitted");
+  minimaxReceiptAdmitted = true;
+  const disclosed = await appendMusicGenerationDisclosure(disclosureContext, baseDescription);
+  assert.equal(disclosed,
+    `${baseDescription}\n\nMusic generated with MiniMax-Music3. This video contains AI-generated audio.`,
+    "the shared music gate adds the required disclosure only after runtime-receipt admission");
+  assert.equal(await appendMusicGenerationDisclosure(disclosureContext, disclosed), disclosed,
+    "reapplying shared provider attribution must not duplicate the disclosure");
+  assert.equal(await appendMusicGenerationDisclosure({ ...ctx, store: { musicProvider: "suno" } }, baseDescription), baseDescription,
+    "other music providers must not inherit MiniMax-specific disclosure");
 
   const reusedAudio = Buffer.alloc(1_024, 9);
   objects.set("reused.mp3", reusedAudio);

@@ -12,6 +12,43 @@ import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { channelProgramRouteFromContext, str } from "./blockContext";
 import { isMusicReviewStatusCompatible } from "./providerAwareMusic";
 
+const MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE =
+  "Music generated with MiniMax-Music3. This video contains AI-generated audio.";
+
+/**
+ * Keep provider attribution with the shared music policy, not the Lo-Fi
+ * renderer that happens to own the current private-upload boundary.
+ */
+export async function appendMusicGenerationDisclosure(
+  ctx: StageContext,
+  description: string,
+): Promise<string> {
+  if (ctx.store["musicProvider"] !== "minimax_music3") return description;
+  const programKey = str(ctx, "channelMusicProgramKey");
+  const receiptKey = str(ctx, "musicRuntimeReceiptKey");
+  const [programBytes, receiptBytes] = await Promise.all([
+    getObjectBytes(programKey),
+    getObjectBytes(receiptKey),
+  ]);
+  let program: unknown;
+  let receipt: unknown;
+  try {
+    program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+    receipt = JSON.parse(Buffer.from(receiptBytes).toString("utf8"));
+  } catch (error) {
+    throw new Error(
+      `MiniMax-Music3 disclosure evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const admitted = assertPinnedMiniMaxMusic3Receipt(receipt, program);
+  if (description.includes(MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE)) return description;
+  ctx.log(
+    `publish package: appended required ${admitted.license.uiAttribution} generated-audio disclosure ` +
+    `from runtime receipt ${admitted.requestKey.slice(0, 12)}`,
+  );
+  return `${description.trim()}\n\n${MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE}`;
+}
+
 /**
  * A worker qualification proves the installed graph is eligible to render; it
  * does not prove this song is free of the documented MiniMax/Comfy decode

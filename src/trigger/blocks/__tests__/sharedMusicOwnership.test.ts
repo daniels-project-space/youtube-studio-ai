@@ -50,7 +50,8 @@ async function main(): Promise<void> {
     topic: "Rain over the glasshouse",
     channelIdentitySeed: "personal-channel",
   };
-  assert.match(musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop" }), /lofi hip-hop/u);
+  assert.match(musicFallbackPromptForRoute({ ...fallbackInput, contentLaneKey: "music_loop" }), /lo-fi/iu,
+    "the shared Lo-Fi prompt must preserve the family identity without pinning every channel to one genre");
   const primaryMusicVideo = musicFallbackPromptForRoute({
     ...fallbackInput,
     family: "cinematic",

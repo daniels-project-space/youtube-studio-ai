@@ -19,14 +19,21 @@ assert.match(
   "the derived Short must retain the same generated-audio disclosure",
 );
 assert.match(
-  lofi,
-  /getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)[\s\S]*assertPinnedMiniMaxMusic3Receipt\(receipt, program\)/u,
-  "disclosure authority must come from durable program and runtime receipts",
+  releaseGate,
+  /export async function appendMusicGenerationDisclosure[\s\S]*getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)/u,
+  "receipt-backed provider disclosure belongs to the shared music policy module",
 );
 assert.match(
-  lofi,
+  releaseGate,
+  /getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)[\s\S]*assertPinnedMiniMaxMusic3Receipt\(receipt, program\)/u,
+  "shared music policy must derive disclosure authority from durable program and runtime receipts",
+);
+assert.match(
+  releaseGate,
   /Music generated with MiniMax-Music3\. This video contains AI-generated audio\./u,
 );
+assert.doesNotMatch(lofi, /assertPinnedMiniMaxMusic3Receipt|MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE/u,
+  "the Lo-Fi renderer must call shared attribution policy without owning provider licensing rules");
 assert.match(
   music,
   /musicNativeWavKey\s*=\s*`\$\{musicRunAudioPrefix\(ctx\.ownerId, ctx\.runId\)\}minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
