@@ -92,6 +92,11 @@ assert(!("finalMasterReleaseCertificate" in compactQaStage), "the full certifica
 assert.ok(JSON.stringify(compactQaStage).length < 10_000, "dense review evidence must remain Convex-safe in the QA stage row");
 
 const narrated = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
+assert.match(
+  narrated,
+  /const visualReviewNarrationKey = ctx\.store\["narrationKey"\];[\s\S]*?const visualReviewNarrationDurationSec = Number\(ctx\.store\["narrationDurationSec"\]\);[\s\S]*?const narrationTimingRequired =\s*\(typeof visualReviewNarrationKey === "string" && visualReviewNarrationKey\.trim\(\)\.length > 0\) \|\|\s*\(Number\.isFinite\(visualReviewNarrationDurationSec\) && visualReviewNarrationDurationSec > 0\);[\s\S]*?requireTranscript: narrationTimingRequired/u,
+  "final-master QA must require cue evidence when the run carries retained narration",
+);
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const dispatcher = readFileSync(join(process.cwd(), "src/lib/publishDispatcher.ts"), "utf8");
 const publishIntents = readFileSync(join(process.cwd(), "convex/publishIntents.ts"), "utf8");

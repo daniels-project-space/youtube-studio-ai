@@ -48,6 +48,16 @@ assert.throws(
   /requires a non-empty narration timing map/i,
   "a narrated final master must not silently omit sentence-to-frame timing evidence",
 );
+assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: undefined,
+    narrationStartSec,
+    finalMasterDurationSec,
+    requireTranscript: true,
+  }),
+  /requires a non-empty narration timing map/i,
+  "a missing narration timing artifact must fail the same narrated-master contract",
+);
 assert.deepEqual(
   finalMasterTranscriptCues({
     sentenceTimings: undefined,
