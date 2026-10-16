@@ -9,6 +9,10 @@ import {
 
 assert.deepEqual(parseScriptCritique({ pass: true, issues: [] }), { pass: true, issues: [] });
 assert.deepEqual(parseScriptCritique({ pass: false, issues: ["  Weak payoff.  "] }), { pass: false, issues: ["Weak payoff."] });
+assert.deepEqual(parseScriptCritique({ pass: true, issues: ["Weak payoff."] }), {
+  pass: false,
+  issues: ["Weak payoff."],
+}, "a critic's concrete finding overrides its contradictory passing flag");
 for (const invalid of [{}, { pass: "true", issues: [] }, { pass: true }, { pass: true, issues: [false] }]) {
   assert.throws(() => parseScriptCritique(invalid), /malformed script critique/);
 }

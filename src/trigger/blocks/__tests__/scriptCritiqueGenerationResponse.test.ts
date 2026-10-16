@@ -189,6 +189,16 @@ async function main(): Promise<void> {
     assert.ok(revisedScript.narrationText.includes("Clear water kept the wooden wheel moving."), "the accepted second draft is returned");
     assert.ok(repaired.logs.some((line) => /2 iter, accepted/.test(line)));
 
+    const contradictory = await run("pass-with-findings", [
+      { pass: true, issues: [remediation] },
+      { pass: true, issues: [] },
+    ]);
+    assert.equal(contradictory.result.ok, true, contradictory.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic", "script", "critic"],
+      "a passing flag with findings is treated as a rejection and uses the existing single-retry path");
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(remediation),
+      "findings from a contradictory critic response reach the script repair prompt");
+
     const withoutIssues = await run("false-without-issues", [{ pass: false, issues: [] }, { pass: true, issues: [] }]);
     assert.equal(withoutIssues.result.ok, true, withoutIssues.result.error);
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic", "script", "critic"]);

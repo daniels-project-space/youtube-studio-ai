@@ -12,7 +12,8 @@ export function parseScriptCritique(value: unknown): { pass: boolean; issues: st
       row.issues.length > 5 || row.issues.some((issue) => typeof issue !== "string" || !issue.trim() || issue.length > 140)) {
     throw new Error("malformed script critique: expected an explicit boolean verdict and at most five bounded text issues");
   }
-  return { pass: row.pass, issues: row.issues.map((issue: string) => issue.trim()) };
+  const issues = row.issues.map((issue: string) => issue.trim());
+  return { pass: row.pass && issues.length === 0, issues };
 }
 
 export function assertScriptCritiqueAccepted(input: {
