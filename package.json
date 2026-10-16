@@ -14,6 +14,7 @@
     "test:production-readiness": "node scripts/run-production-readiness-tests.mjs && npm run test:assembly",
     "test:engine": "tsx src/engine/__tests__/engine.test.ts",
     "test:module-contracts": "tsx src/engine/__tests__/moduleContracts.test.ts",
+    "generate:module-abi": "tsx scripts/generate-module-abi.ts",
     "test:assembly": "tsx scripts/assembly-smoke.ts",
     "test:assembly-parity": "tsx scripts/assembly-parity.ts",
     "test:assembly-render-parity": "tsx scripts/assembly-render-parity.ts",
