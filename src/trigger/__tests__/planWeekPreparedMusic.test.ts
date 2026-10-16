@@ -34,6 +34,10 @@ assert.throws(
   /trackCount/,
 );
 assert.throws(
+  () => assertPlanWeekPreparedMusicArgs({ ...base, manifestKey: planWeekPreparationKey(base), trackCount: "2" }),
+  /trackCount/,
+);
+assert.throws(
   () => assertPlanWeekPreparedMusicArgs({ ...base, manifestKey: planWeekPreparationKey(base), provider: "unknown" }),
   /provider/,
 );

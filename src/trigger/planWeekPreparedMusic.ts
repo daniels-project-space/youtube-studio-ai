@@ -122,8 +122,8 @@ function assertArgs(value: unknown): PlanWeekPreparedMusicArgs {
   if (typeof raw.maxCostUsd !== "number" || !Number.isFinite(raw.maxCostUsd) || raw.maxCostUsd <= 0 || raw.maxCostUsd > 100) throw new Error("weekly prepared music maxCostUsd must be greater than zero and no more than 100");
   const provider = raw.provider;
   if (provider !== undefined && provider !== "mureka" && provider !== "suno" && provider !== "minimax_music3") throw new Error("weekly prepared music provider is invalid");
-  const trackCount = raw.trackCount === undefined ? undefined : Number(raw.trackCount);
-  if (trackCount !== undefined && (!Number.isSafeInteger(trackCount) || trackCount < 1 || trackCount > 8)) throw new Error("weekly prepared music trackCount must be between 1 and 8");
+  const trackCount = raw.trackCount;
+  if (trackCount !== undefined && (typeof trackCount !== "number" || !Number.isSafeInteger(trackCount) || trackCount < 1 || trackCount > 8)) throw new Error("weekly prepared music trackCount must be an integer between 1 and 8");
   return {
     ownerId, channelId, channelSlug, batchId, itemId, manifestKey, manifestSha256, maxCostUsd: raw.maxCostUsd,
     ...(provider === undefined ? {} : { provider }), ...(trackCount === undefined ? {} : { trackCount }),
