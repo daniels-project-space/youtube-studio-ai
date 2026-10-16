@@ -101,11 +101,27 @@ export async function briefDirector(bible: ShowBible, ctx: CrewContext): Promise
         `sums to roughly the target length and serves the channel's vibe. Return STRICT JSON ` +
         `{"hook":string,"beats":[{"name":string,"intentSec":number,"note":string}]}.`,
     });
-    const beats = (raw.beats ?? []).filter((b) => b && b.name).map((b) => ({
-      name: b.name.trim(), intentSec: Math.max(1, Math.round(b.intentSec || 0)), note: (b.note ?? "").trim(),
+    const hook = raw.hook.trim();
+    const proposedBeats = raw.beats ?? [];
+    if (!hook) {
+      log("crew/director: BRIEF REJECTED — the structure has no hook");
+      return undefined;
+    }
+    if (proposedBeats.length === 0) {
+      log("crew/director: BRIEF REJECTED — the structure has no beats");
+      return undefined;
+    }
+    const invalidBeatIndex = proposedBeats.findIndex((beat) =>
+      !beat.name.trim() || !beat.note.trim() || !Number.isFinite(beat.intentSec) || beat.intentSec <= 0,
+    );
+    if (invalidBeatIndex >= 0) {
+      log(`crew/director: BRIEF REJECTED — beat ${invalidBeatIndex + 1} is missing a name, intent, or positive duration`);
+      return undefined;
+    }
+    const beats = proposedBeats.map((beat) => ({
+      name: beat.name.trim(), intentSec: Math.max(1, Math.round(beat.intentSec)), note: beat.note.trim(),
     }));
-    if (!raw.hook && beats.length === 0) return undefined;
-    return { hook: (raw.hook ?? "").trim(), beats };
+    return { hook, beats };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a director
     // brief still renders. But the log has to say the brief is GONE, not just
