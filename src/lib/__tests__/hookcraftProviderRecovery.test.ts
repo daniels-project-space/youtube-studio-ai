@@ -9,6 +9,8 @@ process.env.OPENROUTER_API_KEY = "test-key-for-hookcraft-provider-recovery";
 import assert from "node:assert/strict";
 import Module from "node:module";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 
 const hook = "Chernobyl's ignored safety test failed in 1986.";
 const opening = "At 1:23 a.m., engineers disabled the alarm in Reactor Four. Within minutes, a routine check became the decision that sent the roof into the sky. The surviving logs show who saw the warning first, why the shutdown came too late, and how one ignored test changed the night.";
@@ -49,9 +51,21 @@ const originalLoad = (Module as unknown as { _load: (...args: unknown[]) => unkn
 async function main(): Promise<void> {
   try {
     const { craftHook } = await import("@/lib/hookcraft");
+    const programBrief = createChannelProgramBrief({
+      family: "documentary_collage_short",
+      nicheKey: "history",
+      locale: "en",
+      concept: "Evidence-led histories that make overlooked decisions matter to ordinary lives.",
+      audience: "Curious adults who want clear evidence without academic jargon.",
+      sampleTopics: ["How a bridge changed the town", "What a court record reveals about daily life"],
+    });
     const args = {
       topic: "Chernobyl's ignored safety test",
       title: "Chernobyl's Ignored Safety Test",
+      programRoute: channelProgramRouteRunSeed({
+        route: resolveChannelProgramRoute(programBrief),
+        programBrief,
+      }),
       sourceGrounding: "Chernobyl's ignored safety test failed in 1986. Engineers disabled the alarm in Reactor Four at 1:23 a.m.",
       narrative: { pacing: "Measured, with a deliberate pause before each reveal." },
       channelVoice: {
@@ -73,6 +87,8 @@ async function main(): Promise<void> {
     assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
       "channel narrative DNA must shape its cold open as well as the body script and critic");
     for (const guidance of [
+      "Intended audience: Curious adults who want clear evidence without academic jargon.",
+      "Creator-declared topic priorities (in order): 1. How a bridge changed the town; 2. What a court record reveals about daily life",
       "Evidence-led histories about overlooked decisions and their human consequences.",
       "Measured, humane, and exact.",
       "Ground the opening in a documented detail before interpreting it.",
@@ -82,11 +98,13 @@ async function main(): Promise<void> {
       assert.ok(judgePrompts[0]?.includes(guidance), `hook judge must grade against channel identity: ${guidance}`);
     }
 
-    const draftFailure = await craftHook({ ...args, channelVoice: undefined, qualityProfile: "draft" });
+    const draftFailure = await craftHook({ ...args, programRoute: undefined, channelVoice: undefined, qualityProfile: "draft" });
     assert.equal(draftFailure.verdict.judged, false, "an explicit draft may retain a truthful lint-only preview");
     assert.equal(judgeCalls, 3, "the explicit draft preview makes one judge attempt, not a hidden retry");
     assert.doesNotMatch(generationPrompts[2] ?? "", /FROZEN CHANNEL EDITORIAL IDENTITY/,
       "legacy callers without a Show Bible keep the unconditioned cold-open prompt");
+    assert.doesNotMatch(generationPrompts[2] ?? "", /CANONICAL CHANNEL PROGRAM CONTEXT/,
+      "legacy callers without a sealed program route keep their previous audience/topic context");
 
     judgeMode = "unknown";
     await assert.rejects(

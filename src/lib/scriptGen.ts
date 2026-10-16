@@ -992,6 +992,7 @@ export async function synthScript(
     niche: req.niche,
     persona: req.persona,
     channelVoice: req.channelVoice,
+    programRoute: req.programRoute,
     narrative: req.narrative,
     style: req.style,
     playbookDigest: playbookFull(req) || undefined,

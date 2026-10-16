@@ -25,6 +25,7 @@ import {
 } from "@/lib/creativeText";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
+import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
@@ -453,6 +454,8 @@ export interface HookCraftArgs {
   persona?: string;
   /** Frozen editorial identity; visual signature remains owned by art modules. */
   channelVoice?: ShowBibleVoice;
+  /** Frozen audience/topic context from the admitted channel program. */
+  programRoute?: ChannelProgramRouteRunSeed;
   /** Style-DNA narrative register (beats generic tone). */
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
@@ -628,6 +631,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
         `"${a.topic}"`,
+        a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
         a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
         registerClause(a),
@@ -693,6 +697,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await creativeTextJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
             a.sourceGrounding?.trim() ?? "",
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",
             registerClause(a),
