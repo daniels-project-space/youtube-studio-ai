@@ -117,6 +117,8 @@ export interface Script {
 
 export interface ScriptRequest {
   topic: string;
+  /** Topicraft's cold-open intent, subordinate to the admitted evidence. */
+  topicPromise?: string;
   channelName?: string;
   persona?: string;
   /** Bounded editorial identity; visual motif and render doctrines are excluded. */
@@ -997,6 +999,7 @@ export async function synthScript(
     style: req.style,
     playbookDigest: playbookFull(req) || undefined,
     directorIdea: req.structure?.hook?.trim() || undefined,
+    topicPromise: req.topicPromise,
     seriesNote: req.series
       ? `episode ${req.series.episode} of ${req.series.total} of "${req.series.name}"` +
         (req.series.previousSummary ? `; the previous episode: ${req.series.previousSummary}` : "")

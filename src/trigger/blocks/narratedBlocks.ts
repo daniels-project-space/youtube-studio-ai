@@ -845,6 +845,7 @@ export function createScriptGenBlock(
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
+      topicPromise: topicPromiseForSelectedTopic(ctx),
       sourceGrounding,
       weeklyPreparationBrief,
       serializedEpisodeContext: serializedEpisodeContext
@@ -1019,20 +1020,20 @@ export function createScriptGenBlock(
 
 export const scriptGen: Block = createScriptGenBlock();
 
-function topicPromiseForHook(ctx: StageContext): string | undefined {
+function topicPromiseForSelectedTopic(ctx: StageContext): string | undefined {
   const value = ctx.store["topicBet"];
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("hook_craft: topicBet must be a structured topic-selection receipt");
+    throw new Error("topic promise: topicBet must be a structured topic-selection receipt");
   }
   const bet = value as Record<string, unknown>;
   const topic = ctx.store["topic"];
   const normalize = (text: string) => text.trim().replace(/\s+/gu, " ");
   if (typeof topic !== "string" || typeof bet.topic !== "string" || normalize(topic) !== normalize(bet.topic)) {
-    throw new Error("hook_craft: topicBet does not belong to the selected topic");
+    throw new Error("topic promise: topicBet does not belong to the selected topic");
   }
   if (typeof bet.hookPromise !== "string" || !bet.hookPromise.trim() || bet.hookPromise.trim().length > 500) {
-    throw new Error("hook_craft: topicBet hookPromise must be a non-empty sentence under 500 characters");
+    throw new Error("topic promise: topicBet hookPromise must be a non-empty sentence under 500 characters");
   }
   return bet.hookPromise.trim();
 }
@@ -1046,7 +1047,7 @@ export const hookCraft: Block = {
     // spoken narration already opens with script_gen's hook; this does not
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
-    const plannedPromise = topicPromiseForHook(ctx);
+    const plannedPromise = topicPromiseForSelectedTopic(ctx);
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
     if (!hasCreativeTextKey()) return { hook: firstLine() };
 

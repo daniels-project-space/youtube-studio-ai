@@ -11,6 +11,7 @@ import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channel
 const hook = "The locked garden gate held Mira outside until a tiny seed revealed its secret.";
 const opening = "Mira found the seed beside a cracked stone in the garden wall. She placed it in a pot and waited near the gate. Each morning she carried water from the well. Nothing changed until a green shoot bent toward the stone. Its roots were following a hidden stream. That small discovery would show her how to open the gate.";
 const loop = "Show how Mira discovers the stream and opens the locked garden gate.";
+const topicPromise = "Follow the hidden stream to learn how Mira opens the locked garden gate.";
 const sections = [
   { heading: "The dry garden", narration: "Mira inspected the wall before touching the rusty latch. The soil beside it was dry and hard. Yet the little shoot stayed green through the afternoon heat. She pressed her fingers into the earth and found a cool patch beneath the stone. Water was moving where she could not see it." },
   { heading: "Following the roots", narration: "She carefully lifted the loose stone and followed the roots. They led toward a narrow channel hidden beneath the path. A fallen branch had blocked its entrance. Mira pulled the branch free, and water began to run again. The stream reached a small wooden wheel beside the gate and slowly turned it." },
@@ -56,6 +57,11 @@ async function main(): Promise<void> {
       let value: unknown;
       if (prompt.startsWith("You are the cold-open director.")) {
         kind = "candidates";
+        if (currentLabel === "topic-promise") {
+          assert.ok(prompt.includes(topicPromise), "the spoken cold-open prompt receives Topicraft's promise");
+          assert.match(prompt, /strategic intent only, NOT evidence/);
+          assert.match(prompt, /Existing cold-open fact checks remain authoritative/);
+        }
         if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         assert.equal(body.max_tokens, 3200);
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
@@ -100,14 +106,17 @@ async function main(): Promise<void> {
         usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130, cost: 0.003 } });
     };
 
-    async function run(label: string, values: unknown[], bannedWords: string[] = []) {
+    async function run(label: string, values: unknown[], bannedWords: string[] = [], includeTopicBet = false) {
       currentLabel = label; verdicts = values; requests = [];
       const stages: Array<{ block: string; status: string }> = [];
       const logs: string[] = [];
       const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 75, style: "shorts" } }], ["topic", "niche"]), {
         ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
-        seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords },
+        seedStore: {
+          topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords,
+          ...(includeTopicBet ? { topicBet: { topic: "Mira and the locked garden gate", hookPromise: topicPromise } } : {}),
+        },
         sink: { async upsert(row) { stages.push({ block: row.block, status: row.status }); } },
         log: (message) => { logs.push(message); },
       });
@@ -130,11 +139,30 @@ async function main(): Promise<void> {
     assert.equal(good.result.store.narrationText, script.narrationText);
     assert.ok(good.logs.some((line) => /1 iter, accepted/.test(line)));
 
+    const promised = await run("topic-promise", [{ pass: true, issues: [] }], [], true);
+    assert.equal(promised.result.ok, true, promised.result.error);
+    assert.equal(requests.filter((request) => request.kind === "candidates").length, 1);
+
     const bannedRetry = await run("banned-word-retry", [{ pass: true, issues: [] }], ["forbidden phrase"]);
     assert.equal(bannedRetry.result.ok, true, bannedRetry.result.error);
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
       "deterministic policy catches the first draft before critic spend and retries once");
     assert.doesNotMatch((bannedRetry.result.store.script as Script).narrationText, /forbidden phrase/i);
+
+    currentLabel = "stale-topic-promise";
+    requests = [];
+    const stalePromise = await runPipeline(validatePipeline(
+      [{ block: "script_gen", params: { maxSeconds: 75, style: "shorts" } }], ["topic", "niche"],
+    ), {
+      ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
+      keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
+      seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction",
+        topicBet: { topic: "A stale topic", hookPromise: topicPromise } },
+      sink: { async upsert() {} }, log: () => {},
+    });
+    assert.equal(stalePromise.ok, false);
+    assert.match(stalePromise.error ?? "", /topicBet does not belong to the selected topic/);
+    assert.equal(requests.length, 0, "a stale Topicraft promise fails before paid provider calls");
 
     const closingLineRetry = await run("closing-line-retry", [{ pass: true, issues: [] }]);
     assert.equal(closingLineRetry.result.ok, true, closingLineRetry.result.error);

@@ -465,6 +465,8 @@ export interface HookCraftArgs {
   playbookDigest?: string;
   /** Director (crew) hook idea — honored as intent, crafted for execution. */
   directorIdea?: string;
+  /** Topicraft's strategic promise; intent only, never evidence. */
+  topicPromise?: string;
   /** Episodic series note (e.g. "episode 4 of 7 of X; yesterday taught Y") —
    * the cold open welcomes the RETURNING viewer and picks up the thread. */
   seriesNote?: string;
@@ -640,6 +642,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
         a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
+        a.topicPromise
+          ? `TOPICRAFT PROMISE (strategic intent only, NOT evidence): "${a.topicPromise}". ` +
+            `Honor it only to the extent supported by the topic and admitted source grounding; never invent ` +
+            `facts or imply unsupported coverage. Existing cold-open fact checks remain authoritative.`
+          : "",
         registerClause(a),
         channelBannedWordsDirective(a.bannedWords ?? []),
         a.playbookDigest ?? "",

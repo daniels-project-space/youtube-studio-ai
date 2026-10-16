@@ -613,7 +613,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation", "preparedScript",
       "bannedWords",
-      "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan",
+      "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan", "topicBet",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
