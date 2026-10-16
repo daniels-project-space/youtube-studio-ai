@@ -50,6 +50,36 @@ async function main() {
     output = {
       assertions: [
         {
+          id: "same-check",
+          description: "Keep the rings visually distinct from the planet.",
+          check: "vision",
+          severity: "warn",
+        },
+        {
+          id: "same-check",
+          description: "Every factual claim must match the reviewed source.",
+          check: "vision",
+          severity: "block",
+        },
+      ],
+    };
+    assert.equal(await briefCritic(bible, context), undefined,
+      "duplicate IDs make batched vision verdicts ambiguous and must reject the whole brief");
+
+    output = {
+      assertions: Array.from({ length: 13 }, (_, index) => ({
+        id: `check-${index}`,
+        description: `Distinct review condition ${index}.`,
+        check: "vision",
+        severity: index === 0 ? "block" : "warn",
+      })),
+    };
+    assert.equal(await briefCritic(bible, context), undefined,
+      "the runtime schema must enforce the critic prompt's 12-assertion maximum");
+
+    output = {
+      assertions: [
+        {
           id: "visual-readability",
           description: "Keep the rings visually distinct from the planet.",
           check: "vision",

@@ -546,14 +546,14 @@ export async function briefComposerWithArrangement(
 
 const specSchema = z.object({
   assertions: z.array(z.object({
-    id: z.string(),
-    description: z.string(),
+    id: z.string().trim().min(1),
+    description: z.string().trim().min(1),
     check: z.enum(["deterministic", "vision"]),
     metric: z.string().optional(),
     op: z.enum(["<", "<=", ">", ">=", "=="]).optional(),
     threshold: z.number().optional(),
     severity: z.enum(["block", "warn"]),
-  })).default([]),
+  }).strict()).max(12).default([]),
 });
 
 /**
@@ -659,11 +659,16 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
         `JSON {"assertions":[{"id","description","check","metric"?,"op"?,"threshold"?,"severity"}]}.`,
     });
     const assertions = filterCriticAssertionsForQa(
-      (raw.assertions ?? []).filter((a) => a && a.id && a.description),
+      raw.assertions ?? [],
       ctx.family,
       log,
     );
     if (assertions.length === 0) return undefined;
+    const assertionIds = assertions.map((assertion) => assertion.id.toLowerCase());
+    if (new Set(assertionIds).size !== assertionIds.length) {
+      log("crew/critic: BRIEF REJECTED — assertion ids must be unique for verdict attribution");
+      return undefined;
+    }
     if (!assertions.some((assertion) => assertion.severity === "block")) {
       log("crew/critic: BRIEF REJECTED — the review spec contains no blocking dealbreaker");
       return undefined;
