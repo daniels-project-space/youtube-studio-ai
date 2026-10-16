@@ -4143,6 +4143,9 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
+  // The length gate consumes this value after assembly. Bind it to the exact
+  // post-overlay/post-normalization file, never to the projected timeline.
+  const measuredVideoSec = assertMeasuredMasterDuration((await probe(finalVideo)).durationSec);
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
   await persistRenderedFile(videoKey, finalVideo, { contentType: "video/mp4" }, {
     beforeAttempt: o.assertOutputAuthority,
@@ -4166,18 +4169,19 @@ async function finishFromComposed(
     }
   }
   await recordAsset(ctx, "video", videoKey, {
-    durationSec: videoSec,
+    durationSec: measuredVideoSec,
+    plannedDurationSec: videoSec,
     narrationSec,
     introSec,
     quoteOverlays: quotes.length,
     source: "stock_footage",
     clips: footage.length,
   });
-  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
+  ctx.log(`timeline_assemble ok: video ${measuredVideoSec}s measured (planned ${videoSec}s; narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
   return {
     videoKey,
     videoLocalPath: finalVideo,
-    videoDurationSec: videoSec,
+    videoDurationSec: measuredVideoSec,
     quotesApplied,
     insertsApplied,
     captionsApplied,
@@ -4235,6 +4239,13 @@ export function resolveLengthBounds(
   // error rather than a rejected video, and saying which one it is matters.
   if (min > max) return { ok: false, reason: `bounds are inverted: minSeconds ${min} exceeds maxSeconds ${max}` };
   return { ok: true, dur, min, max };
+}
+
+export function assertMeasuredMasterDuration(durationSec: unknown): number {
+  if (typeof durationSec !== "number" || !Number.isFinite(durationSec) || durationSec <= 0) {
+    throw new Error(`timeline_assemble: final master duration is invalid (${String(durationSec)})`);
+  }
+  return durationSec;
 }
 
 export const lengthCheck: Block = {
