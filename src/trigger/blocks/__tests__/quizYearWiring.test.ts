@@ -79,7 +79,11 @@ async function main(): Promise<void> {
   assert.ok(archetype, "quiz-year archetype must exist");
   const blocks = archetype.pipeline.map((p) => p.block);
   assert.ok(blocks.includes("quiz_year"), "the archetype must actually run the engine");
-  assert.ok(blocks.includes("compliance_check"), "compliance gates before the engine runs");
+  const safetyIndex = blocks.indexOf("quiz_topic_safety");
+  const rendererIndex = blocks.indexOf("quiz_year");
+  const metadataIndex = blocks.indexOf("quiz_metadata");
+  assert.ok(safetyIndex >= 0 && safetyIndex < rendererIndex, "the certified topic-safety gate must run before the engine");
+  assert.ok(metadataIndex > rendererIndex, "the audience package must be authored after the rendered episode");
   assert.ok(
     !blocks.includes("quiz_short_release"),
     "the ordinary QuizYear archetype must not execute the separately supervised private-release adjunct",
@@ -208,8 +212,8 @@ async function main(): Promise<void> {
     "quiz_topic_plan",
     "quiz_topic_safety",
     "quiz_critic_spec",
-    "quiz_metadata",
     "quiz_year",
+    "quiz_metadata",
   ]);
   const dormantPortraitRelease = GOLDEN_MODULES.find((m) => m.key === "quiz-short-private-release");
   assert.ok(dormantPortraitRelease, "the dormant portrait release must have its own non-active catalog card");

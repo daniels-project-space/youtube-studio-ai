@@ -674,6 +674,13 @@ export function designPipelineCore(
       if (forbiddenPlannerBlocks.has(entry.block)) return [];
       return [entry];
     });
+    const quizRendererIndex = pipeline.findIndex((entry) => entry.block === "quiz_year");
+    const quizMetadataIndex = pipeline.findIndex((entry) => entry.block === "quiz_metadata");
+    if (quizRendererIndex >= 0 && quizMetadataIndex >= 0 && quizMetadataIndex < quizRendererIndex) {
+      const [quizMetadata] = pipeline.splice(quizMetadataIndex, 1);
+      const rendererAfterRemoval = pipeline.findIndex((entry) => entry.block === "quiz_year");
+      pipeline.splice(rendererAfterRemoval + 1, 0, quizMetadata!);
+    }
     if (isSupervisedQuizShort) {
       const qaIndex = pipeline.findIndex((entry) => entry.block === "qa_visual");
       if (qaIndex < 0) throw new Error("quiz_short: shared final QA block is missing from the portrait route");

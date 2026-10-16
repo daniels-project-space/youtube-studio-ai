@@ -341,8 +341,9 @@ export const ARCHETYPES: Record<string, Archetype> = {
     template: "A",
     thumbnailTemplate: "banana",
     // The Quiz Year modules own the complete route: they plan and safety-check
-    // a curated topic, certify the QA bounds, write metadata, then source facts
-    // and render. There is no script_gen / narration_tts / footage chain here.
+    // a curated topic, certify the QA bounds, source facts and render, then
+    // write the audience package from the completed episode. There is no
+    // script_gen / narration_tts / footage chain here.
     //
     // quiz_topic_plan owns the episode subject and the certified round plan;
     // one curated choice drives both metadata and sourced questions. An LLM
@@ -356,13 +357,13 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "quiz_topic_plan", params: { targetSeconds: 80 } },
       { block: "quiz_topic_safety" },
       { block: "quiz_critic_spec" },
-      { block: "quiz_metadata" },
       // No `categories` param → the block uses the full default mix, so a
       // channel created from this archetype gets a genuinely mixed trivia video
       // (years, capitals, currencies, symbols, general knowledge) rather than
       // eight rounds of the same question type. The planner's curated topic
       // steers fact sourcing without allowing a second selector to overwrite it.
       { block: "quiz_year", params: { targetSeconds: 80 } },
+      { block: "quiz_metadata" },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
       { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },

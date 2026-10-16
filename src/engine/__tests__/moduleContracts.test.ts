@@ -270,6 +270,12 @@ function compileRepresentativeFamilies(): void {
     if (design.available) {
       assert.ok(design.compilation, `${family} must carry an exact production-contract compilation`);
       assert.equal(design.compilation?.policyId, "production-contract");
+      if (family === "quizyear") {
+        const rendererIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_year");
+        const metadataIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_metadata");
+        assert.ok(rendererIndex >= 0 && metadataIndex > rendererIndex,
+          "QuizYear metadata must be authored from the rendered episode, after its approved renderer");
+      }
       assert.ok(
         Number.isFinite(design.compilation?.reservedMaxCostUsd) &&
           (design.compilation?.reservedMaxCostUsd ?? -1) >= 0,
