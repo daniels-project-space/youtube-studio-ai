@@ -254,15 +254,34 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
         `essay 4-7, energetic explainer 8-12 (a "deliberate, breathing" edit is NOT 8+ cuts/min). Return STRICT JSON ` +
         `{"sections":[{"name":string,"cutsPerMin":number}],"transitions":string,"captionStyle":string,"overlayRule":string}.`,
     });
-    const sections = (raw.sections ?? []).filter((s) => s && s.name).map((s) => ({
-      name: s.name.trim(), cutsPerMin: Math.max(0, s.cutsPerMin || 0),
+    const proposedSections = raw.sections ?? [];
+    const sections = proposedSections.map((section) => ({
+      name: section.name.trim(),
+      cutsPerMin: section.cutsPerMin,
     }));
-    if (sections.length === 0 && !raw.transitions && !raw.captionStyle) return undefined;
+    const invalidSection = sections.some((section) =>
+      !section.name || !Number.isFinite(section.cutsPerMin) || section.cutsPerMin < 2 || section.cutsPerMin > 12,
+    );
+    const uniqueSectionNames = new Set(sections.map((section) => section.name.toLocaleLowerCase("en-US")));
+    const transitions = raw.transitions?.trim() ?? "";
+    const captionStyle = raw.captionStyle?.trim() ?? "";
+    const overlayRule = raw.overlayRule?.trim() ?? "";
+    const missing: string[] = [];
+    if (sections.length === 0) missing.push("section cadence");
+    if (invalidSection) missing.push("valid named cadence between 2 and 12 cuts per minute");
+    if (uniqueSectionNames.size !== sections.length) missing.push("distinct section names");
+    if (!transitions) missing.push("transition language");
+    if (!captionStyle) missing.push("caption styling");
+    if (!overlayRule) missing.push("overlay placement rule");
+    if (missing.length) {
+      log(`crew/editor: BRIEF REJECTED — incomplete cut sheet: ${missing.join(", ")}`);
+      return undefined;
+    }
     return {
       sections,
-      transitions: (raw.transitions ?? "").trim(),
-      captionStyle: (raw.captionStyle ?? "").trim(),
-      overlayRule: (raw.overlayRule ?? "").trim(),
+      transitions,
+      captionStyle,
+      overlayRule,
     };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a editor
