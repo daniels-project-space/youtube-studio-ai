@@ -18,6 +18,7 @@ import {
   ChannelMusicProgramSchema,
   ChannelMusicProviderSchema,
   musicRoleForRoute,
+  resolveMusicModuleBodyMusicVol,
   type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
@@ -428,7 +429,7 @@ export const music: Block = {
       // its episode nuance, or the selected non-DNA prompt, without duplicating it.
       composerDirection: [stableComposerDirection, moduleDirection].filter(Boolean).join(" ") || undefined,
       targetLufs: a?.loudnessLufs,
-      bodyMusicVol: dna?.audio?.bodyMusicVol,
+      bodyMusicVol: resolveMusicModuleBodyMusicVol(ctx.params.bodyMusicVol, dna?.audio?.bodyMusicVol),
     });
     let channelMusicProgram: ChannelMusicProgram = preparedProgram ?? makeChannelMusicProgram(
       provider === "minimax_music3" ? "" : modulePromptDirection,

@@ -152,6 +152,7 @@ const MUSIC_MODULE: ModuleCard = {
       { id: "prompt", type: "text", maxLength: 300, default: "", describes: "supplementary style/mood detail; channel identity remains primary, sleep routes ignore it, and MiniMax may trim it to preserve its caption limit", servesStyles: ["lofi", "ambient"] },
       { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },
       { id: "generationDurationSec", type: "number", range: [10, 300], default: 300, describes: "native channel-score duration before deterministic looping", servesStyles: ["lofi", "ambient", "documentary"] },
+      { id: "bodyMusicVol", type: "number", range: [0.01, 1], default: 0.16, describes: "channel-specific music-bed gain before assembly; narration and meditation beds only, while primary music and unattended sleep soundscapes keep their route-owned level", servesStyles: ["narration", "meditation", "sleep", "ambient"] },
     ],
     presets: { lofi: { trackCount: 4 } },
   },

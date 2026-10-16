@@ -596,13 +596,20 @@ assert.equal(guidedSleepMusicProgram.mix.targetLufs, -20,
   "prepared guided-sleep music uses the sleep-specific master target");
 
 const authoredMusicGainManifest = structuredClone(guidedSleepMusicManifest);
+authoredMusicGainManifest.execution.pipeline.push({ block: "music", params: { bodyMusicVol: 0.31 } });
 authoredMusicGainManifest.execution.seedStore = {
   ...guidedSleepMusicManifest.execution.seedStore,
   styleDNA: { audio: { genre: "soft rain", bodyMusicVol: 0.16, loudnessLufs: -19 } },
 };
+authoredMusicGainManifest.execution.moduleConfig.music = { bodyMusicVol: 0.28 };
 const authoredMusicProgram = planWeekPreparedMusicProgram(authoredMusicGainManifest, "mureka");
-assert.equal(authoredMusicProgram.mix.bodyMusicVol, 0.16,
-  "prepared tracks preserve channel-authored music gain when explicitly configured");
+assert.equal(authoredMusicProgram.mix.bodyMusicVol, 0.28,
+  "explicit module config overrides creation-time music params and Style DNA defaults");
+const creationParamMusicManifest = structuredClone(guidedSleepMusicManifest);
+creationParamMusicManifest.execution.pipeline.push({ block: "music", params: { bodyMusicVol: 0.31 } });
+const creationParamMusicProgram = planWeekPreparedMusicProgram(creationParamMusicManifest, "mureka");
+assert.equal(creationParamMusicProgram.mix.bodyMusicVol, 0.31,
+  "week-ahead preparation preserves a Music control selected during channel creation");
 assert.equal(authoredMusicProgram.mix.targetLufs, -19,
   "prepared tracks preserve the channel-authored loudness target");
 assert.equal(

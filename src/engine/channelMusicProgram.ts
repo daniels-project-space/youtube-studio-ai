@@ -29,6 +29,18 @@ export function music3StructuredCaptionWordCount(caption: string): number {
   return normalized ? normalized.split(/\s+/u).length : 0;
 }
 
+/** Explicit Music-module gain overrides channel DNA; invalid frozen config fails closed. */
+export function resolveMusicModuleBodyMusicVol(
+  moduleValue: unknown,
+  channelValue?: number,
+): number | undefined {
+  if (moduleValue === undefined) return channelValue;
+  if (typeof moduleValue !== "number" || !Number.isFinite(moduleValue) || moduleValue < 0.01 || moduleValue > 1) {
+    throw new Error("music module bodyMusicVol must be a finite number in [0.01, 1]");
+  }
+  return moduleValue;
+}
+
 export const ChannelMusicProviderSchema = z.enum([
   "minimax_music3",
   "suno",

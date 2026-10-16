@@ -191,7 +191,7 @@ const configuredMusicRoute = resolvePipelineModuleConfig({
     { block: "music_program_plan" },
     { block: "music" },
   ],
-  moduleConfig: { music: { provider: "suno" } },
+  moduleConfig: { music: { provider: "suno", bodyMusicVol: 0.24 } },
 });
 assert.equal(
   configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music_program_plan")?.params?.provider,
@@ -202,6 +202,11 @@ assert.equal(
   configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music")?.params?.provider,
   "suno",
   "the selected provider must remain consistent at generation after planning",
+);
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music")?.params?.bodyMusicVol,
+  0.24,
+  "the Music module's explicit bed gain must reach the shared audio producer",
 );
 const musicOnlyConfig = resolvePipelineModuleConfig({
   entries: [{ block: "music" }],

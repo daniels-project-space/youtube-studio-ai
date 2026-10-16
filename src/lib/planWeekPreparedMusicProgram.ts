@@ -1,5 +1,5 @@
 import type { PlanWeekPreparationManifest } from "@/lib/planWeekPreparation";
-import { ChannelMusicProgramSchema, createChannelMusicProgram, musicRoleForRoute, type ChannelMusicProgram, type ChannelMusicProvider as MusicProvider, type ChannelMusicRole } from "@/engine/channelMusicProgram";
+import { ChannelMusicProgramSchema, createChannelMusicProgram, musicRoleForRoute, resolveMusicModuleBodyMusicVol, type ChannelMusicProgram, type ChannelMusicProvider as MusicProvider, type ChannelMusicRole } from "@/engine/channelMusicProgram";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { getMusicBrief } from "@/engine/creative/brief";
 import { assertOriginalMusicProgramPlanBinding } from "@/engine/originalMusicProgram";
@@ -29,8 +29,12 @@ function routeSeed(manifest: PlanWeekPreparationManifest): ChannelProgramRouteRu
 }
 
 export function planWeekMusicConfig(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
-  const value = manifest.execution.moduleConfig.music ?? manifest.execution.moduleConfig.lofi ?? {};
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const value = manifest.execution.moduleConfig.music ?? manifest.execution.moduleConfig.lofi;
+  const moduleConfig = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const musicParams = manifest.execution.pipeline.find((entry) => entry.block === "music")?.params ?? {};
+  return { ...musicParams, ...moduleConfig };
 }
 
 function styleAudio(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
@@ -133,6 +137,6 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
       studioDirection,
     ].filter(Boolean).join(" ") || undefined,
     targetLufs: optionalFiniteNumber(audio.loudnessLufs),
-    bodyMusicVol: optionalFiniteNumber(audio.bodyMusicVol),
+    bodyMusicVol: resolveMusicModuleBodyMusicVol(config.bodyMusicVol, optionalFiniteNumber(audio.bodyMusicVol)),
   }));
 }

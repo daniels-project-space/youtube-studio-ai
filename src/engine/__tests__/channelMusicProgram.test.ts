@@ -13,6 +13,7 @@ import {
   musicFallbackProfileForRole,
   musicProviderPromptForProgram,
   musicRoleForRoute,
+  resolveMusicModuleBodyMusicVol,
   musicSoundProfileFingerprint,
   primaryMusicFallbackProfile,
 } from "@/engine/channelMusicProgram";
@@ -20,6 +21,15 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 const sha = (value: string) => value.repeat(64);
+
+assert.equal(resolveMusicModuleBodyMusicVol(0.28, 0.16), 0.28,
+  "an explicit Music-module mix level overrides the channel DNA default");
+assert.equal(resolveMusicModuleBodyMusicVol(undefined, 0.16), 0.16,
+  "existing channels keep their channel DNA mix level until they opt into a module override");
+for (const invalid of [null, "0.2", Number.NaN, 0, 1.01]) {
+  assert.throws(() => resolveMusicModuleBodyMusicVol(invalid), /bodyMusicVol must be a finite number/u,
+    "invalid persisted Music-module gain must fail closed");
+}
 
 assert.equal(musicRoleForRoute("music_loop", "music_loop"), "primary_music");
 assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "sleep_sound_bed");

@@ -190,6 +190,21 @@ async function main() {
   };
   assert.equal(producedProgram.role, "meditation_bed", "the shared music producer must preserve the channel's declared role instead of rebuilding a family default");
   assert.equal(producedProgram.mix.bodyMusicVol, 0.37, "channel StyleDNA mix gain survives the real producer boundary");
+  await assert.rejects(music.run({
+    ...ctx,
+    params: { provider: "mureka", bodyMusicVol: 0.22 },
+    store: { ...ctx.store, channelProgramRoute, styleDNA, musicBrief: {
+      musicPrompt: "A measured, spacious meditation bed.",
+    } },
+  }), /provider boundary reached/);
+  const moduleGainEntry = [...writtenObjects.entries()].find(([key]) =>
+    key.includes("channel-music-program-") && key !== programEntry[0]);
+  assert.ok(moduleGainEntry, "the explicit module gain is sealed into a distinct immutable channel program");
+  const moduleGainProgram = JSON.parse(Buffer.from(moduleGainEntry[1]).toString("utf8")) as {
+    mix: { bodyMusicVol: number };
+  };
+  assert.equal(moduleGainProgram.mix.bodyMusicVol, 0.22,
+    "the real music producer applies a configured Music-module gain ahead of Style DNA");
   storageCalls = 0;
   networkCalls = 0;
   await assert.rejects(music.run({

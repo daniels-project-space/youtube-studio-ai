@@ -83,6 +83,14 @@ function main(): void {
   for (const required of ["metadata", "script_gen", "narration_tts", "visual_matter"]) {
     assert.ok(keys.has(required), `${required} must expose a surface or its channel config cannot be persisted`);
   }
+  assert.ok(
+    CORE_MODULE_SURFACES.find((card) => card.key === "music")?.customization?.knobs.some((knob) => knob.id === "bodyMusicVol"),
+    "the shared Music module must expose its role-bounded music-bed gain",
+  );
+  assert.ok(
+    NEW_CHANNEL_MODULE_CATALOG.find((entry) => entry.block === "music")?.params.some((param) => param.key === "bodyMusicVol"),
+    "channel creation must offer the same music-bed control it persists and runtime consumes",
+  );
 
   // ONBOARDING AND VALIDATION MUST AGREE.
   //
