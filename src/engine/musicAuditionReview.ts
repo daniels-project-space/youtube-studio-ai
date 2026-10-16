@@ -7,6 +7,41 @@ import { AnyMusicAuditionCheckpointSchema } from "./musicAuditionCheckpoint";
 
 const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 
+export interface MusicAuditionApprovalReadinessInput {
+  readonly sections: readonly { readonly id: string }[];
+  readonly sectionReviews: Readonly<Record<string, { readonly score: string; readonly evidence: string }>>;
+  readonly emotionalDepthScore: string;
+  readonly arrangementDepthScore: string;
+  readonly hollowOrGeneric: boolean;
+  readonly notes: string;
+  readonly thresholds?: {
+    readonly minimumSectionScore: number;
+    readonly minimumEmotionalDepthScore: number;
+    readonly minimumArrangementDepthScore: number;
+  };
+  readonly technicalQualityPass?: boolean;
+}
+
+export function assessMusicAuditionApprovalReadiness(input: MusicAuditionApprovalReadinessInput) {
+  const reviewComplete = input.sections.length >= 4 && input.sections.every((section) => {
+    const review = input.sectionReviews[section.id];
+    const score = Number(review?.score);
+    return review?.score.trim() !== "" && Number.isFinite(score) && score >= 0 && score <= 1 && Boolean(review?.evidence.trim());
+  }) && input.emotionalDepthScore.trim() !== "" && Number.isFinite(Number(input.emotionalDepthScore)) &&
+    Number(input.emotionalDepthScore) >= 0 && Number(input.emotionalDepthScore) <= 1 &&
+    input.arrangementDepthScore.trim() !== "" && Number.isFinite(Number(input.arrangementDepthScore)) &&
+    Number(input.arrangementDepthScore) >= 0 && Number(input.arrangementDepthScore) <= 1 && Boolean(input.notes.trim());
+  const humanReviewPasses = reviewComplete && input.thresholds !== undefined && !input.hollowOrGeneric &&
+    input.sections.every((section) => Number(input.sectionReviews[section.id]?.score) >= input.thresholds!.minimumSectionScore) &&
+    Number(input.emotionalDepthScore) >= input.thresholds.minimumEmotionalDepthScore &&
+    Number(input.arrangementDepthScore) >= input.thresholds.minimumArrangementDepthScore;
+  return {
+    reviewComplete,
+    humanReviewPasses,
+    approvalReady: humanReviewPasses && input.technicalQualityPass === true,
+  };
+}
+
 const SectionReviewSchema = z.object({
   sectionId: z.string().trim().min(1).max(80),
   score: z.number().finite().min(0).max(1),

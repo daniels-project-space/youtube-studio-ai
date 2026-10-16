@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { assessMusicAuditionApprovalReadiness } from "@/engine/musicAuditionReview";
 
 type Section = { id: string; label: string; instruction: string };
 type NativeQuality = {
@@ -55,18 +56,12 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
   const [hollowOrGeneric, setHollowOrGeneric] = useState(false);
   const [notes, setNotes] = useState("");
   const sections = data?.review?.sections;
-  const completeReview = (sections?.length ?? 0) >= 4 && (sections ?? []).every((section) => {
-    const review = sectionReviews[section.id];
-    const score = Number(review?.score);
-    return review?.score.trim() !== "" && Number.isFinite(score) && score >= 0 && score <= 1 && Boolean(review?.evidence.trim());
-  }) && emotionalDepthScore.trim() !== "" && Number.isFinite(Number(emotionalDepthScore)) && Number(emotionalDepthScore) >= 0 && Number(emotionalDepthScore) <= 1 &&
-    arrangementDepthScore.trim() !== "" && Number.isFinite(Number(arrangementDepthScore)) && Number(arrangementDepthScore) >= 0 && Number(arrangementDepthScore) <= 1 && Boolean(notes.trim());
-  const thresholds = data?.review?.approvalThresholds;
-  const humanReviewPasses = completeReview && thresholds !== undefined && !hollowOrGeneric &&
-    (sections ?? []).every((section) => Number(sectionReviews[section.id]?.score) >= thresholds.minimumSectionScore) &&
-    Number(emotionalDepthScore) >= thresholds.minimumEmotionalDepthScore &&
-    Number(arrangementDepthScore) >= thresholds.minimumArrangementDepthScore;
-  const approvalReady = humanReviewPasses && data?.review?.technicalQualityPass === true;
+  const approvalReadiness = assessMusicAuditionApprovalReadiness({
+    sections: sections ?? [], sectionReviews, emotionalDepthScore, arrangementDepthScore,
+    hollowOrGeneric, notes, thresholds: data?.review?.approvalThresholds,
+    technicalQualityPass: data?.review?.technicalQualityPass,
+  });
+  const { reviewComplete: completeReview, approvalReady } = approvalReadiness;
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/music-audition-checkpoints?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
