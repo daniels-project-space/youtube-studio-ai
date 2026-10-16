@@ -49,13 +49,18 @@ async function main(): Promise<void> {
   ok = report("thumbnail lock still spans its gates", (thumbnail?.paths.length ?? 0) >= 23, true) && ok;
 
   // A module is only locked while a marker exists — never by default.
-  const baseEntity = lockableModule("editorial-evidence-packet");
-  if (!baseEntity || baseEntity.paths.length === 0) throw new Error("guard probe module has no files");
+  const preExistingPatterns = initialLocks.flatMap((record) => record.paths);
+  const probe = LOCKABLE_MODULES.flatMap((candidate) =>
+    candidate.paths.map((path) => ({ candidate, path })),
+  ).find(({ path }) => !preExistingPatterns.some((pattern) =>
+    path.includes(pattern) || pattern.includes(path),
+  ));
+  if (!probe) throw new Error("owner-lock verification needs at least one file outside pre-existing locked paths");
   // A synthetic id is deliberately outside LOCKABLE_MODULES, so the minute
   // sync cannot mistake this short-lived local proof for a stale UI marker and
   // remove it halfway through the assertions.
-  const entity = { ...baseEntity, id: `verification-${process.pid}` };
-  const target = `${REPO}/${entity.paths[0]}`;
+  const entity = { ...probe.candidate, id: `verification-${process.pid}`, paths: [probe.path] };
+  const target = `${REPO}/${probe.path}`;
 
   ok = report(
     "unlocked module is editable by default",
