@@ -133,6 +133,7 @@ export interface ChannelCritiqueContext {
   vibe?: string;
   worksInSpace?: readonly string[];
   avoidInSpace?: readonly string[];
+  visualDirection?: readonly string[];
   styleGrammar?: string;
   narrative?: {
     scriptStyle?: string;
@@ -182,6 +183,12 @@ export function channelCritiqueContextFromStore(
     colorGrade?: unknown;
     motifs?: unknown;
     visualAvoid?: unknown;
+    palette?: unknown;
+    recurringSubject?: unknown;
+    setting?: unknown;
+    composition?: unknown;
+    motionDiscipline?: unknown;
+    motionVocabulary?: unknown;
     narrative?: {
       scriptStyle?: unknown;
       hookStyle?: unknown;
@@ -194,6 +201,22 @@ export function channelCritiqueContextFromStore(
   const laneKey = typeof lane?.key === "string" ? compact(lane.key, 60) : undefined;
   const bannedWords = stringListFromStore(store["bannedWords"], 32, 120);
   const dnaVibe = typeof dna?.colorGrade === "string" ? compact(dna.colorGrade, 160) : undefined;
+  const visualDirection = [
+    ...(stringListFromStore(dna?.palette, 6, 100) ?? []).map((item) => `Channel palette: ${item}`),
+    ...(typeof dna?.recurringSubject === "string" && compact(dna.recurringSubject, 180)
+      ? [`Recurring subject: ${compact(dna.recurringSubject, 180)}`]
+      : []),
+    ...(typeof dna?.setting === "string" && compact(dna.setting, 180)
+      ? [`Channel setting: ${compact(dna.setting, 180)}`]
+      : []),
+    ...(typeof dna?.composition === "string" && compact(dna.composition, 180)
+      ? [`Composition: ${compact(dna.composition, 180)}`]
+      : []),
+    ...(typeof dna?.motionDiscipline === "string" && compact(dna.motionDiscipline, 180)
+      ? [`Motion discipline: ${compact(dna.motionDiscipline, 180)}`]
+      : []),
+    ...(stringListFromStore(dna?.motionVocabulary, 6, 100) ?? []).map((item) => `Allowed motion: ${item}`),
+  ].slice(0, 16);
   const channelName = textFromStore(store, "channelName", 120);
   const persona = textFromStore(store, "persona", 180);
   const styleGrammar = textFromStore(store, "styleGrammar", 240);
@@ -212,6 +235,7 @@ export function channelCritiqueContextFromStore(
     ...((showBible?.vibe ?? dnaVibe) ? { vibe: showBible?.vibe ?? dnaVibe } : {}),
     ...(worksInSpace ? { worksInSpace } : {}),
     ...(avoidInSpace ? { avoidInSpace } : {}),
+    ...(visualDirection.length ? { visualDirection } : {}),
     ...(styleGrammar ? { styleGrammar } : {}),
     ...(narrative ? {
       narrative: {
@@ -245,6 +269,7 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
     compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
     compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
     ...showBibleVoicePromptLines(channel),
+    ...(channel.visualDirection ?? []).slice(0, 16).map((item) => `Visual identity: ${compact(item, 200)}`),
     compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
     ...(["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const).map(field => {
       const value = compact(channel.narrative?.[field], 240);
@@ -292,6 +317,7 @@ export function channelCreatorDirection(channel?: ChannelCritiqueContext): strin
     }),
     channel.worksInSpace?.length ? `Lean into: ${channel.worksInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
     channel.avoidInSpace?.length ? `Avoid: ${channel.avoidInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
+    ...(channel.visualDirection ?? []).slice(0, 16).map((item) => `Preserve channel visual identity: ${compact(item, 200)}`),
     compact(channel.criticDoctrine, 400) ? `Standing creative direction: ${compact(channel.criticDoctrine, 400)}` : "",
     channel.bannedWords?.length ? `Do not use these words: ${JSON.stringify(channel.bannedWords.slice(0, 24))}` : "",
   ].filter(Boolean);

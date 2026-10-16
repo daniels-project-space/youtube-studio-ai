@@ -106,8 +106,14 @@ const guardedInputs = {
   showBible,
   styleDNA: {
     colorGrade: "soft natural light",
+    palette: ["moss green", "weathered slate", "warm paper"],
     motifs: ["field notebook"],
     visualAvoid: ["glowing diagrams"],
+    recurringSubject: "a brass field compass with a nicked rim",
+    setting: "quiet coastal paths after rain",
+    composition: "one clear foreground specimen against layered distant landscape",
+    motionDiscipline: "locked camera; only wind-touched grasses may move",
+    motionVocabulary: ["wind in grasses", "slow cloud drift"],
     narrative: {
       scriptStyle: "evidence-led observation",
       hookStyle: "a concrete unanswered question",
@@ -126,6 +132,18 @@ for (const moduleId of ["whiteboard_scribe", "motion_comic", "lore_short", "self
   const context = channelCritiqueContextFromStore(guardedStore, ["illustrate the exact claim"]);
   const brief = channelCritiqueBrief(context);
   const creatorDirection = channelCreatorDirection(context);
+  for (const value of [
+    "moss green",
+    "weathered slate",
+    "brass field compass with a nicked rim",
+    "quiet coastal paths after rain",
+    "foreground specimen against layered distant landscape",
+    "locked camera; only wind-touched grasses may move",
+    "wind in grasses",
+  ]) {
+    assert.ok(brief.includes(value), `${moduleId} critic must preserve authored visual identity: ${value}`);
+    assert.ok(creatorDirection.includes(value), `${moduleId} producer must preserve authored visual identity: ${value}`);
+  }
   for (const value of [
     showBible.positioning,
     showBible.vibe,
