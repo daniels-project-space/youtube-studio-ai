@@ -132,7 +132,7 @@ function validateChannelMusicProgramBody(
 ): void {
   const routeOwnedRole = routeOwnedMusicRole(program.family, program.contentLaneKey);
   if (routeOwnedRole && program.role !== routeOwnedRole &&
-    !isGuidedMeditationOverride(program.family, program.contentLaneKey, program.role)) {
+    !isMusicRoleAllowedForRoute(program.family, program.contentLaneKey, program.role)) {
     issue.addIssue({
       code: z.ZodIssueCode.custom,
       message: `music role ${program.role} conflicts with route-owned role ${routeOwnedRole}`,
@@ -626,17 +626,16 @@ function routeOwnedMusicRole(family: string, contentLaneKey: string): ChannelMus
   return undefined;
 }
 
-function isGuidedMeditationOverride(
+export function isMusicRoleAllowedForRoute(
   family: string,
   contentLaneKey: string,
   role: ChannelMusicRole,
 ): boolean {
-  return family.trim().toLowerCase() === "sleep" &&
+  const expectedRole = musicRoleForRoute(family, contentLaneKey);
+  return role === expectedRole || (family.trim().toLowerCase() === "sleep" &&
     contentLaneKey.trim().toLowerCase() === "ambient_guided" &&
-    role === "meditation_bed";
+    role === "meditation_bed");
 }
-
-export const isGuidedMeditationMusicRoleOverride = isGuidedMeditationOverride;
 
 function routeHasNarrationCue(family: string, contentLaneKey: string): boolean {
   const routeWords = `${family} ${contentLaneKey}`.toLowerCase().replace(/[_-]+/gu, " ");
@@ -925,8 +924,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const contentLaneKey = input.contentLaneKey?.trim() || "unclassified";
   const routeRole = musicRoleForRoute(family, contentLaneKey);
   const routeOwnedRole = routeOwnedMusicRole(family, contentLaneKey);
-  if (routeOwnedRole && input.role !== undefined && input.role !== routeOwnedRole &&
-    !isGuidedMeditationOverride(family, contentLaneKey, input.role)) {
+  if (routeOwnedRole && input.role !== undefined && !isMusicRoleAllowedForRoute(family, contentLaneKey, input.role)) {
     const routeKind = routeOwnedRole === "primary_music" ? "route-owned" : "specialized route";
     throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }

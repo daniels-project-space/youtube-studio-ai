@@ -5,6 +5,7 @@ import {
   ChannelMusicProgramSchema,
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
+  isMusicRoleAllowedForRoute,
   musicProgramTechnicalQualityFailures,
   instrumentalLyricsControl,
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS,
@@ -33,6 +34,10 @@ for (const invalid of [null, "0.2", Number.NaN, 0, 1.01]) {
 
 assert.equal(musicRoleForRoute("music_loop", "music_loop"), "primary_music");
 assert.equal(musicRoleForRoute("sleep", "ambient_guided"), "sleep_sound_bed");
+assert.equal(isMusicRoleAllowedForRoute("sleep", "ambient_guided", "sleep_sound_bed"), true);
+assert.equal(isMusicRoleAllowedForRoute("sleep", "ambient_guided", "meditation_bed"), true);
+assert.equal(isMusicRoleAllowedForRoute("sleep", "ambient_guided", "primary_music"), false);
+assert.equal(isMusicRoleAllowedForRoute("meditation", "ambient_guided", "sleep_sound_bed"), false);
 assert.equal(musicRoleForRoute("sleep", "music_loop"), "sleep_sound_bed");
 assert.equal(musicRoleForRoute("music_loop", "sleep"), "sleep_sound_bed");
 assert.equal(musicRoleForRoute("music_loop", "meditation"), "meditation_bed");

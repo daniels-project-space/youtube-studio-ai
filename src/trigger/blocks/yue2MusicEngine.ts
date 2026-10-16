@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
-import { isGuidedMeditationMusicRoleOverride, musicRoleForRoute } from "@/engine/channelMusicProgram";
+import { isMusicRoleAllowedForRoute, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { ExecutionError } from "@/engine/executionErrors";
@@ -64,7 +64,7 @@ const block: Block & { version: string } = {
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
-      if (arrangement.arrangement.role !== expectedRole && !isGuidedMeditationMusicRoleOverride(
+      if (!isMusicRoleAllowedForRoute(
         route.family,
         route.contentLaneKey,
         arrangement.arrangement.role,
