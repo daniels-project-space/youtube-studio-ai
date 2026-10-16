@@ -2892,6 +2892,7 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "criticDoctrine",
         "persona",
         "scenarioVisualTreatment",
+        "showBible",
         "styleGrammar",
         "syntheticScenario",
         "topic"
@@ -2993,6 +2994,8 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "contentLane",
         "criticDoctrine",
         "persona",
+        "showBible",
+        "styleDNA",
         "styleGrammar",
         "topic",
         "topicBet"
@@ -3177,6 +3180,7 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "competitors",
         "contentLane",
         "family",
+        "hook",
         "narrationText",
         "niche",
         "nicheIntel",
@@ -4021,6 +4025,7 @@ export const GENERATED_MODULE_ABI: ModuleAbiIndex = {
         "reuseScript",
         "scriptPlaybook",
         "serializedProgramEpisodeContext",
+        "showBible",
         "structure",
         "styleDNA",
         "styleGrammar",

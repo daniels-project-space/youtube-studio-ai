@@ -480,6 +480,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
     }
 
     const scriptDoc = ctx.store["script"] as { hook?: string; hookLoop?: string } | undefined;
+    const packageHook = typeof ctx.store["hook"] === "string" ? String(ctx.store["hook"]).trim() : "";
 
     const viewEstimate = async (tags: string[]) => {
       let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
@@ -589,6 +590,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
         episodeContext: serializedEpisodePrompt || undefined,
         coldOpen: scriptDoc?.hook ?? undefined,
         hookLoop: scriptDoc?.hookLoop ?? undefined,
+        packageHook: packageHook || undefined,
         quote: (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine ?? undefined,
         competitorTitles: competitors
           .flatMap((c) => c.topVideos)
