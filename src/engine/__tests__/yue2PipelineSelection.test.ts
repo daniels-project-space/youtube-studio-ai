@@ -3,6 +3,7 @@ import { designPipeline, designPipelineCore } from "../designer";
 import { selectYuE2Pipeline, type YuE2PipelineSelection } from "../yue2PipelineSelection";
 import { validatePipeline } from "../validate";
 import { compilePipeline } from "../pipelineCompiler";
+import { YUE2_SCORED_MUSIC_VERSION } from "../musicModuleVersions";
 
 const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 0.04,
   executionPolicy: { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
@@ -34,7 +35,7 @@ try {
     assert.equal(result.productionReady, false, "source selection is not automatic production qualification");
     assert.ok(result.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const modules = result.compilation!.modules;
-    assert.equal(modules.find(module => module.id === "music")?.version, "5.0.0-render-engine-yue2-scored-v2");
+    assert.equal(modules.find(module => module.id === "music")?.version, YUE2_SCORED_MUSIC_VERSION);
     assert.equal(modules.find(module => module.id === "composer_brief")?.version, "3.1.0-yue2-score-grounding");
     assert.equal(modules.find(module => module.id === (family === "music_loop" ? "assemble" : "timeline_assemble"))?.version,
       playback === "once" ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop");
@@ -54,6 +55,7 @@ try {
     assert.notEqual(result.compilation!.fingerprint, baseline.compilation!.fingerprint);
     assert.ok(Number.isFinite(result.compilation!.reservedMaxCostUsd));
     assert.equal(result.compilation!.bindings.music.acceptedMusicArrangement, "music_arrangement_plan:acceptedMusicArrangement");
+    assert.equal(result.compilation!.bindings.music.musicBrief, "composer_brief:musicBrief");
     assert.equal(result.compilation!.bindings.music_arrangement_plan.musicBrief, "composer_brief:musicBrief");
     assert.deepEqual(baseline.pipeline, before);
     assert.deepEqual(designPipeline(opts).pipeline, before, "default and legacy designs remain unchanged");
@@ -78,22 +80,15 @@ try {
   assert.throws(() => selectYuE2Pipeline(baseline, missingPlayback));
   assert.throws(() => designPipeline({ family: "music_loop", yue2Music: selection, paramOverrides: { music: { trackCount: 2 } } }), /legacy music overrides/);
   const selected = selectYuE2Pipeline(baseline, selection);
-  for (const optional of [false, true]) {
-    const disconnected = validatePipeline(selected, ["styleDNA", "channelProfile"]);
-    const index = disconnected.manifests.findIndex(manifest => manifest.id === "music_arrangement_plan");
-    const mediator = disconnected.manifests[index];
-    const { musicBrief, ...consumes } = mediator.consumes;
-    disconnected.manifests[index] = { ...mediator, consumes,
-      optionalConsumes: { ...mediator.optionalConsumes, ...(optional ? { musicBrief } : {}) } };
-    assert.throws(() => compilePipeline(disconnected), /without declaring it/, "absent or optional crew handoff cannot qualify mediation");
-  }
-  const optionalConsumer = validatePipeline(selected, ["styleDNA", "channelProfile"]);
-  const consumerIndex = optionalConsumer.manifests.findIndex(manifest => manifest.id === "music");
-  const consumer = optionalConsumer.manifests[consumerIndex];
-  const { acceptedMusicArrangement, ...consumes } = consumer.consumes;
-  optionalConsumer.manifests[consumerIndex] = { ...consumer, consumes,
-    optionalConsumes: { ...consumer.optionalConsumes, acceptedMusicArrangement } };
-  assert.throws(() => compilePipeline(optionalConsumer), /without declaring it/, "music must require the accepted handoff");
+  const resolvedSelection = validatePipeline(selected, ["styleDNA", "channelProfile"]);
+  const arrangementPlanner = resolvedSelection.manifests.find(manifest => manifest.id === "music_arrangement_plan")!;
+  const musicModule = resolvedSelection.manifests.find(manifest => manifest.id === "music")!;
+  assert.ok(arrangementPlanner.consumes.musicBrief && !arrangementPlanner.optionalConsumes.musicBrief,
+    "arrangement planning must require its exact Composer brief");
+  assert.ok(musicModule.consumes.musicBrief && !musicModule.optionalConsumes.musicBrief,
+    "YuE2 admission must require the current Composer brief, not only a previously accepted arrangement");
+  assert.ok(musicModule.consumes.acceptedMusicArrangement && !musicModule.optionalConsumes.acceptedMusicArrangement,
+    "music must require the accepted arrangement handoff");
   const withoutMediator = selected.filter(entry => entry.block !== "music_arrangement_plan");
   assert.throws(() => compilePipeline(validatePipeline(withoutMediator, ["styleDNA", "channelProfile"])), /music\.arrangement\.accepted/);
   const reordered = [...withoutMediator, { block: "music_arrangement_plan" }];

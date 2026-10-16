@@ -7,6 +7,7 @@ import { designPipeline, type DesignOptions } from "@/engine/designer";
 import { channelPipelinePreviewInputFromDesign, compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { YUE2_SCORED_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 
 // Execute the worker's actual options projection, then the real designer and
 // compiler. Loading the task itself would bring unrelated provider startup in.
@@ -49,7 +50,7 @@ try {
     const selectedOptions = project(payload);
     assert.equal(selectedOptions.yue2Music, yue2Music, "worker must retain the exact requested selection");
     const selected = designPipeline(selectedOptions);
-    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, "5.0.0-render-engine-yue2-scored-v2");
+    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, YUE2_SCORED_MUSIC_VERSION);
     assert.equal(selected.productionReady, false, "transport cannot grant production qualification");
     assert.ok(selected.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const changed = designPipeline(project({ ...payload, yue2Music: { ...yue2Music, sourceParams: { ...sourceParams, seed: 43 } } }));

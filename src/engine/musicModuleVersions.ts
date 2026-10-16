@@ -4,4 +4,4 @@ export const MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION = "2.3.0-provider-outp
 export const CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION = "2.2.0-channel-identity-short-form";
 export const CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY = Symbol("channel-identity-short-form-music-policy");
 export const MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY = Symbol("music-required-studio-direction-policy");
-export const YUE2_SCORED_MUSIC_VERSION = "5.0.0-render-engine-yue2-scored-v2";
+export const YUE2_SCORED_MUSIC_VERSION = "6.0.0-render-engine-yue2-scored-v2";

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { wait } from "@trigger.dev/sdk/v3";
-import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
+import { acceptedMusicArrangementForRun } from "@/engine/acceptedMusicArrangement";
+import { YUE2_SCORED_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { isMusicRoleAllowedForRoute, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
@@ -24,7 +25,7 @@ import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/
 import { createYuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
 import { channelProgramRouteFromContext, musicProgramForCurrentRoute } from "./blockContext";
 
-export const RENDER_ENGINE_YUE2_MUSIC_VERSION = "5.0.0-render-engine-yue2-scored-v2";
+export const RENDER_ENGINE_YUE2_MUSIC_VERSION = YUE2_SCORED_MUSIC_VERSION;
 
 function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: Render Engine YuE2 ${reason}; recover the same job, never regenerate`,
@@ -52,7 +53,7 @@ export function assertRenderEngineYuE2DispatchEnabled(stage: RenderEngineYuE2Sta
 
 const block: Block & { version: string } = {
   id: "music", version: RENDER_ENGINE_YUE2_MUSIC_VERSION,
-  consumes: ["topic", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate"], paid: true,
+  consumes: ["topic", "musicBrief", "acceptedMusicArrangement"], produces: ["yue2MusicCandidate"], paid: true,
   run: async (ctx) => {
     const params = config.parse(ctx.params);
     const topic = String(ctx.store["topic"] ?? "");
@@ -60,9 +61,19 @@ const block: Block & { version: string } = {
     if (program && program.audio.providerPreference !== "yue2") {
       throw new Error("Render Engine YuE2 music requires a sealed YuE2 program; it cannot override another provider");
     }
-    const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+    const arrangement = acceptedMusicArrangementForRun(ctx.store["acceptedMusicArrangement"], {
+      ownerId: ctx.ownerId,
+      channelId: String(ctx.channelId),
+      runId: String(ctx.runId),
+      topic,
+      sourceBrief: ctx.store["musicBrief"],
+    });
+    if (!arrangement) throw new Error("Render Engine YuE2 requires the current run's accepted music arrangement");
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
+      if (arrangement.reviewContext?.family !== route.family) {
+        throw new Error("Render Engine YuE2 arrangement review context does not match the current channel route family");
+      }
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
       if (!isMusicRoleAllowedForRoute(
         route.family,
@@ -77,8 +88,8 @@ const block: Block & { version: string } = {
     }
     if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
         arrangement.runId !== ctx.runId || arrangement.topic !== topic || !arrangement.symbolicScore ||
-        !arrangement.reviewContext) {
-      throw new Error("Render Engine YuE2 requires the current run's accepted, scored arrangement and channel context");
+        !arrangement.reviewContext || !arrangement.channelGrounding?.length) {
+      throw new Error("Render Engine YuE2 requires the current run's scored arrangement, grounded channel identity, and review context");
     }
     if (!Number.isFinite(ctx.budgetUsd) || ctx.budgetUsd < params.maxCostUsd ||
         !Number.isFinite(ctx.stageBudgetUsd) || ctx.stageBudgetUsd! < params.maxCostUsd ||
