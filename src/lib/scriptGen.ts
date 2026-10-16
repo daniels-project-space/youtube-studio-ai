@@ -165,7 +165,7 @@ export interface ScriptRequest {
    * The channel's Style-DNA narrative spec — the per-channel register the
    * script must be written in (beats the generic per-archetype tone).
    */
-  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; voiceProfile?: string; delivery?: string };
+  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Frozen channel identity language the narration must not contain. */
   bannedWords?: string[];
   /**
@@ -405,14 +405,13 @@ function styleGuidance(req: ScriptRequest): string {
   const { style, language, narrative, niche } = req;
   // The channel's OWN narrative DNA outranks the generic per-archetype tone —
   // a finance documentary channel must not inherit the stoic-essay register.
-  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.pacing || narrative.voiceProfile || narrative.delivery)
+  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.pacing || narrative.delivery)
     ? "WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER (it overrides any generic tone below): " +
       [
         narrative.scriptStyle ? `script style: ${narrative.scriptStyle}` : "",
         narrative.hookStyle ? `hook style: ${narrative.hookStyle}` : "",
         narrative.delivery ? `delivery: ${narrative.delivery}` : "",
         narrative.pacing ? `pacing: ${narrative.pacing}` : "",
-        narrative.voiceProfile ? `voice profile (cadence, warmth, and presence): ${narrative.voiceProfile}` : "",
       ].filter(Boolean).join(" | ") + " "
     : "";
   // The niche's voice ARCHETYPE — how this KIND of channel sounds (history =

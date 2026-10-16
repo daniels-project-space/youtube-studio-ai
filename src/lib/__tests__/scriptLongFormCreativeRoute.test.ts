@@ -57,6 +57,10 @@ async function main(): Promise<void> {
       route: resolveChannelProgramRoute(brief),
       programBrief: brief,
     });
+    const voiceDNA = {
+      pacing: "Let each idea arrive slowly; leave room between discoveries.",
+      voiceProfile: "ACOUSTIC_ONLY_TEST_PROFILE low-register timbre and age-specific breath texture.",
+    };
     await assert.rejects(
       synthScript({ topic: "The bridge's warm final stone", maxSeconds: 421, programRoute: route }),
       /route-bound production script requires its frozen channel persona/u,
@@ -72,10 +76,7 @@ async function main(): Promise<void> {
       sentenceGapSec: 0.85,
       ttsSpeed: 0.94,
       precraftedHook: crafted,
-      narrative: {
-        pacing: "Let each idea arrive slowly; leave room between discoveries.",
-        voiceProfile: "A warm, close presence with patient cadence and understated confidence.",
-      },
+      narrative: voiceDNA,
       channelVoice: {
         positioning: "Patient source-led stories about overlooked evidence in ordinary places.",
         vibe: "Curious, humane, and quietly exact.",
@@ -89,8 +90,8 @@ async function main(): Promise<void> {
     assert.match(prompt, /Creator-declared topic priorities \(in order\): 1\. How a bridge changed the town; 2\. What a court record reveals about daily life/);
     assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,
       "a pacing-only identity must shape generation just as it shapes the channel critic");
-    assert.match(prompt, /voice profile \(cadence, warmth, and presence\): A warm, close presence with patient cadence and understated confidence\./,
-      "the authored voice profile must reach the writer without becoming acoustic TTS instructions");
+    assert.doesNotMatch(prompt, /ACOUSTIC_ONLY_TEST_PROFILE|timbre and age-specific breath texture/,
+      "acoustic casting stays with the narration module and must not steer script prose");
     for (const guidance of [
       "Patient source-led stories about overlooked evidence in ordinary places.",
       "Curious, humane, and quietly exact.",

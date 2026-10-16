@@ -458,7 +458,7 @@ export interface HookCraftArgs {
   /** Frozen audience/topic context from the admitted channel program. */
   programRoute?: ChannelProgramRouteRunSeed;
   /** Style-DNA narrative register (beats generic tone). */
-  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; voiceProfile?: string; delivery?: string };
+  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
   style?: string;
   /** Script Lab playbook digest (hook rules from WATCHED top performers). */
@@ -557,13 +557,12 @@ function passes(v: HookVerdict): boolean {
 
 function registerClause(a: HookCraftArgs): string {
   const reg = a.narrative && (
-    a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.pacing || a.narrative.voiceProfile || a.narrative.delivery
+    a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.pacing || a.narrative.delivery
   )
     ? `LOCKED CHANNEL REGISTER (write inside it — it outranks the archetype below): ${[
         a.narrative.scriptStyle ? `style: ${a.narrative.scriptStyle}` : "",
         a.narrative.hookStyle ? `hook style: ${a.narrative.hookStyle}` : "",
         a.narrative.pacing ? `pacing: ${a.narrative.pacing}` : "",
-        a.narrative.voiceProfile ? `voice profile (cadence, warmth, and presence): ${a.narrative.voiceProfile}` : "",
         a.narrative.delivery ? `delivery: ${a.narrative.delivery}` : "",
       ].filter(Boolean).join(" | ")}`
     : "";
