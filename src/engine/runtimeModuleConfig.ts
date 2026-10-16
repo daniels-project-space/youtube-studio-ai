@@ -149,6 +149,16 @@ export function mergeRuntimeModuleConfig(input: {
     if (!virtual) {
       paramsByBlock[blockId] = { ...(paramsByBlock[blockId] ?? {}), ...values };
     }
+    for (const knob of surface.knobs) {
+      if (!Object.hasOwn(values, knob.id)) continue;
+      for (const target of knob.runtimeTargets ?? []) {
+        if (!selected.has(target)) continue;
+        paramsByBlock[target] = {
+          ...(paramsByBlock[target] ?? {}),
+          [knob.id]: values[knob.id],
+        };
+      }
+    }
     applied.push({
       blockId,
       knobCount: Object.keys(values).length,

@@ -20,6 +20,8 @@ export interface Knob {
   /** max characters (text knobs); omit for unbounded. */
   maxLength?: number;
   default: KnobValue;
+  /** Additional selected blocks that must receive the same resolved value. */
+  runtimeTargets?: readonly string[];
   /** Human- + LLM-readable description of what it controls. */
   describes: string;
   /** Channel styles/intents this knob serves — tells the Architect WHEN to reach for it. */
@@ -85,6 +87,14 @@ export function validateCustomizationSurface(surface: CustomizationSurface): str
     byId.set(knob.id, knob);
     if (!knob.describes.trim()) errors.push(`${knob.id}: description must not be empty`);
     if (knob.servesStyles.some((style) => !style.trim())) errors.push(`${knob.id}: styles must not be empty strings`);
+    if (knob.runtimeTargets !== undefined) {
+      if (!Array.isArray(knob.runtimeTargets) || knob.runtimeTargets.length === 0 ||
+        knob.runtimeTargets.some((target) => typeof target !== "string" || !target.trim())) {
+        errors.push(`${knob.id}: runtime targets must be non-empty block ids`);
+      } else if (new Set(knob.runtimeTargets).size !== knob.runtimeTargets.length) {
+        errors.push(`${knob.id}: runtime targets must be unique`);
+      }
+    }
     const defaultError = checkKnob(knob, knob.default);
     if (defaultError) errors.push(`${knob.id}: invalid default (${defaultError})`);
   }

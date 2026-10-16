@@ -147,7 +147,7 @@ const MUSIC_MODULE: ModuleCard = {
   customization: {
     capabilities: ["provider choice", "channel sound program", "structured arrangement", "style-prompt steering", "multi-track crossfade mix"],
     knobs: [
-      { id: "provider", type: "enum", values: ["mureka", "suno", "minimax_music3"], default: "mureka", describes: "music provider; MiniMax-Music3 is attribution-, license-, safeguards-, and quality-gated", servesStyles: ["platform"] },
+      { id: "provider", type: "enum", values: ["mureka", "suno", "minimax_music3"], default: "mureka", runtimeTargets: ["music_program_plan"], describes: "music provider; MiniMax-Music3 is attribution-, license-, safeguards-, and quality-gated", servesStyles: ["platform"] },
       { id: "model", type: "text", maxLength: 12, default: "", describes: "optional provider-specific model ID; blank preserves the provider's default", servesStyles: ["platform"] },
       { id: "prompt", type: "text", maxLength: 300, default: "", describes: "supplementary style/mood detail; channel identity remains primary, sleep routes ignore it, and MiniMax may trim it to preserve its caption limit", servesStyles: ["lofi", "ambient"] },
       { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },

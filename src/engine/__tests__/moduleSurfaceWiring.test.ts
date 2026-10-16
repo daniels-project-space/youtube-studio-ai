@@ -61,6 +61,13 @@ function main(): void {
       if (!readsParameter(source, knob.id)) {
         dead.push(`${card.key}.${knob.id}`);
       }
+      for (const targetId of knob.runtimeTargets ?? []) {
+        const target = getManifest(targetId)?.block;
+        assert.ok(target, `${card.key}.${knob.id} targets unregistered block ${targetId}`);
+        if (!readsParameter(target.run.toString(), knob.id)) {
+          dead.push(`${card.key}.${knob.id}->${targetId}`);
+        }
+      }
     }
   }
 

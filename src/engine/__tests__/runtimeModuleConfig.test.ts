@@ -186,6 +186,30 @@ assert.equal(
   "the creation preview must materialize the same validated controls the runner applies",
 );
 assert.deepEqual(onboardingResolution.skippedBlockIds, ["metadata"]);
+const configuredMusicRoute = resolvePipelineModuleConfig({
+  entries: [
+    { block: "music_program_plan" },
+    { block: "music" },
+  ],
+  moduleConfig: { music: { provider: "suno" } },
+});
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music_program_plan")?.params?.provider,
+  "suno",
+  "the Music module's provider choice must reach its upstream program planner before it seals provider identity",
+);
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music")?.params?.provider,
+  "suno",
+  "the selected provider must remain consistent at generation after planning",
+);
+const musicOnlyConfig = resolvePipelineModuleConfig({
+  entries: [{ block: "music" }],
+  moduleConfig: { music: { provider: "suno" } },
+});
+assert.equal(musicOnlyConfig.effectivePipeline.length, 1,
+  "provider fan-out must not invent a planner operation when the selected route has no planner");
+assert.equal(musicOnlyConfig.effectivePipeline[0]?.params?.provider, "suno");
 assert.throws(
   () => resolvePipelineModuleConfig({
     entries: routeOwnedEntries,
