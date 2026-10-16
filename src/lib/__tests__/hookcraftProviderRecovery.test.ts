@@ -104,6 +104,7 @@ async function main(): Promise<void> {
     );
     assert.equal(judgeCalls, 2, "production retries the complete cold-open slate exactly once");
     assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
+    assert.match(generationPrompts[0] ?? "", /authored guide defines the channel voice and outranks the generic archetype below/);
     assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
       "channel narrative DNA must shape its cold open as well as the body script and critic");
     assert.doesNotMatch(generationPrompts[0] ?? "", /ACOUSTIC_ONLY_TEST_PROFILE|timbre and age-specific breath texture/,

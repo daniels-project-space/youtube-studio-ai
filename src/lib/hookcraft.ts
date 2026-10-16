@@ -575,7 +575,8 @@ function registerClause(a: HookCraftArgs): string {
     a.niche ? `Niche: ${a.niche}.` : "",
     a.persona ? `Persona: ${a.persona}` : "",
     channelVoice.length
-      ? `FROZEN CHANNEL EDITORIAL IDENTITY — honor this authored guide without copying it:\n${channelVoice.join("\n")}`
+      ? `FROZEN CHANNEL EDITORIAL IDENTITY — this authored guide defines the channel voice and outranks ` +
+        `the generic archetype below; honor it without copying it:\n${channelVoice.join("\n")}`
       : "",
     reg,
     doctrine
