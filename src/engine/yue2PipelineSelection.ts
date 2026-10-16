@@ -6,6 +6,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import type { PipelineEntry } from "./types";
 import { YuE2SourceConfigSchema } from "./yue2SourceConfig";
 import {
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   YUE2_SCORED_MUSIC_VERSION,
 } from "./musicModuleVersions";
@@ -67,7 +68,7 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   for (const [index, version] of versions) {
     const entry = source[index];
     const canonicalProviderMusicVersion = entry.block === "music" &&
-      entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION;
+      [MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION, LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION].includes(entry.version ?? "");
     if (entry.version !== undefined && entry.version !== version && !canonicalProviderMusicVersion) {
       throw new Error(`YuE2 selection cannot replace explicitly pinned ${entry.block}@${entry.version}`);
     }

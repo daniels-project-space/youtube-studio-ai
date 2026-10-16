@@ -22,7 +22,10 @@ import {
   type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
-import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY } from "@/engine/musicModuleVersions";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
+  MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY,
+} from "@/engine/musicModuleVersions";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
 import {
   assertMusicAuditionNativeBytes,
@@ -663,7 +666,8 @@ export const music: Block = {
           dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
           composerPrompt,
           musicProgram?.audio.direction,
-        ].filter(Boolean).join(" "));
+        ].filter(Boolean).join(" "), 900,
+        (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true);
 
     // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
     // longer than a few minutes. trackCount asks for N distinct clips that get

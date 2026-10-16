@@ -118,12 +118,14 @@ assert.throws(
     narrationProgram,
     "",
     `Keep the approved sound unchanged and preserve the final constraint: ${"required ".repeat(180)}NO PERCUSSION UNDER ANY CIRCUMSTANCE`,
+    900,
+    true,
   ),
   /required Studio direction exceeds the provider prompt limit/u,
   "the module must not silently truncate a direction explicitly marked as required",
 );
 assert.match(
-  musicProviderPromptForProgram(narrationProgram, "calm ".repeat(300)),
+  musicProviderPromptForProgram(narrationProgram, "calm ".repeat(300), "", 900, true),
   /Episode direction: calm(?: calm)*\.\.\.$/u,
   "optional episode direction must be visibly shortened at a word boundary",
 );

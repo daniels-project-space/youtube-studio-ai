@@ -529,6 +529,7 @@ export function musicProviderPromptForProgram(
   episodeDirection = "",
   requiredDirection = "",
   maximumCharacters = 900,
+  preserveRequiredStudioDirection = false,
 ): string {
   if (!Number.isInteger(maximumCharacters) || maximumCharacters < 160) {
     throw new Error("music provider prompt limit must be an integer of at least 160 characters");
@@ -552,6 +553,18 @@ export function musicProviderPromptForProgram(
     .map((section) => `${section.label}: ${section.instruction}`)
     .join("; ");
   let result = core;
+  if (!preserveRequiredStudioDirection) {
+    for (const addition of [
+      required ? `Required Studio direction: ${required}` : "",
+      direction ? `Episode direction: ${direction}` : "",
+      sections ? `Arrangement: ${sections}` : "",
+    ]) {
+      if (!addition || result.length >= maximumCharacters) continue;
+      const available = maximumCharacters - result.length - 2;
+      if (available > 0) result += `; ${addition.slice(0, available)}`;
+    }
+    return result;
+  }
   const requiredAddition = required ? `Required Studio direction: ${required}` : "";
   if (requiredAddition && result.length + 2 + requiredAddition.length > maximumCharacters) {
     throw new Error("required Studio direction exceeds the provider prompt limit");

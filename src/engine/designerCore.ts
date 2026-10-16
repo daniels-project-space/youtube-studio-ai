@@ -83,7 +83,11 @@ import {
 import { routeNarrationProvider } from "@/lib/narrationProviderRouting";
 import { resolveVoiceDoctrine as voiceDoctrine } from "@/engine/golden";
 import { musicRoleForRoute } from "./channelMusicProgram";
-import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./musicModuleVersions";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+} from "./musicModuleVersions";
 import {
   compilePipeline,
   completePipelineForPolicy,
@@ -1244,21 +1248,27 @@ export function designPipelineCore(
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
   // manifests. Creative engine choices remain the designer's responsibility.
-  const policyPipeline = options.validateRuntimeRegistry === false
-    ? pipeline.map((entry) => entry.block === "music" && entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+  const previewMusicVersions = new Set([
+    MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+    LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+    CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  ]);
+  const previewMusicVersion = options.validateRuntimeRegistry === false
+    ? pipeline.find((entry) => entry.block === "music" && previewMusicVersions.has(entry.version ?? ""))?.version
+    : undefined;
+  const policyPipeline = previewMusicVersion
+    ? pipeline.map((entry) => entry.block === "music" && entry.version === previewMusicVersion
       ? { block: entry.block, params: entry.params }
       : entry)
     : pipeline;
-  const restorePreviewMusicVersion = options.validateRuntimeRegistry === false
-    && pipeline.some((entry) => entry.block === "music" && entry.version === MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
   const completed = completePipelineForPolicy(policyPipeline, {
     generationProfile: generationProfileId,
     manifestSource: options.validateRuntimeRegistry === false ? "structural" : "runtime",
   });
-  pipeline = completed.entries.map((entry) => restorePreviewMusicVersion
+  pipeline = completed.entries.map((entry) => previewMusicVersion
     && entry.block === "music"
     && entry.version === undefined
-    ? { ...entry, version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION }
+    ? { ...entry, version: previewMusicVersion }
     : entry);
   if (completed.inserted.length) {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);

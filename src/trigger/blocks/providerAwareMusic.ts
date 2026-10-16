@@ -5,11 +5,14 @@ import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import {
   CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
   CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY,
   MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   MUSIC_PROVIDER_OUTPUTS_VERSION,
 } from "@/engine/musicModuleVersions";
 
 export {
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   MUSIC_PROVIDER_OUTPUTS_VERSION,
 } from "@/engine/musicModuleVersions";
@@ -59,7 +62,11 @@ const output = z.object({
 /** Correct the selected provider's ABI without changing the legacy generator. */
 export function createProviderAwareMusicManifest(
   legacy: ModuleManifest,
-  options: { requireMusicProgram?: boolean; channelIdentityShortForm?: boolean } = {},
+  options: {
+    requireMusicProgram?: boolean;
+    channelIdentityShortForm?: boolean;
+    preserveRequiredStudioDirection?: boolean;
+  } = {},
 ): ModuleManifest {
   if (legacy.id !== "music") throw new Error("provider-aware music requires the shared music module");
   const produces = { ...legacy.produces };
@@ -87,8 +94,12 @@ export function createProviderAwareMusicManifest(
     if (ctx.store["reuseMusicKey"] !== undefined) {
       throw new Error("provider-aware music refuses raw reuseMusicKey without verified provider/review provenance");
     }
-    const delegatedContext = options.channelIdentityShortForm
-      ? { ...ctx, params: { ...ctx.params, [CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY]: true } }
+    const delegatedContext = options.channelIdentityShortForm || options.preserveRequiredStudioDirection
+      ? { ...ctx, params: {
+          ...ctx.params,
+          ...(options.channelIdentityShortForm ? { [CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY]: true } : {}),
+          ...(options.preserveRequiredStudioDirection ? { [MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY]: true } : {}),
+        } }
       : ctx;
     const patch = await legacy.block.run(delegatedContext);
     try {
@@ -117,7 +128,9 @@ export function createProviderAwareMusicManifest(
     version: options.channelIdentityShortForm
       ? CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION
       : options.requireMusicProgram
-        ? MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+        ? options.preserveRequiredStudioDirection
+          ? MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+          : LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
         : MUSIC_PROVIDER_OUTPUTS_VERSION,
     requiredCapabilities,
     consumes,
@@ -126,7 +139,9 @@ export function createProviderAwareMusicManifest(
     optionalProduces,
     certification: {
       status: "contract",
-      evidence: options.channelIdentityShortForm
+      evidence: options.preserveRequiredStudioDirection
+        ? "Versioned required-direction integrity rejects over-budget Studio constraints before provider dispatch; legacy prompt behavior remains registered separately."
+        : options.channelIdentityShortForm
         ? "Versioned short-form fallback identity spread; provider output admission and existing review requirements are unchanged."
         : "Opt-in provider-specific output admission; generation and existing review requirements are unchanged.",
     },

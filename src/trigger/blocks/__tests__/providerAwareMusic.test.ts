@@ -8,6 +8,9 @@ import { recordModelUsage } from "@/lib/modelUsage";
 import {
   CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
   CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
 } from "@/engine/musicModuleVersions";
 import { music } from "../musicBlocks";
 import {
@@ -65,7 +68,10 @@ async function main() {
     assert.ok(!registered.produces.musicRuntimeReceiptKey);
     assert.ok(!allManifests().includes(registered));
     const registeredIdentityProfile = getManifest("music", CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION)!;
-    assert.ok(registeredIdentityProfile, "new channel identity profile has an exact registered module version");
+    assert.equal(registeredIdentityProfile.version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+      "short-form profile remains executable at its exact pinned version");
+    assert.ok(getManifest("music", MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION), "new complete-direction contract is registered");
+    assert.ok(getManifest("music", LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION), "legacy program-bound music remains executable");
 
     let calls = 0;
     let response: Record<string, unknown> | null | undefined = { ...base };
@@ -78,12 +84,26 @@ async function main() {
       return structuredClone(response) as Record<string, unknown>;
     } } };
     const selected = createProviderAwareMusicManifest(fakeLegacy);
+    const legacyProgramBound = createProviderAwareMusicManifest(fakeLegacy, { requireMusicProgram: true });
+    assert.equal(legacyProgramBound.version, LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
+    const strictProgramBound = createProviderAwareMusicManifest(fakeLegacy, {
+      requireMusicProgram: true, preserveRequiredStudioDirection: true,
+    });
+    assert.equal(strictProgramBound.version, MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
+    response = { ...base };
+    await legacyProgramBound.execute(context);
+    assert.equal(received, context, "legacy version preserves its exact prompt behavior context");
+    await strictProgramBound.execute(context);
+    assert.notEqual(received, context, "new version receives an isolated prompt-integrity policy");
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY], true);
+
     const identityProfile = createProviderAwareMusicManifest(fakeLegacy, { channelIdentityShortForm: true });
     assert.equal(identityProfile.version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION);
     response = { ...base };
     await identityProfile.execute(context);
     assert.notEqual(received, context, "versioned policy is passed in a delegated context, not caller params");
     assert.equal((received!.params as Record<PropertyKey, unknown>)[CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY], true);
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY], undefined);
     assert.equal(Object.getOwnPropertySymbols(context.params).length, 0, "the private policy marker never mutates stored params");
     for (const provider of ["mureka", "suno"] as const) {
       response = { ...base, musicProvider: provider };

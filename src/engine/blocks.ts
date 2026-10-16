@@ -14,6 +14,7 @@ import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifes
 import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAwareMetadata";
 import { music, musicProgramPlan } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
+import { LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./musicModuleVersions";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
 import { createRenderEngineYuE2MusicManifest } from "@/trigger/blocks/yue2MusicEngine";
 import { createYuE2AssemblyManifest } from "@/trigger/blocks/yue2Assembly";
@@ -83,7 +84,11 @@ export function registerAllBlocks(): void {
   register(music);
   const musicManifest = getManifest("music")!;
   registerManifestVersion(createProviderAwareMusicManifest(musicManifest));
-  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { requireMusicProgram: true }));
+  registerManifestVersion({ ...createProviderAwareMusicManifest(musicManifest, { requireMusicProgram: true }),
+    version: LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION });
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, {
+    requireMusicProgram: true, preserveRequiredStudioDirection: true,
+  }));
   registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { channelIdentityShortForm: true }));
   registerManifestVersion(createYuE2MusicManifest());
   registerManifestVersion(createRenderEngineYuE2MusicManifest());
