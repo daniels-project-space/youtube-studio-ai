@@ -731,9 +731,12 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
   const narratedSleepRoute = role === "sleep_sound_bed" && routeHasNarrationCue(family, contentLaneKey);
   const narratedMeditationRoute = role === "meditation_bed" && routeHasNarrationCue(family, contentLaneKey);
+  const defaultBodyMusicVol = role === "meditation_bed"
+    ? narratedMeditationRoute ? 0.16 : 0.25
+    : 0.1026;
   const bodyMusicVol = role === "primary_music" || (role === "sleep_sound_bed" && !narratedSleepRoute)
     ? 1
-    : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" && !narratedMeditationRoute ? 0.25 : 0.1026)));
+    : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? defaultBodyMusicVol));
   const body: ChannelMusicProgramBody = {
     version: CHANNEL_MUSIC_PROGRAM_VERSION,
     channelIdentityPromptContract: "channel-identity-caption/v1",
