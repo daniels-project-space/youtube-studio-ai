@@ -902,6 +902,9 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }
   const role = input.role ?? routeRole;
+  if (routeRole === "narration_bed" && role === "primary_music") {
+    throw new Error("primary_music conflicts with narration route role narration_bed");
+  }
   if (input.tempoMode === "unmetered" && role !== "meditation_bed" && role !== "sleep_sound_bed") {
     throw new Error("unmetered music is only supported for meditation and sleep roles");
   }

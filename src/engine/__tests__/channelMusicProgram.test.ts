@@ -172,6 +172,15 @@ assert.equal(unclassified.role, "narration_bed");
 assert.equal(unclassified.mix.narrationPriority, true);
 assert.equal(unclassified.mix.bodyMusicVol, 0.1026,
   "an unknown route must not be mislabeled as a full-volume music-loop program");
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-narrated-primary-music",
+  channelIdentityFingerprint: sha("e"),
+  family: "narrated",
+  contentLaneKey: "documentary",
+  role: "primary_music",
+  topic: "A source-led documentary episode",
+}), /primary_music conflicts with narration route role narration_bed/u,
+"spoken routes must not let channel or composer configuration turn their supporting score into a full-volume music lead");
 
 const meditation = createChannelMusicProgram({
   channelId: "channel-meditation",

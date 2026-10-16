@@ -101,6 +101,16 @@ async function main() {
   assert.equal(storageCalls, 2); assert.equal(networkCalls, 0);
   assert.deepEqual(reads, [], "untrusted reuse keys are never downloaded or accepted");
   storageCalls = 0;
+  const primaryMusicOnNarratedChannel = {
+    ...musicReuseTestStyleDNA,
+    audio: { ...musicReuseTestStyleDNA.audio, role: "primary_music" as const },
+  };
+  await assert.rejects(music.run({
+    ...ctx,
+    store: { ...ctx.store, styleDNA: primaryMusicOnNarratedChannel },
+  }), /primary_music conflicts with narration route role narration_bed/u);
+  assert.equal(storageCalls, 0, "a music-led role cannot overwrite the narrated route before a program receipt is written");
+  assert.equal(networkCalls, 0, "a music-led role cannot reach a paid provider on a narrated route");
   const conflictingSleepStore = {
     topic: "Steady rain through a quiet night",
     musicBrief: { musicIntent: { role: "sleep_sound_bed" } },
