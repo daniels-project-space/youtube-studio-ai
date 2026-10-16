@@ -632,9 +632,8 @@ const FAMILY_DIMENSIONS: Record<FamilyKey, readonly QualityDimensionId[]> = {
 };
 
 /**
- * Derive the per-channel bar from its DNA. Each dimension's description is
- * grounded in the DNA so the critic judges conformance to THIS channel, and the
- * deterministic floors (loop seam SSIM, music LUFS) are the un-gameable anchors.
+ * Derive the reviewer-facing per-channel bar from its DNA. Hard measured gates
+ * belong to the owning pipeline modules; this rubric is not itself an evaluator.
  * `target` mean of 1.6 / 2 ≈ the 80% bar the operator asked for.
  */
 export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): QualityBar {
@@ -656,17 +655,10 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
       : "Keep the pacing purposeful for this format; transitions should earn the next beat, and avoid unplanned dead air.",
     motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
-  // Deterministic floors the iteration loop cannot game.
-  const floors: Partial<Record<QualityDimensionId, Pick<QualityDimension, "metric" | "op" | "threshold">>> = {
-    loop_seam: { metric: "seam_ssim", op: ">=", threshold: 0.9 },
-    music: { metric: "lufs_abs_err", op: "<=", threshold: 1.5 },
-  };
-
   const dimensions: QualityDimension[] = ids.map((id) => ({
     id,
     description: desc[id],
     minScore: 1, // must be at least "acceptable" (0-1-2 scale)
-    ...(floors[id] ?? {}),
   }));
 
   return attachReferenceQualityContract(family, { target: 1.6, dimensions, refreshedAt: now });

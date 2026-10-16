@@ -86,6 +86,10 @@ for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
     bar.dimensions.every((dimension) => dimension.description.length > 24),
     `${family} must not fall back to generic dimension guidance`,
   );
+  assert.ok(
+    bar.dimensions.every((dimension) => dimension.metric === undefined),
+    `${family} must not advertise an unbound deterministic quality floor`,
+  );
 }
 
 const music = buildQualityBar("sleep", DNA, 123).dimensions.find(
