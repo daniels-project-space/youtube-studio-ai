@@ -241,6 +241,20 @@ async function main() {
   assert.match(minimaxProgram.generation.structuredCaption,
     /Additional module direction, subordinate to the locked channel sound and route contract: Add a delicate bell accent to the final phrase\./u,
     "MiniMax receives manual module direction as subordinate to channel identity, matching other providers");
+  const sleepDirection = "Build through bright dramatic swells to a powerful climax.";
+  await assert.rejects(music.run({
+    ...ctx,
+    params: { provider: "mureka", prompt: sleepDirection },
+    store: { topic: "A quiet night for sleep", channelProgramRoute },
+  }), /provider boundary reached/u);
+  const sleepProgramEntry = [...writtenObjects.entries()].find(([key]) =>
+    key.includes("channel-music-program-") && key !== programEntry[0] && key !== moduleGainEntry[0] && key !== minimaxProgramEntry[0]);
+  assert.ok(sleepProgramEntry, "sleep output must be frozen into the same shared Music program contract");
+  const sleepProgram = JSON.parse(Buffer.from(sleepProgramEntry[1]).toString("utf8")) as {
+    generation: { structuredCaption: string };
+  };
+  assert.doesNotMatch(sleepProgram.generation.structuredCaption, /dramatic swells|powerful climax/iu,
+    "free-form module prompts must not leak into the sealed low-arousal sleep program");
   storageCalls = 0;
   networkCalls = 0;
   await assert.rejects(music.run({
