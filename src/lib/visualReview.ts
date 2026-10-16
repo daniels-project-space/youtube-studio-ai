@@ -1162,6 +1162,7 @@ export function narrationCueForVisualFrame(
   cues: readonly VisualReviewTranscriptCue[],
   tSec: number,
 ): string | undefined {
+  if (!Number.isFinite(tSec)) return undefined;
   // Intro/outro frames live outside the narrated source window. Nearest-cue
   // fallback is useful only for small pauses *inside* narration; applying it
   // before the first word or after the last one falsely tells the reviewer an

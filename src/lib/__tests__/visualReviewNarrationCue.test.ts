@@ -14,6 +14,8 @@ test("frame context uses active or nearby narration, never a remote cue across a
   assert.equal(narrationCueForVisualFrame(cues, 18), undefined, "a long internal silence must remain unassociated");
   assert.equal(narrationCueForVisualFrame(cues, 4), undefined, "intro frames remain outside narration context");
   assert.equal(narrationCueForVisualFrame(cues, 32), undefined, "outro frames remain outside narration context");
+  assert.equal(narrationCueForVisualFrame(cues, Number.NaN), undefined, "an invalid frame time has no narration context");
+  assert.equal(narrationCueForVisualFrame(cues, Number.POSITIVE_INFINITY), undefined);
 });
 
 test("a frame on an adjacent sentence boundary uses the sentence beginning there", () => {
