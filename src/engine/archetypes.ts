@@ -356,13 +356,13 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "competitor_research" },
       { block: "quiz_topic_plan", params: { targetSeconds: 80 } },
       { block: "quiz_topic_safety" },
-      { block: "quiz_critic_spec" },
       // No `categories` param → the block uses the full default mix, so a
       // channel created from this archetype gets a genuinely mixed trivia video
       // (years, capitals, currencies, symbols, general knowledge) rather than
       // eight rounds of the same question type. The planner's curated topic
       // steers fact sourcing without allowing a second selector to overwrite it.
       { block: "quiz_year", params: { targetSeconds: 80 } },
+      { block: "quiz_critic_spec" },
       { block: "quiz_metadata" },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
       { block: "package_to_opening_plan" },

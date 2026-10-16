@@ -272,9 +272,10 @@ function compileRepresentativeFamilies(): void {
       assert.equal(design.compilation?.policyId, "production-contract");
       if (family === "quizyear") {
         const rendererIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_year");
+        const criticIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_critic_spec");
         const metadataIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_metadata");
-        assert.ok(rendererIndex >= 0 && metadataIndex > rendererIndex,
-          "QuizYear metadata must be authored from the rendered episode, after its approved renderer");
+        assert.ok(rendererIndex >= 0 && criticIndex > rendererIndex && metadataIndex > criticIndex,
+          "QuizYear critic and audience package must follow the approved renderer in dependency order");
       }
       assert.ok(
         Number.isFinite(design.compilation?.reservedMaxCostUsd) &&

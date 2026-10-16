@@ -193,15 +193,15 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   "quiz-year": {
     kind: "pipeline-module",
     // The autonomous QuizYear route owns its deterministic topic/safety/cue,
-    // critic, renderer and metadata receipts as one Golden module. Its final thumbnail
+    // renderer, critic and metadata receipts as one Golden module. Its final thumbnail
     // is intentionally owned by the shared Nano Banana module. Binding only
     // the final renderer left its actual production
     // planner outside the catalog proof graph.
     executableIds: [
       "quiz_topic_plan",
       "quiz_topic_safety",
-      "quiz_critic_spec",
       "quiz_year",
+      "quiz_critic_spec",
       "quiz_metadata",
     ],
   },

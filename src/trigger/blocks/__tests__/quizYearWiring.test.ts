@@ -81,9 +81,11 @@ async function main(): Promise<void> {
   assert.ok(blocks.includes("quiz_year"), "the archetype must actually run the engine");
   const safetyIndex = blocks.indexOf("quiz_topic_safety");
   const rendererIndex = blocks.indexOf("quiz_year");
+  const criticIndex = blocks.indexOf("quiz_critic_spec");
   const metadataIndex = blocks.indexOf("quiz_metadata");
   assert.ok(safetyIndex >= 0 && safetyIndex < rendererIndex, "the certified topic-safety gate must run before the engine");
-  assert.ok(metadataIndex > rendererIndex, "the audience package must be authored after the rendered episode");
+  assert.ok(rendererIndex < criticIndex && criticIndex < metadataIndex,
+    "critic and audience package must follow the rendered episode in dependency order");
   assert.ok(
     !blocks.includes("quiz_short_release"),
     "the ordinary QuizYear archetype must not execute the separately supervised private-release adjunct",
@@ -211,8 +213,8 @@ async function main(): Promise<void> {
   assert.deepEqual(binding.executableIds, [
     "quiz_topic_plan",
     "quiz_topic_safety",
-    "quiz_critic_spec",
     "quiz_year",
+    "quiz_critic_spec",
     "quiz_metadata",
   ]);
   const dormantPortraitRelease = GOLDEN_MODULES.find((m) => m.key === "quiz-short-private-release");

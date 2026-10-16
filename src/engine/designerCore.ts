@@ -608,6 +608,12 @@ export function designPipelineCore(
       planner.mode === "registered_non_gemini" ? planner.forbiddenGeminiBlocks : [],
     );
     pipeline = pipeline.flatMap((entry): PipelineEntry[] => {
+      if (entry.block === "quiz_topic_plan" && effectiveQuizProfile) {
+        return [{
+          ...entry,
+          params: { ...(entry.params ?? {}), quizProfile: quizProfile.key },
+        }];
+      }
       if (entry.block === "topic_select") {
         return [{
           block: "quiz_topic_plan",
@@ -674,12 +680,12 @@ export function designPipelineCore(
       if (forbiddenPlannerBlocks.has(entry.block)) return [];
       return [entry];
     });
-    const quizRendererIndex = pipeline.findIndex((entry) => entry.block === "quiz_year");
-    const quizMetadataIndex = pipeline.findIndex((entry) => entry.block === "quiz_metadata");
-    if (quizRendererIndex >= 0 && quizMetadataIndex >= 0 && quizMetadataIndex < quizRendererIndex) {
-      const [quizMetadata] = pipeline.splice(quizMetadataIndex, 1);
-      const rendererAfterRemoval = pipeline.findIndex((entry) => entry.block === "quiz_year");
-      pipeline.splice(rendererAfterRemoval + 1, 0, quizMetadata!);
+    if (pipeline.some((entry) => entry.block === "quiz_year")) {
+      const postRenderBlocks = new Set(["quiz_critic_spec", "quiz_metadata"]);
+      const postRenderEntries = pipeline.filter((entry) => postRenderBlocks.has(entry.block));
+      pipeline = pipeline.filter((entry) => !postRenderBlocks.has(entry.block));
+      const rendererIndex = pipeline.findIndex((entry) => entry.block === "quiz_year");
+      pipeline.splice(rendererIndex + 1, 0, ...postRenderEntries);
     }
     if (isSupervisedQuizShort) {
       const qaIndex = pipeline.findIndex((entry) => entry.block === "qa_visual");
@@ -1334,6 +1340,15 @@ export function designPipelineCore(
     pipeline = selectComposerMixAssembly(pipeline);
   }
   pipeline = selectChannelAwareScriptQa(pipeline);
+  if (opts.family === "cinematic") {
+    const hookIndex = pipeline.findIndex((entry) => entry.block === "hook_craft");
+    const scriptQaIndex = pipeline.findIndex((entry) => entry.block === "qa_script");
+    if (hookIndex >= 0 && scriptQaIndex >= 0 && hookIndex < scriptQaIndex) {
+      const [hook] = pipeline.splice(hookIndex, 1);
+      const scriptQaAfterRemoval = pipeline.findIndex((entry) => entry.block === "qa_script");
+      pipeline.splice(scriptQaAfterRemoval + 1, 0, hook!);
+    }
+  }
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);
   }

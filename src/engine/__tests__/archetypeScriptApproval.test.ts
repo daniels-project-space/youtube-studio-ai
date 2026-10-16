@@ -53,14 +53,14 @@ const quizStages = ARCHETYPES["quiz-year"].pipeline.map((entry) => entry.block);
 const quizModules = [
   "quiz_topic_plan",
   "quiz_topic_safety",
+  "quiz_year",
   "quiz_critic_spec",
   "quiz_metadata",
-  "quiz_year",
 ];
 assert.deepEqual(
   quizStages.filter((stage) => quizModules.includes(stage)),
   quizModules,
-  "Quiz Year must run its planner, safety, critic, and metadata modules before rendering",
+  "Quiz Year must render before its critic and audience-package modules",
 );
 assert.ok(!quizStages.includes("topic_select"), "Quiz Year must not duplicate its curated topic planner");
 assert.ok(!quizStages.includes("compliance_check"), "Quiz Year safety fields must have one deterministic owner");
