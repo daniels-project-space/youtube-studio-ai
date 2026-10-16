@@ -86,6 +86,7 @@ async function main(): Promise<void> {
     });
     assert.equal(calls, 1, "a sufficient one-shot must not buy continuation or chunked calls");
     assert.match(prompt, /WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER/);
+    assert.match(prompt, /authored contract defines the channel voice and outranks generic voice archetype or style guidance/);
     assert.match(prompt, /Intended audience: Curious adults who want clear evidence without academic jargon\./);
     assert.match(prompt, /Creator-declared topic priorities \(in order\): 1\. How a bridge changed the town; 2\. What a court record reveals about daily life/);
     assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,

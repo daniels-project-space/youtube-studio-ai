@@ -434,8 +434,10 @@ function styleGuidance(req: ScriptRequest): string {
     : "";
   const voiceLines = showBibleVoicePromptLines(req.channelVoice);
   const voiceClause = voiceLines.length
-    ? `FROZEN CHANNEL CREATIVE IDENTITY — honor this authored editorial contract without copying its wording. ` +
-      `Episode route, source evidence, and safety constraints remain authoritative.\n${voiceLines.join("\n")}\n`
+    ? `FROZEN CHANNEL CREATIVE IDENTITY — this authored contract defines the channel voice and outranks ` +
+      `generic voice archetype or style guidance that follows; honor it without copying its wording. ` +
+      `Episode route, source evidence, safety constraints, and locked narrative DNA remain authoritative.\n` +
+      `${voiceLines.join("\n")}\n`
     : "";
   return dnaClause + voiceClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) +
     channelBannedWordsDirective(req.bannedWords ?? []) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
