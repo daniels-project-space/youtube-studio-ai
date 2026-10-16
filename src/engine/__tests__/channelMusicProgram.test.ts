@@ -113,6 +113,20 @@ assert.ok(narrationProviderPrompt.includes(narrationProgram.identity.genre));
 assert.ok(narrationProgram.identity.instrumentation.some((instrument) => narrationProviderPrompt.includes(instrument)));
 assert.ok(narrationProviderPrompt.includes(narrationProgram.topic));
 assert.ok(narrationProviderPrompt.includes("Episode direction:"));
+assert.throws(
+  () => musicProviderPromptForProgram(
+    narrationProgram,
+    "",
+    `Keep the approved sound unchanged and preserve the final constraint: ${"required ".repeat(180)}NO PERCUSSION UNDER ANY CIRCUMSTANCE`,
+  ),
+  /required Studio direction exceeds the provider prompt limit/u,
+  "the module must not silently truncate a direction explicitly marked as required",
+);
+assert.match(
+  musicProviderPromptForProgram(narrationProgram, "calm ".repeat(300)),
+  /Episode direction: calm(?: calm)*\.\.\.$/u,
+  "optional episode direction must be visibly shortened at a word boundary",
+);
 const meditationFallbackPrograms = soundscapeChannels.map((channelName) => createChannelMusicProgram({
   channelId: channelName,
   channelIdentityFingerprint: sha256Hex(channelName),

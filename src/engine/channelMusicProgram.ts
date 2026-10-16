@@ -552,14 +552,28 @@ export function musicProviderPromptForProgram(
     .map((section) => `${section.label}: ${section.instruction}`)
     .join("; ");
   let result = core;
+  const requiredAddition = required ? `Required Studio direction: ${required}` : "";
+  if (requiredAddition && result.length + 2 + requiredAddition.length > maximumCharacters) {
+    throw new Error("required Studio direction exceeds the provider prompt limit");
+  }
+  if (requiredAddition) result += `; ${requiredAddition}`;
   for (const addition of [
-    required ? `Required Studio direction: ${required}` : "",
     direction ? `Episode direction: ${direction}` : "",
     sections ? `Arrangement: ${sections}` : "",
   ]) {
     if (!addition || result.length >= maximumCharacters) continue;
     const available = maximumCharacters - result.length - 2;
-    if (available > 0) result += `; ${addition.slice(0, available)}`;
+    if (addition.length <= available) {
+      result += `; ${addition}`;
+      continue;
+    }
+    const contentLimit = available - 3;
+    if (contentLimit > 0) {
+      const prefix = addition.slice(0, contentLimit);
+      const boundary = prefix.lastIndexOf(" ");
+      if (boundary > 0) result += `; ${prefix.slice(0, boundary).trimEnd()}...`;
+    }
+    break;
   }
   return result;
 }
