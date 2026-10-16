@@ -65,6 +65,10 @@ loader._load = function (id, ...args) {
       generateMiniMaxMusic3: async () => { throw new Error("provider boundary reached; no generation in this contract test"); },
     };
   }
+  if (id === "@/engine/studioAssetLibrary") return {
+    ...originalLoad.call(this, id, ...args) as object,
+    studioPostproductionRecipeProjectionFromUnknown: () => ({ promptAddenda: ["use a soft distant rain texture"] }),
+  };
   if (id === "./blockContext") return { ...originalLoad.call(this, id, ...args) as object, recordAsset: async () => {} };
   // This test checks transfer admission, not audio decoding or musical quality.
   if (id === "@/lib/files") return {
@@ -131,6 +135,20 @@ async function main() {
   );
   assert.equal(storageCalls, 0, "a role-conflicting channel genre must fail before writing its sound program");
   assert.equal(networkCalls, 0, "a role-conflicting channel genre must fail before a provider request");
+  const sleepLogs: string[] = [];
+  await assert.rejects(music.run({
+    ...ctx,
+    params: { provider: "suno" },
+    log: message => sleepLogs.push(message),
+    store: {
+      topic: "Steady rain through a quiet night",
+      studioAudioRecipeProjection: { promptAddenda: ["use a soft distant rain texture"] },
+      musicBrief: { musicIntent: { role: "sleep_sound_bed" } },
+      styleDNA: { audio: { genre: "ambient", instrumentation: ["soft sustained pad"] } },
+    },
+  }), /admitted-first-storage-write/u);
+  assert.match(sleepLogs.join("\n"), /approved Studio audio direction withheld by the locked beatless sleep contract/u,
+    "sleep prompt handling must not claim a direction was used when the safety contract withholds it");
   for (const provider of ["mureka", "suno"] as const) {
     const result = await music.run({ ...ctx, params: { provider }, store: { ...ctx.store,
       reuseMusicKey: reusedKey,

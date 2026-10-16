@@ -555,7 +555,11 @@ export const music: Block = {
     ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "route-aware default"}` +
       `${modulePromptDirection ? " + supplemental module direction" : ""}` +
       `${sleepBed && configuredPrompt ? " + sleep contract suppresses free-form module direction" : ""}` +
-      `${studioAudioDirection ? " + approved Studio audio direction" : ""}`);
+      `${studioAudioDirection
+        ? sleepBed
+          ? " + approved Studio audio direction withheld by the locked beatless sleep contract"
+          : " + approved Studio audio direction"
+        : ""}`);
     const channelMusicProgramKey =
       `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}channel-music-program-${channelMusicProgram.fingerprint}.json`;
     await putObject(
