@@ -42,7 +42,8 @@ import {
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
 import { buildPreparedFootageSidecar } from "@/trigger/minimaxH3WeeklyBatch";
-import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { ChannelMusicProgramSchema, musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
@@ -546,6 +547,42 @@ assert.equal(roleBoundMusicProgram.mix.narrationPriority, true,
 assert.equal(roleBoundMusicProgram.mix.targetLufs, -18,
   "a prepared meditation bed uses the shared role-specific master target");
 
+const shortFormMusicManifest = structuredClone(musicManifest);
+shortFormMusicManifest.execution.pipeline = [{ block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION }];
+shortFormMusicManifest.execution.seedStore = {
+  family: "shorts",
+  contentLane: { key: "shorts" },
+  channelName: "Quick Archive",
+};
+const shortFormMusicProgram = planWeekPreparedMusicProgram(shortFormMusicManifest, "mureka");
+const shortFormIdentityFingerprint = sha256Hex(canonicalJson({
+  ownerId: shortFormMusicManifest.ownerId,
+  channelId: shortFormMusicManifest.channelId,
+  channelName: "Quick Archive",
+  routeFingerprint: null,
+  styleDNA: null,
+}));
+const expectedShortFormIdentity = musicFallbackProfileForRole({
+  role: "short_form_bed",
+  family: "shorts",
+  contentLaneKey: "shorts",
+  channelIdentitySeed: shortFormIdentityFingerprint,
+  profileVersion: "channel-identity-short-form/v1",
+});
+assert.equal(shortFormMusicProgram.role, "short_form_bed");
+assert.equal(shortFormMusicProgram.channelIdentityFingerprint, shortFormIdentityFingerprint,
+  "weekly music uses the same stable channel-only identity binding as runtime generation");
+assert.equal(shortFormMusicProgram.identity.genre, expectedShortFormIdentity.genre);
+assert.deepEqual(shortFormMusicProgram.identity.instrumentation, expectedShortFormIdentity.instrumentation);
+assert.deepEqual(shortFormMusicProgram.identity.textures, expectedShortFormIdentity.textures);
+assert.equal(shortFormMusicProgram.identity.moodArc, expectedShortFormIdentity.moodArc);
+
+const wrongRoleShortFormManifest = structuredClone(roleBoundMusicManifest);
+wrongRoleShortFormManifest.execution.pipeline = [{ block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION }];
+assert.throws(() => planWeekPreparedMusicProgram(wrongRoleShortFormManifest, "mureka"),
+  /requires the short_form_bed role/,
+  "the short-form version cannot leak its fallback identity into meditation routes");
+
 const guidedSleepMusicManifest = structuredClone(musicManifest);
 guidedSleepMusicManifest.execution.seedStore = {
   family: "sleep",
@@ -615,14 +652,22 @@ for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
     const wrongProvider = { ...frozen, execution: { ...frozen.execution,
       moduleConfig: { ...frozen.execution.moduleConfig, music: { provider: provider === "suno" ? "mureka" : "suno" } } } };
     assert.throws(() => planWeekPreparedMusicProgram(wrongProvider, provider), /provider does not match the frozen route/);
-    for (const changed of [
+    const changedBrief = { ...frozen, execution: { ...frozen.execution,
+      seedStore: { ...frozen.execution.seedStore, musicBrief: { musicPrompt: "Replace the episode with an aggressive solo." } } } };
+    if (family === "sleep") {
+      assert.equal(planWeekPreparedMusicProgram(changedBrief, provider).fingerprint, musicProgram.fingerprint,
+        "the sleep role owns a stable soundscape and rejects composer directions that would add movement");
+    }
+    const changedManifests = [
       { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, channelName: "Different channel personality" } } },
-      { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, musicBrief: { musicPrompt: "Replace the episode with an aggressive solo." } } } },
       { ...frozen, execution: { ...frozen.execution, moduleConfig: { ...frozen.execution.moduleConfig, music: { generationDurationSec: 240 } } } },
-    ]) {
+      ...(family === "sleep" ? [] : [changedBrief]),
+    ];
+    for (const changed of changedManifests) {
       assert.throws(() => assertPlanWeekPreparedMusicBinding({
         prepared: { ...receipt, manifestSha256: planWeekPreparationManifestSha256(changed) }, manifest: changed,
-      }), /music program binding mismatch/, "rewriting the outer manifest hash cannot reuse stale channel direction");
+      }), /music program binding mismatch/,
+      `rewriting the outer manifest hash cannot reuse stale channel direction: ${JSON.stringify(changed.execution.seedStore)}`);
     }
   }
 }

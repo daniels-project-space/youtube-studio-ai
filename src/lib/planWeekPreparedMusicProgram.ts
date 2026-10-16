@@ -4,6 +4,7 @@ import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from
 import { getMusicBrief } from "@/engine/creative/brief";
 import { assertOriginalMusicProgramPlanBinding } from "@/engine/originalMusicProgram";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -43,6 +44,15 @@ function styleAudio(manifest: PlanWeekPreparationManifest): Record<string, unkno
 export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManifest, provider: MusicProvider): ChannelMusicProgram {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
+  const musicEntries = manifest.execution.pipeline.filter((entry): entry is Record<string, unknown> =>
+    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) &&
+    (entry as Record<string, unknown>).block === "music");
+  if (musicEntries.length > 1) throw new Error("weekly prepared music requires exactly one music module");
+  const musicVersion = musicEntries[0]?.version;
+  if (musicVersion !== undefined && musicVersion !== CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION) {
+    throw new Error(`weekly prepared music implementation version ${JSON.stringify(musicVersion)} is unsupported`);
+  }
+  const usesShortFormIdentityProfile = musicVersion === CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION;
   const audio = styleAudio(manifest);
   const config = planWeekMusicConfig(manifest);
   const styleDNA = seed.styleDNA ?? null;
@@ -68,19 +78,21 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
     : "";
   const channelName = seed.channelName ?? null;
   const routeFingerprint = route?.routeFingerprint ?? null;
+  const family = route?.family ?? (typeof seed.family === "string" ? seed.family : "narrated_stock");
+  const contentLaneKey = route?.contentLaneKey ?? (typeof seed.contentLane === "object" && seed.contentLane && !Array.isArray(seed.contentLane)
+    ? String((seed.contentLane as Record<string, unknown>).key ?? "narrated_stock")
+    : "narrated_stock");
+  const role = musicBrief?.musicIntent?.role ?? musicRoleForRoute(family, contentLaneKey);
+  if (usesShortFormIdentityProfile && role !== "short_form_bed") {
+    throw new Error("weekly prepared short-form music version requires the short_form_bed role");
+  }
   const channelIdentityFingerprint = sha256Hex(canonicalJson({
     ownerId: manifest.ownerId,
     channelId: manifest.channelId,
     channelName,
     routeFingerprint,
     styleDNA,
-    musicBrief: getMusicBrief(seed) ?? null,
   }));
-  const family = route?.family ?? (typeof seed.family === "string" ? seed.family : "narrated_stock");
-  const contentLaneKey = route?.contentLaneKey ?? (typeof seed.contentLane === "object" && seed.contentLane && !Array.isArray(seed.contentLane)
-    ? String((seed.contentLane as Record<string, unknown>).key ?? "narrated_stock")
-    : "narrated_stock");
-  const role = musicBrief?.musicIntent?.role ?? musicRoleForRoute(family, contentLaneKey);
   const supplementalDirection = explicitDirection && role !== "sleep_sound_bed" && (hasDna || composerDirection)
     ? `Additional module direction, subordinate to the locked channel sound and route contract: ${explicitDirection}`
     : "";
@@ -95,6 +107,7 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
     contentLaneKey,
     topic: manifest.plan.topic,
     role,
+    musicProfileVersion: usesShortFormIdentityProfile ? "channel-identity-short-form/v1" : undefined,
     providerPreference: provider,
     durationSec: finiteNumber(config.generationDurationSec ?? config.durationSec, 300, 10, 300),
     genre: typeof audio.genre === "string" ? audio.genre : undefined,

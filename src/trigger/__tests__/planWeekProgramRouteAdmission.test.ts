@@ -82,11 +82,6 @@ const quiz = admittedChannel({
   family: "quizyear",
   programIntent: { kind: "certified_quiz", profile: "world_geography" },
 });
-assert.throws(
-  () => assertPlanWeekChannelRouteAdmission(quiz),
-  /unsupported explicit weekly preparation implementation versions: music@/,
-  "week-ahead preparation must fail closed on the unqualified music implementation pin",
-);
 const quizWithoutMusicPin = {
   ...quiz,
   pipeline: quiz.pipeline.map((entry) => entry.block === "music" ? { ...entry, version: undefined } : entry),

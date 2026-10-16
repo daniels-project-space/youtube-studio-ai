@@ -11,6 +11,7 @@ import {
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import {
   CHANNEL_AWARE_SCRIPT_GEN_VERSION,
@@ -114,6 +115,9 @@ async function main(): Promise<void> {
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "music" }, { block: "script_gen", version: undefined, params: { version: "provider-model" } },
     ], "test"));
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test"), "weekly preparation admits only the short-form music ABI implemented by its shared composer");
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
     ], "test"), "weekly preparation executes the exact frozen channel-aware reviewer before TTS");
