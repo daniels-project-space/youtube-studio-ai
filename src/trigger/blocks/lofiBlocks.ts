@@ -28,8 +28,10 @@
  * operates on per-run temp files. No mocks — failures are loud.
  *
  * FRUGALITY (M1): durations are short. The single param that scales to a 2-hour
- * production video is the channel pipeline's `assemble.params.durationSec`
- * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
+ * production video is the channel pipeline's `assemble.params.durationSec`.
+ * Set that to 7200 for a 2h render. The shared `music` block creates a source
+ * composition whose measured natural length is independent of the final video
+ * clock; assembly loops/crossfades that source to the exact requested length.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";

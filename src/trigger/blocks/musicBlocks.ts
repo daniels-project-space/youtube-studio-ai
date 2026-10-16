@@ -222,6 +222,9 @@ export const music: Block = {
       styleDNA: dna,
       musicBrief: getMusicBrief(ctx.store) ?? null,
     }));
+    // This is a source-composition target, not the final video duration. Some
+    // providers return a naturally shorter performance; assembly measures and
+    // loops/crossfades the accepted source to its own exact delivery clock.
     const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
