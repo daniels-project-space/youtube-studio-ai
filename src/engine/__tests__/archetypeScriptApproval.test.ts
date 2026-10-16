@@ -4,11 +4,28 @@ import { registerAllBlocks } from "../blocks";
 import { CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY } from "../childrenShowBible";
 import { CURRICULUM_EPISODE_SEED_INPUT_SEED_KEY } from "../curriculumEpisodeSeed";
 import { validatePipeline } from "../validate";
+import { LOFI_PIPELINE } from "../../trigger/blocks/lofiBlocks";
 
 registerAllBlocks();
 
 for (const archetype of Object.values(ARCHETYPES)) {
   const stages = archetype.pipeline.map((entry) => entry.block);
+  assert.ok(
+    stages.includes("package_to_opening_plan"),
+    `${archetype.key} must freeze its package/opening handoff`,
+  );
+  const seeds = stages.includes("curriculum_episode_seed")
+    ? [
+        "contentLane",
+        CURRICULUM_EPISODE_SEED_INPUT_SEED_KEY,
+        CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY,
+      ]
+    : [];
+  assert.doesNotThrow(
+    () => validatePipeline(archetype.pipeline, seeds),
+    `${archetype.key} must compile as a complete pipeline`,
+  );
+
   const narrationIndex = stages.indexOf("narration_tts");
   const scriptIndex = stages.indexOf("script_gen");
   if (scriptIndex < 0 || narrationIndex < 0) continue;
@@ -18,13 +35,6 @@ for (const archetype of Object.values(ARCHETYPES)) {
     approvalIndex > scriptIndex,
     `${archetype.key} must approve generated narration before TTS`,
   );
-  const seeds = stages.includes("curriculum_episode_seed")
-    ? [
-        "contentLane",
-        CURRICULUM_EPISODE_SEED_INPUT_SEED_KEY,
-        CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY,
-      ]
-    : [];
   assert.doesNotThrow(
     () => validatePipeline(archetype.pipeline.slice(0, narrationIndex + 1), seeds),
     `${archetype.key} must compile through the approved narration handoff`,
@@ -60,5 +70,9 @@ assert.doesNotThrow(
   () => validatePipeline(ARCHETYPES["quiz-year"].pipeline.slice(0, quizRendererIndex + 1)),
   "Quiz Year must compile its plan, safety, compliance, and QA artifacts before rendering",
 );
+assert.doesNotThrow(
+  () => validatePipeline(LOFI_PIPELINE),
+  "the standalone Lo-Fi pipeline must compile its shared module handoffs",
+);
 
-console.log("archetype script gates and Quiz Year module handoffs pass");
+console.log("archetype gates, full pipeline contracts, and Lo-Fi module handoffs pass");

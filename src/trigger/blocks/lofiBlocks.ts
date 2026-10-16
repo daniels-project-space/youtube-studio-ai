@@ -3370,6 +3370,7 @@ export const LOFI_PIPELINE = [
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
