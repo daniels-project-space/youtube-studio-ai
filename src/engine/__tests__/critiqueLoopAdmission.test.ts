@@ -38,6 +38,30 @@ for (const invalid of [
 
 async function main(): Promise<void> {
   let produced = 0;
+  for (const maxIters of [Number.NaN, Number.POSITIVE_INFINITY, 0, 1.5, 6]) {
+    await assert.rejects(
+      () => produceAndCritique({
+        label: "iteration-cap-test",
+        maxIters,
+        produce: async () => ({ id: ++produced }),
+        critique: async () => ({ score: 1, pass: true, issues: [] }),
+      }),
+      /iteration-cap-test: maxIters must be an integer from 1 to 5/,
+    );
+  }
+  for (const threshold of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, 1.1]) {
+    await assert.rejects(
+      () => produceAndCritique({
+        label: "threshold-test",
+        threshold,
+        produce: async () => ({ id: ++produced }),
+        critique: async () => ({ score: 1, pass: true, issues: [] }),
+      }),
+      /threshold-test: critique threshold must be a finite number from 0 to 1/,
+    );
+  }
+  assert.equal(produced, 0, "invalid loop settings must stop before any producer attempt");
+
   await assert.rejects(
     () => produceAndCritique({
       label: "admission-test",
