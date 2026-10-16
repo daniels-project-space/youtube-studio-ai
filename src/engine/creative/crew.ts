@@ -402,9 +402,14 @@ export async function briefComposerWithArrangement(
   const musicIntent = ctx.musicIntent === undefined ? undefined : MusicArrangementIntentSchema.parse(ctx.musicIntent);
   const config = agentJsonConfiguration("composer_arrangement");
   assertArrangementComposerAdmission(config.model, admission, includeSymbolicScore);
-  const responseSchema = includeSymbolicScore
+  const responseSchema = (includeSymbolicScore
     ? arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema })
-    : arrangementComposerResponseSchema;
+    : arrangementComposerResponseSchema).superRefine((response, issue) => {
+      if (response.arrangement.tempoMode === undefined) {
+        issue.addIssue({ code: z.ZodIssueCode.custom, path: ["arrangement", "tempoMode"],
+          message: "new Composer responses must explicitly choose metered or unmetered tempoMode" });
+      }
+    });
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
     musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",
@@ -433,8 +438,9 @@ export async function briefComposerWithArrangement(
       `dynamics, articulation, space, or development, with concrete audible choices and the section ids they govern. ` +
       `Choose role primary_music, narration_bed, meditation_bed, sleep_sound_bed, or short_form_bed from the supplied intent. ` +
       `sleep_sound_bed is for unattended sleep: stable low arousal, no pulse, melodic arrival, crescendo, or attention-catching event. ` +
-      `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +
-      `applicable. Explicitly unmetered drones are valid. No vocals or lyrics. ` +
+      `Set tempoMode explicitly to metered or unmetered. sleep_sound_bed must be unmetered; meditation_bed ` +
+      `may use either mode. Unmetered arrangements must not supply a pulse or BPM direction. Provide full direction including ` +
+      `genre, instrumentation, mood, and exclusions. No vocals or lyrics. ` +
       `requestedDurationSec requests one native source piece, an integer from 10 to 300 seconds; it is ` +
       `neither total video duration nor a promise of exact provider output length. Do not clamp an explicit ` +
       `out-of-range source-piece request into this range. Choose form continuous, through_composed, or sectional. ` +

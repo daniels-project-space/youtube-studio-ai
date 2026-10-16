@@ -134,7 +134,7 @@ function validateChannelMusicProgramBody(
   if (bpmRange && bpmRange[0] > bpmRange[1]) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music BPM range is inverted" });
   }
-  if (program.role !== "sleep_sound_bed" && bpmRange === null) {
+  if (program.role !== "sleep_sound_bed" && program.role !== "meditation_bed" && bpmRange === null) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "metered music roles require an explicit BPM range" });
   }
   const rhythmicCue = sleepSoundRhythmicCue(program.role, program.identity.instrumentation);
@@ -268,6 +268,7 @@ export interface CreateChannelMusicProgramInput {
   readonly musicProfileVersion?: "legacy" | "channel-identity-short-form/v1";
   readonly providerPreference?: ChannelMusicProvider;
   readonly durationSec?: number;
+  readonly tempoMode?: "metered" | "unmetered";
   readonly genre?: string;
   readonly instrumentation?: readonly string[];
   readonly textures?: readonly string[];
@@ -753,7 +754,9 @@ function structuredCaption(input: {
   const listeningScenario: Record<ChannelMusicRole, string> = {
     primary_music: "sustained focused work or relaxed repeat listening",
     narration_bed: "a paced narrated story where words remain the foreground",
-    meditation_bed: "quiet reflection or breathwork with a steady, gently responsive pulse",
+    meditation_bed: input.bpmRange
+      ? "quiet reflection or breathwork with a steady, gently responsive pulse"
+      : "quiet reflection or breathwork with an unmetered, pulse-free texture",
     sleep_sound_bed: "unattended overnight listening with stable loudness and no attention-catching events",
     short_form_bed: "a quick editorial insight with a single clear reveal",
   };
@@ -767,12 +770,17 @@ function structuredCaption(input: {
   // identity. The detailed control section retains it for compatible routes.
   const supportingTimbres = input.instrumentation.slice(1);
   const beatlessSleep = input.role === "sleep_sound_bed";
-  if (!beatlessSleep && !input.bpmRange) throw new Error("metered music caption requires a BPM range");
+  const unmetered = input.bpmRange === null;
+  if (!unmetered && !input.bpmRange) throw new Error("metered music caption requires a BPM range");
   const globalMetadata = beatlessSleep
     ? `unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
       `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
-    : `${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
+    : unmetered
+      ? `unmetered and pulse-free; no BPM or pulse instruction; ${roleLanguage[input.role]}. ` +
+        `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. ` +
+        `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
+      : `${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
       `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
       `Topic: “${input.topic}”. ` +
       `Production: dimensional and spatially coherent—not a flat preset stack. ` +
@@ -784,7 +792,9 @@ function structuredCaption(input: {
       `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`;
   const creativeFoundation = beatlessSleep
     ? `${input.genre}: “${input.topic}”. Character: ${input.moodArc}. Keep ${featuredPalette} diffuse and sustained.`
-    : `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. Feature ${featuredPalette}.`;
+    : unmetered
+      ? `A ${input.moodArc} ${input.genre} instrumental, intentionally unmetered and pulse-free: “${input.topic}”. Feature ${featuredPalette}.`
+      : `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. Feature ${featuredPalette}.`;
   return [
     "### Creative Foundation",
     creativeFoundation,
@@ -873,6 +883,9 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
   }
   const role = input.role ?? routeRole;
+  if (input.tempoMode === "unmetered" && role !== "meditation_bed" && role !== "sleep_sound_bed") {
+    throw new Error("unmetered music is only supported for meditation and sleep roles");
+  }
   assertRoleCompatibleIdentity(role, input.instrumentation, input.genre);
   const defaults = musicFallbackProfileForRole({
     role,
@@ -884,7 +897,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);
-  const rawBpm = role === "sleep_sound_bed" ? undefined :
+  const rawBpm = role === "sleep_sound_bed" || input.tempoMode === "unmetered" ? undefined :
     input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
   const bpmRange: [number, number] | null = rawBpm ? [
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),

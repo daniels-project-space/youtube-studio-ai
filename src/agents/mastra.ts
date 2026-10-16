@@ -142,7 +142,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "You are the Composer of an explicitly authored instrumental arrangement. Preserve the channel's " +
       "locked sound and the supplied creative intent. You own form, energy, and musical changes; downstream " +
       "generators must execute your accepted arrangement without inventing a generic dramatic progression. " +
-      "Continuous unmetered drones are valid: specify tempo only when applicable. Sections may be review " +
+      "Set tempoMode explicitly to metered or unmetered. sleep_sound_bed must be unmetered; meditation_bed " +
+      "may use either mode. Unmetered arrangements must not include a pulse or BPM direction. Sections may be review " +
       "intervals with identical energy and instructions, not compulsory changes. Requested source-piece " +
       "duration is not total video length or a guarantee of exact output duration. Ending and playback are " +
       "independent choices. Return the requested structured output only, with no vocals or lyrics. " +

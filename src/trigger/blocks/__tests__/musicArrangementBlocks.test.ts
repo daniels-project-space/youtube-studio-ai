@@ -84,6 +84,7 @@ const bible: ShowBible = {
 };
 const flat: AcceptedMusicArrangementDraft = {
   role: "primary_music", direction: "Flat nocturnal drone. No build, drop, climax, or new motif.",
+  tempoMode: "metered",
   requestedDurationSec: 180, form: "continuous", ending: "seamless_wrap", playback: "repeat",
   sections: Array.from({ length: 4 }, (_, index) => ({
     id: `interval-${index + 1}`, label: `Review interval ${index + 1}`,
@@ -92,12 +93,18 @@ const flat: AcceptedMusicArrangementDraft = {
   })),
 };
 const developing: AcceptedMusicArrangementDraft = {
-  role: "narration_bed", direction: "Quiet uncertainty, a restrained turn, then a natural resolution.",
+  role: "narration_bed", tempoMode: "metered", direction: "Quiet uncertainty, a restrained turn, then a natural resolution.",
   requestedDurationSec: 120, form: "through_composed", ending: "natural_cadence", playback: "once",
   sections: flat.sections.map((section, index) => ({
     ...section, energy: [0.2, 0.3, 0.4, 0.15][index],
     instruction: ["Enter sparsely.", "Introduce the authored tension.", "Change to the answering harmony.", "Resolve and end naturally."][index],
   })),
+};
+const unmeteredMeditation: AcceptedMusicArrangementDraft = {
+  ...flat,
+  role: "meditation_bed",
+  tempoMode: "unmetered",
+  direction: "An intentionally unmetered, pulse-free breath meditation drone.",
 };
 const seedStore = {
   topic: "Night horizon", showBible: bible, channelSlug: "arrangement-evaluation", channelName: "Arrangement evaluation",
@@ -152,7 +159,7 @@ async function main() {
   }
   assert.equal(calls.length, callsBeforeValidation, "legacy pairing is rejected during graph validation before any text purchase");
 
-  for (const arrangement of [flat, developing, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
+  for (const arrangement of [flat, developing, unmeteredMeditation, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
     const family = arrangement.role === "narration_bed" ? "narrated_stock" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const outputs: Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0][] = [];
@@ -181,6 +188,8 @@ async function main() {
     assert.equal(accepted.channelGrounding?.length, 2);
     assert.ok(accepted.channelGrounding?.every((entry) => entry.sectionIds.length === arrangement.sections.length));
     assert.deepEqual(accepted.arrangement, arrangement, "no inferred sections, normalization, or duration clamp");
+    assert.equal(accepted.arrangement.tempoMode, arrangement.tempoMode,
+      "the accepted artifact preserves the Composer's explicit metering decision");
     assert.equal(accepted.sourceBriefFingerprint, sha256Hex(canonicalJson(result.store.musicBrief)));
     for (const key of ["ownerId", "channelId", "runId"] as const) assert.equal(accepted[key], stageContext()[key]);
     assert.equal(accepted.topic, seedStore.topic);
@@ -190,6 +199,13 @@ async function main() {
     assert.ok(outputs.flatMap((batch) => batch.artifacts).some((row) => row.artifact.key === "acceptedMusicArrangement"));
     const request = calls.at(-1)!;
     assert.equal(request.role, "composer_arrangement");
+    const missingTempoMode = { ...arrangement };
+    delete missingTempoMode.tempoMode;
+    assert.equal(request.schema.safeParse({ ...(response as object), arrangement: missingTempoMode }).success, false,
+      "new Composer responses cannot silently omit their metering decision");
+    assert.equal(request.schema.safeParse({ ...(response as object),
+      arrangement: { ...flat, role: "sleep_sound_bed", tempoMode: "metered" },
+    }).success, false, "new sleep arrangements cannot claim a contradictory metered mode");
     assert.equal(request.maxTokens, 6000);
     assert.equal(request.temperature, 0.8);
     assert.ok(request.prompt.includes(bible.composerDoctrine!));
@@ -243,7 +259,8 @@ async function main() {
   assert.equal(calls.length, beforeInvented + 1, "an invented identity cue cannot be accepted as grounding evidence");
 
   for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
-    const musicIntent = { role, requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
+    const musicIntent = { role, tempoMode: role === "sleep_sound_bed" ? "unmetered" as const : "metered" as const,
+      requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
     const arrangement = { ...flat, ...musicIntent };
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const result = await runPipeline(validatePipeline([
@@ -412,7 +429,7 @@ async function main() {
   await agentJson({ ...legacyRequest, role: "composer" });
   assert.equal(routedRequests.length, 2, "both roles use the actual agentJson route with mocked text transport");
   assert.equal(routedRequests[0].tier, routedRequests[1].tier, "opt-in role preserves the legacy model tier");
-  assert.match(routedRequests[0].system ?? "", /unmetered drones are valid/);
+  assert.match(routedRequests[0].system ?? "", /Set tempoMode explicitly to metered or unmetered/);
   assert.doesNotMatch(routedRequests[0].system ?? "", /BPM band/);
   assert.match(routedRequests[1].system ?? "", /BPM band/, "legacy system instructions remain unchanged");
   assert.equal(networkCalls, 0);

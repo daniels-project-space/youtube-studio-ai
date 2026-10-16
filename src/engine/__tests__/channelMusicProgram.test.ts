@@ -174,6 +174,32 @@ assert.equal(meditation.mix.bodyMusicVol, 0.25,
   "a specific meditation lane must not inherit primary-music full volume from its broad family");
 assert.equal(meditation.mix.narrationPriority, false);
 assert.equal(meditation.quality.minimumLraLu, 2);
+assert.deepEqual(meditation.identity.bpmRange, [48, 64],
+  "legacy meditation arrangements without tempoMode retain the metered default");
+const unmeteredMeditation = createChannelMusicProgram({
+  channelId: "channel-unmetered-meditation",
+  channelIdentityFingerprint: sha("d"),
+  family: "music_loop",
+  contentLaneKey: "meditation",
+  role: "meditation_bed",
+  tempoMode: "unmetered",
+  topic: "A quiet, wordless breath meditation",
+});
+assert.equal(unmeteredMeditation.identity.bpmRange, null);
+assert.match(unmeteredMeditation.generation.structuredCaption, /unmetered and pulse-free/u);
+assert.match(unmeteredMeditation.generation.structuredCaption, /intentionally unmetered and pulse-free/u);
+assert.match(unmeteredMeditation.generation.structuredCaption, /unmetered, pulse-free texture/u);
+assert.equal(ChannelMusicProgramSchema.safeParse(unmeteredMeditation).success, true,
+  "meditation programs may explicitly omit meter without weakening other role validation");
+assert.throws(() => createChannelMusicProgram({
+  channelId: "channel-invalid-unmetered",
+  channelIdentityFingerprint: sha("b"),
+  family: "cinematic",
+  contentLaneKey: "music_video",
+  role: "primary_music",
+  tempoMode: "unmetered",
+  topic: "A focused instrumental",
+}), /only supported for meditation and sleep roles/u);
 const guidedSleepAlias = createChannelMusicProgram({
   channelId: "channel-guided-sleep-alias",
   channelIdentityFingerprint: sha("7"),

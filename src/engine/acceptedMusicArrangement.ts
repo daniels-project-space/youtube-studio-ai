@@ -80,6 +80,7 @@ export const MusicChannelGroundingSchema = z.array(MusicGroundingEntrySchema).mi
 
 const arrangementControls = {
   role: z.enum(["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"]),
+  tempoMode: z.enum(["metered", "unmetered"]).optional(),
   requestedDurationSec: z.number().finite().int().min(10).max(300),
   form: z.enum(["continuous", "through_composed", "sectional"]),
   ending: z.enum(["seamless_wrap", "natural_cadence"]),
@@ -100,6 +101,14 @@ export const AcceptedMusicArrangementDraftSchema = z.object({
   direction: nonblankText(8_000),
   sections: z.array(AcceptedMusicArrangementSectionSchema).min(4).max(8),
 }).strict().superRefine((draft, issue) => {
+  if (draft.tempoMode === "unmetered" && draft.role !== "meditation_bed" && draft.role !== "sleep_sound_bed") {
+    issue.addIssue({ code: z.ZodIssueCode.custom, path: ["tempoMode"],
+      message: "unmetered arrangements are only supported for meditation and sleep roles" });
+  }
+  if (draft.role === "sleep_sound_bed" && draft.tempoMode === "metered") {
+    issue.addIssue({ code: z.ZodIssueCode.custom, path: ["tempoMode"],
+      message: "sleep arrangements must be unmetered" });
+  }
   const sections = draft.sections;
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, path: ["sections"], message: "sections must cover the full program from 0 to 1" });
