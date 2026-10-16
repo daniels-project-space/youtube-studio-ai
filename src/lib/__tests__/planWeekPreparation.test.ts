@@ -617,6 +617,16 @@ malformedMusicParamsManifest.execution.pipeline = [
 malformedMusicParamsManifest.execution.moduleConfig.music = { bodyMusicVol: 0.24 };
 assert.equal(planWeekPreparedMusicProgram(malformedMusicParamsManifest, "mureka").mix.bodyMusicVol, 0.24,
   "week-ahead preparation ignores malformed pipeline params while preserving explicit module config");
+const legacyLofiMusicConfigManifest = structuredClone(guidedSleepMusicManifest);
+legacyLofiMusicConfigManifest.execution.moduleConfig.lofi = { bodyMusicVol: 0.42 };
+legacyLofiMusicConfigManifest.execution.moduleConfig.music = {};
+assert.equal(planWeekPreparedMusicProgram(legacyLofiMusicConfigManifest, "mureka").mix.bodyMusicVol, 0.42,
+  "an empty shared Music config must not mask a legacy Lo-Fi setting during week-ahead preparation");
+const migratedLofiMusicConfigManifest = structuredClone(guidedSleepMusicManifest);
+migratedLofiMusicConfigManifest.execution.moduleConfig.lofi = { bodyMusicVol: 0.42 };
+migratedLofiMusicConfigManifest.execution.moduleConfig.music = { bodyMusicVol: 0.27 };
+assert.equal(planWeekPreparedMusicProgram(migratedLofiMusicConfigManifest, "mureka").mix.bodyMusicVol, 0.27,
+  "an explicit shared Music setting takes precedence over retained legacy Lo-Fi config");
 assert.equal(authoredMusicProgram.mix.targetLufs, -19,
   "prepared tracks preserve the channel-authored loudness target");
 assert.equal(

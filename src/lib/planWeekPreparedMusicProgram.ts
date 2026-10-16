@@ -29,9 +29,13 @@ function routeSeed(manifest: PlanWeekPreparationManifest): ChannelProgramRouteRu
 }
 
 export function planWeekMusicConfig(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
-  const value = manifest.execution.moduleConfig.music ?? manifest.execution.moduleConfig.lofi;
-  const moduleConfig = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  const legacyValue = manifest.execution.moduleConfig.lofi;
+  const musicValue = manifest.execution.moduleConfig.music;
+  const legacyConfig = legacyValue && typeof legacyValue === "object" && !Array.isArray(legacyValue)
+    ? legacyValue as Record<string, unknown>
+    : {};
+  const musicConfig = musicValue && typeof musicValue === "object" && !Array.isArray(musicValue)
+    ? musicValue as Record<string, unknown>
     : {};
   const musicEntry = manifest.execution.pipeline.find((entry): entry is Record<string, unknown> =>
     Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) &&
@@ -40,7 +44,7 @@ export function planWeekMusicConfig(manifest: PlanWeekPreparationManifest): Reco
   const musicParams = rawMusicParams && typeof rawMusicParams === "object" && !Array.isArray(rawMusicParams)
     ? rawMusicParams as Record<string, unknown>
     : {};
-  return { ...musicParams, ...moduleConfig };
+  return { ...musicParams, ...legacyConfig, ...musicConfig };
 }
 
 function styleAudio(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
