@@ -20,6 +20,7 @@ import {
   type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY } from "@/engine/musicModuleVersions";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
 import {
   assertMusicAuditionNativeBytes,
@@ -191,6 +192,7 @@ export function musicFallbackPromptForRoute(input: {
   role?: ChannelMusicRole;
   topic: string;
   channelIdentitySeed: string;
+  profileVersion?: "legacy" | "channel-identity-short-form/v1";
 }): string {
   const family = input.family?.toLowerCase() ?? "";
   const contentLaneKey = input.contentLaneKey?.toLowerCase() ?? "";
@@ -200,6 +202,7 @@ export function musicFallbackPromptForRoute(input: {
     family,
     contentLaneKey,
     channelIdentitySeed: input.channelIdentitySeed,
+    profileVersion: input.profileVersion,
   });
   const lyricRule = role === "sleep_sound_bed" ? "no vocals or lyrics" : "no vocals, no lyrics";
   return `${profile.prompt}, evoking "${input.topic}"; ${lyricRule}`;
@@ -357,6 +360,9 @@ export const music: Block = {
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
     const route = musicRoute;
+    const musicProfileVersion = (ctx.params as Record<PropertyKey, unknown>)[CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY] === true
+      ? "channel-identity-short-form/v1" as const
+      : "legacy" as const;
     const channelIdentityFingerprint = sha256Hex(canonicalJson({
       ownerId: ctx.ownerId,
       channelId: ctx.channelId,
@@ -370,6 +376,7 @@ export const music: Block = {
       role: composerBrief?.musicIntent?.role,
       topic,
       channelIdentitySeed: channelIdentityFingerprint,
+      profileVersion: musicProfileVersion,
     });
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
@@ -394,6 +401,7 @@ export const music: Block = {
       contentLaneKey: route?.contentLaneKey,
       topic,
       role: composerBrief?.musicIntent?.role,
+      musicProfileVersion,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
       genre: a?.genre,

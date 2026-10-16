@@ -5,6 +5,10 @@ import { runPipeline } from "@/engine/runner";
 import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type RunStageSink, type StageContext } from "@/engine/types";
 import { recordModelUsage } from "@/lib/modelUsage";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+} from "@/engine/musicModuleVersions";
 import { music } from "../musicBlocks";
 import {
   createProviderAwareMusicManifest,
@@ -60,6 +64,8 @@ async function main() {
     assert.ok(registered.optionalProduces.musicRuntimeReceiptKey);
     assert.ok(!registered.produces.musicRuntimeReceiptKey);
     assert.ok(!allManifests().includes(registered));
+    const registeredIdentityProfile = getManifest("music", CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION)!;
+    assert.ok(registeredIdentityProfile, "new channel identity profile has an exact registered module version");
 
     let calls = 0;
     let response: Record<string, unknown> | null | undefined = { ...base };
@@ -72,6 +78,13 @@ async function main() {
       return structuredClone(response) as Record<string, unknown>;
     } } };
     const selected = createProviderAwareMusicManifest(fakeLegacy);
+    const identityProfile = createProviderAwareMusicManifest(fakeLegacy, { channelIdentityShortForm: true });
+    assert.equal(identityProfile.version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION);
+    response = { ...base };
+    await identityProfile.execute(context);
+    assert.notEqual(received, context, "versioned policy is passed in a delegated context, not caller params");
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY], true);
+    assert.equal(Object.getOwnPropertySymbols(context.params).length, 0, "the private policy marker never mutates stored params");
     for (const provider of ["mureka", "suno"] as const) {
       response = { ...base, musicProvider: provider };
       const patch = await selected.execute(context);

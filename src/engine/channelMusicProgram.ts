@@ -265,6 +265,7 @@ export interface CreateChannelMusicProgramInput {
   readonly contentLaneKey?: string;
   readonly topic: string;
   readonly role?: ChannelMusicRole;
+  readonly musicProfileVersion?: "legacy" | "channel-identity-short-form/v1";
   readonly providerPreference?: ChannelMusicProvider;
   readonly durationSec?: number;
   readonly genre?: string;
@@ -424,6 +425,31 @@ const SHORT_FORM_MUSIC_FALLBACK: PrimaryMusicFallbackProfile = Object.freeze({
   prompt: "concise modern instrumental underscore with muted bass, soft compact percussion and one restrained pluck; tight low end, controlled width, a small quick lift and clean resolution, no vocals",
 });
 
+const SHORT_FORM_MUSIC_FALLBACKS: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  SHORT_FORM_MUSIC_FALLBACK,
+  Object.freeze({
+    genre: "bright mallet-led short-form instrumental",
+    instrumentation: ["muted marimba", "rounded bass", "light brushed ticks"],
+    textures: ["clean close detail", "compact warm room"],
+    moodArc: "open immediately with a memorable two-note figure, add one measured accent, and resolve before the cut",
+    prompt: "bright mallet-led short-form instrumental with muted marimba, rounded bass and light brushed ticks; memorable two-note opening, one measured accent and a clean ending before the cut, no vocals",
+  }),
+  Object.freeze({
+    genre: "restrained acoustic short-form instrumental",
+    instrumentation: ["palm-muted guitar", "soft hand percussion", "warm bass"],
+    textures: ["dry string detail", "natural small-room air"],
+    moodArc: "state one nimble acoustic motif immediately, vary it once, then land a tidy final button",
+    prompt: "restrained acoustic short-form instrumental with palm-muted guitar, soft hand percussion and warm bass; immediate nimble motif, one natural variation and a tidy final button, no vocals",
+  }),
+  Object.freeze({
+    genre: "minimal analog short-form groove",
+    instrumentation: ["soft analog pluck", "subtle low synth", "quiet rim clicks"],
+    textures: ["rounded transient detail", "narrow focused stereo image"],
+    moodArc: "establish a focused electronic pulse at once, create a small harmonic turn, and finish cleanly",
+    prompt: "minimal analog short-form groove with soft synth pluck, subtle low synth and quiet rim clicks; immediate focused pulse, a small harmonic turn and a clean finish, no vocals or dramatic drop",
+  }),
+]);
+
 const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
   Object.freeze({
     genre: "cinematic post-rock instrumental",
@@ -473,13 +499,18 @@ export function musicFallbackProfileForRole(input: {
   readonly family?: string;
   readonly contentLaneKey?: string;
   readonly channelIdentitySeed: string;
+  readonly profileVersion?: "legacy" | "channel-identity-short-form/v1";
 }): PrimaryMusicFallbackProfile {
   if (input.role === "primary_music") {
     return primaryMusicFallbackProfile(input);
   }
   if (input.role === "meditation_bed") return spreadDefault(input.channelIdentitySeed, MEDITATION_MUSIC_FALLBACKS);
   if (input.role === "sleep_sound_bed") return spreadDefault(input.channelIdentitySeed, SLEEP_SOUND_FALLBACKS);
-  if (input.role === "short_form_bed") return SHORT_FORM_MUSIC_FALLBACK;
+  if (input.role === "short_form_bed") {
+    return input.profileVersion === "channel-identity-short-form/v1"
+      ? spreadDefault(input.channelIdentitySeed, SHORT_FORM_MUSIC_FALLBACKS)
+      : SHORT_FORM_MUSIC_FALLBACK;
+  }
   return spreadDefault(input.channelIdentitySeed, NARRATION_MUSIC_FALLBACKS);
 }
 
@@ -848,6 +879,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
     family,
     contentLaneKey,
     channelIdentitySeed: input.channelIdentityFingerprint,
+    profileVersion: input.musicProfileVersion,
   });
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);

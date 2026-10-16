@@ -3,6 +3,8 @@ import { ExecutionError } from "@/engine/executionErrors";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
   MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
   MUSIC_PROVIDER_OUTPUTS_VERSION,
 } from "@/engine/musicModuleVersions";
@@ -57,7 +59,7 @@ const output = z.object({
 /** Correct the selected provider's ABI without changing the legacy generator. */
 export function createProviderAwareMusicManifest(
   legacy: ModuleManifest,
-  options: { requireMusicProgram?: boolean } = {},
+  options: { requireMusicProgram?: boolean; channelIdentityShortForm?: boolean } = {},
 ): ModuleManifest {
   if (legacy.id !== "music") throw new Error("provider-aware music requires the shared music module");
   const produces = { ...legacy.produces };
@@ -85,7 +87,10 @@ export function createProviderAwareMusicManifest(
     if (ctx.store["reuseMusicKey"] !== undefined) {
       throw new Error("provider-aware music refuses raw reuseMusicKey without verified provider/review provenance");
     }
-    const patch = await legacy.block.run(ctx);
+    const delegatedContext = options.channelIdentityShortForm
+      ? { ...ctx, params: { ...ctx.params, [CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY]: true } }
+      : ctx;
+    const patch = await legacy.block.run(delegatedContext);
     try {
       output.parse(patch);
     } catch {
@@ -109,9 +114,11 @@ export function createProviderAwareMusicManifest(
   };
   return {
     ...legacy,
-    version: options.requireMusicProgram
-      ? MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
-      : MUSIC_PROVIDER_OUTPUTS_VERSION,
+    version: options.channelIdentityShortForm
+      ? CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION
+      : options.requireMusicProgram
+        ? MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION
+        : MUSIC_PROVIDER_OUTPUTS_VERSION,
     requiredCapabilities,
     consumes,
     optionalConsumes,
@@ -119,7 +126,9 @@ export function createProviderAwareMusicManifest(
     optionalProduces,
     certification: {
       status: "contract",
-      evidence: "Opt-in provider-specific output admission; generation and existing review requirements are unchanged.",
+      evidence: options.channelIdentityShortForm
+        ? "Versioned short-form fallback identity spread; provider output admission and existing review requirements are unchanged."
+        : "Opt-in provider-specific output admission; generation and existing review requirements are unchanged.",
     },
     block, execute: run,
   };

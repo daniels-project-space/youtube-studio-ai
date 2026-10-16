@@ -84,6 +84,7 @@ export function registerAllBlocks(): void {
   const musicManifest = getManifest("music")!;
   registerManifestVersion(createProviderAwareMusicManifest(musicManifest));
   registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { requireMusicProgram: true }));
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { channelIdentityShortForm: true }));
   registerManifestVersion(createYuE2MusicManifest());
   registerManifestVersion(createRenderEngineYuE2MusicManifest());
   // Route-owned, provider-free bridge from a completed serialized Topic Select

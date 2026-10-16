@@ -92,7 +92,7 @@ import {
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
 import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
-import { selectComposerMixAssembly } from "./composerMixPipelineSelection";
+import { selectChannelIdentityMusicProfile, selectComposerMixAssembly } from "./composerMixPipelineSelection";
 import { selectChannelAwareScriptQa } from "./channelAwareScriptQaSelection";
 
 export interface DesignOptions {
@@ -1310,6 +1310,10 @@ export function designPipelineCore(
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
   } else {
+    pipeline = selectChannelIdentityMusicProfile(
+      pipeline,
+      musicRoleForRoute(opts.family, manifest.contentLane.key),
+    );
     pipeline = selectComposerMixAssembly(pipeline);
   }
   pipeline = selectChannelAwareScriptQa(pipeline);

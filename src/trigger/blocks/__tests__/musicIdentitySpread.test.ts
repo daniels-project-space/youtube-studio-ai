@@ -23,7 +23,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
+import { createChannelMusicProgram, musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
+import { selectChannelIdentityMusicProfile } from "@/engine/composerMixPipelineSelection";
+import type { PipelineEntry } from "@/engine/types";
 import { musicFallbackPromptForRoute } from "../musicBlocks";
 
 const ARCHETYPES = readFileSync(join(process.cwd(), "src/engine/archetypes.ts"), "utf8")
@@ -62,6 +65,59 @@ function main(): void {
     );
   }
 
+  // The default remains the immutable legacy profile; only the selected new
+  // module version spreads concise beds across short-form channel identities.
+  const legacyShortForm = channels.map((channelIdentitySeed) => musicFallbackProfileForRole({
+    role: "short_form_bed", channelIdentitySeed,
+  }));
+  assert.equal(new Set(legacyShortForm.map((profile) => profile.prompt)).size, 1,
+    "legacy unversioned short-form runs must retain their established fallback");
+  const versionedShortForm = channels.map((channelIdentitySeed) => musicFallbackProfileForRole({
+    role: "short_form_bed", channelIdentitySeed, profileVersion: "channel-identity-short-form/v1",
+  }));
+  assert.ok(new Set(versionedShortForm.map((profile) => profile.prompt)).size >= 3,
+    "the versioned short-form range must make channel identity audible in the fallback brief");
+  for (const profile of versionedShortForm) {
+    assert.match(profile.prompt, /no vocals/u);
+    assert.match(profile.moodArc, /immediately|at once|quickly/u);
+    assert.match(profile.moodArc, /resolve|ending|finish|button/u);
+  }
+  assert.equal(versionedShortForm[0].prompt,
+    musicFallbackProfileForRole({
+      role: "short_form_bed", channelIdentitySeed: channels[0], profileVersion: "channel-identity-short-form/v1",
+    }).prompt,
+    "the same short-form channel identity must resolve deterministically");
+  const programSeed = "a".repeat(64);
+  const expectedProgramProfile = musicFallbackProfileForRole({
+    role: "short_form_bed", channelIdentitySeed: programSeed, profileVersion: "channel-identity-short-form/v1",
+  });
+  const versionedProgram = createChannelMusicProgram({
+    channelId: "short-channel", channelIdentityFingerprint: programSeed, family: "shorts",
+    contentLaneKey: "shorts", topic: "one useful idea", role: "short_form_bed",
+    musicProfileVersion: "channel-identity-short-form/v1", durationSec: 45,
+  });
+  assert.equal(versionedProgram.identity.genre, expectedProgramProfile.genre,
+    "the sealed production program must consume the selected versioned profile");
+  assert.deepEqual(versionedProgram.identity.instrumentation, expectedProgramProfile.instrumentation);
+  const legacyProgram = createChannelMusicProgram({
+    channelId: "short-channel", channelIdentityFingerprint: programSeed, family: "shorts",
+    contentLaneKey: "shorts", topic: "one useful idea", role: "short_form_bed", durationSec: 45,
+  });
+  assert.equal(legacyProgram.identity.genre, legacyShortForm[0].genre,
+    "unversioned program construction retains the established short-form profile");
+  const selectable: PipelineEntry[] = [
+    { block: "composer_brief" }, { block: "music" }, { block: "timeline_assemble" },
+  ];
+  const identitySelected = selectChannelIdentityMusicProfile(selectable, "short_form_bed");
+  assert.equal(identitySelected[1].version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION);
+  assert.equal(selectable[1].version, undefined, "selection leaves legacy source entries untouched");
+  assert.equal(selectChannelIdentityMusicProfile(selectable, "narration_bed")[1].version, undefined,
+    "other music roles do not receive the short-form profile version");
+  assert.equal(selectChannelIdentityMusicProfile([
+    selectable[0], { ...selectable[1], version: "1.0.0-owner-pinned" }, selectable[2],
+  ], "short_form_bed")[1].version, "1.0.0-owner-pinned",
+  "explicit module pins remain authoritative");
+
   // ---- lofi keeps its own sound -------------------------------------------
   const lofiPrompt = musicFallbackPromptForRoute({
     family: "music_loop", contentLaneKey: "music_loop", topic: "quiet harbor", channelIdentitySeed: "Seaside Ghibli",
@@ -77,6 +133,12 @@ function main(): void {
     const profile = musicFallbackProfileForRole({ role: "narration_bed", channelIdentitySeed });
     assert.equal(narratedPrompts[index], `${profile.prompt}, evoking "a measured story"; no vocals, no lyrics`);
   }
+  const versionedShortFormPrompts = channels.map((channelIdentitySeed) => musicFallbackPromptForRoute({
+    family: "shorts", contentLaneKey: "shorts", topic: "one useful idea", channelIdentitySeed,
+    profileVersion: "channel-identity-short-form/v1",
+  }));
+  assert.ok(new Set(versionedShortFormPrompts).size >= 3,
+    "the real route prompt adapter must carry the selected short-form identity profile");
 
   // ---- the archetype must not hard-code one identity ----------------------
   assert.ok(
@@ -85,7 +147,7 @@ function main(): void {
       "override the three differentiating paths beneath it",
   );
 
-  console.log("MUSIC IDENTITY PASS — undeclared channels differ, and lofi stays lofi");
+  console.log("MUSIC IDENTITY PASS — channel-bound narration and short-form profiles; legacy short-form and Lo-Fi remain unchanged");
 }
 
 main();
