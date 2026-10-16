@@ -183,9 +183,13 @@ export function resolveShowBibleReview(input: {
   else if (validScore < 0.8 && !(input.criticIssues?.length)) {
     issues.push(`independent Show Bible critic score ${validScore.toFixed(2)} is below the 0.80 acceptance bar`);
   }
+  if (validScore !== undefined && validScore >= 0.8 && input.criticIssues?.length) {
+    issues.push("independent Show Bible critic identified repair issues despite its passing score");
+  }
   return {
     score: input.deterministicIssues.length ? Math.min(validScore ?? 0.5, 0.6) : validScore ?? 0.5,
-    pass: input.deterministicIssues.length === 0 && validScore !== undefined && validScore >= 0.8,
+    pass: input.deterministicIssues.length === 0 && validScore !== undefined && validScore >= 0.8 &&
+      !(input.criticIssues?.length),
     issues,
   };
 }

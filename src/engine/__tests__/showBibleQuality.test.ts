@@ -48,6 +48,14 @@ assert.equal(resolveShowBibleReview({ deterministicIssues: [], criticScore: Numb
   "an unavailable or invalid independent verdict cannot establish channel identity");
 assert.equal(resolveShowBibleReview({ deterministicIssues: ["vibe is generic"], criticScore: 1 }).pass, false,
   "a generous critic cannot override deterministic identity defects");
+const contradictoryCritic = resolveShowBibleReview({
+  deterministicIssues: [],
+  criticScore: 0.94,
+  criticIssues: ["The motif is generic and could describe any astronomy channel."],
+});
+assert.equal(contradictoryCritic.pass, false,
+  "a passing score cannot override a concrete repair issue from the independent critic");
+assert.ok(contradictoryCritic.issues.some((issue) => issue.includes("identified repair issues")));
 
 const cases: Array<{ candidate: ShowBible; issue: string }> = [
   { candidate: { ...bible, positioning: " " }, issue: "positioning is empty" },
