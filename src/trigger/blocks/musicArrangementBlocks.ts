@@ -14,9 +14,11 @@ import type { ComposerDirectives } from "@/lib/crew/composer";
 import { agentJsonConfiguration } from "@/agents/mastra";
 import { arrangementComposerReservation, assertArrangementComposerAdmission } from "@/lib/arrangementComposerBudget";
 import { createComposerBriefBlock } from "./crewBlocks";
+import { isMusicRoleAllowedForRoute, musicRoleForRoute } from "@/engine/channelMusicProgram";
+import { channelProgramRouteFromContext } from "./blockContext";
 
-export const ARRANGEMENT_COMPOSER_VERSION = "2.0.0-accepted-arrangement";
-export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.0.0-yue2-score";
+export const ARRANGEMENT_COMPOSER_VERSION = "2.1.0-channel-grounding";
+export const SCORED_ARRANGEMENT_COMPOSER_VERSION = "3.1.0-yue2-score-grounding";
 
 export function createArrangementComposerManifest(legacy: ModuleManifest, includeSymbolicScore = false): ModuleManifest {
   if (legacy.id !== "composer_brief") throw new Error("arrangement composer requires composer_brief");
@@ -99,6 +101,27 @@ export const musicArrangementPlan: Block = {
       throw new Error("music_arrangement_plan requires a non-empty topic");
     }
     if (!ctx.channelId) throw new Error("music_arrangement_plan requires a channel id");
+    const currentChannelName = ctx.store["channelName"];
+    if (currentChannelName !== undefined && brief.reviewContext?.channelName !== currentChannelName) {
+      throw new Error("music_arrangement_plan review context does not match the current channel name");
+    }
+    const route = channelProgramRouteFromContext(ctx);
+    if (route) {
+      if (brief.reviewContext?.family !== route.family) {
+        throw new Error("music_arrangement_plan review context does not match the current channel route family");
+      }
+      const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
+      if (!isMusicRoleAllowedForRoute(
+        route.family,
+        route.contentLaneKey,
+        brief.arrangement.role,
+      )) {
+        throw new Error(`music_arrangement_plan requires a ${expectedRole} arrangement for route ${route.routeKey}`);
+      }
+      if (route.requiredBlocks.includes("music_program_plan") && brief.arrangement.playback !== "repeat") {
+        throw new Error(`music_arrangement_plan requires repeating playback for route ${route.routeKey}`);
+      }
+    }
     return {
       acceptedMusicArrangement: createAcceptedMusicArrangement({
         ownerId: ctx.ownerId,

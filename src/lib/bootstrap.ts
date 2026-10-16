@@ -36,9 +36,8 @@ const SERVICES = [
   "ayrshare", // AYRSHARE_API_KEY (Phase 8 cross-post; optional)
 ] as const;
 
-// Provider-specific workers can request only their own vault service. Salad is
-// opt-in here so unrelated jobs never acquire its infrastructure credential.
-type BootstrapService = (typeof SERVICES)[number] | "salad" | "novita";
+// Infrastructure capabilities remain opt-in so unrelated workers do not load them.
+type BootstrapService = (typeof SERVICES)[number] | "render-engine" | "salad" | "novita";
 const hydratedServices = new Set<BootstrapService>();
 const pendingServices = new Map<BootstrapService, Promise<string[]>>();
 
@@ -87,7 +86,7 @@ export async function bootstrapSecrets(
   const services = opts?.services ?? SERVICES;
   // Runtime callers must not bypass the sealed Gemini boundary by casting
   // arbitrary strings into the type-level allowlist. Validate before any read.
-  if (services.some((svc) => svc !== "salad" && svc !== "novita" && !(SERVICES as readonly string[]).includes(svc))) {
+  if (services.some((svc) => svc !== "render-engine" && svc !== "salad" && svc !== "novita" && !(SERVICES as readonly string[]).includes(svc))) {
     throw new Error("bootstrap: unsupported vault service");
   }
   for (const svc of new Set(services)) {

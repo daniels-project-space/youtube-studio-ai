@@ -1,9 +1,12 @@
 import { canonicalJson } from "@/lib/canonicalJson";
+import { assertScriptNarrationConsistent } from "@/engine/scriptNarration";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   assertPlanWeekThumbnailSource,
   type PlanWeekThumbnailSource,
 } from "@/lib/planWeekThumbnailSource";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
 import type { CraftedHook } from "@/lib/hookcraft";
 import {
   assertNarrationPerformanceEvidence,
@@ -61,6 +64,8 @@ export interface PlanWeekPreparationManifest {
     title: string;
     description: string;
     sceneSeed: string;
+    /** Optional Topicraft promise, preserved for the prepared Script/Hookcraft handoff. */
+    topicPromise?: string;
     thumbnailKey: string;
     /**
      * `rendered_video_frame` deliberately reserves the eventual artifact path
@@ -210,7 +215,7 @@ export interface PlanWeekPreparedFootage {
       }
     | {
         kind: "render-engine-h3";
-        projectName: "youtube-studio-ai";
+        projectName: typeof RENDER_ENGINE_STUDIO_PROJECT_NAME;
         workflowId: string;
         profileRevisionSha256: string;
       };
@@ -547,6 +552,7 @@ function normalizedScript(value: unknown): Script {
   if (normalized.hook.length + normalized.narrationText.length > 210_000) {
     throw new Error("plan-week prepared script is too large");
   }
+  assertScriptNarrationConsistent(normalized, "plan-week prepared script");
   return normalized;
 }
 
@@ -1002,10 +1008,10 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     if (rendererRecord.kind === "render-engine-h3") {
       const workflowId = requiredText(rendererRecord.workflowId, "prepared footage Engine workflow id");
       const profileRevisionSha256 = requiredText(rendererRecord.profileRevisionSha256, "prepared footage Engine profile revision").toLowerCase();
-      if (rendererRecord.projectName !== "youtube-studio-ai" || !/^[a-z0-9]{8,64}$/.test(workflowId) || !/^[a-f0-9]{64}$/.test(profileRevisionSha256)) {
+      if (rendererRecord.projectName !== RENDER_ENGINE_STUDIO_PROJECT_NAME || !/^[a-z0-9]{8,64}$/.test(workflowId) || !/^[a-f0-9]{64}$/.test(profileRevisionSha256)) {
         throw new Error("prepared footage Engine renderer binding is invalid");
       }
-      renderer = { kind: "render-engine-h3", projectName: "youtube-studio-ai", workflowId, profileRevisionSha256 };
+      renderer = { kind: "render-engine-h3", projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME, workflowId, profileRevisionSha256 };
       const engineJobs = prepared.engineH3Jobs;
       if (!Array.isArray(engineJobs) || engineJobs.length !== clips.length || prepared.h3Jobs !== undefined || prepared.h3Receipts !== undefined) {
         throw new Error("prepared footage Engine jobs must match the ordered clips without legacy receipts");
@@ -1244,6 +1250,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
     throw new Error("plan-week preparation frozen timestamp is invalid");
   }
   const plan = requiredRecord(manifest.plan, "plan");
+  const topicPromise = normalizePlanWeekTopicPromise(plan.topicPromise);
   const execution = requiredRecord(manifest.execution, "execution");
   const prompts = requiredRecord(manifest.prompts, "prompts");
   if (!Array.isArray(execution.pipeline)) {
@@ -1269,6 +1276,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
       title: requiredText(plan.title, "plan title"),
       description: requiredText(plan.description, "plan description"),
       sceneSeed: requiredText(plan.sceneSeed, "scene seed"),
+      ...(topicPromise ? { topicPromise } : {}),
       thumbnailKey: requiredText(plan.thumbnailKey, "thumbnail key"),
       // v1 manifests written before this field existed were all paid planner
       // artwork. Keep them executable while every new manifest is explicit.
@@ -1322,6 +1330,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
   title: string;
   thumbnailKey: string;
   thumbnailSource?: PlanWeekThumbnailSource;
+  topicPromise?: string;
 }): PlanWeekPreparationManifest {
   const manifest = normalizePlanWeekPreparationManifest(args.manifest);
   const pointer = assertPlanWeekPreparationPointer(args.pointer);
@@ -1339,6 +1348,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
     manifest.plan.topic !== args.topic ||
     manifest.plan.title !== args.title ||
     manifest.plan.thumbnailKey !== args.thumbnailKey ||
+    manifest.plan.topicPromise !== args.topicPromise ||
     manifest.plan.thumbnailSource !== (args.thumbnailSource ?? "planner_artwork")
   ) {
     throw new Error("plan-week preparation manifest binding mismatch");

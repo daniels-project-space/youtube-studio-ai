@@ -46,7 +46,7 @@ async function main(): Promise<void> {
       throw new Error(`unexpected network request: ${url}`);
     };
 
-    const { craftMetadata } = await import("@/lib/metacraft");
+    const { craftMetadata, clearMetacraftEvidenceCache, youtubeSuggest } = await import("@/lib/metacraft");
     const result = await craftMetadata({
       topic: "Roman aqueduct engineering",
       niche: "history",
@@ -69,6 +69,24 @@ async function main(): Promise<void> {
       creativePrompts.some((prompt) => prompt.includes('FORMAT PROFILE "searchable_long"')),
       "standalone metacraft callers must resolve a format profile from channel context",
     );
+
+    clearMetacraftEvidenceCache();
+    const suggestionLogs: string[] = [];
+    let suggestionAttempts = 0;
+    globalThis.fetch = async () => {
+      suggestionAttempts += 1;
+      return suggestionAttempts === 1
+        ? new Response("temporarily unavailable", { status: 503 })
+        : Response.json(["aqueduct", ["aqueduct engineering", "Roman aqueduct design"]]);
+    };
+    assert.deepEqual(await youtubeSuggest("aqueduct recovery", (message) => suggestionLogs.push(message)), []);
+    assert.deepEqual(suggestionLogs, ["metacraft: YouTube autocomplete unavailable (HTTP 503)"]);
+    assert.deepEqual(
+      await youtubeSuggest("aqueduct recovery", (message) => suggestionLogs.push(message)),
+      ["aqueduct engineering", "Roman aqueduct design"],
+      "a transient outage must be visible but must not poison the suggestion cache",
+    );
+    assert.equal(suggestionAttempts, 2);
     console.log("METACRAFT EXPLICIT EMPTY FEED PASS — upstream no-results reuse avoids duplicate YouTube quota");
   } finally {
     loader._load = originalLoad;

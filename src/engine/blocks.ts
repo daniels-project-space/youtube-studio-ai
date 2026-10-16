@@ -12,15 +12,18 @@ import { createBoundScenePlannerManifest, createBoundKeyframesManifest } from "@
 import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2KeyframesManifest } from "@/trigger/blocks/yue2LoopVisuals";
 import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifest } from "@/trigger/blocks/reviewedLoopMotion";
 import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAwareMetadata";
-import { music } from "@/trigger/blocks/musicBlocks";
+import { music, musicProgramPlan } from "@/trigger/blocks/musicBlocks";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
+import { LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./musicModuleVersions";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
+import { createRenderEngineYuE2MusicManifest } from "@/trigger/blocks/yue2MusicEngine";
 import { createYuE2AssemblyManifest } from "@/trigger/blocks/yue2Assembly";
 import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
 import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
 import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
 import { createChannelAwareScriptQaManifest } from "@/trigger/blocks/channelAwareScriptQa";
+import { createChannelAwareScriptGenManifest } from "@/trigger/blocks/channelAwareScriptGen";
 import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
 import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
@@ -61,6 +64,8 @@ let registered = false;
 /** Idempotently register all blocks. Safe to call multiple times. */
 export function registerAllBlocks(): void {
   if (registered) return;
+  // Register the shared planner before constructing its versioned YuE2 wrappers.
+  register(musicProgramPlan);
   // Template C (Lofi) blocks. metadata + thumbnail_gen come from the
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
@@ -77,8 +82,16 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createReviewedMotionClipsManifest(getManifest("loop_clips")!, boundScenePlanner));
   // Shared music generation and prepared-track reuse for all channel families.
   register(music);
-  registerManifestVersion(createProviderAwareMusicManifest(getManifest("music")!));
+  const musicManifest = getManifest("music")!;
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest));
+  registerManifestVersion({ ...createProviderAwareMusicManifest(musicManifest, { requireMusicProgram: true }),
+    version: LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION });
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, {
+    requireMusicProgram: true, preserveRequiredStudioDirection: true,
+  }));
+  registerManifestVersion(createProviderAwareMusicManifest(musicManifest, { channelIdentityShortForm: true }));
   registerManifestVersion(createYuE2MusicManifest());
+  registerManifestVersion(createRenderEngineYuE2MusicManifest());
   // Route-owned, provider-free bridge from a completed serialized Topic Select
   // receipt to the shared script/crew/QA consumers. Registration alone cannot
   // admit a route; the designer only materializes it for serialized_program/v1.
@@ -89,6 +102,7 @@ export function registerAllBlocks(): void {
   registerManifestVersion(createDeliveryAwareMetadataManifest(getManifest("metadata")!));
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
+  registerManifestVersion(createChannelAwareScriptGenManifest(getManifest("script_gen")!));
   registerManifestVersion(createChannelAwareScriptQaManifest(getManifest("qa_script")!));
   registerManifestVersion(createComposerAwareAssemblyManifest(getManifest("timeline_assemble")!));
   registerManifestVersion(createYuE2AssemblyManifest(getManifest("assemble")!));

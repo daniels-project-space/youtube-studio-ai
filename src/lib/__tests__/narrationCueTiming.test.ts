@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { assertNarrationCueTimingEvidence } from "@/lib/narrationCueTiming";
+import {
+  assertNarrationCueTimingEvidence,
+  NarrationCueTimingEvidenceSchema,
+} from "@/lib/narrationCueTiming";
 import {
   FASTER_WHISPER_VERSION,
   NARRATION_TRANSCRIPT_MODEL_ID,
@@ -74,6 +77,36 @@ assert.equal(evidence.cueCount, 3);
 assert.equal(evidence.matchedTokenCount, 15);
 assert.equal(evidence.timingAlignedTokenCount, 15);
 assert.equal(evidence.maxTimingDriftSec, 0);
+assert.doesNotThrow(() => NarrationCueTimingEvidenceSchema.parse(evidence));
+for (const forged of [
+  { ...evidence, matchedTokenCount: evidence.expectedTokenCount + 1 },
+  { ...evidence, timingAlignedTokenCount: evidence.matchedTokenCount + 1 },
+  { ...evidence, matchedTokenRatio: 0.95 },
+  { ...evidence, expectedTokenCount: 100, matchedTokenCount: 67, timingAlignedTokenCount: 58,
+    matchedTokenRatio: 0.67, timingAlignedTokenRatio: 0.8657 },
+  { ...evidence, expectedTokenCount: 100, matchedTokenCount: 100, timingAlignedTokenCount: 84,
+    matchedTokenRatio: 1, timingAlignedTokenRatio: 0.84 },
+]) {
+  assert.equal(NarrationCueTimingEvidenceSchema.safeParse(forged).success, false,
+    "persisted cue evidence must reject impossible, inconsistent, or under-threshold measurements");
+}
+
+const accentedWords = [
+  "El", "niño", "habló", "de", "corazón", "mientras", "José", "recordó", "la", "canción", "en", "Málaga",
+];
+const accentedTimedWords = accentedWords.map((text, index) => ({
+  text,
+  startMs: index * 125,
+  endMs: index * 125 + 100,
+}));
+const accentedEvidence = assertNarrationCueTimingEvidence({
+  sentenceTimings: [{ text: accentedWords.join(" "), start: 0, end: 1.6 }],
+  transcriptProof: proof(accentedTimedWords),
+  narrationDurationSec: 1.6,
+});
+assert.equal(accentedEvidence.matchedTokenCount, accentedWords.length,
+  "accented words and names must remain intact between Whisper timestamps and sentence cues");
+assert.equal(accentedEvidence.timingAlignedTokenCount, accentedWords.length);
 
 assert.throws(
   () =>

@@ -26,6 +26,8 @@ import { runPipeline } from "@/engine/runner";
 import { allManifests } from "@/engine/registry";
 import { configuredMaxCostUsd, manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
+import { recordConvexHttpRequest } from "@/lib/convexUsage";
+import { produceAndCritique } from "@/engine/critiqueLoop";
 
 interface Recorded {
   block: string;
@@ -58,10 +60,36 @@ async function positive(): Promise<void> {
   registerAllBlocks();
   register(echoSeed);
   register(echoSink);
+  const convexUsageProbe: Block = {
+    id: "convex_usage_probe",
+    consumes: [],
+    produces: ["convexUsageProbeOutput"],
+    run: async () => {
+      recordConvexHttpRequest("https://studio.convex.cloud/api/query");
+      recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
+      await produceAndCritique({
+        label: "local:quality-probe",
+        maxIters: 1,
+        produce: async () => "fixture",
+        critique: async () => ({ score: 0.82, pass: true, issues: [] }),
+      });
+      return { convexUsageProbeOutput: true };
+    },
+  };
+  register(convexUsageProbe);
+  const remoteUsageProbe: Block = {
+    id: "remote_usage_probe",
+    consumes: [],
+    produces: ["remoteUsageProbeOutput"],
+    run: async () => { throw new Error("remote probe must execute in its child task"); },
+  };
+  register(remoteUsageProbe);
 
   const entries = [
     { block: "echo_seed", params: { topic: "rainy night jazz" } },
     { block: "echo_sink" },
+    { block: "convex_usage_probe" },
+    { block: "remote_usage_probe" },
   ];
   const resolved = validatePipeline(entries);
   preflight(resolved, { budgetUsd: 0 }); // no paid blocks → 0 budget is fine
@@ -75,6 +103,26 @@ async function positive(): Promise<void> {
     keyPrefix: "owner/owner_test/channel/test/",
     budgetUsd: 0,
     paramsByBlock: { echo_seed: { topic: "rainy night jazz" } },
+    remoteBlocks: new Set([remoteUsageProbe.id]),
+    runRemoteBlock: async () => ({
+      patch: { remoteUsageProbeOutput: true },
+      moduleUsage: {
+        providerCalls: 5,
+        inputTokens: 17,
+        outputTokens: 9,
+        critiqueEvidence: [{
+          label: "remote:quality-probe",
+          scores: [0.87],
+          passes: [true],
+          fatalIterations: [false],
+          issueCounts: [0],
+          accepted: true,
+          fatal: false,
+          completed: true,
+        }],
+      },
+      convexUsage: { reads: 4, writes: 2, actions: 1 },
+    }),
     sink,
     log: (message, extra) => logs.push({ message, extra }),
   });
@@ -86,15 +134,73 @@ async function positive(): Promise<void> {
     "seen:rainy night jazz@run_test_pos",
     "echo_sink consumed topic and wrote a real marker",
   );
-  // Stage transitions persisted: running+ok for each of the two blocks.
+  // Stage transitions persisted: running+ok for each block.
   const okStages = rows.filter((r) => r.status === "ok").map((r) => r.block);
-  assert.deepEqual(okStages, ["echo_seed", "echo_sink"], "both blocks marked ok");
+  assert.deepEqual(okStages, ["echo_seed", "echo_sink", "convex_usage_probe", "remote_usage_probe"], "all blocks marked ok");
   const scorecards = logs
     .filter((entry) => entry.message.startsWith("module scorecard:"))
-    .map((entry) => entry.extra?.scorecard as { moduleId: string; status: string; fingerprint: string });
-  assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink"]);
-  assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed"]);
+    .map((entry) => entry.extra?.scorecard as {
+      moduleId: string;
+      status: string;
+      fingerprint: string;
+      outputArtifacts: Array<{
+        key: string;
+        artifactId: string;
+        type: string;
+        schemaVersion: string;
+        producerVersion: string;
+        payloadSha256: string;
+      }>;
+      convexReads: number | null;
+      convexWrites: number | null;
+      convexActions: number | null;
+      providerCalls: number | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      critiqueEvidence: Array<{ label: string; accepted: boolean }> | null;
+    });
+  assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink", "convex_usage_probe", "remote_usage_probe"]);
+  assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed", "passed", "passed"]);
   assert(scorecards.every((card) => /^[0-9a-f]{64}$/.test(card.fingerprint)), "scorecards are fingerprinted");
+  assert.deepEqual(scorecards[0].outputArtifacts.map((artifact) => artifact.key), ["topic"]);
+  assert.match(scorecards[0].outputArtifacts[0]!.artifactId, /^run_test_pos:echo_seed:topic:[0-9a-f]{16}$/);
+  assert.match(scorecards[0].outputArtifacts[0]!.payloadSha256, /^[0-9a-f]{64}$/);
+  assert.equal(scorecards[0].outputArtifacts[0]!.producerVersion, "1.0.0-migration");
+  assert.deepEqual(
+    [scorecards[2].convexReads, scorecards[2].convexWrites, scorecards[2].convexActions],
+    [1, 1, 0],
+    "per-module scorecard records observed Convex query/mutation/action calls",
+  );
+  assert.deepEqual(
+    [scorecards[3].convexReads, scorecards[3].convexWrites, scorecards[3].convexActions],
+    [4, 2, 1],
+    "remote module scorecard receives Convex usage measured by its child",
+  );
+  assert.deepEqual(
+    [scorecards[3].providerCalls, scorecards[3].inputTokens, scorecards[3].outputTokens],
+    [5, 17, 9],
+    "remote module scorecard receives child model/image usage",
+  );
+  assert.deepEqual(scorecards[3].critiqueEvidence, [{
+    label: "remote:quality-probe",
+    scores: [0.87],
+    passes: [true],
+    fatalIterations: [false],
+    issueCounts: [0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }], "remote module scorecard preserves critic outcomes without calling them oracle scores");
+  assert.deepEqual(scorecards[2].critiqueEvidence, [{
+    label: "local:quality-probe",
+    scores: [0.82],
+    passes: [true],
+    fatalIterations: [false],
+    issueCounts: [0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }], "local module scorecard captures the shared critique loop's actual outcome");
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }
 

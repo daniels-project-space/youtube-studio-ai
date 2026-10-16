@@ -189,6 +189,8 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   chessReplay: { type: "ChessReplay", schema: ChessReplaySchema, persist: "reference" },
   chessNarrationPlan: { type: "ChessNarrationPlan", schema: ChessNarrationPlanShape, persist: "reference" },
   chessNarrationTiming: { type: "ChessNarrationTiming", schema: ChessNarrationTimingShape, persist: "reference" },
+  channelMusicProgramKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
+  channelMusicProgramFingerprint: { type: "SHA256Fingerprint", schema: z.string().regex(/^[a-f0-9]{64}$/u) },
   narrationPerformanceEvidence: {
     type: "NarrationPerformanceEvidence",
     schema: z.object({

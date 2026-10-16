@@ -1,11 +1,13 @@
 import { artifactContract } from "@/engine/artifactSchemas";
+import { LoopableChannelMusicRoleSchema } from "@/engine/channelMusicRole";
 import { ChannelProfileSchema, parseFrozenChannelProfile } from "@/engine/channelProfile";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
 import { verifyApprovedYuE2Source } from "@/lib/approvedYuE2AssemblySource";
 import { musicProgramForCurrentRoute } from "./blockContext";
-import { createLoopClipsBlock, createMusicProgramPlanBlock } from "./lofiBlocks";
+import { createLoopClipsBlock } from "./lofiBlocks";
+import { createMusicProgramPlanBlock } from "./musicBlocks";
 import { createBoundKeyframesManifest } from "./boundLoopVisuals";
 
 export const YUE2_PROGRAM_VERSION = "2.0.0-yue2-intent";
@@ -19,8 +21,8 @@ export async function admitYuE2LoopSource(ctx: StageContext) {
     throw new Error("YuE2 loop visuals require the sealed YuE2 program, not a legacy provider plan");
   }
   const source = await verifyApprovedYuE2Source(ctx, "repeat");
-  if (source.arrangement.arrangement.role !== "primary_music") {
-    throw new Error("YuE2 loop visuals require the primary-music arrangement");
+  if (!LoopableChannelMusicRoleSchema.safeParse(source.arrangement.arrangement.role).success) {
+    throw new Error("YuE2 loop visuals require a primary-music, meditation, or sleep-sound arrangement");
   }
   return source;
 }

@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { canonicalJson } from "@/lib/canonicalJson";
+import { spreadDefault } from "@/lib/identitySpread";
 import { sha256Hex } from "@/lib/sha256";
+import { ChannelMusicRoleSchema, type ChannelMusicRole } from "./channelMusicRole";
+
+export { ChannelMusicRoleSchema, type ChannelMusicRole } from "./channelMusicRole";
 
 export const CHANNEL_MUSIC_PROGRAM_VERSION = "channel-music-program/v1" as const;
 /** Exact maximum tolerated early high-band collapse in a retained Music3 WAV. */
@@ -14,6 +18,7 @@ export const MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB = 18;
  */
 export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS = 450;
 export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS = 250;
+export const MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE = 0.75;
 
 /**
  * Music3's caption guidance is a quality boundary, not presentation copy.
@@ -24,13 +29,17 @@ export function music3StructuredCaptionWordCount(caption: string): number {
   return normalized ? normalized.split(/\s+/u).length : 0;
 }
 
-export const ChannelMusicRoleSchema = z.enum([
-  "primary_music",
-  "narration_bed",
-  "meditation_bed",
-  "short_form_bed",
-]);
-export type ChannelMusicRole = z.infer<typeof ChannelMusicRoleSchema>;
+/** Explicit Music-module gain overrides channel DNA; invalid frozen config fails closed. */
+export function resolveMusicModuleBodyMusicVol(
+  moduleValue: unknown,
+  channelValue?: number,
+): number | undefined {
+  if (moduleValue === undefined) return channelValue;
+  if (typeof moduleValue !== "number" || !Number.isFinite(moduleValue) || moduleValue < 0.01 || moduleValue > 1) {
+    throw new Error("music module bodyMusicVol must be a finite number in [0.01, 1]");
+  }
+  return moduleValue;
+}
 
 export const ChannelMusicProviderSchema = z.enum([
   "minimax_music3",
@@ -41,6 +50,10 @@ export type ChannelMusicProvider = z.infer<typeof ChannelMusicProviderSchema>;
 
 const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const boundedText = (maximum: number) => z.string().trim().min(1).max(maximum);
+const BpmRangeSchema = z.tuple([
+  z.number().int().min(30).max(300),
+  z.number().int().min(30).max(300),
+]);
 
 const MusicSectionSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/u),
@@ -57,6 +70,7 @@ const MusicSectionSchema = z.object({
 
 const ChannelMusicProgramBodyBaseSchema = z.object({
   version: z.literal(CHANNEL_MUSIC_PROGRAM_VERSION),
+  channelIdentityPromptContract: z.literal("channel-identity-caption/v1").optional(),
   channelId: boundedText(320),
   channelIdentityFingerprint: FingerprintSchema,
   family: boundedText(120),
@@ -67,7 +81,7 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     genre: boundedText(160),
     instrumentation: z.array(boundedText(120)).min(1).max(12),
     textures: z.array(boundedText(120)).max(8),
-    bpmRange: z.tuple([z.number().int().min(30).max(300), z.number().int().min(30).max(300)]),
+    bpmRange: z.union([BpmRangeSchema, z.null()]),
     moodArc: boundedText(600),
     exclusions: z.array(boundedText(160)).min(1).max(20),
   }).strict(),
@@ -98,6 +112,8 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     sectionReviewRequired: z.literal(true),
     humanAuditionRequired: z.literal(true),
   }).strict(),
+  // Optional for legacy provider-neutral programs; new non-MiniMax programs
+  // must not inherit MiniMax-only attribution and commercial terms.
   minimaxLicense: z.object({
     uiAttribution: z.literal("MiniMax-Music3"),
     prominentCommercialAttributionRequired: z.literal(true),
@@ -105,7 +121,7 @@ const ChannelMusicProgramBodyBaseSchema = z.object({
     safeguardsRequired: z.literal(true),
     separateAuthorizationAboveAnnualRevenueUsd: z.literal(20_000_000),
     operatorAttestationRequiredBeforeEnablement: z.literal(true),
-  }).strict(),
+  }).strict().optional(),
 }).strict();
 
 type ChannelMusicProgramBody = z.infer<typeof ChannelMusicProgramBodyBaseSchema>;
@@ -114,11 +130,65 @@ function validateChannelMusicProgramBody(
   program: ChannelMusicProgramBody,
   issue: z.RefinementCtx,
 ): void {
-  const [minimumBpm, maximumBpm] = program.identity.bpmRange;
-  if (minimumBpm > maximumBpm) {
+  const routeOwnedRole = routeOwnedMusicRole(program.family, program.contentLaneKey);
+  if (routeOwnedRole && program.role !== routeOwnedRole &&
+    !isMusicRoleAllowedForRoute(program.family, program.contentLaneKey, program.role)) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `music role ${program.role} conflicts with route-owned role ${routeOwnedRole}`,
+    });
+  }
+  const bpmRange = program.identity.bpmRange;
+  if (bpmRange && bpmRange[0] > bpmRange[1]) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music BPM range is inverted" });
   }
+  if (program.role !== "sleep_sound_bed" && program.role !== "meditation_bed" && bpmRange === null) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, message: "metered music roles require an explicit BPM range" });
+  }
+  const rhythmicCue = sleepSoundRhythmicCue(program.role, program.identity.instrumentation);
+  if (rhythmicCue) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["identity", "instrumentation"],
+      message: `sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`,
+    });
+  }
+  const rhythmicGenre = sleepSoundRhythmicGenre(program.role, program.identity.genre);
+  if (rhythmicGenre) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["identity", "genre"],
+      message: `sleep soundscape cannot use a rhythmic genre: ${rhythmicGenre}`,
+    });
+  }
   const sections = program.generation.sections;
+  if (new Set(sections.map((section) => section.id)).size !== sections.length) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["generation", "sections"],
+      message: "music sections must have unique ids",
+    });
+  }
+  if (program.role === "sleep_sound_bed") {
+    if (sections.some((section) => section.energy > 0.12) ||
+        sections.some((section) => section.energy !== sections[0]?.energy)) {
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generation", "sections"],
+        message: "sleep soundscape sections must maintain stable low arousal",
+      });
+    }
+    const sleepDirection = [program.generation.structuredCaption, ...sections.map((section) => section.instruction)]
+      .join(" ")
+      .match(/\b(?:four[-\s]?on[-\s]?the[-\s]?floor|driving|strong|prominent|steady|insistent|pulsing)\s+(?:beat|pulse|groove|rhythm|drums?|percussion)\b|\b(?:boom[-\s]?bap|breakbeat|drum\s*(?:and|&)\s*bass)\b/iu)?.[0];
+    if (sleepDirection) {
+      issue.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["generation", "structuredCaption"],
+        message: `sleep soundscape cannot include rhythmic generation direction: ${sleepDirection}`,
+      });
+    }
+  }
   if (sections[0]?.startFraction !== 0 || sections.at(-1)?.endFraction !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "music sections must cover the full program from 0 to 1" });
   }
@@ -130,10 +200,36 @@ function validateChannelMusicProgramBody(
   if (program.role === "primary_music" && program.mix.bodyMusicVol !== 1) {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "primary music must remain music-forward at unity body gain" });
   }
-  if (program.role !== "primary_music" && !program.mix.narrationPriority && program.role !== "meditation_bed") {
+  if (program.role !== "primary_music" && !program.mix.narrationPriority &&
+      program.role !== "meditation_bed" && program.role !== "sleep_sound_bed") {
     issue.addIssue({ code: z.ZodIssueCode.custom, message: "narrated/short music beds must preserve narration priority" });
   }
+  if (program.channelIdentityPromptContract === "channel-identity-caption/v1") {
+    const caption = program.generation.structuredCaption.toLocaleLowerCase("en-US");
+    const declaredSoundCues = [
+      program.topic,
+      program.identity.genre,
+      program.identity.moodArc,
+      ...program.identity.instrumentation,
+      ...program.identity.textures,
+      ...program.identity.exclusions,
+      ...(bpmRange && program.role !== "sleep_sound_bed"
+        ? [bpmRange[0] === bpmRange[1] ? `${bpmRange[0]} BPM` : `${bpmRange[0]}–${bpmRange[1]} BPM`]
+        : []),
+    ];
+    for (const cue of declaredSoundCues) {
+      if (!caption.includes(cue.toLocaleLowerCase("en-US"))) {
+        issue.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `music structured caption omits declared channel sound cue: ${cue}`,
+        });
+      }
+    }
+  }
   if (program.generation.providerPreference === "minimax_music3") {
+    if (!program.minimaxLicense) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, message: "MiniMax-Music3 programs require the provider-specific license and attribution terms" });
+    }
     const words = music3StructuredCaptionWordCount(program.generation.structuredCaption);
     if (words < MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS || words > MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS) {
       issue.addIssue({
@@ -160,23 +256,347 @@ export const ChannelMusicProgramSchema = ChannelMusicProgramBodyBaseSchema.exten
 
 export type ChannelMusicProgram = z.infer<typeof ChannelMusicProgramSchema>;
 
+/** Channel-level sound contract, excluding per-video topic and channel identifiers. */
+export function musicSoundProfileFingerprint(program: ChannelMusicProgram): string {
+  return sha256Hex(canonicalJson({
+    role: program.role,
+    identity: program.identity,
+    generation: {
+      providerPreference: program.generation.providerPreference,
+      durationSec: program.generation.durationSec,
+      instrumental: program.generation.instrumental,
+      lyricsControl: program.generation.lyricsControl,
+      sections: program.generation.sections,
+    },
+    mix: program.mix,
+    quality: program.quality,
+  }));
+}
+
 export interface CreateChannelMusicProgramInput {
   readonly channelId: string;
   readonly channelIdentityFingerprint: string;
-  readonly family: string;
-  readonly contentLaneKey: string;
+  readonly family?: string;
+  readonly contentLaneKey?: string;
   readonly topic: string;
   readonly role?: ChannelMusicRole;
+  readonly musicProfileVersion?: "legacy" | "channel-identity-short-form/v1";
   readonly providerPreference?: ChannelMusicProvider;
   readonly durationSec?: number;
+  readonly tempoMode?: "metered" | "unmetered";
   readonly genre?: string;
   readonly instrumentation?: readonly string[];
   readonly textures?: readonly string[];
   readonly bpmRange?: readonly [number, number];
   readonly moodArc?: string;
   readonly composerDirection?: string;
+  readonly studioTextureDirection?: string;
   readonly targetLufs?: number;
   readonly bodyMusicVol?: number;
+}
+
+export interface PrimaryMusicFallbackProfile {
+  readonly genre: string;
+  readonly instrumentation: readonly string[];
+  readonly textures: readonly string[];
+  readonly moodArc: string;
+  readonly prompt: string;
+}
+
+const LOFI_PRIMARY_MUSIC_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "warm lo-fi instrumental",
+    instrumentation: ["felt piano", "soft bass", "restrained brush percussion"],
+    textures: ["natural room depth", "subtle tape warmth"],
+    moodArc: "a recognizable motif deepens through real variation and returns with warmer resolution",
+    prompt: "warm cozy lo-fi instrumental, mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl grain and tape warmth; calm, nostalgic, purely instrumental, loop-friendly",
+  }),
+  Object.freeze({
+    genre: "nocturnal lo-fi instrumental",
+    instrumentation: ["muted electric piano", "rounded sub-bass", "soft rim-click percussion"],
+    textures: ["dim late-night room tone", "soft cassette haze"],
+    moodArc: "a muted motif drifts through cool harmony, opens briefly, then settles into night",
+    prompt: "nocturnal lo-fi instrumental, muted electric piano, rounded sub-bass and soft rim clicks; intimate room tone, restrained cassette haze, gentle harmonic drift and no dramatic drop",
+  }),
+  Object.freeze({
+    genre: "sunlit lo-fi instrumental",
+    instrumentation: ["soft Rhodes piano", "nylon-string guitar", "light brushed drums"],
+    textures: ["open daylight room", "fine vinyl dust"],
+    moodArc: "a light motif gains warmth through guitar replies, then returns to calm",
+    prompt: "sunlit lo-fi instrumental, soft Rhodes piano, nylon-string guitar and light brushed drums; airy daylight room, fine vinyl dust, warm melodic replies and relaxed dynamics",
+  }),
+  Object.freeze({
+    genre: "jazzy lo-fi instrumental",
+    instrumentation: ["smoky jazz piano", "upright bass", "soft brush kit"],
+    textures: ["close wooden resonance", "faint tape grain"],
+    moodArc: "piano and bass trade phrases, open one harmony, then settle into a relaxed pocket",
+    prompt: "jazzy lo-fi instrumental, smoky piano voicings, upright bass and soft brush kit; close wooden resonance, faint tape grain, understated call-and-response and a relaxed pocket",
+  }),
+]);
+
+const MEDITATION_MUSIC_FALLBACKS = Object.freeze([
+  Object.freeze({
+    genre: "slow spacious ambient meditation",
+    instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
+    textures: ["wide calm stereo space", "gentle natural air"],
+    moodArc: "settle into a steady spacious calm, support slow breathing with subtle timbral change, and return without a strong melodic arrival",
+    prompt: "slow spacious ambient meditation with warm sustained pads, sparse felt piano and soft breathy flute; wide calm stereo space, gentle natural air, no percussion or dramatic build-ups, purely instrumental",
+  }),
+  Object.freeze({
+    genre: "organic ambient meditation",
+    instrumentation: ["soft bowed strings", "low warm drone", "distant wooden flute"],
+    textures: ["open wood-room resonance", "quiet breath-like air"],
+    moodArc: "begin with spacious warmth, allow a slow harmonic opening, then return gently to the same grounded stillness",
+    prompt: "organic ambient meditation with soft bowed strings, low warm drone and distant wooden flute; open wood-room resonance, quiet breath-like air, no percussion or dramatic build-ups, purely instrumental",
+  }),
+  Object.freeze({
+    genre: "minimal piano meditation",
+    instrumentation: ["felt piano", "soft sustained cello", "subtle airy synth"],
+    textures: ["close felt detail", "long natural room decay"],
+    moodArc: "let sparse piano tones breathe over a calm sustained bed, widen briefly, and settle without a strong melodic arrival",
+    prompt: "minimal piano meditation with felt piano, soft sustained cello and subtle airy synth; close felt detail, long natural room decay, no percussion or dramatic build-ups, purely instrumental",
+  }),
+  Object.freeze({
+    genre: "soft tonal meditation ambient",
+    instrumentation: ["warm harmonium", "rounded low strings", "breathy reed tone"],
+    textures: ["soft harmonic air", "wide unhurried space"],
+    moodArc: "hold a gentle center while one warm harmony slowly opens and returns, keeping each change unhurried and predictable",
+    prompt: "soft tonal meditation ambient with warm harmonium, rounded low strings and breathy reed tone; soft harmonic air, wide unhurried space, no percussion or dramatic build-ups, purely instrumental",
+  }),
+]);
+
+const SLEEP_SOUND_FALLBACKS = Object.freeze([
+  Object.freeze({
+    genre: "continuous low-arousal ambient sleep soundscape",
+    instrumentation: ["soft sustained synth pad", "distant piano harmonics"],
+    textures: ["steady filtered noise bed", "quiet natural room air"],
+    moodArc: "remain stable and unobtrusive for unattended sleep; no pulse, melodic phrase, cadence, crescendo, or attention-catching event",
+    prompt: "continuous low-arousal ambient sleep soundscape with soft sustained synth pad and distant piano harmonics; steady filtered noise, quiet room air, beatless and event-free, no melody, pulse, swell or vocals",
+  }),
+  Object.freeze({
+    genre: "soft rain-texture sleep soundscape",
+    instrumentation: ["low diffuse drone", "soft sustained air tone"],
+    textures: ["even filtered rainfall", "deep quiet room tone"],
+    moodArc: "maintain a smooth, even field of sound through the night with no event, swell, pulse, or tonal arrival",
+    prompt: "soft rain-texture sleep soundscape with low diffuse drone and sustained air tone; even filtered rainfall, deep quiet room tone, beatless and event-free, no melody, pulse, swell or vocals",
+  }),
+  Object.freeze({
+    genre: "deep ambient sleep soundscape",
+    instrumentation: ["rounded sub-audible drone", "soft sustained upper air"],
+    textures: ["steady brown-noise bed", "diffuse distant atmosphere"],
+    moodArc: "stay low, continuous, and tonally unobtrusive; changes remain nearly imperceptible with no new event or cadence",
+    prompt: "deep ambient sleep soundscape with rounded low drone and soft sustained upper air; steady brown-noise bed, diffuse distant atmosphere, beatless and event-free, no melody, pulse, swell or vocals",
+  }),
+  Object.freeze({
+    genre: "quiet ocean-air sleep soundscape",
+    instrumentation: ["soft low synth bed", "distant smooth resonance"],
+    textures: ["level ocean-air wash", "muted spacious room tone"],
+    moodArc: "preserve a calm unchanging horizon of sound without wave-like swells, pulse, melody, or attention-catching shifts",
+    prompt: "quiet ocean-air sleep soundscape with soft low synth bed and distant smooth resonance; level ocean-air wash, muted spacious room tone, beatless and event-free, no melody, pulse, swell or vocals",
+  }),
+]);
+
+const NARRATION_MUSIC_FALLBACKS: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "sparse solo piano underscore",
+    instrumentation: ["soft felt piano"],
+    textures: ["wide phrase spacing", "warm room tone"],
+    moodArc: "contemplative and unhurried, very low in dynamics and unobtrusive beneath narration",
+    prompt: "sparse solo piano underscore, wide spacing between phrases, soft felt hammers, warm room tone, contemplative and unhurried, very low dynamics, no percussion, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "sustained string underscore",
+    instrumentation: ["gentle cello", "soft bowed strings"],
+    textures: ["slow bowed swells", "warm resonance"],
+    moodArc: "warm and reflective with minimal movement, staying unobtrusive beneath narration",
+    prompt: "sustained string underscore, slow bowed swells, gentle cello underneath, warm and reflective, minimal movement, no percussion, no drums, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "soft ambient underscore",
+    instrumentation: ["analogue pads"],
+    textures: ["faint tape hiss", "slow harmonic drift"],
+    moodArc: "calm and spacious without rhythm, staying unobtrusive beneath narration",
+    prompt: "soft ambient underscore, layered analogue pads and faint tape hiss, slow harmonic drift, calm and spacious, no rhythm section, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "quiet acoustic guitar underscore",
+    instrumentation: ["fingerpicked acoustic guitar", "low sustained notes"],
+    textures: ["close microphone detail", "warm natural room"],
+    moodArc: "warm, grounded and unobtrusive beneath narration, with no build-up",
+    prompt: "quiet acoustic guitar underscore, fingerpicked and close-mic'd, occasional low sustained note, warm and grounded, unobtrusive, no percussion, no build-ups, purely instrumental beneath narration",
+  }),
+  Object.freeze({
+    genre: "muted brass and low woodwind underscore",
+    instrumentation: ["muted brass", "low woodwinds"],
+    textures: ["long held notes", "distant documentary space"],
+    moodArc: "restrained and serious, remaining low and unobtrusive beneath narration",
+    prompt: "muted brass and low woodwind underscore, long held notes, distant and documentary, restrained and serious, no percussion, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+]);
+
+const SHORT_FORM_MUSIC_FALLBACK: PrimaryMusicFallbackProfile = Object.freeze({
+  genre: "concise modern instrumental underscore",
+  instrumentation: ["muted bass", "soft compact percussion", "single restrained pluck"],
+  textures: ["tight clean low end", "controlled stereo width"],
+  moodArc: "establish one clear rhythmic idea quickly, add a small lift, and resolve cleanly before the cut",
+  prompt: "concise modern instrumental underscore with muted bass, soft compact percussion and one restrained pluck; tight low end, controlled width, a small quick lift and clean resolution, no vocals",
+});
+
+const SHORT_FORM_MUSIC_FALLBACKS: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  SHORT_FORM_MUSIC_FALLBACK,
+  Object.freeze({
+    genre: "bright mallet-led short-form instrumental",
+    instrumentation: ["muted marimba", "rounded bass", "light brushed ticks"],
+    textures: ["clean close detail", "compact warm room"],
+    moodArc: "open immediately with a memorable two-note figure, add one measured accent, and resolve before the cut",
+    prompt: "bright mallet-led short-form instrumental with muted marimba, rounded bass and light brushed ticks; memorable two-note opening, one measured accent and a clean ending before the cut, no vocals",
+  }),
+  Object.freeze({
+    genre: "restrained acoustic short-form instrumental",
+    instrumentation: ["palm-muted guitar", "soft hand percussion", "warm bass"],
+    textures: ["dry string detail", "natural small-room air"],
+    moodArc: "state one nimble acoustic motif immediately, vary it once, then land a tidy final button",
+    prompt: "restrained acoustic short-form instrumental with palm-muted guitar, soft hand percussion and warm bass; immediate nimble motif, one natural variation and a tidy final button, no vocals",
+  }),
+  Object.freeze({
+    genre: "minimal analog short-form groove",
+    instrumentation: ["soft analog pluck", "subtle low synth", "quiet rim clicks"],
+    textures: ["rounded transient detail", "narrow focused stereo image"],
+    moodArc: "establish a focused electronic pulse at once, create a small harmonic turn, and finish cleanly",
+    prompt: "minimal analog short-form groove with soft synth pluck, subtle low synth and quiet rim clicks; immediate focused pulse, a small harmonic turn and a clean finish, no vocals or dramatic drop",
+  }),
+]);
+
+const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "cinematic post-rock instrumental",
+    instrumentation: ["electric piano", "bowed electric guitar", "restrained toms"],
+    textures: ["wide natural room", "soft tape saturation"],
+    moodArc: "a clear melodic motif grows through patient interplay, opens into a full but controlled lift, and returns with earned resolution",
+    prompt: "cinematic post-rock instrumental with electric piano, bowed electric guitar and restrained toms; patient melodic development, spacious dynamics and an earned lift; full music-forward arrangement, no vocals",
+  }),
+  Object.freeze({
+    genre: "organic acoustic instrumental",
+    instrumentation: ["fingerstyle acoustic guitar", "upright bass", "soft hand percussion"],
+    textures: ["close wooden resonance", "natural room air"],
+    moodArc: "a memorable acoustic motif travels through warm rhythmic variation and settles into a natural, satisfying return",
+    prompt: "organic acoustic instrumental led by fingerstyle guitar with upright bass and soft hand percussion; warm, rhythmic, melodic and fully arranged for attentive listening, no vocals",
+  }),
+  Object.freeze({
+    genre: "deep analog electronic instrumental",
+    instrumentation: ["analog synthesizer", "rounded electric bass", "restrained electronic percussion"],
+    textures: ["dimensional analog space", "subtle modular movement"],
+    moodArc: "a focused synth motif gains harmonic color and rhythmic depth, creates one meaningful contrast, then resolves without a generic drop",
+    prompt: "deep analog electronic instrumental with a distinctive synth motif, rounded bass and restrained electronic percussion; evolving harmony, dimensional sound design and a deliberate contrast, no vocals or generic EDM drop",
+  }),
+  Object.freeze({
+    genre: "modern chamber instrumental",
+    instrumentation: ["cello", "felt piano", "muted frame drum"],
+    textures: ["intimate chamber space", "soft bow detail"],
+    moodArc: "an intimate chamber theme develops through conversational strings and piano, finds a measured pulse, and closes with quiet conviction",
+    prompt: "modern chamber instrumental led by expressive cello and felt piano with a measured frame-drum pulse; intimate, melodic and dynamically alive, building through musical conversation rather than a preset loop, no vocals",
+  }),
+]);
+
+export function primaryMusicFallbackProfile(input: {
+  readonly family?: string;
+  readonly contentLaneKey?: string;
+  readonly channelIdentitySeed: string;
+}): PrimaryMusicFallbackProfile {
+  const family = input.family?.trim().toLowerCase() ?? "";
+  const lane = input.contentLaneKey?.trim().toLowerCase() ?? "";
+  if (family === "music_loop" && lane === "music_loop") {
+    return spreadDefault(input.channelIdentitySeed, LOFI_PRIMARY_MUSIC_PROFILES);
+  }
+  return spreadDefault(input.channelIdentitySeed, PRIMARY_MUSIC_FALLBACK_PROFILES);
+}
+
+export function musicFallbackProfileForRole(input: {
+  readonly role: ChannelMusicRole;
+  readonly family?: string;
+  readonly contentLaneKey?: string;
+  readonly channelIdentitySeed: string;
+  readonly profileVersion?: "legacy" | "channel-identity-short-form/v1";
+}): PrimaryMusicFallbackProfile {
+  if (input.role === "primary_music") {
+    return primaryMusicFallbackProfile(input);
+  }
+  if (input.role === "meditation_bed") return spreadDefault(input.channelIdentitySeed, MEDITATION_MUSIC_FALLBACKS);
+  if (input.role === "sleep_sound_bed") return spreadDefault(input.channelIdentitySeed, SLEEP_SOUND_FALLBACKS);
+  if (input.role === "short_form_bed") {
+    return input.profileVersion === "channel-identity-short-form/v1"
+      ? spreadDefault(input.channelIdentitySeed, SHORT_FORM_MUSIC_FALLBACKS)
+      : SHORT_FORM_MUSIC_FALLBACK;
+  }
+  return spreadDefault(input.channelIdentitySeed, NARRATION_MUSIC_FALLBACKS);
+}
+
+/** Compact provider-facing caption derived from the same sealed identity we retain for review. */
+export function musicProviderPromptForProgram(
+  program: ChannelMusicProgram,
+  episodeDirection = "",
+  requiredDirection = "",
+  maximumCharacters = 900,
+  preserveRequiredStudioDirection = false,
+): string {
+  if (!Number.isInteger(maximumCharacters) || maximumCharacters < 160) {
+    throw new Error("music provider prompt limit must be an integer of at least 160 characters");
+  }
+  const identity = program.identity;
+  const core = [
+    identity.genre.slice(0, 100),
+    identity.instrumentation.slice(0, 3).map((item) => item.slice(0, 30)).join(", "),
+    identity.textures.slice(0, 2).map((item) => item.slice(0, 26)).join(", "),
+    `Topic: ${program.topic.slice(0, 90)}`,
+    `Mood: ${identity.moodArc.slice(0, 100)}`,
+    identity.bpmRange ? `Tempo ${identity.bpmRange[0]}-${identity.bpmRange[1]} BPM` : "Beatless, no pulse or tempo",
+    "Instrumental, no vocals or lyrics",
+  ].filter(Boolean).join("; ");
+  if (core.length > maximumCharacters) {
+    throw new Error("sealed music identity exceeds the provider prompt limit");
+  }
+  const required = requiredDirection.replace(/\s+/gu, " ").trim();
+  const direction = episodeDirection.replace(/\s+/gu, " ").trim();
+  const sections = program.generation.sections
+    .map((section) => `${section.label}: ${section.instruction}`)
+    .join("; ");
+  let result = core;
+  if (!preserveRequiredStudioDirection) {
+    for (const addition of [
+      required ? `Required Studio direction: ${required}` : "",
+      direction ? `Episode direction: ${direction}` : "",
+      sections ? `Arrangement: ${sections}` : "",
+    ]) {
+      if (!addition || result.length >= maximumCharacters) continue;
+      const available = maximumCharacters - result.length - 2;
+      if (available > 0) result += `; ${addition.slice(0, available)}`;
+    }
+    return result;
+  }
+  const requiredAddition = required ? `Required Studio direction: ${required}` : "";
+  if (requiredAddition && result.length + 2 + requiredAddition.length > maximumCharacters) {
+    throw new Error("required Studio direction exceeds the provider prompt limit");
+  }
+  if (requiredAddition) result += `; ${requiredAddition}`;
+  for (const addition of [
+    direction ? `Episode direction: ${direction}` : "",
+    sections ? `Arrangement: ${sections}` : "",
+  ]) {
+    if (!addition || result.length >= maximumCharacters) continue;
+    const available = maximumCharacters - result.length - 2;
+    if (addition.length <= available) {
+      result += `; ${addition}`;
+      continue;
+    }
+    const contentLimit = available - 3;
+    if (contentLimit > 0) {
+      const prefix = addition.slice(0, contentLimit);
+      const boundary = prefix.lastIndexOf(" ");
+      if (boundary > 0) result += `; ${prefix.slice(0, boundary).trimEnd()}...`;
+    }
+    break;
+  }
+  return result;
 }
 
 function cleanText(value: string | undefined, fallback: string, maximum: number): string {
@@ -189,11 +609,45 @@ function unique(values: readonly string[] | undefined, fallback: readonly string
 }
 
 export function musicRoleForRoute(family: string, contentLaneKey: string): ChannelMusicRole {
-  const route = `${family} ${contentLaneKey}`.toLowerCase();
-  if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
-  if (/meditat|sleep|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
+  const familyRoute = family.toLowerCase();
+  const laneRoute = contentLaneKey.toLowerCase();
+  const route = `${familyRoute} ${laneRoute}`;
+  if (/sleep/u.test(route)) return "sleep_sound_bed";
+  if (/meditat|ambient[_ -]?guided|asmr/u.test(route)) return "meditation_bed";
   if (/short|quiz|trivia/u.test(route)) return "short_form_bed";
+  if (/music[_ -]?loop|lofi|music[_ -]?video/u.test(route)) return "primary_music";
   return "narration_bed";
+}
+
+function routeOwnedMusicRole(family: string, contentLaneKey: string): ChannelMusicRole | undefined {
+  const familyRoute = family.trim().toLowerCase();
+  const laneRoute = contentLaneKey.trim().toLowerCase();
+  const role = musicRoleForRoute(familyRoute, laneRoute);
+  if (
+    role === "sleep_sound_bed" ||
+    role === "meditation_bed" ||
+    role === "short_form_bed" ||
+    role === "primary_music"
+  ) {
+    return role;
+  }
+  return undefined;
+}
+
+export function isMusicRoleAllowedForRoute(
+  family: string,
+  contentLaneKey: string,
+  role: ChannelMusicRole,
+): boolean {
+  const expectedRole = musicRoleForRoute(family, contentLaneKey);
+  return role === expectedRole || (family.trim().toLowerCase() === "sleep" &&
+    contentLaneKey.trim().toLowerCase() === "ambient_guided" &&
+    role === "meditation_bed");
+}
+
+function routeHasNarrationCue(family: string, contentLaneKey: string): boolean {
+  const routeWords = `${family} ${contentLaneKey}`.toLowerCase().replace(/[_-]+/gu, " ");
+  return /\b(?:guided|breathwork|spoken|narrated)\b/u.test(routeWords);
 }
 
 function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
@@ -227,6 +681,14 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
       { id: "variation", label: "Variation", startFraction: 0.52, endFraction: 0.72, energy: 0.72, instruction: `Turn the motif through a different rhythmic placement or answering phrase, then briefly remove one layer so the return has contrast; never substitute a generic riser. ${shared}` },
       { id: "return", label: "Return", startFraction: 0.72, endFraction: 0.9, energy: 0.58, instruction: `Bring back the original motif in a warmer voicing with the same groove; the listener should recognize the return without a density spike. ${shared}` },
       { id: "outro", label: "Outro", startFraction: 0.9, endFraction: 1, energy: 0.3, instruction: `Strip back to the opening harmony and one final motif fragment, leaving a natural handoff so the later deterministic loop fold is musical. ${shared}` },
+    ];
+  }
+  if (role === "sleep_sound_bed") {
+    return [
+      { id: "settle", label: "Settle", startFraction: 0, endFraction: 0.2, energy: 0.12, instruction: `Arrive as a soft, already-stable texture with no transient, pulse, lead melody, or attention-grabbing entrance. ${shared}` },
+      { id: "steady", label: "Steady", startFraction: 0.2, endFraction: 0.52, energy: 0.12, instruction: `Hold the same low-arousal sound bed; use sustained tones and gentle noise texture without a beat, chord change, or melodic phrase. ${shared}` },
+      { id: "drift", label: "Drift", startFraction: 0.52, endFraction: 0.78, energy: 0.12, instruction: `Make only one extremely gradual timbral or spatial shift, with no swell, new layer attack, or change in perceived loudness. ${shared}` },
+      { id: "rest", label: "Rest", startFraction: 0.78, endFraction: 1, energy: 0.12, instruction: `Return to the opening texture and leave a calm, loop-compatible tail; no cadence, fade cue, climax, or new event. ${shared}` },
     ];
   }
   if (role === "meditation_bed") {
@@ -275,13 +737,43 @@ function roleSections(role: ChannelMusicRole, durationSec: number): Array<z.infe
   ];
 }
 
+function sleepSoundRhythmicCue(role: ChannelMusicRole, instrumentation: readonly string[] | undefined): string | undefined {
+  if (role !== "sleep_sound_bed") return undefined;
+  return instrumentation?.find((instrument) =>
+    /\b(?:drums?|percussion|boom[-\s]?bap|kick|snare|hi[-\s]?hat|cymbals?|tambourine|shaker|groove|rhythmic)\b/iu.test(instrument),
+  );
+}
+
+function sleepSoundRhythmicGenre(role: ChannelMusicRole, genre: string | undefined): string | undefined {
+  if (role !== "sleep_sound_bed" || !genre) return undefined;
+  return /\b(?:techno|house|drum\s*(?:and|&)\s*bass|dnb|breakbeat|boom[-\s]?bap|hip[-\s]?hop|disco|funk|trap|dance)\b/iu.test(genre)
+    ? genre
+    : undefined;
+}
+
+function assertRoleCompatibleIdentity(
+  role: ChannelMusicRole,
+  instrumentation: readonly string[] | undefined,
+  genre: string | undefined,
+): void {
+  const rhythmicCue = sleepSoundRhythmicCue(role, instrumentation);
+  if (rhythmicCue) {
+    throw new Error(`sleep soundscape cannot use rhythmic instrumentation: ${rhythmicCue}`);
+  }
+  const rhythmicGenre = sleepSoundRhythmicGenre(role, genre);
+  if (rhythmicGenre) {
+    throw new Error(`sleep soundscape cannot use a rhythmic genre: ${rhythmicGenre}`);
+  }
+}
+
 function structuredCaption(input: {
+  channelIdentityFingerprint: string;
   topic: string;
   role: ChannelMusicRole;
   genre: string;
   instrumentation: readonly string[];
   textures: readonly string[];
-  bpmRange: readonly [number, number];
+  bpmRange: readonly [number, number] | null;
   moodArc: string;
   composerDirection: string;
   sections: readonly z.infer<typeof MusicSectionSchema>[];
@@ -291,6 +783,7 @@ function structuredCaption(input: {
     primary_music: "music-forward original instrumental for focused repeated listening",
     narration_bed: "restrained cinematic underscore that supports speech without dictating emotion",
     meditation_bed: "stable meditative bed with organic micro-variation and no startling events",
+    sleep_sound_bed: "continuous low-arousal sleep soundscape with no pulse, melodic arrival, or startling events",
     short_form_bed: "compact information-forward underscore with an immediate motif and clean final button",
   };
   // Music3 still needs the explicit metadata/arrangement map below, but its
@@ -300,23 +793,25 @@ function structuredCaption(input: {
   // keep the audible palette deliberately small.  This gives the model a
   // memorable musical reason for the later section map without replacing the
   // channel-owned identity or adding an unbounded list of instruments.
-  const tempo = Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2);
-  // Music3's Global Metadata explicitly calls for a key and scale. Keep that
-  // control stable for a channel sound rather than choosing it per episode:
-  // changing the tonal centre just because a title changes is one easy way to
-  // make a playlist feel like unrelated stock cues. This is prompt guidance,
-  // not a claim that the generator can guarantee symbolic harmony.
+  const tempo = input.bpmRange ? Math.round((input.bpmRange[0] + input.bpmRange[1]) / 2) : null;
+  // Music3's Global Metadata explicitly calls for a key and scale. Derive it
+  // from the stable channel identity, not episode mood, so a changing brief
+  // does not make one channel's playlist feel tonally unrelated. This is prompt
+  // guidance, not a claim that the generator can guarantee symbolic harmony.
   const tonalPalette = [
     "D minor", "E minor", "A minor", "C minor", "G minor", "B minor",
     "C major", "D major", "E-flat major", "F major", "G major", "A-flat major",
   ] as const;
-  const tonalSource = `${input.genre}|${input.instrumentation.join("|")}|${input.moodArc}`;
+  const tonalSource = input.channelIdentityFingerprint;
   const tonalIndex = Number.parseInt(sha256Hex(tonalSource).slice(0, 8), 16) % tonalPalette.length;
   const tonalCenter = tonalPalette[tonalIndex]!;
   const listeningScenario: Record<ChannelMusicRole, string> = {
     primary_music: "sustained focused work or relaxed repeat listening",
     narration_bed: "a paced narrated story where words remain the foreground",
-    meditation_bed: "quiet reflection, breathwork, or a gradual sleep wind-down",
+    meditation_bed: input.bpmRange
+      ? "quiet reflection or breathwork with a steady, gently responsive pulse"
+      : "quiet reflection or breathwork with an unmetered, pulse-free texture",
+    sleep_sound_bed: "unattended overnight listening with stable loudness and no attention-catching events",
     short_form_bed: "a quick editorial insight with a single clear reveal",
   };
   const featuredInstruments = input.instrumentation.slice(0, 3);
@@ -328,28 +823,51 @@ function structuredCaption(input: {
   // The focused opening must not erase a channel's complete declared sound
   // identity. The detailed control section retains it for compatible routes.
   const supportingTimbres = input.instrumentation.slice(1);
+  const beatlessSleep = input.role === "sleep_sound_bed";
+  const unmetered = input.bpmRange === null;
+  if (!unmetered && !input.bpmRange) throw new Error("metered music caption requires a BPM range");
+  const globalMetadata = beatlessSleep
+    ? `unmetered and beatless; no tempo or tonal-center instruction; ${roleLanguage[input.role]}. ` +
+      `Scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. ` +
+      `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
+    : unmetered
+      ? `unmetered and pulse-free; no BPM or pulse instruction; ${roleLanguage[input.role]}. ` +
+        `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. Topic: “${input.topic}”. ` +
+        `Production: dimensional and spatially coherent—not a flat preset stack. Additional composer direction: ${input.composerDirection}`
+      : `${input.bpmRange![0]}–${input.bpmRange![1]} BPM; ${roleLanguage[input.role]}. ` +
+      `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
+      `Topic: “${input.topic}”. ` +
+      `Production: dimensional and spatially coherent—not a flat preset stack. ` +
+      `Additional composer direction: ${input.composerDirection}`;
+  const vocalDetails = beatlessSleep
+    ? "Instrumental sleep soundscape only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. " +
+      `Keep ${featuredPalette} as diffuse, sustained background texture; no featured or melodic lead.`
+    : `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
+      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`;
+  const creativeFoundation = beatlessSleep
+    ? `${input.genre}: “${input.topic}”. Character: ${input.moodArc}. Keep ${featuredPalette} diffuse and sustained.`
+    : unmetered
+      ? `A ${input.moodArc} ${input.genre} instrumental, intentionally unmetered and pulse-free: “${input.topic}”. Feature ${featuredPalette}.`
+      : `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. Feature ${featuredPalette}.`;
   return [
     "### Creative Foundation",
-    `A ${input.moodArc} ${input.genre} instrumental at ${tempo} BPM: “${input.topic}”. ` +
-      `Feature ${featuredPalette}.`,
+    creativeFoundation,
     "",
     "### Global Metadata",
-    `${input.genre}; ${input.bpmRange[0]}–${input.bpmRange[1]} BPM; ${roleLanguage[input.role]}. ` +
-      `Key/scale: ${tonalCenter}; scenario: ${listeningScenario[input.role]}. ` +
-      `Topic: “${input.topic}”. Emotional arc: ${input.moodArc}. ` +
-      `Production: dimensional and spatially coherent—not a flat preset stack. ` +
-      `Additional composer direction: ${input.composerDirection}`,
+    globalMetadata,
     "",
     "### Vocal Details",
-    `Instrumental only: no lead vocal, backing vocal, chant, spoken word, whisper, or lyric. ` +
-      `The melodic lead belongs to ${input.instrumentation[0]}; supporting timbres are ${supportingTimbres.join(", ") || "restrained harmonic texture"}.`,
+    vocalDetails,
     "",
     "### Arrangement",
     input.sections.map((section) =>
       `${section.label} (${Math.round(section.startFraction * 100)}–${Math.round(section.endFraction * 100)}%, energy ${section.energy.toFixed(2)}): ${section.instruction}`,
     ).join("\n"),
     `Texture and space: ${input.textures.join(", ") || "natural room depth"}. ` +
-      `Hard exclusions: ${input.exclusions.join("; ")}. Preserve musical causality: every entrance, change, and exit must be audible and motivated.`,
+      `Hard exclusions: ${input.exclusions.join("; ")}. ` +
+      (beatlessSleep
+        ? "For sleep, these beatless/no-tonal-arrival constraints override any conflicting channel or composer direction; preserve an unmetered, stable sound texture."
+        : "Preserve musical causality: every entrance, change, and exit must be audible and motivated."),
   ].join("\n");
 }
 
@@ -377,6 +895,10 @@ export function instrumentalLyricsControl(
     meditation_bed: {
       core: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]"],
       extension: ["[Instrumental]", "[Verse]", "[Bridge]"],
+    },
+    sleep_sound_bed: {
+      core: ["[Intro]", "[Instrumental]", "[Instrumental]"],
+      extension: ["[Instrumental]", "[Instrumental]"],
     },
     short_form_bed: {
       core: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]"],
@@ -406,48 +928,100 @@ export function instrumentalLyricsControl(
 }
 
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
-  const role = input.role ?? musicRoleForRoute(input.family, input.contentLaneKey);
-  const genre = cleanText(input.genre, role === "primary_music" ? "warm lo-fi instrumental" : "restrained cinematic ambient", 160);
-  const instrumentation = unique(input.instrumentation, ["felt piano", "soft bass", "restrained percussion"], 12);
-  const textures = unique(input.textures, ["natural room depth", "subtle tape warmth"], 8);
-  const rawBpm = input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
-  const bpmRange: [number, number] = [
+  const family = input.family?.trim() || "unclassified";
+  const contentLaneKey = input.contentLaneKey?.trim() || "unclassified";
+  const routeRole = musicRoleForRoute(family, contentLaneKey);
+  const routeOwnedRole = routeOwnedMusicRole(family, contentLaneKey);
+  if (routeOwnedRole && input.role !== undefined && !isMusicRoleAllowedForRoute(family, contentLaneKey, input.role)) {
+    const routeKind = routeOwnedRole === "primary_music" ? "route-owned" : "specialized route";
+    throw new Error(`music role ${input.role} conflicts with ${routeKind} role ${routeOwnedRole}`);
+  }
+  const role = input.role ?? routeRole;
+  if (routeRole === "narration_bed" && role === "primary_music") {
+    throw new Error("primary_music conflicts with narration route role narration_bed");
+  }
+  if (input.tempoMode === "unmetered" && role !== "meditation_bed" && role !== "sleep_sound_bed") {
+    throw new Error("unmetered music is only supported for meditation and sleep roles");
+  }
+  assertRoleCompatibleIdentity(role, input.instrumentation, input.genre);
+  const defaults = musicFallbackProfileForRole({
+    role,
+    family,
+    contentLaneKey,
+    channelIdentitySeed: input.channelIdentityFingerprint,
+    profileVersion: input.musicProfileVersion,
+  });
+  const genre = cleanText(input.genre, defaults.genre, 160);
+  const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
+  const textures = unique(input.textures, defaults.textures, 8);
+  const rawBpm = role === "sleep_sound_bed" || input.tempoMode === "unmetered" ? undefined :
+    input.bpmRange ?? (role === "meditation_bed" ? [48, 64] : role === "short_form_bed" ? [88, 112] : [64, 84]);
+  const bpmRange: [number, number] | null = rawBpm ? [
     Math.max(30, Math.min(300, Math.floor(rawBpm[0]))),
     Math.max(30, Math.min(300, Math.floor(rawBpm[1]))),
-  ];
-  const moodArc = cleanText(
-    input.moodArc,
-    role === "narration_bed"
-      ? "quiet intrigue develops into restrained tension, then resolves with earned warmth"
-      : "a recognizable motif deepens through real variation and returns with warmer resolution",
-    600,
-  );
-  // Preserve authored direction in full. Existing caption size/word gates
-  // reject oversized programs before purchase rather than silently cutting intent.
-  const composerDirection = input.composerDirection?.trim().replace(/\s+/gu, " ") ||
-    "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
-  const exclusions = [
-    "vocals or intelligible words",
-    "hollow preset-only arrangement",
-    "mechanical or broadband artifacts",
-    "brick-wall compression or limiter pumping",
-    "flat dynamics with no section development",
-    "abrupt key, tempo, or acoustic-space changes",
-    "generic trailer booms and risers",
-    "melody that masks narration",
-  ];
+  ] : null;
+  const moodArc = role === "sleep_sound_bed"
+    ? defaults.moodArc
+    : cleanText(input.moodArc, defaults.moodArc, 600);
+  const studioTextureDirection = input.studioTextureDirection?.replace(/\s+/gu, " ").trim() ?? "";
+  if (studioTextureDirection.length > 420) {
+    throw new Error("sleep Studio texture direction exceeds the 420-character bound");
+  }
+  if (studioTextureDirection && role !== "sleep_sound_bed") {
+    throw new Error("Studio texture direction is reserved for the beatless sleep role");
+  }
+  // Other roles preserve authored episode direction in full. Sleep is a
+  // specialized beatless soundscape, so its role contract overrides groove,
+  // meter, and movement directions while retaining the channel sound palette.
+  const composerDirection = role === "sleep_sound_bed"
+    ? [
+        "Keep the sound stable and unobtrusive; avoid groove, pulse, melodic hooks, chord arrivals, crescendos, or attention-catching changes.",
+        studioTextureDirection
+          ? `Approved Studio texture direction (timbre or spatial detail only, and only when compatible with the beatless sleep contract): ${studioTextureDirection}. Do not change pulse, melody, harmony, arousal, or level.`
+          : "",
+      ].filter(Boolean).join(" ")
+    : input.composerDirection?.trim().replace(/\s+/gu, " ") ||
+      "Give every section a musical job; preserve depth, groove, melodic purpose, and dynamic breathing room.";
+  const exclusions = role === "sleep_sound_bed"
+    ? [
+        "vocals or intelligible words",
+        "mechanical or broadband artifacts",
+        "brick-wall compression or limiter pumping",
+        "unintentional digital silence, clicks, or loop seams",
+        "abrupt spatial or timbral jumps",
+        "generic trailer booms and risers",
+        "metered tempo or audible beat/pulse",
+        "tonal progression, melodic hook, or cadence",
+        "sudden change in loudness or density",
+      ]
+    : [
+        "vocals or intelligible words",
+        "hollow preset-only arrangement",
+        "mechanical or broadband artifacts",
+        "brick-wall compression or limiter pumping",
+        "flat dynamics with no section development",
+        "abrupt key, tempo, or acoustic-space changes",
+        "generic trailer booms and risers",
+        "melody that masks narration",
+      ];
   const durationSec = Math.max(10, Math.min(300, Math.floor(input.durationSec ?? (role === "short_form_bed" ? 60 : 120))));
   const sections = roleSections(role, durationSec);
-  const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "primary_music" ? -16 : -18)));
-  const bodyMusicVol = role === "primary_music"
+  const targetLufs = Math.max(-23, Math.min(-12, input.targetLufs ?? (role === "sleep_sound_bed" ? -20 : role === "primary_music" ? -16 : -18)));
+  const narratedSleepRoute = role === "sleep_sound_bed" && routeHasNarrationCue(family, contentLaneKey);
+  const narratedMeditationRoute = role === "meditation_bed" && routeHasNarrationCue(family, contentLaneKey);
+  const defaultBodyMusicVol = role === "meditation_bed"
+    ? narratedMeditationRoute ? 0.16 : 0.25
+    : 0.1026;
+  const bodyMusicVol = role === "primary_music" || (role === "sleep_sound_bed" && !narratedSleepRoute)
     ? 1
-    : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? (role === "meditation_bed" ? 0.25 : 0.1026)));
+    : Math.max(0.01, Math.min(1, input.bodyMusicVol ?? defaultBodyMusicVol));
   const body: ChannelMusicProgramBody = {
     version: CHANNEL_MUSIC_PROGRAM_VERSION,
+    channelIdentityPromptContract: "channel-identity-caption/v1",
     channelId: input.channelId,
     channelIdentityFingerprint: input.channelIdentityFingerprint,
-    family: input.family,
-    contentLaneKey: input.contentLaneKey,
+    family,
+    contentLaneKey,
     topic: input.topic,
     role,
     identity: { genre, instrumentation, textures, bpmRange, moodArc, exclusions },
@@ -456,6 +1030,7 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       durationSec,
       instrumental: true,
       structuredCaption: structuredCaption({
+        channelIdentityFingerprint: input.channelIdentityFingerprint,
         topic: input.topic,
         role,
         genre,
@@ -474,13 +1049,13 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       targetLufs,
       truePeakMaxDbtp: -1,
       bodyMusicVol,
-      narrationPriority: role === "narration_bed" || role === "short_form_bed",
+      narrationPriority: role === "narration_bed" || role === "short_form_bed" || narratedSleepRoute || narratedMeditationRoute,
       transparentConstantGainOnly: true,
       compressorProhibited: true,
       limiterProhibited: true,
     },
     quality: {
-      minimumLraLu: role === "primary_music" ? 3 : role === "meditation_bed" ? 2 : 1.5,
+      minimumLraLu: role === "primary_music" ? 3 : role === "meditation_bed" ? 2 : role === "sleep_sound_bed" ? 1 : 1.5,
       minimumCrestDb: role === "primary_music" ? 8 : 7,
       maximumConsecutiveCeilingSamples: 3,
       maximumClippedSamples: 0,
@@ -489,15 +1064,17 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       sectionReviewRequired: true,
       humanAuditionRequired: true,
     },
-    minimaxLicense: {
+  };
+  if (body.generation.providerPreference === "minimax_music3") {
+    body.minimaxLicense = {
       uiAttribution: "MiniMax-Music3",
       prominentCommercialAttributionRequired: true,
       generatedContentDisclosureRequired: true,
       safeguardsRequired: true,
       separateAuthorizationAboveAnnualRevenueUsd: 20_000_000,
       operatorAttestationRequiredBeforeEnablement: true,
-    },
-  };
+    };
+  }
   return Object.freeze(ChannelMusicProgramSchema.parse({
     ...body,
     fingerprint: musicProgramFingerprint(body),
@@ -563,6 +1140,30 @@ export const MusicProgramQualityReceiptSchema = MusicProgramQualityReceiptBodySc
 
 export type MusicProgramQualityReceipt = z.infer<typeof MusicProgramQualityReceiptSchema>;
 
+/** Technical release failures shared by the owner desk and receipt admission. */
+export function musicProgramTechnicalQualityFailures(input: {
+  readonly program: unknown;
+  readonly measurements: unknown;
+}): string[] {
+  const program = ChannelMusicProgramSchema.parse(input.program);
+  const measurements = MusicProgramQualityReceiptBodySchema.shape.measurements.parse(input.measurements);
+  return [
+    Math.abs(measurements.integratedLufs - program.mix.targetLufs) > 2
+      ? "integrated loudness is outside the transparent ±2 LU window" : "",
+    measurements.truePeakDbtp > program.mix.truePeakMaxDbtp ? "true peak exceeds the sealed ceiling" : "",
+    measurements.lraLu < program.quality.minimumLraLu ? "loudness range is below the role-specific floor" : "",
+    measurements.crestDb < program.quality.minimumCrestDb ? "crest factor is below the role-specific floor" : "",
+    measurements.clippedSamples > program.quality.maximumClippedSamples ? "the master contains clipped samples" : "",
+    measurements.maximumConsecutiveCeilingSamples > program.quality.maximumConsecutiveCeilingSamples
+      ? "the master contains a flat-topped ceiling run" : "",
+    measurements.dcOffsetAbsolute > 0.02 ? "DC offset is above the release ceiling" : "",
+    measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
+    measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
+    measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
+      ? "opening-to-early-interior high-band energy collapsed (known Music3 degradation signature)" : "",
+  ].filter(Boolean);
+}
+
 export function createMusicProgramQualityReceipt(input: {
   readonly program: unknown;
   readonly output: unknown;
@@ -581,31 +1182,9 @@ export function createMusicProgramQualityReceipt(input: {
     throw new Error("music quality receipt must review every sealed section exactly once and in order");
   }
   const failures = [
-    Math.abs(measurements.integratedLufs - program.mix.targetLufs) > 2
-      ? "integrated loudness is outside the transparent ±2 LU window"
-      : "",
-    measurements.truePeakDbtp > program.mix.truePeakMaxDbtp
-      ? "true peak exceeds the sealed ceiling"
-      : "",
-    measurements.lraLu < program.quality.minimumLraLu
-      ? "loudness range is below the role-specific floor"
-      : "",
-    measurements.crestDb < program.quality.minimumCrestDb
-      ? "crest factor is below the role-specific floor"
-      : "",
-    measurements.clippedSamples > program.quality.maximumClippedSamples
-      ? "the master contains clipped samples"
-      : "",
-    measurements.maximumConsecutiveCeilingSamples > program.quality.maximumConsecutiveCeilingSamples
-      ? "the master contains a flat-topped ceiling run"
-      : "",
-    measurements.dcOffsetAbsolute > 0.02 ? "DC offset is above the release ceiling" : "",
-    measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
-    measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
-    measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
-      ? "opening-to-early-interior high-band energy collapsed (known Music3 degradation signature)"
-      : "",
-    sectionReviews.some((section) => section.score < 0.75) ? "at least one musical section failed review" : "",
+    ...musicProgramTechnicalQualityFailures({ program, measurements }),
+    sectionReviews.some((section) => section.score < MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE)
+      ? "at least one musical section failed review" : "",
     audition.emotionalDepthScore < program.quality.minimumEmotionalDepthScore
       ? "human audition found insufficient emotional depth"
       : "",

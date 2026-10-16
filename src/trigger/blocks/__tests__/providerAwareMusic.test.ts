@@ -5,8 +5,19 @@ import { runPipeline } from "@/engine/runner";
 import { validatePipeline } from "@/engine/validate";
 import { COST_PATCH_KEY, type RunStageSink, type StageContext } from "@/engine/types";
 import { recordModelUsage } from "@/lib/modelUsage";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+} from "@/engine/musicModuleVersions";
 import { music } from "../musicBlocks";
-import { createProviderAwareMusicManifest, MUSIC_PROVIDER_OUTPUTS_VERSION } from "../providerAwareMusic";
+import {
+  createProviderAwareMusicManifest,
+  isMusicReviewStatusCompatible,
+  MUSIC_PROVIDER_OUTPUTS_VERSION,
+} from "../providerAwareMusic";
 
 type Row = Awaited<ReturnType<NonNullable<RunStageSink["getResumeState"]>>>[number];
 function localSink() {
@@ -26,8 +37,10 @@ const base = {
   musicUrl: "https://synthetic.invalid/music.mp3",
   channelMusicProgramKey: "owner/fixture/runs/music/program.json",
   channelMusicProgramFingerprint: "a".repeat(64),
-  musicQualityReviewStatus: "not-required-provider-route",
+  musicQualityReviewStatus: "awaiting-human-audition",
   musicRuntimeReceiptKey: undefined, musicNativeWavKey: undefined,
+  musicAuditionSourceKey: "owner/fixture/runs/music/audio/music-provider-audition.json",
+  musicAuditionWavKey: "owner/fixture/runs/music/audio/music-audition.wav",
   [COST_PATCH_KEY]: 0.03,
 };
 const context: StageContext = {
@@ -36,6 +49,12 @@ const context: StageContext = {
 };
 
 async function main() {
+  assert.equal(isMusicReviewStatusCompatible("mureka", "not-required-provider-route"), false);
+  assert.equal(isMusicReviewStatusCompatible("suno", "awaiting-human-audition"), true);
+  assert.equal(isMusicReviewStatusCompatible("minimax_music3", "awaiting-human-audition"), true);
+  assert.equal(isMusicReviewStatusCompatible("minimax_music3", "not-required-provider-route"), false);
+  assert.equal(isMusicReviewStatusCompatible("reuse", "not-required-reused-master"), true);
+  assert.equal(isMusicReviewStatusCompatible("unknown", "not-required-provider-route"), false);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("provider contract test forbids network"); };
   try {
@@ -48,6 +67,11 @@ async function main() {
     assert.ok(registered.optionalProduces.musicRuntimeReceiptKey);
     assert.ok(!registered.produces.musicRuntimeReceiptKey);
     assert.ok(!allManifests().includes(registered));
+    const registeredIdentityProfile = getManifest("music", CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION)!;
+    assert.equal(registeredIdentityProfile.version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+      "short-form profile remains executable at its exact pinned version");
+    assert.ok(getManifest("music", MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION), "new complete-direction contract is registered");
+    assert.ok(getManifest("music", LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION), "legacy program-bound music remains executable");
 
     let calls = 0;
     let response: Record<string, unknown> | null | undefined = { ...base };
@@ -60,6 +84,27 @@ async function main() {
       return structuredClone(response) as Record<string, unknown>;
     } } };
     const selected = createProviderAwareMusicManifest(fakeLegacy);
+    const legacyProgramBound = createProviderAwareMusicManifest(fakeLegacy, { requireMusicProgram: true });
+    assert.equal(legacyProgramBound.version, LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
+    const strictProgramBound = createProviderAwareMusicManifest(fakeLegacy, {
+      requireMusicProgram: true, preserveRequiredStudioDirection: true,
+    });
+    assert.equal(strictProgramBound.version, MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION);
+    response = { ...base };
+    await legacyProgramBound.execute(context);
+    assert.equal(received, context, "legacy version preserves its exact prompt behavior context");
+    await strictProgramBound.execute(context);
+    assert.notEqual(received, context, "new version receives an isolated prompt-integrity policy");
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY], true);
+
+    const identityProfile = createProviderAwareMusicManifest(fakeLegacy, { channelIdentityShortForm: true });
+    assert.equal(identityProfile.version, CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION);
+    response = { ...base };
+    await identityProfile.execute(context);
+    assert.notEqual(received, context, "versioned policy is passed in a delegated context, not caller params");
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY], true);
+    assert.equal((received!.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY], undefined);
+    assert.equal(Object.getOwnPropertySymbols(context.params).length, 0, "the private policy marker never mutates stored params");
     for (const provider of ["mureka", "suno"] as const) {
       response = { ...base, musicProvider: provider };
       const patch = await selected.execute(context);
@@ -69,8 +114,11 @@ async function main() {
       assert.ok(!("musicRuntimeReceiptKey" in patch));
       assert.ok(!("musicNativeWavKey" in patch));
     }
+    const { musicAuditionSourceKey, musicAuditionWavKey, ...minimaxBase } = base;
+    void musicAuditionSourceKey;
+    void musicAuditionWavKey;
     for (const status of ["awaiting-human-audition", "passed-prepared-weekly-audition"]) {
-      response = { ...base, musicProvider: "minimax_music3", musicQualityReviewStatus: status,
+      response = { ...minimaxBase, musicProvider: "minimax_music3", musicQualityReviewStatus: status,
         musicRuntimeReceiptKey: "owner/fixture/runtime.json", musicNativeWavKey: "owner/fixture/native.wav" };
       assert.deepEqual(await selected.execute(context), response, "MiniMax evidence and pending/approved state stay intact");
     }

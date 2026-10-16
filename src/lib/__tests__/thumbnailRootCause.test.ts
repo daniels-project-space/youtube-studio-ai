@@ -392,7 +392,7 @@ async function assertFatalDefectsNeverShip(): Promise<void> {
   const normal = await produceAndCritique<string>({
     label: "test", threshold: 1, maxIters: 2, channel: {},
     produce: async (_i, iter) => `ok${iter}`,
-    critique: async (_v, iter) => ({ score: iter === 2 ? 0.8 : 0.2, pass: false, issues: [] }),
+    critique: async (_v, iter) => ({ score: iter === 2 ? 0.8 : 0.2, pass: false, issues: ["below the quality bar"] }),
   });
   assert.equal(normal.value, "ok2", "best-of selection is unchanged when nothing is fatal");
   assert.equal(normal.fatal, undefined);

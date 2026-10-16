@@ -213,6 +213,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
       },
       { key: "prompt", label: "Music style prompt", type: "text", help: "Describe the mood (e.g. \"calm ambient, soft pads, no drums\")." },
       { key: "trackCount", label: "Distinct tracks", type: "number", min: 1, max: 8, step: 1, help: "Clips crossfaded into the mix (variety vs cost)." },
+      { key: "bodyMusicVol", label: "Music bed level", type: "number", min: 0.01, max: 1, step: 0.01, help: "Mix gain for narration or meditation beds; primary music and unattended sleep soundscapes keep their route-owned level." },
     ],
   },
   {

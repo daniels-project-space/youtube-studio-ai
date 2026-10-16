@@ -281,24 +281,94 @@ export function validateStorySpine(value: StorySpine): StorySpine {
   const spine = StorySpineSchema.parse(value);
   const sentenceIds = new Set(spine.timedScript.sentences.map((sentence) => sentence.id));
   const beatIds = new Set(spine.narrativeBeats.map((beat) => beat.id));
+  if (sentenceIds.size !== spine.timedScript.sentences.length) {
+    throw new Error("story spine timed script contains duplicate sentence ids");
+  }
+  if (beatIds.size !== spine.narrativeBeats.length) {
+    throw new Error("story spine contains duplicate narrative beat ids");
+  }
   assertContinuous(spine.narrativeBeats, spine.timedScript.narrationDurationSec, "beat");
   assertContinuous(spine.shotList, spine.timedScript.narrationDurationSec, "shot");
+  const sentenceById = new Map(spine.timedScript.sentences.map((sentence) => [sentence.id, sentence]));
+  const beatById = new Map(spine.narrativeBeats.map((beat) => [beat.id, beat]));
+  const beatSentenceIds = new Set<string>();
   for (const beat of spine.narrativeBeats) {
     if (beat.sourceSentenceIds.some((id) => !sentenceIds.has(id))) {
       throw new Error(`beat ${beat.id} references an unknown sentence`);
     }
+    for (const sentenceId of beat.sourceSentenceIds) {
+      const sentence = sentenceById.get(sentenceId)!;
+      if (Math.min(beat.t1, sentence.t1) - Math.max(beat.t0, sentence.t0) <= EPSILON) {
+        throw new Error(`beat ${beat.id} references sentence ${sentenceId} outside its narration timing`);
+      }
+      beatSentenceIds.add(sentenceId);
+    }
   }
+  const shotSentenceIds = new Set<string>();
   for (const shot of spine.shotList) {
     if (!beatIds.has(shot.beatId) || shot.sourceSentenceIds.some((id) => !sentenceIds.has(id))) {
       throw new Error(`shot ${shot.id} has invalid story references`);
     }
+    const beat = beatById.get(shot.beatId)!;
+    const parentSentenceIds = new Set(beat.sourceSentenceIds);
+    if (shot.sourceSentenceIds.some((id) => !parentSentenceIds.has(id))) {
+      throw new Error(`shot ${shot.id} references narration outside its parent beat`);
+    }
+    if (!shot.sourceSentenceIds.some((id) => {
+      const sentence = sentenceById.get(id)!;
+      return Math.min(shot.t1, sentence.t1) - Math.max(shot.t0, sentence.t0) > EPSILON;
+    })) {
+      throw new Error(`shot ${shot.id} has no source sentence in its narration timing`);
+    }
+    shot.sourceSentenceIds.forEach((id) => shotSentenceIds.add(id));
+  }
+  const uncoveredBeatSentences = spine.timedScript.sentences
+    .filter((sentence) => !beatSentenceIds.has(sentence.id))
+    .map((sentence) => sentence.id);
+  if (uncoveredBeatSentences.length) {
+    throw new Error(`story spine narrative beats omit timed sentences: ${uncoveredBeatSentences.join(", ")}`);
+  }
+  const uncoveredShotSentences = spine.timedScript.sentences
+    .filter((sentence) => !shotSentenceIds.has(sentence.id))
+    .map((sentence) => sentence.id);
+  if (uncoveredShotSentences.length) {
+    throw new Error(`story spine shots omit timed sentences: ${uncoveredShotSentences.join(", ")}`);
+  }
+  const durationSec = spine.timedScript.narrationDurationSec;
+  if (Math.abs(spine.editorEdl.durationSec - durationSec) > EPSILON) {
+    throw new Error("story spine EDL duration does not match the timed narration");
+  }
+  if (spine.editorEdl.shots.length !== spine.shotList.length) {
+    throw new Error("story spine EDL shot count does not match the visual shot plan");
+  }
+  for (let index = 0; index < spine.shotList.length; index++) {
+    const shot = spine.shotList[index];
+    const edit = spine.editorEdl.shots[index];
+    if (
+      edit.shotId !== shot.id ||
+      Math.abs(edit.t0 - shot.t0) > EPSILON ||
+      Math.abs(edit.t1 - shot.t1) > EPSILON ||
+      edit.sourceSentenceIds.length !== shot.sourceSentenceIds.length ||
+      edit.sourceSentenceIds.some((id, sourceIndex) => id !== shot.sourceSentenceIds[sourceIndex])
+    ) {
+      throw new Error(`story spine EDL does not match visual shot ${shot.id}`);
+    }
   }
   const specIds = new Set(spine.dpVisualSpecs.map((spec) => spec.shotId));
   const edlIds = new Set(spine.editorEdl.shots.map((shot) => shot.shotId));
-  if (spine.shotList.some((shot) => !specIds.has(shot.id) || !edlIds.has(shot.id))) {
+  if (
+    specIds.size !== spine.dpVisualSpecs.length ||
+    specIds.size !== spine.shotList.length ||
+    spine.shotList.some((shot) => !specIds.has(shot.id) || !edlIds.has(shot.id))
+  ) {
     throw new Error("every shot requires one DP spec and one EDL entry");
   }
-  if (spine.coverage.gaps.length || spine.coverage.ratio < 0.999999) {
+  if (
+    spine.coverage.gaps.length ||
+    spine.coverage.ratio < 0.999999 ||
+    Math.abs(spine.coverage.mappedSec - durationSec) > EPSILON ||
+    Math.abs(spine.coverage.totalSec - durationSec) > EPSILON
+  ) {
     throw new Error(`story coverage is not complete (${spine.coverage.ratio})`);
   }
   // Lightweight automatic-path validation for the character-introduction

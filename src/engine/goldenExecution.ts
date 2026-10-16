@@ -173,7 +173,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     note: "Provider-free shared factual-evidence admission only. It binds a human-reviewed source/claim/snapshot packet and lets Episode Graph reject mismatched factual visual manifests before local rendering; it neither replaces Casefile safeguards nor admits automatic factual production.",
   },
   "cinematic-case-sequence": {
-    kind: "pipeline-module",
+    kind: "registered-private-release",
     executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
     note: "Provider-free cinematic direction draft → human signature → strict admission. It converts the admitted Casefile map and Story Spine into a source-bound multi-shot/EDL handoff for the existing Novita renderer, but cannot mint its own crime-editor approval or auto-admit a crime family.",
   },
@@ -193,16 +193,16 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   "quiz-year": {
     kind: "pipeline-module",
     // The autonomous QuizYear route owns its deterministic topic/safety/cue,
-    // critic and metadata receipts as one Golden module. Its final thumbnail
+    // renderer, critic and metadata receipts as one Golden module. Its final thumbnail
     // is intentionally owned by the shared Nano Banana module. Binding only
     // the final renderer left its actual production
     // planner outside the catalog proof graph.
     executableIds: [
       "quiz_topic_plan",
       "quiz_topic_safety",
+      "quiz_year",
       "quiz_critic_spec",
       "quiz_metadata",
-      "quiz_year",
     ],
   },
   "quiz-short-private-release": {
@@ -664,6 +664,15 @@ export function assessGoldenPromotion(args: {
     !boundManifests.some((manifest) => manifest.qualityContract.required && manifest.qualityContract.failClosed)
   ) {
     blockers.push("bound module set has no required fail-closed quality contract");
+  }
+  const paidWithoutQuality = boundManifests.filter((manifest) =>
+    manifest.costAndLatency.paid &&
+    !(manifest.qualityContract.required && manifest.qualityContract.failClosed),
+  );
+  if (paidWithoutQuality.length) {
+    blockers.push(
+      `paid modules lack their own required fail-closed quality contract: ${paidWithoutQuality.map((manifest) => manifest.id).join(", ")}`,
+    );
   }
 
   const parsed = GoldenPromotionProofSchema.safeParse(args.proof);

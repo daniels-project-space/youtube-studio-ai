@@ -17,6 +17,8 @@ import {
   type Segment,
   type Overlay,
   type Format,
+  assertFinalDurationMatchesTarget,
+  projectedDurationSec,
 } from "./timeline";
 
 /** A card to render as a standalone clip (intro/outro; chapter cards are built inside buildBody). */
@@ -200,11 +202,14 @@ function transitionFromHints(transitions?: string): "hardcut" | "crossfade" | "d
 
 /** Final receipts describe the inspected artifact, never the authored plan.
  * Validate before any final-cache write or publish, on fresh and cached paths. */
-async function probeFinalDuration(backend: RenderBackend, path: string): Promise<number> {
+async function probeFinalDuration(
+  backend: RenderBackend,
+  path: string,
+  targetDurationSec: number,
+  fps: number,
+): Promise<number> {
   const durationSec = await backend.probe(path);
-  if (!Number.isFinite(durationSec) || durationSec <= 0) {
-    throw new Error("renderTimeline: final master duration must be a positive finite number");
-  }
+  assertFinalDurationMatchesTarget(durationSec, targetDurationSec, fps, "renderTimeline final master");
   return durationSec;
 }
 
@@ -228,7 +233,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   if (done) {
     // A cache key identifies the plan, not the current file's measured runtime.
     // A bad cached artifact fails here; it must not silently buy another render.
-    const durationSec = await probeFinalDuration(backend, done);
+    const durationSec = await probeFinalDuration(backend, done, projectedDurationSec(t), t.format.fps);
     return ReceiptSchema.parse({
       videoKey: finalKey,
       videoLocalPath: done,
@@ -342,7 +347,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   // 5. PROBE → CACHE → PUBLISH. Probe first (a corrupt final must fail BEFORE it
   // is published/cached); cache before publish so a publish failure retried later
   // hits the final-key cache instead of re-rendering everything.
-  const durationSec = await probeFinalDuration(backend, finalPath);
+  const durationSec = await probeFinalDuration(backend, finalPath, projectedDurationSec(t), t.format.fps);
   await backend.cachePut(finalKey, finalPath);
   const videoKey = await backend.publish(finalPath);
 

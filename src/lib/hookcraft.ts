@@ -24,7 +24,12 @@ import {
   OpenRouterGenerationOutcomeUnknownError,
 } from "@/lib/creativeText";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
+import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
+import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { unmatchedSpokenNumericClaims, unmatchedTitleUnits } from "@/lib/numericClaims";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
+import type { ShowBibleVoice } from "@/engine/showBibleVoice";
+import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
 
 export function hasHookcraft(): boolean {
   return hasCreativeTextKey();
@@ -444,8 +449,14 @@ export interface HookCraftArgs {
   /** The video's (working) title — the cold open must confirm the clicked promise. */
   title?: string;
   channelName?: string;
+  /** Frozen channel language policy for the spoken cold open. */
+  bannedWords?: string[];
   niche?: string;
   persona?: string;
+  /** Frozen editorial identity; visual signature remains owned by art modules. */
+  channelVoice?: ShowBibleVoice;
+  /** Frozen audience/topic context from the admitted channel program. */
+  programRoute?: ChannelProgramRouteRunSeed;
   /** Style-DNA narrative register (beats generic tone). */
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
@@ -454,6 +465,8 @@ export interface HookCraftArgs {
   playbookDigest?: string;
   /** Director (crew) hook idea — honored as intent, crafted for execution. */
   directorIdea?: string;
+  /** Topicraft's strategic promise; intent only, never evidence. */
+  topicPromise?: string;
   /** Episodic series note (e.g. "episode 4 of 7 of X; yesterday taught Y") —
    * the cold open welcomes the RETURNING viewer and picks up the thread. */
   seriesNote?: string;
@@ -485,23 +498,29 @@ function isFictionRegister(niche?: string, style?: string): boolean {
 }
 
 /**
- * Grounded fact-check of a cold open's checkable claims. Specificity pressure
- * invites confident invention — one
- * wrong number in the first sentence costs the channel its credibility, so a
- * "false" verdict on any claim rejects the candidate. "unverifiable" passes
- * with a log (soft claims and paraphrases often won't ground cleanly); a dead
- * fact-checker passes on the judge gates alone, loudly.
+ * Exact numeric-presence floor only. It is not semantic fact verification:
+ * names and causal entailment still belong to source-review modules.
  */
 async function factCheckColdOpen(
   c: { hook: string; opening: string },
   a: HookCraftArgs,
 ): Promise<{ ok: boolean; problems: string[]; status: "verified" | "unchecked" }> {
-  void c;
-  void a;
-  // Google search grounding is not an allowed fallback. A factual channel must
-  // bind its hook to an admitted source packet before publication; absent that
-  // artifact this creative-only module marks the claim status honestly.
-  return { ok: true, problems: [], status: "unchecked" };
+  if (!a.sourceGrounding?.trim()) {
+    // Google search grounding is not an allowed fallback. Without an admitted
+    // source packet this creative-only module cannot verify factual claims.
+    return { ok: true, problems: [], status: "unchecked" };
+  }
+  const coldOpen = `${c.hook}\n${c.opening}`;
+  const unsupportedNumbers = unmatchedSpokenNumericClaims(coldOpen, a.sourceGrounding);
+  const unsupportedUnits = unmatchedTitleUnits(coldOpen, a.sourceGrounding);
+  return {
+    ok: unsupportedNumbers.length === 0 && unsupportedUnits.length === 0,
+    problems: [
+      ...unsupportedNumbers.map((number) => `numeric claim ${number} is absent from admitted source grounding`),
+      ...unsupportedUnits.map((number) => `numeric claim ${number} has an unsupported or mismatched unit in admitted source grounding`),
+    ],
+    status: "unchecked",
+  };
 }
 
 /**
@@ -539,18 +558,26 @@ function passes(v: HookVerdict): boolean {
 }
 
 function registerClause(a: HookCraftArgs): string {
-  const reg = a.narrative && (a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.delivery)
+  const reg = a.narrative && (
+    a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.pacing || a.narrative.delivery
+  )
     ? `LOCKED CHANNEL REGISTER (write inside it — it outranks the archetype below): ${[
         a.narrative.scriptStyle ? `style: ${a.narrative.scriptStyle}` : "",
         a.narrative.hookStyle ? `hook style: ${a.narrative.hookStyle}` : "",
+        a.narrative.pacing ? `pacing: ${a.narrative.pacing}` : "",
         a.narrative.delivery ? `delivery: ${a.narrative.delivery}` : "",
       ].filter(Boolean).join(" | ")}`
     : "";
   const doctrine = resolveVoiceDoctrine(a.niche);
+  const channelVoice = showBibleVoicePromptLines(a.channelVoice);
   return [
     a.channelName ? `Channel: "${a.channelName}".` : "",
     a.niche ? `Niche: ${a.niche}.` : "",
     a.persona ? `Persona: ${a.persona}` : "",
+    channelVoice.length
+      ? `FROZEN CHANNEL EDITORIAL IDENTITY — this authored guide defines the channel voice and outranks ` +
+        `the generic archetype below; honor it without copying it:\n${channelVoice.join("\n")}`
+      : "",
     reg,
     doctrine
       ? `VOICE ARCHETYPE "${doctrine.voice}" — how this kind of channel must SOUND: ${doctrine.tone}\n` +
@@ -577,10 +604,6 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
 
   let fixNote = "";
   let lastIssues: string[] = [];
-  // Grounded fact-checks bill per REQUEST (~$35/1k) on top of tokens — cap them
-  // per craft: the judge's ordered picks get at most 2 grounded verdicts; after
-  // that a candidate passes on the judge gates alone (logged, never silent).
-  let groundedCalls = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
     // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
@@ -588,8 +611,10 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     const gen = await creativeTextJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
-        `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
-          `viewer's pain or fascination, and the emotional stakes. Write every candidate FROM that analysis.`,
+        `FIRST, silently analyze the topic: its core tension, the viewer's pain or fascination, and the ` +
+          `emotional stakes. When admitted source grounding is present, choose a surprising fact it supports; ` +
+          `without source grounding, do not present an invented detail as verified. Write every candidate from ` +
+          `that analysis.`,
         `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +
           `and register; for search-intent topics favor problem_agitation/wrong_way/result_first, for ` +
           `browse/suggested-style topics favor curiosity, contrarian and scene devices):`,
@@ -604,8 +629,9 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `specific (a name, number, date, place, object of THIS topic) and close on an open loop the video ` +
           `promises to pay off. No meta ("in this video", "today we"), no greeting, no channel name, no ` +
           `restating the title verbatim.`,
-        `HARD RULES: concrete over abstract — name the person/place/number/year of THIS topic within the first ` +
-          `3 sentences${skipConcreteness ? " (soft for meditative register)" : ""}. Short spoken sentences, average ` +
+        `HARD RULES: concrete over abstract — name a person/place/number/year of THIS topic within the first ` +
+          `3 sentences only when it is supplied by the topic or admitted source grounding; never invent a ` +
+          `specific to satisfy this rule${skipConcreteness ? " (soft for meditative register)" : ""}. Short spoken sentences, average ` +
           `under 15 words. The promise must be honest — never claim what the topic can't deliver, and NEVER invent ` +
           `first-person research the channel hasn't done ("we analyzed", "I reviewed the filings") — cite real ` +
           `public facts instead. No disclaimers, no apologies, no subscribe asks. NEVER use these openers: ` +
@@ -614,9 +640,16 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
         `"${a.topic}"`,
+        a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
         a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
+        a.topicPromise
+          ? `TOPICRAFT PROMISE (strategic intent only, NOT evidence): "${a.topicPromise}". ` +
+            `Honor it only to the extent supported by the topic and admitted source grounding; never invent ` +
+            `facts or imply unsupported coverage. Existing cold-open fact checks remain authoritative.`
+          : "",
         registerClause(a),
+        channelBannedWordsDirective(a.bannedWords ?? []),
         a.playbookDigest ?? "",
         a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
         a.seriesNote
@@ -678,8 +711,15 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await creativeTextJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
             a.sourceGrounding?.trim() ?? "",
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",
+            a.topicPromise
+              ? `Topicraft opening promise (editorial intent, NOT evidence): "${a.topicPromise}". ` +
+                `Score whether the cold open honors it only where supported by the topic and admitted ` +
+                `sources. Score low for ignoring, contradicting, or overstating it; reward honest narrowing ` +
+                `when evidence cannot support it. Never treat the promise itself as proof.`
+              : "",
             registerClause(a),
             `Score EACH candidate cold open 1-10 per dimension:`,
             `- punch: would a scroller STOP inside the first sentence?`,
@@ -689,7 +729,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
               `teaches while it narrates; a finance channel sounds like a calm teacher-advisor; a ` +
               `chaos/drama channel fires the loudest verified fact immediately)?`,
             `- promise: by ~15 seconds (the first ~45 spoken words), does the viewer know EXACTLY what they ` +
-              `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}?`,
+              `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}` +
+              `${a.topicPromise ? ", while fulfilling or honestly narrowing Topicraft's opening promise" : ""}?`,
             `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?`,
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
             `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
@@ -749,9 +790,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         );
       }
 
-      // Prefer the judge's pick if it gates; else any gating candidate. The
-      // judge-gated pick must then survive the grounded fact-check — a false
-      // claim rejects the candidate and the next gating one gets its turn.
+      // Prefer the judge's pick if it gates; each factual candidate then gets
+      // the same local numeric/source check before it can be selected.
       const fiction = isFictionRegister(a.niche, a.style);
       const selectedBest = best ?? 0;
       const order = [selectedBest, ...survivors.map((_, i) => i).filter((i) => i !== selectedBest)];
@@ -761,18 +801,14 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         if (!passes(v)) continue;
         const c = survivors[i];
         let factCheck: "verified" | "skipped" | "unchecked" = "skipped";
-        if (!fiction && groundedCalls < 2) {
-          groundedCalls++;
+        if (!fiction) {
           const fc = await factCheckColdOpen(c, a);
           if (!fc.ok) {
             factProblems.push(...fc.problems);
-            a.log?.(`hookcraft: "${c.device}" rejected by fact-check (${fc.problems[0] ?? ""})`);
+            a.log?.(`hookcraft: "${c.device}" rejected by numeric source check (${fc.problems[0] ?? ""})`);
             continue;
           }
           factCheck = fc.status;
-        } else if (!fiction) {
-          a.log?.(`hookcraft: grounded fact-check budget (2) spent — "${c.device}" passes on judge gates alone`);
-          factCheck = "unchecked";
         }
         a.log?.(
           `hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, ` +

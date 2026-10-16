@@ -7,6 +7,7 @@ import { designPipeline, type DesignOptions } from "@/engine/designer";
 import { channelPipelinePreviewInputFromDesign, compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { YUE2_SCORED_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 
 // Execute the worker's actual options projection, then the real designer and
 // compiler. Loading the task itself would bring unrelated provider startup in.
@@ -35,7 +36,7 @@ const fetchBefore = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error("design transport must not dispatch or call providers"); };
 try {
   for (const [family, playback, role] of [
-    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "meditation_bed"],
+    ["music_loop", "repeat", "primary_music"], ["sleep", "repeat", "sleep_sound_bed"],
     ["shorts", "once", "short_form_bed"], ["narrated_stock", "once", "narration_bed"],
   ] as const) {
     const programBrief = createChannelProgramBrief({ family, nicheKey: "educational", locale: "en",
@@ -49,7 +50,7 @@ try {
     const selectedOptions = project(payload);
     assert.equal(selectedOptions.yue2Music, yue2Music, "worker must retain the exact requested selection");
     const selected = designPipeline(selectedOptions);
-    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, "3.0.0-yue2-candidate");
+    assert.equal(selected.compilation!.modules.find(module => module.id === "music")?.version, YUE2_SCORED_MUSIC_VERSION);
     assert.equal(selected.productionReady, false, "transport cannot grant production qualification");
     assert.ok(selected.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const changed = designPipeline(project({ ...payload, yue2Music: { ...yue2Music, sourceParams: { ...sourceParams, seed: 43 } } }));

@@ -50,8 +50,12 @@ async function main(): Promise<void> {
       assert.equal(scope.snapshot().calls, 1, `${label}: consumed response remains accounted`);
       assert.ok(scope.snapshot().costUsd > 0, `${label}: fixture charge is not erased on rejection`);
     }
-    for (const issues of [[], ["The opening promise is not paid off."]]) {
-      response = { pass: false, issues };
+    for (const verdict of [
+      { pass: false, issues: [] },
+      { pass: false, issues: ["The opening promise is not paid off."] },
+      { pass: true, issues: ["The opening promise is not paid off."] },
+    ]) {
+      response = verdict;
       await assert.rejects(() => createModelUsageScope().run(() => qaScript.run(context)), /narration failed craft-quality critique/);
     }
     response = { pass: true, issues: [] };

@@ -16,6 +16,17 @@ function main(): void {
   assert.equal(privateRelease.state, "private-review-only");
   assert.match(privateRelease.detail, /no owner-facing intake/i);
 
+  const cinematicCase = catalogExecutionAvailability(catalogExecutionBinding("cinematic-case-sequence"));
+  assert.equal(catalogExecutionBinding("cinematic-case-sequence").kind, "registered-private-release");
+  assert.deepEqual(catalogExecutionBinding("cinematic-case-sequence").executableIds, [
+    "cinematic_case_sequence_draft",
+    "cinematic_case_sequence_finalize",
+    "cinematic_case_sequence",
+  ], "direction and signature inputs stay behind the same private-release boundary");
+  assert.equal(cinematicCase.state, "private-review-only",
+    "human-signed cinematic crime review must not appear as an autonomous pipeline capability");
+  assert.match(cinematicCase.detail, /cannot become an automatic creator route/i);
+
   const children = catalogExecutionAvailability(catalogExecutionBinding("children-video-treatment"));
   assert.equal(catalogExecutionBinding("children-video-treatment").kind, "pipeline-module");
   assert.equal(children.state, "composition-gated");

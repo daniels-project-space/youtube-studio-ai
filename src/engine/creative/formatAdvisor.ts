@@ -25,7 +25,7 @@ import { FORMAT_RECIPES, type FormatSelectionInput, type RankedFormatCandidate }
  * reproduces today's exact deterministic behavior rather than surfacing an
  * error to the caller. Doubt includes:
  *   - no permitted provider configured (`hasCreativeTextKey()` is false),
- *   - fewer than two candidates to meaningfully advise between,
+ *   - fewer than two top-score-tied candidates in the requested top-N slice,
  *   - the provider call failing, timing out, or being unreachable,
  *   - a malformed or incomplete provider response,
  *   - a confidence below `FORMAT_ADVISOR_MIN_CONFIDENCE`,
@@ -189,11 +189,11 @@ function performanceContextLines(context: FormatAdvisorContext | undefined): str
 }
 
 /**
- * Attempts an advisory tie-break among the top-N deterministic format
- * candidates using real available context. Never throws: on any doubt it
+ * Attempts an advisory tie-break among top-score-tied candidates in the
+ * top-N deterministic format slice, using real available context. Never throws: on any doubt it
  * returns the deterministic top candidate (`candidates[0]`) unchanged with
  * `advisorApplied: false` and a `fallbackReason`. Never calls a provider when
- * fewer than two candidates are available to choose between, or when no
+ * fewer than two candidates share the top score, or when no
  * permitted provider is configured.
  */
 export async function adviseFormatSelection(args: AdviseFormatSelectionArgs): Promise<FormatAdvisorResult> {
@@ -212,8 +212,9 @@ export async function adviseFormatSelection(args: AdviseFormatSelectionArgs): Pr
   };
 
   const topN = Math.max(1, Math.min(args.topN ?? FORMAT_ADVISOR_DEFAULT_TOP_N, args.candidates.length));
-  const pool = args.candidates.slice(0, topN);
-  if (pool.length < 2) return fallback("fewer than two candidates to advise between");
+  const topRanked = args.candidates.slice(0, topN);
+  const pool = topRanked.filter((candidate) => candidate.score === deterministicTop.score);
+  if (pool.length < 2) return fallback("no top-score tie to advise between");
 
   const poolFamilies = new Set<FamilyKey>(pool.map((candidate) => candidate.family));
 

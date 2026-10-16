@@ -72,19 +72,17 @@ export function fallbackVoiceKey(seed: string): (typeof ENGLISH_FALLBACK_VOICE_K
   return spreadDefault(seed.trim().toLowerCase(), ENGLISH_FALLBACK_VOICE_KEYS);
 }
 
-export function resolveVoiceId(voiceId?: string, niche?: string): string {
+export function resolveVoiceId(voiceId?: string, niche?: string, identitySeed?: string): string {
   if (voiceId && VOICE_MAP[voiceId]) return VOICE_MAP[voiceId];
   if (voiceId && /^[0-9a-f]{32}$/i.test(voiceId)) return voiceId; // raw ref id
   // A deliberate niche mapping always wins — those are chosen, not inferred.
   const mapped = niche ? NICHE_VOICES[niche.toLowerCase()] : undefined;
   if (mapped) return VOICE_MAP[mapped] ?? VOICE_MAP["sleepless_historian"];
   // Otherwise spread across a RANGE by stable identity rather than collapsing
-  // onto one point. NICHE_VOICES covers four niches and maps all four to the
-  // same voice, so before this every unmapped channel — which is most of them —
-  // received the identical narrator. Seeded on the niche so a channel's voice
-  // is stable across runs, and so two channels in the same niche still share a
-  // register, which is intended; two channels in DIFFERENT niches no longer do.
-  const key = fallbackVoiceKey(String(niche ?? ""));
+  // onto one point. Use the stable channel identity when available so same-niche
+  // channels do not all inherit one narrator; niche remains a stable fallback
+  // for callers that do not have channel context.
+  const key = fallbackVoiceKey(String(identitySeed ?? niche ?? ""));
   return VOICE_MAP[key] ?? VOICE_MAP["sleepless_historian"];
 }
 
@@ -271,6 +269,8 @@ export async function synthNarration(args: {
   text: string;
   voiceId?: string;
   niche?: string;
+  /** Stable channel identity for Fish fallback casting; explicit choices win. */
+  voiceIdentitySeed?: string;
   /** Speaking-rate multiplier 0.5–2.0 (1.0 = the voice's native pace). */
   speed?: number;
   /** TTS engine: fish (default) | elevenlabs | qwen3 (attested open worker). */
@@ -308,7 +308,7 @@ export async function synthNarration(args: {
   }
   const key = process.env.FISH_AUDIO_API_KEY;
   if (!key) throw new TtsError("FISH_AUDIO_API_KEY is not configured");
-  const reference_id = resolveVoiceId(args.voiceId, args.niche);
+  const reference_id = resolveVoiceId(args.voiceId, args.niche, args.voiceIdentitySeed);
   const speed = Math.max(0.5, Math.min(2, args.speed ?? 1));
   // Defensive: a tagged script routed to Fish must never SPEAK the brackets.
   args = { ...args, text: stripAudioTags(args.text) };

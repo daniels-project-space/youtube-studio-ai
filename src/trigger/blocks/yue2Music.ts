@@ -1,6 +1,7 @@
 import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
+import { isMusicRoleAllowedForRoute, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { ExecutionError } from "@/engine/executionErrors";
 import { manifestFromBlock } from "@/engine/moduleManifest";
@@ -9,7 +10,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
 import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
-import { musicProgramForCurrentRoute } from "./blockContext";
+import { channelProgramRouteFromContext, musicProgramForCurrentRoute } from "./blockContext";
 
 export const YUE2_MUSIC_CANDIDATE_VERSION = "3.0.0-yue2-candidate";
 
@@ -29,6 +30,23 @@ const block: Block & { version: string } = {
       throw new Error("YuE2 music requires a sealed YuE2 program; a legacy provider choice cannot be overwritten");
     }
     const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+    const route = channelProgramRouteFromContext(ctx);
+    if (route) {
+      if (arrangement.reviewContext?.family !== route.family) {
+        throw new Error("YuE2 music arrangement review context does not match the current channel route family");
+      }
+      const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
+      if (!isMusicRoleAllowedForRoute(
+        route.family,
+        route.contentLaneKey,
+        arrangement.arrangement.role,
+      )) {
+        throw new Error(`YuE2 music route requires a ${expectedRole} arrangement, received ${arrangement.arrangement.role}`);
+      }
+    }
+    if (program && arrangement.arrangement.playback !== "repeat") {
+      throw new Error("YuE2 music-loop route requires a repeating primary-music arrangement");
+    }
     if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
       arrangement.runId !== ctx.runId || arrangement.topic !== ctx.store["topic"] ||
       !arrangement.symbolicScore || !arrangement.reviewContext) {

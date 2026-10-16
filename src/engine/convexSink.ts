@@ -35,6 +35,7 @@ export function makeConvexSink(
         inputs: args.inputs,
         outputs: args.outputs,
         reuseReceipt: args.reuseReceipt,
+        moduleScorecard: args.moduleScorecard,
         error: args.error,
       });
     },

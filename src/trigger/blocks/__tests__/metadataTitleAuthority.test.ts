@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MODULE_REGISTRY } from "@/engine/moduleRegistry";
+import { TITLE_PROFILES } from "@/lib/titleProfile";
 
 const source = readFileSync(join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"), "utf8");
 
@@ -40,6 +42,56 @@ async function main(): Promise<void> {
       /planned title held out \(not evaluated\)/,
       "the operator must be told why the plan title was not used",
     );
+
+    const titleProfileKnob = MODULE_REGISTRY.metadata?.customization?.knobs.find((knob) => knob.id === "titleProfile");
+    assert.deepEqual(titleProfileKnob?.values, ["auto", ...Object.keys(TITLE_PROFILES)],
+      "the module surface must expose auto plus the authoritative format-profile set");
+    assert.equal(titleProfileKnob?.default, "auto",
+      "the visible default must match the route-sealed format profile used by execution");
+    const longTopic = "How Roman Aqueducts Carried Fresh Water Across Long Distances Without Modern Pumps";
+    const shortProfileOut = await metadataOptimized.run({
+      ownerId: "owner-test",
+      runId: "run-test-short-profile",
+      channelId: "channel-test",
+      keyPrefix: "owner/test/",
+      params: { titleProfile: "short_form" },
+      store: {
+        topic: longTopic,
+        plannedTitle,
+        channelName: "Inked Histories",
+        niche: "history",
+        persona: "documentary narrator",
+      },
+      budgetUsd: 5,
+      log: (message: string) => logs.push(message),
+    } as never) as { title: string };
+    assert.ok(shortProfileOut.title.length <= TITLE_PROFILES.short_form.hardMaxChars,
+      "the persisted module knob must control the real deterministic title fallback");
+    assert.notEqual(shortProfileOut.title, longTopic,
+      "a profile-specific title envelope must not silently fall back to the channel's general profile");
+
+    const sealedMusicTopic = "Rainy Midnight Jazz for Deep Focus with Soft Piano and Vinyl Crackle";
+    const autoProfileOut = await metadataOptimized.run({
+      ownerId: "owner-test",
+      runId: "run-test-auto-profile",
+      channelId: "channel-test",
+      keyPrefix: "owner/test/",
+      params: { titleProfile: "auto" },
+      store: {
+        topic: sealedMusicTopic,
+        plannedTitle,
+        channelName: "Inked Histories",
+        niche: "history",
+        persona: "documentary narrator",
+        automaticVideoPlan: { titleProfile: "music_loop" },
+      },
+      budgetUsd: 5,
+      log: (message: string) => logs.push(message),
+    } as never) as { title: string };
+    assert.ok(autoProfileOut.title.length > TITLE_PROFILES.short_form.hardMaxChars,
+      "auto must not be rendered as general or short-form when the sealed plan is music");
+    assert.ok(autoProfileOut.title.length <= TITLE_PROFILES.music_loop.hardMaxChars,
+      "auto must honor the sealed music profile's hard title envelope");
   } finally {
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalKey;

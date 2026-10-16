@@ -45,6 +45,8 @@ import {
   unavailableStoryboardCriticVerdict,
 } from "@/lib/storyboardCritic";
 import {
+  channelCritiqueContextFromStore,
+  channelCreatorDirection,
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -157,21 +159,7 @@ export type CritiquedMotionComicStoryboard = CritiquedSelfContainedStory & {
 /** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
 function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
   const lane = ctx.store["contentLane"];
-  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
-    ? String((lane as { key?: unknown }).key)
-    : undefined;
-  const text = (key: string): string | undefined => {
-    const value = ctx.store[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
-  return {
-    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
-    ...(text("persona") ? { persona: text("persona")! } : {}),
-    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
-    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
-    ...(laneKey ? { contentLaneKey: laneKey } : {}),
-    laneEmphasis: laneQualityPolicy(lane).emphasis,
-  };
+  return channelCritiqueContextFromStore(ctx.store, laneQualityPolicy(lane).emphasis);
 }
 
 function motionComicAtlasIdentity(
@@ -400,6 +388,7 @@ export async function planComicWithCritique(
   brief: MotionComicBrief,
 ): Promise<CritiquedMotionComicStoryboard> {
   const channel = comicCritiqueChannel(ctx);
+  const channelDirection = channelCreatorDirection(channel);
   const wantPanels = motionComicPanelCount(brief.panels);
   const targetSeconds = Number(brief.targetSeconds ?? 0) || 0;
   const checkpointKey = storyboardCheckpointKey(ctx, {
@@ -410,6 +399,7 @@ export async function planComicWithCritique(
     style: brief.style ?? null,
     targetSeconds,
     criticDoctrine: channel.criticDoctrine ?? null,
+    channelDirection,
     contentLaneKey: channel.contentLaneKey ?? null,
   });
 
@@ -430,7 +420,7 @@ export async function planComicWithCritique(
     channel,
     // TEXT ONLY. planMotionComicStoryboard reaches no image/voice/music
     // provider, so no iteration here can spend render money.
-    produce: (priorIssues) => planMotionComicStoryboard(brief, (m) => ctx.log(`mc-plan: ${m}`), priorIssues),
+    produce: (priorIssues) => planMotionComicStoryboard({ ...brief, channelDirection }, (m) => ctx.log(`mc-plan: ${m}`), priorIssues),
     critique: async (plan, iter) => {
       const hard = motionComicStoryboardDefects(plan, wantPanels, targetSeconds);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });

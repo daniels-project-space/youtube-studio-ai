@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { assertPipelineMatchesContentLane, contentLaneForFamily } from "@/engine/contentLane";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { designPipeline } from "@/engine/designer";
 import { assertFamilyAutonomousPlanningPipeline } from "@/engine/families";
 import { compilePipeline } from "@/engine/pipelineCompiler";
@@ -21,7 +22,11 @@ const withoutStorySpine = narrated.filter((entry) => entry.block !== "story_spin
 
 assert.doesNotThrow(() => {
   assertPipelineMatchesContentLane(contentLaneForFamily("narrated_stock")!, withoutStorySpine);
-  compilePipeline(validatePipeline(withoutStorySpine));
+  const contentLane = contentLaneForFamily("narrated_stock")!;
+  compilePipeline(validatePipeline(
+    withoutStorySpine,
+    channelPipelineValidationSeedKeys(contentLane, undefined, withoutStorySpine),
+  ));
 }, "the regression graph remains structurally valid at the visual-lane/compiler layer");
 assert.throws(
   () => assertFamilyAutonomousPlanningPipeline("narrated_stock", withoutStorySpine),

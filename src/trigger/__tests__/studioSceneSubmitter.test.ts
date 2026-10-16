@@ -51,8 +51,8 @@ function fixture() {
 }
 test("real multi-scene submitter freezes intent before admission and replays one deterministic shared GPU job after lost stage response", async () => {
   const f = fixture();
-  const previous = process.env.RENDER_ENGINE_PROJECT_TOKEN;
-  process.env.RENDER_ENGINE_PROJECT_TOKEN = "a".repeat(64);
+  const previous = process.env.MANAGEMENT_PROJECT_SECRET;
+  process.env.MANAGEMENT_PROJECT_SECRET = "fixture-management-project-secret".padEnd(64, "x");
   const saved = new Map<string, string>();
   const jobs = new Map<string, string>();
   const keys: string[] = [];
@@ -80,15 +80,15 @@ test("real multi-scene submitter freezes intent before admission and replays one
     },
     read: async (key: string) => f.frames[Number(key.split("-")[1])],
     upload: async (engine, input) => {
-      assert.equal(engine.projectName, "youtube-studio-ai");
+      assert.equal(engine.projectName, "youtube-studio-render");
       return {
-        key: `projects/youtube-studio-ai/inputs/sha256/${input.sha256}.png`,
+        key: `projects/youtube-studio-render/inputs/sha256/${input.sha256}.png`,
         url: "https://r2.example/fixture-put",
         headers: {},
       };
     },
     stage: async (engine, config) => {
-      assert.equal(engine.projectName,"youtube-studio-ai");
+      assert.equal(engine.projectName,"youtube-studio-render");
       assert.equal(config.request.scenes.length,2);
       assert.ok(events.includes("bind"));
       const key = config.request.idempotencyKey;
@@ -152,8 +152,8 @@ test("real multi-scene submitter freezes intent before admission and replays one
     );
     assert.equal(keys.length, 2);
   } finally {
-    if (previous === undefined) delete process.env.RENDER_ENGINE_PROJECT_TOKEN;
-    else process.env.RENDER_ENGINE_PROJECT_TOKEN = previous;
+    if (previous === undefined) delete process.env.MANAGEMENT_PROJECT_SECRET;
+    else process.env.MANAGEMENT_PROJECT_SECRET = previous;
   }
 });
 test("scene packet includes all ordered scene IDs and prepared receipt hash; no truncation", () => {

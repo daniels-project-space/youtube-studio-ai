@@ -96,7 +96,7 @@ async function parentResumeRequestsOnlyLaterLocalInputs(): Promise<void> {
       remoteBlocks: new Set([remote.id]),
       runRemoteBlock: async (blockId) => {
         assert.equal(blockId, remote.id);
-        return { remoteConsumerResult: "dispatched" };
+        return { patch: { remoteConsumerResult: "dispatched" } };
       },
     },
   );

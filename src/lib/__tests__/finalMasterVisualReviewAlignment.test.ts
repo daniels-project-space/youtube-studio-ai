@@ -9,10 +9,12 @@ import {
 import { planHeal, type HealableBlock } from "@/engine/healer";
 import {
   finalMasterTranscriptCues,
+  missingVisualReviewCreativeLockIds,
   planVisualReviewEvidence,
   reviewRender,
   visualRepairSignals,
   visualReviewFailureMessage,
+  visualReviewReceiptFingerprint,
 } from "@/lib/visualReview";
 
 const sentenceTimings = [
@@ -67,6 +69,27 @@ for (const lock of locks) {
     `Story Spine lock ${lock.shotId} must contribute a final-master review frame`,
   );
 }
+assert.deepEqual(
+  missingVisualReviewCreativeLockIds(locks, evidence),
+  [],
+  "every Story Spine visual lock must have at least one selected master-clock witness",
+);
+const cappedLocks = Array.from({ length: 12 }, (_, index) => ({
+  shotId: `capped-shot-${index + 1}`,
+  startSec: index * 5,
+  endSec: (index + 1) * 5,
+  expected: `Narrated beat ${index + 1}`,
+  acceptanceCriteria: ["The visible action supports this beat."],
+}));
+const cappedEvidence = planVisualReviewEvidence({
+  durationSec: 60,
+  creativeLocks: cappedLocks,
+  maxFrames: 8,
+});
+assert(
+  missingVisualReviewCreativeLockIds(cappedLocks, cappedEvidence).length > 0,
+  "a capped sample must expose Story Spine locks that received no review frame",
+);
 assert(
   evidence.some((frame) => frame.tSec >= narrationStartSec && frame.selectionReasons.includes("cue")),
   "the shifted narration map must contribute cue evidence on the master clock",
@@ -92,6 +115,30 @@ assert.throws(
   "a cue map that does not fit the final master must fail before review",
 );
 assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: [
+      { text: "First cue", start: 0, end: 2 },
+      { text: "Overlapping cue", start: 1.5, end: 3 },
+    ],
+    narrationStartSec: 0,
+    finalMasterDurationSec: 10,
+  }),
+  /out of order or overlaps/i,
+  "overlapping cues must not make the reviewer associate a frame with ambiguous speech",
+);
+assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: [
+      { text: "Later cue", start: 2, end: 3 },
+      { text: "Earlier cue", start: 0, end: 1 },
+    ],
+    narrationStartSec: 0,
+    finalMasterDurationSec: 10,
+  }),
+  /out of order or overlaps/i,
+  "out-of-order cues must not poison the visual review timeline",
+);
+assert.throws(
   () => storySpineVisualReviewLocks({
     storySpine,
     expectedStorySpineFingerprint: storySpineFingerprint(storySpine),
@@ -104,7 +151,42 @@ assert.throws(
 
 async function finalReviewerPromptWiringTest(): Promise<void> {
   const prompts: string[] = [];
-  let emittedSemanticDefects = false;
+  const emittedSemanticCategories = new Set<string>();
+  const semanticDefects = [
+    {
+      startSec: 5,
+      endSec: 6,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.96,
+      observed: "The visible prior scene contradicts the current narration cue and is temporally misplaced.",
+      expected: "The current spoken seed discovery is visible.",
+      suggestedRepair: "Replace the mistimed scene.",
+      inferredCategory: "narration_mismatch",
+    },
+    {
+      startSec: 9,
+      endSec: 10,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.95,
+      observed: "Mira's wardrobe visibly changes from a red coat to a different blue outfit, breaking continuity.",
+      expected: "Mira retains the locked wardrobe.",
+      suggestedRepair: "Restore the locked wardrobe.",
+      inferredCategory: "continuity_break",
+    },
+    {
+      startSec: 13,
+      endSec: 14,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.94,
+      observed: "The planned consequence reveal is missing and the sprout payoff is not visible.",
+      expected: "The authored sprout consequence visibly lands.",
+      suggestedRepair: "Restore the authored reveal.",
+      inferredCategory: "reveal_failure",
+    },
+  ];
   const reviewIntent = {
     title: "Final-master clock alignment fixture",
     expectTitleCard: false,
@@ -122,52 +204,59 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
       maxFocusFrames: 0,
       reviewer: async (input) => {
         prompts.push(input.prompt);
-        if (input.phase === "broad" && !emittedSemanticDefects) {
-          emittedSemanticDefects = true;
-          return JSON.stringify({
-            defects: [
-              {
-                startSec: 5,
-                endSec: 6,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.96,
-                observed: "The visible prior scene contradicts the current narration cue and is temporally misplaced.",
-                expected: "The current spoken seed discovery is visible.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Replace the mistimed scene.",
-              },
-              {
-                startSec: 9,
-                endSec: 10,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.95,
-                observed: "Mira's wardrobe visibly changes from a red coat to a different blue outfit, breaking continuity.",
-                expected: "Mira retains the locked wardrobe.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Restore the locked wardrobe.",
-              },
-              {
-                startSec: 13,
-                endSec: 14,
-                severity: "major",
-                category: "general_visual",
-                confidence: 0.94,
-                observed: "The planned consequence reveal is missing and the sprout payoff is not visible.",
-                expected: "The authored sprout consequence visibly lands.",
-                evidenceFrameIds: [input.frames[0]!.id],
-                suggestedRepair: "Restore the authored reveal.",
-              },
-            ],
-            summary: "Typed semantic defect fixture.",
+        const lockAssessmentRows = (defects: readonly { startSec: number; endSec: number }[]) => locks
+          .filter((lock) => input.frames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec))
+          .map((lock) => ({
+            shotId: lock.shotId,
+            verdict: defects.some((defect) => defect.startSec <= lock.endSec && defect.endSec >= lock.startSec)
+              ? "fail"
+              : "pass",
+            assessment: "The reviewed frame supports the timed Story Spine lock.",
+            evidenceFrameIds: input.frames
+              .filter((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec)
+              .map((frame) => frame.id),
+          }));
+        if (input.phase === "broad") {
+          const defects = semanticDefects.flatMap((defect) => {
+            if (emittedSemanticCategories.has(defect.inferredCategory)) return [];
+            const frame = input.frames.find((candidate) =>
+              candidate.tSec >= defect.startSec - 0.5 && candidate.tSec <= defect.endSec + 0.5);
+            if (!frame) return [];
+            emittedSemanticCategories.add(defect.inferredCategory);
+            return [{
+              startSec: defect.startSec,
+              endSec: defect.endSec,
+              severity: defect.severity,
+              category: defect.category,
+              confidence: defect.confidence,
+              observed: defect.observed,
+              expected: defect.expected,
+              suggestedRepair: defect.suggestedRepair,
+              evidenceFrameIds: [frame.id],
+            }];
           });
+          if (defects.length) {
+            return JSON.stringify({
+              defects,
+              summary: "Typed semantic defect fixture.",
+              creativeLockAssessments: lockAssessmentRows(defects),
+            });
+          }
         }
-        return JSON.stringify({ defects: [], summary: "Aligned narration and Story Spine fixture." });
+        return JSON.stringify({
+          defects: [],
+          summary: "Aligned narration and Story Spine fixture.",
+          creativeLockAssessments: lockAssessmentRows([]),
+        });
       },
     },
   );
   assert.equal(reviewed.verdict, "fail");
+  assert.deepEqual(
+    reviewed.evidence.coverage.creativeLocks?.failedLockIds,
+    locks.map((lock) => lock.shotId),
+    "contradicted timed Story Spine locks must be individually present in durable visual QA evidence",
+  );
   assert.deepEqual(
     [...new Set(reviewed.defects.map((defect) => defect.category))].sort(),
     ["continuity_break", "narration_mismatch", "reveal_failure"],
@@ -178,6 +267,118 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
   assert(
     semanticSignals.every((signal) => signal.owner === "stock_footage" && signal.action === "resample_footage"),
     "semantic replacement is bounded to the real stock-footage resampling owner",
+  );
+  const cappedStoryLocks = Array.from({ length: 12 }, (_, index) => ({
+    shotId: `capped-story-beat-${index + 1}`,
+    startSec: index * 1.5,
+    endSec: (index + 1) * 1.5,
+    expected: `Show the narrated action for beat ${index + 1}.`,
+    acceptanceCriteria: ["The visible action supports the current narration."],
+  }));
+  const cappedReview = await reviewRender(
+    join(process.cwd(), "public", "golden", "comic", "comic3d.mp4"),
+    18,
+    {
+      title: "Capped Story Spine witness fixture",
+      creativeLocks: cappedStoryLocks,
+    },
+    {
+      runId: "capped-story-spine-witnesses",
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+      reviewer: async (input) => JSON.stringify({
+        defects: [],
+        summary: "No visible defects.",
+        creativeLockAssessments: cappedStoryLocks
+          .filter((lock) => input.frames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec))
+          .map((lock) => ({
+            shotId: lock.shotId,
+            verdict: "pass",
+            assessment: "The sampled frame supports this beat.",
+            evidenceFrameIds: input.frames
+              .filter((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec)
+              .map((frame) => frame.id),
+          })),
+      }),
+    },
+  );
+  assert.equal(cappedReview.verdict, "needs_human");
+  assert(
+    (cappedReview.evidence.coverage.creativeLocks?.missingFrameLockIds.length ?? 0) > 0,
+    "durable review coverage must identify locks dropped by the frame cap",
+  );
+  assert.match(cappedReview.summary, /Story Spine visual locks lack a complete broad-review assessment/i);
+  const sealedReviewReceipt = visualReviewReceiptFingerprint({
+    ran: cappedReview.ran,
+    verdict: cappedReview.verdict,
+    reviewFingerprint: cappedReview.reviewFingerprint,
+    evidence: cappedReview.evidence,
+    defects: cappedReview.defects,
+    referenceCriteria: cappedReview.referenceCriteria,
+    referenceCriteriaComplete: cappedReview.referenceCriteriaComplete,
+  });
+  assert.equal(sealedReviewReceipt, cappedReview.reviewReceiptFingerprint);
+  const changedLockLedger = structuredClone(cappedReview.evidence);
+  changedLockLedger.coverage.creativeLocks!.assessments[0]!.assessment = "edited after review";
+  assert.notEqual(
+    visualReviewReceiptFingerprint({
+      ran: cappedReview.ran,
+      verdict: cappedReview.verdict,
+      reviewFingerprint: cappedReview.reviewFingerprint,
+      evidence: changedLockLedger,
+      defects: cappedReview.defects,
+      referenceCriteria: cappedReview.referenceCriteria,
+      referenceCriteriaComplete: cappedReview.referenceCriteriaComplete,
+    }),
+    cappedReview.reviewReceiptFingerprint,
+    "the post-review receipt fingerprint must bind Story Spine lock assessments",
+  );
+  const mixedEvidenceLock = [{
+    shotId: "mixed-evidence-beat",
+    startSec: 0.8,
+    endSec: 0.8,
+    expected: "Show the narrated action in the opening beat.",
+    acceptanceCriteria: ["Evidence must come from within this beat."],
+  }];
+  let citedUnrelatedFrameId: string | undefined;
+  const mixedEvidenceReview = await reviewRender(
+    join(process.cwd(), "public", "golden", "comic", "comic3d.mp4"),
+    18,
+    { title: "Reject unrelated beat evidence", creativeLocks: mixedEvidenceLock },
+    {
+      runId: "capped-story-spine-witnesses",
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+      reviewer: async (input) => {
+        const relevant = input.frames.find((frame) => frame.tSec >= 0.8 && frame.tSec <= 0.9);
+        if (!relevant) return JSON.stringify({ defects: [], summary: "No lock is sampled in this batch.", creativeLockAssessments: [] });
+        const unrelated = input.frames.find((frame) => Math.abs(frame.tSec - 0.8) > 0.25);
+        assert.ok(unrelated,
+          `the lock batch must also include an unrelated witness: ${JSON.stringify(input.frames.map((frame) => ({ id: frame.id, tSec: frame.tSec })))}`);
+        citedUnrelatedFrameId = unrelated.id;
+        return JSON.stringify({
+          defects: [],
+          summary: "Mixed-time evidence should not certify a single beat.",
+          creativeLockAssessments: [{
+            shotId: "mixed-evidence-beat",
+            verdict: "pass",
+            assessment: "One relevant frame was mixed with a frame from another beat.",
+            evidenceFrameIds: [relevant.id, unrelated.id],
+          }],
+        });
+      },
+    },
+  );
+  assert.ok(citedUnrelatedFrameId, "the counterexample must cite an actual outside-beat frame");
+  assert.equal(mixedEvidenceReview.verdict, "needs_human",
+    "a Story Spine beat must not pass when its evidence cites a frame from another time");
+  assert.deepEqual(mixedEvidenceReview.evidence.coverage.creativeLocks?.notObservableLockIds, ["mixed-evidence-beat"]);
+  assert.equal(
+    mixedEvidenceReview.evidence.coverage.creativeLocks?.assessments[0]?.evidenceFrameIds.includes(citedUnrelatedFrameId ?? ""),
+    false,
+    "invalid cross-beat citations must not survive into durable QA evidence",
   );
   const generatedLane: HealableBlock[] = [
     { id: "generated_visuals", produces: ["videoLocalPath"], consumes: ["storySpine"] },
@@ -208,11 +409,18 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
   assert.match(prompt, /narration: "Mira finds a tiny seed/i);
   assert.match(prompt, /visual-lock: "Story Spine shot-0001/i);
   assert.match(prompt, /exact current narrated idea/i);
+  assert.match(prompt, /STORY \/ SHOT LOCK ASSESSMENTS/);
+  assert.match(prompt, /creativeLockAssessments/);
   assert.match(prompt, /narration_mismatch\|continuity_break\|reveal_failure/);
   assert.doesNotMatch(
     prompt,
     /@(?:0\.2|0\.7|1\.5)s[^\n]*narration:/i,
     "intro evidence before the declared narration start must not inherit the nearest spoken cue",
+  );
+  assert.doesNotMatch(
+    prompt,
+    /@(?:0\.2|0\.7|1\.5)s[^\n]*visual-lock:/i,
+    "intro evidence before the first timed shot must not inherit that shot's creative lock",
   );
   console.log("final-master narration/Story Spine visual-review alignment tests passed");
 }

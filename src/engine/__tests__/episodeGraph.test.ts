@@ -207,6 +207,19 @@ const storySpine = {
 
 assert.equal(assertEpisodeGraphAgainstStorySpine(graph, storySpine).episodeId, graph.episodeId);
 
+const misboundNarration = structuredClone(graph);
+misboundNarration.beats[0].storySpineSentenceIds = ["sentence-lesson"];
+assert.throws(
+  () => assertEpisodeGraphAgainstStorySpine(misboundNarration, storySpine),
+  /Story Spine sentence mapping does not match its source beats/,
+  "a graph beat must not cite a different valid narration sentence than its source beat",
+);
+assert.throws(
+  () => compileSceneManifest(misboundNarration, storySpine),
+  /Story Spine sentence mapping does not match its source beats/,
+  "the scene compiler must reject narration references that disagree with the visible scene text",
+);
+
 // This is the reusable children-learning handoff: real Story Spine evidence
 // becomes a causal Episode Graph, a zero-provider Scene Manifest, and a
 // private-human-review receipt before a renderer may be admitted.
@@ -250,7 +263,7 @@ assert.throws(
 // resulting graph-owned manifest and still validates the exact scene/sentence
 // attachment on its own boundary.
 const factualStorySpine = structuredClone(storySpine);
-factualStorySpine.timedScript.sentences[0].text = "According to Seed Atlas, 20 seeds sprouted in week one and 35 in week two.";
+factualStorySpine.timedScript.sentences[0].text = "According to Seed Atlas, 20 seeds sprouted in week one and 35 seeds sprouted in week two.";
 const factualVisualBase = {
   version: "evidence-visual-manifest/v1" as const,
   id: "visual-seed-sprout-trend",

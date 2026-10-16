@@ -17,6 +17,7 @@ export type YuE2CandidateReview = {
     topic: string;
     sourceBriefFingerprint: string;
     reviewContext: NonNullable<Material["request"]["acceptedArrangement"]["reviewContext"]> | null;
+    channelGrounding: NonNullable<Material["request"]["acceptedArrangement"]["channelGrounding"]> | null;
     contextRetained: boolean;
     channelPersonalityVerified: false;
   };

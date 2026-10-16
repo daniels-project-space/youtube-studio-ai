@@ -25,7 +25,7 @@ import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 import { withMusicGenerationCost } from "@/lib/music";
 import { registerAllBlocks } from "@/engine/blocks";
 import { getManifest } from "@/engine/registry";
-import { declaredArtifactStore } from "@/engine/runner";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 
 const ROOT = process.cwd();

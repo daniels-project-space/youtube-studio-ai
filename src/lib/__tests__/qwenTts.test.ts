@@ -92,12 +92,13 @@ async function main(): Promise<void> {
     composeQwenNarrationInstruction({
       explicit: "Use a close, intimate delivery.",
       editorialBrief: "This must not replace the channel's explicit direction.",
+      voiceProfile: "Mature low register with a lightly textured timbre",
       delivery: "warm and patient",
       pacing: "measured",
       archetype: "documentary",
     }),
-    "Use a close, intimate delivery. This must not replace the channel's explicit direction. warm and patient. measured. documentary.",
-    "an explicit instruction must stay first without deleting frozen editorial and channel delivery controls",
+    "Use a close, intimate delivery. This must not replace the channel's explicit direction. Mature low register with a lightly textured timbre. warm and patient. measured. documentary.",
+    "explicit and editorial directions must retain channel voice profile, delivery, and pacing controls",
   );
   assert.equal(
     composeQwenNarrationInstruction({
@@ -118,6 +119,18 @@ async function main(): Promise<void> {
     "Open with quiet urgency. restrained but intimate. measured documentary. documentary.",
     "weekly narration must retain both its frozen brief and the channel Style DNA",
   );
+  const boundedInstruction = composeQwenNarrationInstruction({
+    explicit: "Follow the configured speaker direction",
+    editorialBrief: "weekly context ".repeat(100),
+    voiceProfile: "Mature, warm voice with a lightly textured lower register",
+    delivery: "restrained and patient",
+    pacing: "measured with deliberate pauses",
+    archetype: "documentary",
+  });
+  assert.ok(boundedInstruction.length <= 520, "provider instruction must remain within its hard cap");
+  assert.match(boundedInstruction, /Mature, warm voice/u, "long editorial context must not crowd out channel voice identity");
+  assert.match(boundedInstruction, /restrained and patient/u, "long editorial context must not crowd out channel delivery");
+  assert.match(boundedInstruction, /measured with deliberate pauses/u, "long editorial context must not crowd out channel pacing");
 
   const audio = new Uint8Array(2_048).fill(23);
   audio.set([0x49, 0x44, 0x33], 0);

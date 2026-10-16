@@ -22,6 +22,8 @@
  * (the legacy Gemini/creative-text helpers); a later phase can back them with Mastra agents (and a
  * Mastra workflow can wrap this loop) without changing any chunk.
  */
+import { recordModuleCritique } from "@/lib/moduleCritiqueEvidence";
+import { parseShowBibleVoice, showBibleVoicePromptLines } from "./showBibleVoice";
 
 export interface Critique {
   /** 0..1 quality. */
@@ -93,6 +95,12 @@ export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
   if (row.fatal !== undefined && typeof row.fatal !== "boolean") {
     issues.push("critic fatal must be boolean when present");
   }
+  if (row.fatal === true && row.pass === true) {
+    issues.push("a fatal critique cannot pass");
+  }
+  if (row.pass === false && Array.isArray(row.issues) && row.issues.length === 0) {
+    issues.push("a rejected critique must include at least one actionable issue");
+  }
   if (issues.length) return { pass: false, critique: null, issues };
   return {
     pass: true,
@@ -121,8 +129,19 @@ export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
 export interface ChannelCritiqueContext {
   channelName?: string;
   persona?: string;
+  positioning?: string;
+  vibe?: string;
+  worksInSpace?: readonly string[];
+  avoidInSpace?: readonly string[];
+  visualDirection?: readonly string[];
   styleGrammar?: string;
-  narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
+  narrative?: {
+    scriptStyle?: string;
+    hookStyle?: string;
+    pacing?: string;
+    voiceProfile?: string;
+    delivery?: string;
+  };
   /** Operator/Showrunner-authored stance for THIS channel's critic. */
   criticDoctrine?: string;
   /** Durable content-lane key; drives lane-tuned thresholds + emphases. */
@@ -131,6 +150,107 @@ export interface ChannelCritiqueContext {
   laneEmphasis?: readonly string[];
   /** Channel QualityBar dimension ids the operator actually cares about. */
   qualityDimensions?: readonly string[];
+  /** Literal spoken wording forbidden by this channel's frozen identity. */
+  bannedWords?: readonly string[];
+}
+
+function textFromStore(store: Readonly<Record<string, unknown>>, key: string, max: number): string | undefined {
+  const value = store[key];
+  return typeof value === "string" ? compact(value, max) : undefined;
+}
+
+function stringListFromStore(value: unknown, count: number, max: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => compact(item, max))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, count);
+  return items.length ? items : undefined;
+}
+
+/**
+ * Resolve the shared identity inputs consumed by module-owned critics. Callers
+ * still declare these optional artifacts in their own manifest; the runner's
+ * guarded store makes undeclared reads fail before module work can proceed.
+ */
+export function channelCritiqueContextFromStore(
+  store: Readonly<Record<string, unknown>>,
+  laneEmphasis?: readonly string[],
+): ChannelCritiqueContext {
+  const showBible = parseShowBibleVoice(store["showBible"]);
+  const dna = store["styleDNA"] as {
+    colorGrade?: unknown;
+    motifs?: unknown;
+    visualAvoid?: unknown;
+    palette?: unknown;
+    recurringSubject?: unknown;
+    setting?: unknown;
+    composition?: unknown;
+    motionDiscipline?: unknown;
+    motionVocabulary?: unknown;
+    narrative?: {
+      scriptStyle?: unknown;
+      hookStyle?: unknown;
+      pacing?: unknown;
+      voiceProfile?: unknown;
+      delivery?: unknown;
+    };
+  } | null | undefined;
+  const lane = store["contentLane"] as { key?: unknown } | null | undefined;
+  const laneKey = typeof lane?.key === "string" ? compact(lane.key, 60) : undefined;
+  const bannedWords = stringListFromStore(store["bannedWords"], 32, 120);
+  const dnaVibe = typeof dna?.colorGrade === "string" ? compact(dna.colorGrade, 160) : undefined;
+  const visualDirection = [
+    ...(stringListFromStore(dna?.palette, 6, 100) ?? []).map((item) => `Channel palette: ${item}`),
+    ...(typeof dna?.recurringSubject === "string" && compact(dna.recurringSubject, 180)
+      ? [`Recurring subject: ${compact(dna.recurringSubject, 180)}`]
+      : []),
+    ...(typeof dna?.setting === "string" && compact(dna.setting, 180)
+      ? [`Channel setting: ${compact(dna.setting, 180)}`]
+      : []),
+    ...(typeof dna?.composition === "string" && compact(dna.composition, 180)
+      ? [`Composition: ${compact(dna.composition, 180)}`]
+      : []),
+    ...(typeof dna?.motionDiscipline === "string" && compact(dna.motionDiscipline, 180)
+      ? [`Motion discipline: ${compact(dna.motionDiscipline, 180)}`]
+      : []),
+    ...(stringListFromStore(dna?.motionVocabulary, 6, 100) ?? []).map((item) => `Allowed motion: ${item}`),
+  ].slice(0, 16);
+  const channelName = textFromStore(store, "channelName", 120);
+  const persona = textFromStore(store, "persona", 180);
+  const styleGrammar = textFromStore(store, "styleGrammar", 240);
+  const criticDoctrine = textFromStore(store, "criticDoctrine", 600);
+  const narrative = dna?.narrative;
+  const worksInSpace = showBible?.worksInSpace?.length
+    ? showBible.worksInSpace
+    : stringListFromStore(dna?.motifs, 10, 140);
+  const avoidInSpace = showBible?.avoidInSpace?.length
+    ? showBible.avoidInSpace
+    : stringListFromStore(dna?.visualAvoid, 10, 140);
+  return {
+    ...(channelName ? { channelName } : {}),
+    ...(persona ? { persona } : {}),
+    ...(showBible?.positioning ? { positioning: showBible.positioning } : {}),
+    ...((showBible?.vibe ?? dnaVibe) ? { vibe: showBible?.vibe ?? dnaVibe } : {}),
+    ...(worksInSpace ? { worksInSpace } : {}),
+    ...(avoidInSpace ? { avoidInSpace } : {}),
+    ...(visualDirection.length ? { visualDirection } : {}),
+    ...(styleGrammar ? { styleGrammar } : {}),
+    ...(narrative ? {
+      narrative: {
+        ...(typeof narrative.scriptStyle === "string" ? { scriptStyle: compact(narrative.scriptStyle, 240) } : {}),
+        ...(typeof narrative.hookStyle === "string" ? { hookStyle: compact(narrative.hookStyle, 240) } : {}),
+        ...(typeof narrative.pacing === "string" ? { pacing: compact(narrative.pacing, 240) } : {}),
+        ...(typeof narrative.voiceProfile === "string" ? { voiceProfile: compact(narrative.voiceProfile, 240) } : {}),
+        ...(typeof narrative.delivery === "string" ? { delivery: compact(narrative.delivery, 240) } : {}),
+      },
+    } : {}),
+    ...(criticDoctrine ? { criticDoctrine } : {}),
+    ...(laneKey ? { contentLaneKey: laneKey } : {}),
+    ...(bannedWords ? { bannedWords } : {}),
+    ...(laneEmphasis?.length ? { laneEmphasis: laneEmphasis.slice(0, 4) } : {}),
+  };
 }
 
 function compact(value: string | undefined, max: number): string | undefined {
@@ -148,12 +268,17 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
   const lines = [
     compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
     compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
+    ...showBibleVoicePromptLines(channel),
+    ...(channel.visualDirection ?? []).slice(0, 16).map((item) => `Visual identity: ${compact(item, 200)}`),
     compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
-    ...(["scriptStyle", "hookStyle", "pacing", "delivery"] as const).map(field => {
+    ...(["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const).map(field => {
       const value = compact(channel.narrative?.[field], 240);
       return value ? `Narrative ${field}: ${value}` : "";
     }),
     compact(channel.contentLaneKey, 60) ? `Content lane: ${compact(channel.contentLaneKey, 60)}` : "",
+    channel.bannedWords?.length
+      ? `Forbidden channel wording (reject any occurrence in narration): ${JSON.stringify(channel.bannedWords.slice(0, 32))}`
+      : "",
     (channel.qualityDimensions ?? []).length
       ? `Operator quality priorities: ${(channel.qualityDimensions ?? []).slice(0, 8).join(", ")}`
       : "",
@@ -177,12 +302,34 @@ export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
   );
 }
 
+/** Bounded writer-facing channel identity, separate from critic instructions. */
+export function channelCreatorDirection(channel?: ChannelCritiqueContext): string {
+  if (!channel) return "";
+  const lines = [
+    compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
+    compact(channel.persona, 180) ? `Audience: ${compact(channel.persona, 180)}` : "",
+    compact(channel.positioning, 240) ? `Promise: ${compact(channel.positioning, 240)}` : "",
+    compact(channel.vibe, 180) ? `Voice and mood: ${compact(channel.vibe, 180)}` : "",
+    compact(channel.styleGrammar, 240) ? `Writing style: ${compact(channel.styleGrammar, 240)}` : "",
+    ...(["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const).map(field => {
+      const value = compact(channel.narrative?.[field], 240);
+      return value ? `Narrative ${field}: ${value}` : "";
+    }),
+    channel.worksInSpace?.length ? `Lean into: ${channel.worksInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
+    channel.avoidInSpace?.length ? `Avoid: ${channel.avoidInSpace.slice(0, 6).map(x => compact(x, 140)).filter(Boolean).join("; ")}` : "",
+    ...(channel.visualDirection ?? []).slice(0, 16).map((item) => `Preserve channel visual identity: ${compact(item, 200)}`),
+    compact(channel.criticDoctrine, 400) ? `Standing creative direction: ${compact(channel.criticDoctrine, 400)}` : "",
+    channel.bannedWords?.length ? `Do not use these words: ${JSON.stringify(channel.bannedWords.slice(0, 24))}` : "",
+  ].filter(Boolean);
+  return lines.length ? `\nCHANNEL CREATIVE DIRECTION — make this feel authored for this channel:\n${lines.map(x => `- ${x}`).join("\n")}\n` : "";
+}
+
 export interface LoopOptions<T> {
   produce: (priorIssues: string[], iter: number) => Promise<T>;
   critique: (candidate: T, iter: number) => Promise<Critique>;
   /** Accept once score ≥ threshold AND critique.pass. Default 0.8. */
   threshold?: number;
-  /** Hard cap on iterations. Default 3. */
+  /** Hard cap on iterations (1–8). Default 3. */
   maxIters?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
   /** Label for logs/observability. */
@@ -194,6 +341,8 @@ export interface LoopOptions<T> {
    */
   channel?: ChannelCritiqueContext;
 }
+
+export const MAX_CRITIQUE_LOOP_ITERATIONS = 8;
 
 export interface LoopResult<T> {
   value: T;
@@ -209,13 +358,32 @@ export async function produceAndCritique<T>(
   o: LoopOptions<T>,
 ): Promise<LoopResult<T>> {
   const threshold = o.threshold ?? 0.8;
-  const maxIters = Math.max(1, o.maxIters ?? 3);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new RangeError("critique loop threshold must be a finite number from 0 to 1");
+  }
+  const maxIters = o.maxIters ?? 3;
+  if (!Number.isSafeInteger(maxIters) || maxIters < 1 || maxIters > MAX_CRITIQUE_LOOP_ITERATIONS) {
+    throw new RangeError(`critique loop maxIters must be an integer from 1 to ${MAX_CRITIQUE_LOOP_ITERATIONS}`);
+  }
   const log = o.log ?? (() => {});
   const label = o.label ?? "loop";
 
   const history: Critique[] = [];
   let priorIssues: string[] = [];
   let best: { value: T; critique: Critique } | null = null;
+  const record = (result: LoopResult<T>, completed: boolean): LoopResult<T> => {
+    recordModuleCritique({
+      label,
+      scores: history.map((item) => item.score),
+      passes: history.map((item) => item.pass),
+      fatalIterations: history.map((item) => item.fatal === true),
+      issueCounts: history.map((item) => item.issues.length),
+      accepted: result.accepted,
+      fatal: result.fatal === true,
+      completed,
+    });
+    return result;
+  };
 
   if (o.channel?.criticDoctrine || o.channel?.contentLaneKey) {
     log(
@@ -224,62 +392,79 @@ export async function produceAndCritique<T>(
   }
 
   let lastValue: T | undefined;
-  for (let iter = 1; iter <= maxIters; iter++) {
-    const value = await o.produce(priorIssues, iter);
-    lastValue = value;
-    const admission = validateCritiqueResponse(await o.critique(value, iter));
-    if (!admission.pass || !admission.critique) {
-      throw new Error(
-        `${label}: malformed critique response — ${admission.issues.join("; ")}`,
+  try {
+    for (let iter = 1; iter <= maxIters; iter++) {
+      const value = await o.produce(priorIssues, iter);
+      lastValue = value;
+      const admission = validateCritiqueResponse(await o.critique(value, iter));
+      if (!admission.pass || !admission.critique) {
+        throw new Error(
+          `${label}: malformed critique response — ${admission.issues.join("; ")}`,
+        );
+      }
+      const critique = admission.critique;
+      if ((!critique.pass || critique.score < threshold) && critique.issues.length === 0) {
+        throw new Error(`${label}: rejected critique must include at least one actionable issue`);
+      }
+      history.push(critique);
+      log(
+        `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,
+        { issues: critique.issues.slice(0, 4) },
       );
+
+      // A fatal candidate is never eligible as "best": returning the highest
+      // score among unusable outputs is how a caught defect ships anyway.
+      if (!critique.fatal && (!best || critique.score > best.critique.score)) {
+        best = { value, critique };
+      }
+      if (critique.fatal) {
+        log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
+      }
+
+      const accepted = !critique.fatal && critique.pass && critique.score >= threshold;
+      if (accepted) {
+        return record({ value, critique, iterations: iter, accepted: true, history }, true);
+      }
+      priorIssues = critique.issues;
     }
-    const critique = admission.critique;
-    history.push(critique);
+
+    // None cleared the bar. Prefer the best NON-FATAL attempt; if every candidate
+    // was fatal there is nothing safe to return, so the last one comes back
+    // flagged and the caller owns the fail-closed decision.
+    if (!best) {
+      const lastCritique = history[history.length - 1]!;
+      log(`${label}: exhausted ${maxIters} iters and EVERY candidate carried a fatal defect`);
+      return record({
+        value: lastValue as T,
+        critique: lastCritique,
+        iterations: maxIters,
+        accepted: false,
+        fatal: true,
+        history,
+      }, true);
+    }
+    const b = best;
     log(
-      `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,
-      { issues: critique.issues.slice(0, 4) },
+      `${label}: exhausted ${maxIters} iters — returning best (score=${b.critique.score.toFixed(2)})`,
     );
-
-    // A fatal candidate is never eligible as "best": returning the highest
-    // score among unusable outputs is how a caught defect ships anyway.
-    if (!critique.fatal && (!best || critique.score > best.critique.score)) {
-      best = { value, critique };
-    }
-    if (critique.fatal) {
-      log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
-    }
-
-    const accepted = critique.pass && critique.score >= threshold;
-    if (accepted) {
-      return { value, critique, iterations: iter, accepted: true, history };
-    }
-    priorIssues = critique.issues;
-  }
-
-  // None cleared the bar. Prefer the best NON-FATAL attempt; if every candidate
-  // was fatal there is nothing safe to return, so the last one comes back
-  // flagged and the caller owns the fail-closed decision.
-  if (!best) {
-    const lastCritique = history[history.length - 1]!;
-    log(`${label}: exhausted ${maxIters} iters and EVERY candidate carried a fatal defect`);
-    return {
-      value: lastValue as T,
-      critique: lastCritique,
+    return record({
+      value: b.value,
+      critique: b.critique,
       iterations: maxIters,
       accepted: false,
-      fatal: true,
       history,
-    };
+    }, true);
+  } catch (error) {
+    recordModuleCritique({
+      label,
+      scores: history.map((item) => item.score),
+      passes: history.map((item) => item.pass),
+      fatalIterations: history.map((item) => item.fatal === true),
+      issueCounts: history.map((item) => item.issues.length),
+      accepted: false,
+      fatal: false,
+      completed: false,
+    });
+    throw error;
   }
-  const b = best;
-  log(
-    `${label}: exhausted ${maxIters} iters — returning best (score=${b.critique.score.toFixed(2)})`,
-  );
-  return {
-    value: b.value,
-    critique: b.critique,
-    iterations: maxIters,
-    accepted: false,
-    history,
-  };
 }

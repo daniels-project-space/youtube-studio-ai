@@ -10,7 +10,17 @@ import {
 } from "@/lib/planWeekPreparation";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { DELIVERY_METADATA_VERSION } from "@/lib/metadataDelivery";
+import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "@/engine/channelAwareScriptQaSelection";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
+import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import { designPipeline } from "@/engine/designer";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -28,6 +38,8 @@ const base: PlanWeekPreparationManifest = {
 let manifestBytes: Uint8Array = new Uint8Array();
 let reads: string[] = [];
 let paidCalls = 0;
+let paidInput: unknown;
+let paidOutput: unknown;
 let writes = 0;
 let dispatches = 0;
 let mutations = 0;
@@ -37,12 +49,34 @@ let sidecarMode: "existing" | "missing" | "stop" | "error" | "bytes" = "existing
 let sidecarError: unknown;
 let sidecarBytes = Buffer.from("{}");
 let channelPipeline: unknown[] = [];
+function weekAheadTestChannel() {
+  const programBrief = createChannelProgramBrief({
+    family: "narrated_stock", nicheKey: "psychology", locale: "en",
+    concept: "A clear, recurring channel program with a bounded viewer promise.",
+  });
+  const programRoute = resolveChannelProgramRoute(programBrief);
+  const designed = designPipeline({ family: programBrief.family, nicheKey: programBrief.nicheKey,
+    locale: programBrief.locale, programBrief, programRoute });
+  const pipeline = designed.pipeline.map((entry) => {
+    const override = channelPipeline.find((candidate) => candidate && typeof candidate === "object" &&
+      (candidate as { block?: unknown }).block === entry.block) as { version?: unknown } | undefined;
+    return override ? { ...entry, version: override.version } : entry;
+  });
+  const showProfile = createChannelShowProfile({ programBrief, programRoute, pipeline });
+  return { ...scope, name: "Test channel", identity: { nicheKey: programBrief.nicheKey,
+    programBrief, programRoute, showProfile }, pipeline };
+}
 const sidecarBoundary = new Error("unversioned task reached the existing sidecar boundary");
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 const originalUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-const paid = async () => { paidCalls++; throw new Error("paid call forbidden"); };
+const paid = async (input: unknown) => {
+  paidInput = input;
+  paidCalls++;
+  if (paidOutput !== undefined) return paidOutput;
+  throw new Error("paid call forbidden");
+};
 
 async function main(): Promise<void> {
   globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
@@ -56,7 +90,7 @@ async function main(): Promise<void> {
     if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
     if (id === "@/lib/studioConvexHttpClient") return {
       StudioConvexHttpClient: class {
-        async query() { return { ...scope, pipeline: channelPipeline }; }
+        async query() { return weekAheadTestChannel(); }
         async mutation() { mutations++; throw new Error("mutation forbidden"); }
       },
     };
@@ -102,6 +136,24 @@ async function main(): Promise<void> {
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "music" }, { block: "script_gen", version: undefined, params: { version: "provider-model" } },
     ], "test"));
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test", "short_form_bed"), "weekly preparation admits the short-form ABI only for its matching module role");
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test", "narration_bed"), /requires short_form_bed/);
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test"), /actual role: unresolved/);
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+    ], "test"), "weekly preparation executes the exact frozen channel-aware reviewer before TTS");
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
+      { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+    ], "test"), "weekly preparation implements the exact identity-grounded writer contract");
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "qa_script", version: "2.0.0-unqualified" },
+    ], "test"), /qa_script@"2\.0\.0-unqualified"/);
     assert.throws(() => assertWeeklyPreparationVersionsSupported([
       { block: "music", version: "1.0.0-migration" }, { block: "script_gen", version: "2.0.0" },
     ], "test"), (error: unknown) => {
@@ -143,14 +195,23 @@ async function main(): Promise<void> {
 
     const downstream = { block: "metadata", version: DELIVERY_METADATA_VERSION, params: { targetDurationSec: 7200 } };
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([downstream], "test"));
+    const assembly = { block: "timeline_assemble", version: COMPOSER_MIX_ASSEMBLY_VERSION };
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([assembly], "test"));
     for (const bad of [
       { ...downstream, block: "music" }, { ...downstream, version: "2.0.0-unqualified" },
       { ...downstream, params: {} }, { ...downstream, params: { targetDurationSec: "7200" } },
+      { ...assembly, version: "2.0.0-unqualified" },
     ]) assert.throws(() => assertWeeklyPreparationVersionsSupported([bad], "test"), /unsupported explicit/);
     const selected = normalizePlanWeekPreparationManifest({ ...base, execution: {
       ...base.execution, pipeline: [...base.execution.pipeline, downstream],
     } });
     assert.deepEqual(selected.execution.pipeline.at(-1), downstream, "weekly freezing must not erase the downstream version");
+    const withAssembly = normalizePlanWeekPreparationManifest({ ...base, execution: {
+      ...base.execution, pipeline: [...base.execution.pipeline, assembly],
+    } });
+    assert.deepEqual(withAssembly.execution.pipeline.at(-1), assembly, "week-ahead receipts preserve the admitted assembly ABI");
+    assert.notEqual(planWeekPreparationManifestSha256(selected), planWeekPreparationManifestSha256(withAssembly),
+      "prepared receipts remain bound to the exact downstream assembly version");
     for (const changed of [{ ...downstream, version: "1.0.0-migration" },
       { ...downstream, params: { targetDurationSec: 3600 } }]) {
       const altered = normalizePlanWeekPreparationManifest({ ...selected, execution: {
@@ -172,7 +233,25 @@ async function main(): Promise<void> {
 
     // Unversioned invocations still reach the original reuse path. Stop there,
     // without manufacturing a successful receipt or issuing generation work.
-    manifestBytes = Buffer.from(canonicalJson(normalizePlanWeekPreparationManifest(base)));
+    const scriptManifest = normalizePlanWeekPreparationManifest({ ...base, execution: {
+      ...base.execution,
+      pipeline: [
+        { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+        { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+      ],
+      seedStore: {
+        bannedWords: ["The Missing Pin"],
+        channelName: "Inked Histories",
+        persona: "Careful viewers seeking evidence-led history.",
+        showBible: {
+          positioning: "Evidence-led histories about overlooked decisions.",
+          vibe: "Measured, humane, and exact.",
+          worksInSpace: ["Ground claims in documented details."],
+          avoidInSpace: ["Do not turn evidence gaps into suspense."],
+        },
+      },
+    } });
+    manifestBytes = Buffer.from(canonicalJson(scriptManifest));
     sidecarMode = "stop";
     for (const [name, producer] of producers) {
       reads = [];
@@ -218,8 +297,21 @@ async function main(): Promise<void> {
     assert.equal(dispatches, 0);
     assert.equal(networkCalls, 0);
     sidecarMode = "missing";
-    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run(payload), /paid call forbidden/);
-    assert.equal(paidCalls, 1, "confirmed missing object still admits first-time script generation (stubbed)");
+    const scriptProducer = producers.find(([name]) => name === "script")![1];
+    paidOutput = {
+      hook: "A sealed archive changed everything.",
+      sections: [{ heading: "The Missing Pin", narration: "The missing pin changed the archive." }],
+      narrationText: "A sealed archive changed everything. The missing pin changed the archive.",
+      estDurationSec: 20,
+      closingLine: "Keep the record close.",
+    };
+    await assert.rejects(() => scriptProducer.run(payload), /weekly prepared script violates channel language policy: The Missing Pin/);
+    assert.equal(writes, 0, "a prohibited prepared script must not become a durable sidecar");
+    paidOutput = undefined;
+    await assert.rejects(() => scriptProducer.run(payload), /paid call forbidden/);
+    assert.equal(paidCalls, 2, "confirmed missing object admits first-time script generation (stubbed)");
+    assert.deepEqual((paidInput as { bannedWords?: unknown }).bannedWords, ["The Missing Pin"],
+      "prepared script generation must receive the exact frozen channel language policy");
     console.log("WEEKLY VERSION ADMISSION PASS: four real producers, version gates, bounded metadata, 28 ambiguous-read holds, 12 corrupt metadata holds, confirmed absence admits one stubbed purchase");
   } finally {
     loader._load = originalLoad;

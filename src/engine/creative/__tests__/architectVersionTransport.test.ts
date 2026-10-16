@@ -13,6 +13,8 @@ globalThis.fetch = async () => { throw new Error("version transport must not cal
 try {
   const base = designPipeline({ family: "music_loop", nicheKey: "lofi", lengthMinutes: 60 }).pipeline;
   const music = getManifest("music")!;
+  const baseMusicVersion = base.find((entry) => entry.block === "music")?.version;
+  assert.equal(typeof baseMusicVersion, "string", "the designer must freeze the current module ABI");
   const version = "2.0.0-transport-test";
   registerManifestVersion({ ...music, version });
   const pinned = base.map((entry) => entry.block === "music" ? { ...entry, version } : entry);
@@ -34,7 +36,11 @@ try {
   const noDecisions = applyArchitectPlan(pinned, { ...plan, decisions: [] }, { family: "music_loop" });
   assert.equal(noDecisions.pipeline.find((entry) => entry.block === "music")?.version, version);
   const legacy = applyArchitectPlan(base, plan, { family: "music_loop" });
-  assert.equal(Object.hasOwn(legacy.pipeline.find((entry) => entry.block === "music")!, "version"), false);
+  assert.equal(
+    legacy.pipeline.find((entry) => entry.block === "music")?.version,
+    baseMusicVersion,
+    "an architect edit must preserve the exact version already frozen into its source pipeline",
+  );
   for (const invalid of ["9.9.9", " 1.0.0-migration", "1.0.0-migration "]) {
     const unknown = pinned.map((entry) => entry.block === "music" ? { ...entry, version: invalid } : entry);
     const rejected = applyArchitectPlan(unknown, plan, { family: "music_loop" });

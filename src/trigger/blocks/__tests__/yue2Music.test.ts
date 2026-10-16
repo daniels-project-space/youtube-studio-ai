@@ -7,7 +7,7 @@ import type { YuE2DurableEvaluationInput } from "@/lib/yue2DurableEvaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
 
 const read = (name: string) => JSON.parse(readFileSync(`test-fixtures/music-composer/seaside-after/${name}.json`, "utf8"));
-const retained = read("gpu-material"), brief = read("brief").musicBrief;
+const retained = read("gpu-material");
 const arrangement = retained.request.acceptedArrangement;
 const policy = { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
   rate_source: "operator_configured", rate_reference: "synthetic admission policy", runtime_id: "fixture",
@@ -87,6 +87,10 @@ async function main() {
   const { runPipeline } = load("@/engine/runner") as typeof import("@/engine/runner");
   const { rehydrateOutputs } = load("@/lib/rehydrate") as typeof import("@/lib/rehydrate");
   const { YUE2_MUSIC_CANDIDATE_VERSION } = load("../yue2Music") as typeof import("../yue2Music");
+  const { createChannelProgramBrief } = load("@/engine/channelProgramBrief") as typeof import("@/engine/channelProgramBrief");
+  const { createMusicReviewContext } = load("@/engine/acceptedMusicArrangement") as typeof import("@/engine/acceptedMusicArrangement");
+  const { channelProgramRouteRunSeed, resolveChannelProgramRoute } = load("@/engine/channelProgramRoute") as typeof import("@/engine/channelProgramRoute");
+  const { createOriginalMusicProgramPlan } = load("@/engine/originalMusicProgram") as typeof import("@/engine/originalMusicProgram");
   _resetBlocks(); registerAllBlocks();
   const selected = getManifest("music", YUE2_MUSIC_CANDIDATE_VERSION)!;
   assert.ok(selected && !allManifests().includes(selected));
@@ -94,6 +98,53 @@ async function main() {
   assert.deepEqual(Object.keys(selected.produces), ["yue2MusicCandidate"]);
   assert.deepEqual(selected.capabilities, ["audio.music_candidate"]);
   assert.equal(selected.retryAndResume.retryable, false);
+
+  const brief = createChannelProgramBrief({ family: "music_loop", locale: "en-US", nicheKey: "lofi",
+    concept: "Original instrumental focus sessions with calm seamless visual loops.",
+    audience: "people seeking focused instrumental background music", sampleTopics: [arrangement.topic] });
+  const route = resolveChannelProgramRoute(brief)!;
+  const routeSeed = channelProgramRouteRunSeed({ route, programBrief: brief });
+  const musicProgramPlan = createOriginalMusicProgramPlan({ route: routeSeed, topic: arrangement.topic, providerPreference: "yue2" });
+  const routeBoundContext = { ...context, store: { ...context.store, channelProgramRoute: routeSeed, musicProgramPlan } };
+  for (const [patch, reason] of [
+    [changedArrangement({ arrangement: { ...arrangement.arrangement, role: "sleep_sound_bed" }, musicIntent: { ...arrangement.musicIntent, role: "sleep_sound_bed" } }), /requires a primary_music arrangement/],
+    [changedArrangement({ arrangement: { ...arrangement.arrangement, playback: "once" }, musicIntent: { ...arrangement.musicIntent, playback: "once" } }), /requires a repeating primary-music arrangement/],
+  ]) {
+    reset();
+    await assert.rejects(selected.execute({ ...routeBoundContext,
+      store: { ...routeBoundContext.store, acceptedMusicArrangement: patch } }), reason);
+    assert.equal(calls.length + reads + bootstraps, 0, "route-incompatible arrangements must refuse before paid or storage I/O");
+  }
+  const sleepBrief = createChannelProgramBrief({ family: "sleep", locale: "en-US", nicheKey: "history",
+    concept: "Quiet continuous sleep soundscapes without attention-catching changes.",
+    audience: "people seeking stable overnight sleep sound", sampleTopics: [arrangement.topic] });
+  const sleepRoute = resolveChannelProgramRoute(sleepBrief)!;
+  const sleepRouteSeed = channelProgramRouteRunSeed({ route: sleepRoute, programBrief: sleepBrief });
+  const wrongSleepArrangement = changedArrangement({
+    arrangement: { ...arrangement.arrangement, role: "primary_music" },
+    musicIntent: { ...arrangement.musicIntent, role: "primary_music" },
+    reviewContext: createMusicReviewContext({
+      topic: arrangement.reviewContext.topic,
+      family: "sleep",
+      channelName: arrangement.reviewContext.channelName,
+      promptContext: arrangement.reviewContext.promptContext,
+    }),
+  });
+  reset();
+  await assert.rejects(selected.execute({ ...context, store: { ...context.store,
+    channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: wrongSleepArrangement } }), /requires a sleep_sound_bed arrangement/);
+  assert.equal(calls.length + reads + bootstraps, 0, "a sleep route must not pass a primary-music arrangement to YuE2");
+
+  const guidedMeditationArrangement = changedArrangement({
+    arrangement: { ...arrangement.arrangement, role: "meditation_bed" },
+    musicIntent: { ...arrangement.musicIntent, role: "meditation_bed" },
+  });
+  reset();
+  await assert.rejects(selected.execute({ ...context, store: { ...context.store,
+    channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: guidedMeditationArrangement } }),
+  /review context does not match the current channel route family/);
+  assert.equal(calls.length + reads + bootstraps, 0,
+    "a cross-family arrangement must refuse before paid or storage I/O");
 
   for (const patch of [
     { ownerId: "another-owner" }, { channelId: "another-channel" }, { runId: "another-run" },
@@ -138,9 +189,11 @@ async function main() {
   assert.equal(waits, 8); assert.equal(calls.length, 9);
   assert.ok(calls.slice(1).every(call => call.recoverOnly === true));
 
-  registerManifest(manifestFromBlock({ id: "retained_brief_fixture", consumes: [], produces: ["musicBrief"],
-    run: async () => ({ musicBrief: structuredClone(brief) }) }, { capabilities: ["crew.accepted_music_arrangement"] }));
-  const entries = [{ block: "retained_brief_fixture" }, { block: "music_arrangement_plan" },
+  registerManifest(manifestFromBlock({ id: "retained_arrangement_fixture", consumes: [], produces: ["acceptedMusicArrangement"],
+    run: async () => ({ acceptedMusicArrangement: structuredClone(arrangement) }) }, {
+    capabilities: ["crew.accepted_music_arrangement", "music.arrangement.accepted"],
+  }));
+  const entries = [{ block: "retained_arrangement_fixture" },
     { block: "music", version: YUE2_MUSIC_CANDIDATE_VERSION, params }];
   const resolved = validatePipeline(entries, ["topic"]);
   for (const [consumer, seeds] of [["assemble", ["loopUnitKey"]],
@@ -154,7 +207,7 @@ async function main() {
     rehydrate: (block: string, outputs: Record<string, unknown>) => rehydrateOutputs(block, outputs, context.runId) };
   const result = await runPipeline(resolved, options);
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.store.acceptedMusicArrangement, arrangement, "actual planner seals the retained brief exactly");
+  assert.deepEqual(result.store.acceptedMusicArrangement, arrangement, "the source module receives the accepted arrangement unchanged");
   assert.equal(result.costTotal, 0.004208);
   assert.equal((result.store.yue2MusicCandidate as Record<string, unknown>).productionApproved, false);
   assert.equal(result.store.musicKey, undefined); assert.equal(result.store.musicUrl, undefined);

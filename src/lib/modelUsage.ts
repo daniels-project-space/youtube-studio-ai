@@ -8,6 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
+import type { CostModelUsageKind, ModelUsageCostSnapshot } from "@/engine/types";
 
 export type ModelCallKind =
   | "text"
@@ -67,6 +68,31 @@ export interface ModelUsageSummary {
   costUsd: number;
   unpricedCalls: number;
   groups: ModelUsageGroup[];
+}
+
+export function trackedUsageForKinds(
+  summary: ModelUsageSummary,
+  kinds?: ReadonlySet<CostModelUsageKind>,
+): ModelUsageCostSnapshot {
+  return summary.groups.reduce<ModelUsageCostSnapshot>(
+    (total, group) => {
+      if (kinds && !kinds.has(group.kind)) return total;
+      return {
+        calls: total.calls + group.calls,
+        cacheHits: total.cacheHits + group.cacheHits,
+        costUsd: total.costUsd + group.costUsd,
+        unpricedCalls: total.unpricedCalls + group.unpricedCalls,
+      };
+    },
+    { calls: 0, cacheHits: 0, costUsd: 0, unpricedCalls: 0 },
+  );
+}
+
+export function trackedCostForKinds(
+  summary: ModelUsageSummary,
+  kinds: ReadonlySet<CostModelUsageKind>,
+): number {
+  return trackedUsageForKinds(summary, kinds).costUsd;
 }
 
 interface ModelRate {

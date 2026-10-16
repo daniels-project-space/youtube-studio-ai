@@ -64,7 +64,7 @@ assert.equal(
 );
 
 const denseReviewEvidence = compactQaVisualReviewEvidenceForStage({
-  version: "video-review/v5",
+  version: "video-review/v6",
   source: { durationSec: 600, sha256: "a".repeat(64) },
   manifestKey: "owner/alice/runs/run-qa/visual-review/manifest.json",
   frames: Array.from({ length: 20_000 }, (_, index) => ({
@@ -102,6 +102,11 @@ const productionReleaseGate = narrated.indexOf("if (productionQa) {", releaseCer
 const receiptCreation = narrated.indexOf("createVisualReviewReleaseReceipt(");
 const qaStockEvidenceLoad = narrated.indexOf('consumer: "qa_visual"');
 const certificateCreation = narrated.indexOf("const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate(");
+assert.match(
+  narrated,
+  /critical\.push\(\.\.\.finalMasterNarratedStoryCoverageReleaseIssues\([\s\S]*?finalMasterNarratedStoryCoverage\.receipt\.coverage/,
+  "production qa_visual must block any failed narrated Story Spine beat, even when its duration-weighted average passes",
+);
 assert(
   releaseCertificateDeclaration >= 0 && productionReleaseGate >= 0 && productionReleaseGate < receiptCreation,
   "only production QA may persist durable release evidence; draft probes must remain certificate-free",

@@ -16,6 +16,7 @@
  * to gain a "text" variant first — tracked as a follow-up.
  */
 import type { ModuleCard } from "./moduleRegistry";
+import { TITLE_PROFILES } from "@/lib/titleProfile";
 
 const SCRIPT_MODULE: ModuleCard = {
   key: "script_gen",
@@ -142,16 +143,18 @@ const MUSIC_MODULE: ModuleCard = {
   key: "music",
   title: "Music",
   stage: "audio",
-  does: "Generates the background score, crossfading distinct tracks into the mix.",
+  does: "Generates the sealed route-specific audio program: foreground primary music or a narration-aware music, meditation, or sleep bed; visual loop generation belongs to visual modules.",
   customization: {
     capabilities: ["provider choice", "channel sound program", "structured arrangement", "style-prompt steering", "multi-track crossfade mix"],
     knobs: [
-      { id: "provider", type: "enum", values: ["mureka", "suno", "minimax_music3"], default: "mureka", describes: "music provider; MiniMax-Music3 is attribution-, license-, safeguards-, and quality-gated", servesStyles: ["platform"] },
-      { id: "prompt", type: "text", maxLength: 300, default: "", describes: "music style/mood prompt (e.g. 'calm ambient, soft pads, no drums')", servesStyles: ["lofi", "ambient"] },
+      { id: "provider", type: "enum", values: ["mureka", "suno", "minimax_music3"], default: "mureka", runtimeTargets: ["music_program_plan"], describes: "music provider; MiniMax-Music3 is attribution-, license-, safeguards-, and quality-gated", servesStyles: ["platform"] },
+      { id: "model", type: "text", maxLength: 12, default: "", describes: "optional provider-specific model ID; blank preserves the provider's default", servesStyles: ["platform"] },
+      { id: "prompt", type: "text", maxLength: 300, default: "", describes: "supplementary style/mood detail; channel identity remains primary, sleep routes ignore it, and MiniMax may trim it to preserve its caption limit", servesStyles: ["lofi", "ambient"] },
       { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },
       { id: "generationDurationSec", type: "number", range: [10, 300], default: 300, describes: "native channel-score duration before deterministic looping", servesStyles: ["lofi", "ambient", "documentary"] },
+      { id: "bodyMusicVol", type: "number", range: [0.01, 1], default: 0.16, describes: "channel-specific music-bed gain before assembly; narration and meditation beds only, while primary music and unattended sleep soundscapes keep their route-owned level", servesStyles: ["narration", "meditation", "sleep", "ambient"] },
     ],
-    presets: { lofi: { provider: "suno", trackCount: 4 } },
+    presets: { lofi: { trackCount: 4 } },
   },
 };
 
@@ -325,10 +328,16 @@ const METADATA_MODULE: ModuleCard = {
   customization: {
     capabilities: [
       "seven framed title candidates judged against the live feed",
+      "format-specific title profile for search, browse, serialized, music, and short-form discovery",
       "per-channel clickbait intensity",
       "runner-up retained for a click-through swap",
     ],
     knobs: [
+      {
+        id: "titleProfile", type: "enum", values: ["auto", ...Object.keys(TITLE_PROFILES)], default: "auto",
+        describes: "title length envelope and discovery framing; auto follows the sealed format profile, then channel/family",
+        servesStyles: ["documentary", "search", "serialized", "motivational", "children", "music", "shorts"],
+      },
       // 0-3 rather than a boolean. It was a binary tied to one voice archetype,
       // so ten of eleven archetypes shared identical, maximally restrained
       // rules — the same single-constant collapse that made every thumbnail
@@ -341,9 +350,14 @@ const METADATA_MODULE: ModuleCard = {
       },
     ],
     presets: {
-      documentary: { clickbaitLevel: 1 },
-      meditation: { clickbaitLevel: 0 },
-      commentary: { clickbaitLevel: 3 },
+      documentary: { titleProfile: "searchable_long", clickbaitLevel: 1 },
+      meditation: { titleProfile: "general", clickbaitLevel: 0 },
+      commentary: { titleProfile: "browse_long", clickbaitLevel: 3 },
+      serialized_lore: { titleProfile: "serialized_lore", clickbaitLevel: 1 },
+      children_quiz: { titleProfile: "children_quiz", clickbaitLevel: 0 },
+      music: { titleProfile: "music_loop", clickbaitLevel: 1 },
+      shorts: { titleProfile: "short_form", clickbaitLevel: 2 },
+      motivational: { titleProfile: "motivational", clickbaitLevel: 2 },
     },
   },
 };

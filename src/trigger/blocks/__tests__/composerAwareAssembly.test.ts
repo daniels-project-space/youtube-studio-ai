@@ -5,10 +5,10 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildChannelProfile } from "@/engine/channelProfile";
 import { validateArtifact } from "@/engine/artifactSchemas";
+import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import { composerDirectives, resolveComposerConfig } from "@/lib/crew/composer";
 import { resolveAssembleParams } from "@/lib/assembly/planTimeline";
 import type { StageContext } from "@/engine/types";
-import { COMPOSER_MIX_ASSEMBLY_VERSION, createComposerAwareAssemblyManifest } from "../composerAwareAssembly";
 
 type Args = Record<string, unknown>;
 const calls: { bodies: Args[]; compositions: Args[]; targets: number[]; voiceFx: number } = {
@@ -23,6 +23,7 @@ const convexEnv = { public: process.env.NEXT_PUBLIC_CONVEX_URL, private: process
 delete process.env.NEXT_PUBLIC_CONVEX_URL;
 delete process.env.CONVEX_URL;
 let networkCalls = 0;
+let finalProbeDurationSec = 10;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in assembly evaluation"); };
 
 async function encoded(path: string): Promise<string> {
@@ -50,7 +51,10 @@ loader._load = function (id, ...args) {
     assembleBeatBody: async (input: Args) => { calls.bodies.push(input); return encoded(String(input.outPath)); },
     composeWithIntro: async (input: Args) => { calls.compositions.push(input); return encoded(String(input.outPath)); },
     normalizeAudioOnly: async (_input: string, output: string, target: number) => { calls.targets.push(target); return encoded(output); },
-    probe: async () => ({ durationSec: 10, width: 1920, height: 1080, hasAudio: true }),
+    probe: async (path: string) => ({
+      durationSec: path.endsWith("video_norm.mp4") ? finalProbeDurationSec : 10,
+      width: 1920, height: 1080, hasAudio: true,
+    }),
     applyVoiceFx: async () => { calls.voiceFx++; throw new Error("assembly must not apply narration effects"); },
   };
   return actual;
@@ -62,6 +66,8 @@ async function main() {
   const { registerAllBlocks, _resetBlocks } = require("@/engine/blocks") as typeof import("@/engine/blocks");
   const registry = require("@/engine/registry") as typeof import("@/engine/registry");
   const { timelineAssemble } = require("../narratedBlocks") as typeof import("../narratedBlocks");
+  const { COMPOSER_MIX_ASSEMBLY_VERSION, createComposerAwareAssemblyManifest } =
+    require("../composerAwareAssembly") as typeof import("../composerAwareAssembly");
   /* eslint-enable @typescript-eslint/no-require-imports */
   _resetBlocks();
   registerAllBlocks();
@@ -108,8 +114,28 @@ async function main() {
       narrationDurationSec: 10, musicKey: "test/music.mp3", musicUrl: "https://unused.invalid/music.mp3",
       cutSheet: { sections: [{ name: "body", cutsPerMin: 6 }], transitions: "crossfade" },
       ...(musicBrief === undefined ? {} : { musicBrief }),
+      topic: "Measured attention",
     }),
   });
+  function attachMusicProgram(ctx: StageContext, bodyMusicVol: number) {
+    const program = createChannelMusicProgram({
+      channelId: ctx.channelId,
+      channelIdentityFingerprint: "a".repeat(64),
+      family: "meditation",
+      contentLaneKey: "ambient_guided",
+      topic: String(ctx.store.topic),
+      bodyMusicVol,
+      durationSec: 120,
+    });
+    const key = `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${program.fingerprint}.json`;
+    stored.set(key, Buffer.from(JSON.stringify(program)));
+    return { key, fingerprint: program.fingerprint };
+  }
+  function storeWithoutBrief(ctx: StageContext) {
+    const store = { ...ctx.store };
+    delete store.musicBrief;
+    return store;
+  }
   function resetCalls() {
     calls.bodies.length = 0; calls.compositions.length = 0; calls.targets.length = 0; calls.voiceFx = 0;
     stored.clear();
@@ -143,6 +169,39 @@ async function main() {
     await run(edl, { targetLufs: -12 }, 0.25, -12);
     await run(edl, {}, 0.1026, -14, {});
     resetCalls();
+    const programContext = makeContext(edl);
+    const programHandoff = attachMusicProgram(programContext, 0.33);
+    const programStore = Object.freeze({ ...storeWithoutBrief(programContext),
+      channelMusicProgramKey: programHandoff.key,
+      channelMusicProgramFingerprint: programHandoff.fingerprint,
+    });
+    await revised.execute({ ...programContext, store: programStore });
+    assert.equal(calls.compositions[0].bodyMusicVol, 0.33, "assembly consumes the validated channel music program when no higher-priority mix directive exists");
+
+    for (const invalidHandoff of [
+      { channelMusicProgramKey: programHandoff.key, channelMusicProgramFingerprint: undefined },
+      { channelMusicProgramKey: programHandoff.key, channelMusicProgramFingerprint: "b".repeat(64) },
+      { channelMusicProgramKey: `${programContext.keyPrefix}runs/another-run/audio/channel-music-program-${programHandoff.fingerprint}.json`, channelMusicProgramFingerprint: programHandoff.fingerprint },
+    ]) {
+      resetCalls();
+      const invalidContext = makeContext(edl);
+      const sameRunStore = Object.freeze({ ...storeWithoutBrief(invalidContext),
+        ...invalidHandoff,
+      });
+      await assert.rejects(revised.execute({ ...invalidContext, store: sameRunStore }));
+      assert.equal(calls.bodies.length + calls.compositions.length + calls.targets.length, 0, "invalid music-program handoffs reject before encode");
+    }
+
+    resetCalls();
+    const overriddenContext = makeContext(edl, { bodyMusicVol: 0.07 });
+    const overriddenHandoff = attachMusicProgram(overriddenContext, 0.33);
+    await revised.execute({ ...overriddenContext, store: Object.freeze({ ...storeWithoutBrief(overriddenContext),
+      channelMusicProgramKey: overriddenHandoff.key,
+      channelMusicProgramFingerprint: overriddenHandoff.fingerprint,
+    }) });
+    assert.equal(calls.compositions[0].bodyMusicVol, 0.07, "explicit assembly gain retains precedence over program defaults");
+
+    resetCalls();
     const absentContext = makeContext(edl);
     const absentStore = { ...absentContext.store };
     delete absentStore.musicBrief;
@@ -174,6 +233,18 @@ async function main() {
       assert.equal(calls.bodies.length + calls.compositions.length + calls.targets.length, 0);
     }
   }
+
+  resetCalls();
+  finalProbeDurationSec = 10 + 2 / 30;
+  const wrongDurationContext = makeContext(false);
+  await assert.rejects(
+    () => revised.execute(wrongDurationContext),
+    /final master duration .* differs from target/i,
+    "the active legacy assembly must refuse a final file that drifts beyond one video frame",
+  );
+  assert.ok(!stored.has(`${wrongDurationContext.keyPrefix}runs/${wrongDurationContext.runId}/final.mp4`),
+    "duration-invalid output must not be persisted as the final master");
+  finalProbeDurationSec = 10;
   // Delegate identity and pass-through invariants are also checked directly;
   // neither a profile nor unrelated/voice params may be rewritten by the wrapper.
   let received: StageContext | undefined;

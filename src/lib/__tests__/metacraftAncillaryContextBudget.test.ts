@@ -3,7 +3,7 @@ import Module from "node:module";
 
 /**
  * The title generator and semantic judge still receive the complete source,
- * but the post-selection description/comment calls do not need to repeat a
+ * but the post-selection description package does not need to repeat a
  * very long narration. This test pins that split and measures the bounded
  * prompt payload rather than relying on a provider response.
  */
@@ -70,11 +70,11 @@ async function main(): Promise<void> {
     assert.equal(result.title, "Roman Aqueducts Moved Water Across Mountains");
 
     const sourceTexts = prompts.map((prompt) => contextFrom(prompt).source?.text ?? "");
-    assert.equal(sourceTexts.length, 4, "one generation, judge, package and comment call is expected");
+    assert.equal(sourceTexts.length, 3, "only generation, judge and the required package call are expected");
     assert.equal(sourceTexts.filter((text) => text === source).length, 2,
       "title generation and semantic judging retain the complete source");
     const compact = sourceTexts.filter((text) => text !== source);
-    assert.equal(compact.length, 2, "only ancillary calls should use the compact source");
+    assert.equal(compact.length, 1, "only the package call should use the compact source");
     for (const text of compact) {
       assert.ok(text.length <= ANCILLARY_SOURCE_CHAR_BUDGET, "ancillary source must stay inside its hard character budget");
       assert.match(text, /middle of narration omitted for ancillary packaging/);
@@ -83,9 +83,9 @@ async function main(): Promise<void> {
     }
     const oldSourceChars = source.length * sourceTexts.length;
     const newSourceChars = sourceTexts.reduce((total, text) => total + text.length, 0);
-    assert.ok(newSourceChars < oldSourceChars * 0.6,
+    assert.ok(newSourceChars < oldSourceChars * 0.75,
       `ancillary compaction should cut repeated source payload materially (${newSourceChars}/${oldSourceChars})`);
-    console.log(`METACRAFT ANCILLARY CONTEXT PASS — ${oldSourceChars - newSourceChars} source chars avoided across package/comment calls`);
+    console.log(`METACRAFT ANCILLARY CONTEXT PASS — ${oldSourceChars - newSourceChars} source chars avoided across the package call`);
   } finally {
     loader._load = originalLoad;
     globalThis.fetch = originalFetch;

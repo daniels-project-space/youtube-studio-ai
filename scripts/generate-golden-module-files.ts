@@ -39,9 +39,10 @@ const CURATED: Record<string, readonly string[]> = {
     "src/trigger/inlinePaidExecutionLease.ts",
     "src/trigger/runPipeline.ts",
   ],
-  // These owners previously protected the shared helpers inside lofiBlocks.
-  // Music's executable file is discovered separately from its block id.
-  music: ["src/trigger/blocks/blockContext.ts"],
+  // These owners previously protected shared helpers inside lofiBlocks.
+  // Music's executable file is discovered separately from its block id; its
+  // release gate is a shared policy module with no executable block id.
+  music: ["src/trigger/blocks/blockContext.ts", "src/trigger/blocks/musicReleaseGate.ts"],
   lofi: ["src/trigger/blocks/blockContext.ts"],
   "topic-intel": ["src/trigger/blocks/blockContext.ts"],
   ship: ["src/trigger/blocks/blockContext.ts"],

@@ -1,3 +1,5 @@
+import type { ChannelMusicRole } from "../channelMusicRole";
+
 /**
  * Creative-direction layer types — the "film crew" contracts.
  *
@@ -122,6 +124,8 @@ export interface StyleDNA {
 
   /* --- Audio / music --- */
   audio: {
+    /** Stable channel-level purpose; older persisted StyleDNA may omit it. */
+    role?: ChannelMusicRole;
     genre: string;
     /** [min, max] BPM band. */
     bpmRange: [number, number];
@@ -131,6 +135,8 @@ export interface StyleDNA {
     moodArc: string;
     /** Integrated-loudness master target (LUFS). */
     loudnessLufs: number;
+    /** Optional final body-music gain for this channel. */
+    bodyMusicVol?: number;
     loopable: boolean;
   };
 
@@ -160,8 +166,8 @@ export interface StyleDNA {
 /**
  * The per-channel bar every block's critic judges against. Coarse 0-1-2 scoring
  * (research-backed: 3 levels stabilize an LLM judge). `target` is the channel's
- * "80%". Deterministic floors (CLIP similarity, LUFS window, loop-seam SSIM) are
- * the un-gameable anchors against reward-hacking. Stored on `channels.qaRubric`.
+ * "80%". Objective media gates are enforced by owning pipeline modules; this
+ * rubric guides reviewer scoring. Stored on `channels.qaRubric`.
  */
 export interface QualityDimension {
   /** "thumbnail" | "loop_seam" | "music" | "script" | "footage" | "identity" | … */
@@ -170,7 +176,7 @@ export interface QualityDimension {
   description: string;
   /** Minimum 0..2 to pass. */
   minScore: number;
-  /** Optional deterministic floor the loop cannot talk past. */
+  /** Optional evaluator metric hint; the rubric itself does not execute it. */
   metric?: string;
   op?: ValidationOp;
   threshold?: number;

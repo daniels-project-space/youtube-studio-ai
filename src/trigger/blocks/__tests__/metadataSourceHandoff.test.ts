@@ -45,6 +45,13 @@ async function main() {
   const baseStore = {
     topic: 'Roman aqueduct engineering', channelName: 'Water Archive', niche: 'history',
     persona: 'Patient engineering historian', competitors: [{ topVideos: [{ title: 'Roman water systems', views: 200 }] }],
+    hook: 'The aqueduct carried water farther than the city could see.',
+    showBible: {
+      positioning: 'Patient, source-led histories of practical engineering.',
+      vibe: 'Quietly curious and exact.',
+      worksInSpace: ['Let physical details reveal the wider mechanism.'],
+      avoidInSpace: ['Do not inflate the discovery into a mystery.'],
+    },
     styleDNA: { seo: { titleFormula: 'State the engineering consequence' } },
   };
   const full = '  ' + 'Roman aqueducts moved water across difficult terrain. '.repeat(50) + '\nThe route carried water for 240 miles. 尾声 🌊\n';
@@ -63,13 +70,18 @@ async function main() {
   try { output = await run({ narrationText: full }); } catch (caught) { error = caught; }
   assert.ifError(error);
   assert.ok(prompts[0]?.includes(JSON.stringify(full)), 'Generator lost exact full narration at the production caller');
+  assert.match(prompts[0], /Use Hookcraft's independently reviewed package hook to understand the intended angle/);
   assert.equal(output?.title, candidate, 'Late-source claim must survive the actual lint and finishing path');
   const contexts = prompts.map(contextFrom);
-  assert.equal(contexts.length, 4);
+  assert.equal(contexts.length, 3);
   for (const context of contexts) {
-    assert.deepEqual(context, contexts[0], 'Generation, judge, description and comment must share source and identity');
+    assert.deepEqual(context, contexts[0], 'Generation, judge and description must share source and identity');
     assert.equal(context.source.text, full);
     assert.equal(context.source.kind, 'full_narration');
+    assert.equal(context.episode.packageHook, baseStore.hook,
+      'MetaCraft must receive Hookcraft\'s reviewed package hook as a framing cue');
+    assert.ok(context.channel.authoredVoice.some((line: string) => line.includes('Quietly curious and exact')),
+      'MetaCraft generation, judging, and description must receive the authored channel voice');
     assert.equal(context.channel.persona, baseStore.persona);
     assert.equal(context.channel.titleFormula, baseStore.styleDNA.seo.titleFormula);
   }

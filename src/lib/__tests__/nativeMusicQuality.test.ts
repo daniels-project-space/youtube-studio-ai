@@ -48,12 +48,20 @@ async function main(): Promise<void> {
   const work = await mkdtemp(join(tmpdir(), "native-music-quality-test-"));
   try {
     const stable = join(work, "stable.wav");
+    const lowBass = join(work, "low-bass.wav");
     const collapsed = join(work, "collapsed.wav");
     const delayedCollapsed = join(work, "delayed-collapsed.wav");
     const dynamicFloat = join(work, "dynamic-float.wav");
     // Both windows contain the same low- and high-band content.
     render(stable, [
       "-f", "lavfi", "-i", "aevalsrc=0.22*sin(2*PI*440*t)+0.13*sin(2*PI*8000*t):s=32000:d=8",
+      "-ac", "2",
+    ]);
+    // A role-correct sleep/meditation bed may intentionally have no useful
+    // energy above 5 kHz. That must not look like the known opening-collapse
+    // defect when the opening and interior are equally low-band.
+    render(lowBass, [
+      "-f", "lavfi", "-i", "aevalsrc=0.22*sin(2*PI*80*t):s=32000:d=8",
       "-ac", "2",
     ]);
     // This reproduces the reported failure signature: a healthy opening that
@@ -76,14 +84,16 @@ async function main(): Promise<void> {
     render(dynamicFloat, ["-f", "lavfi", "-i",
       "aevalsrc=between(t\\,1\\,7)*(0.1+1.1*sin(2*PI*440*t))|between(t\\,1\\,7)*0.2*sin(2*PI*8000*t):s=48000:d=8"], "pcm_f32le");
 
-    const [stableAnalysis, collapsedAnalysis, delayedCollapsedAnalysis] = await Promise.all([
+    const [stableAnalysis, lowBassAnalysis, collapsedAnalysis, delayedCollapsedAnalysis] = await Promise.all([
       measureNativeMusicQuality({ audio: await readFile(stable), durationSec: 8 }),
+      measureNativeMusicQuality({ audio: await readFile(lowBass), durationSec: 8 }),
       measureNativeMusicQuality({ audio: await readFile(collapsed), durationSec: 8 }),
       measureNativeMusicQuality({ audio: await readFile(delayedCollapsed), durationSec: 12 }),
     ]);
     const floatAnalysis = await measureNativeMusicQuality({ audio: await readFile(dynamicFloat), durationSec: 8 });
-    for (const [path, duration, analysis] of [[stable, 8, stableAnalysis], [collapsed, 8, collapsedAnalysis],
-      [delayedCollapsed, 12, delayedCollapsedAnalysis], [dynamicFloat, 8, floatAnalysis]] as const) {
+    for (const [path, duration, analysis] of [[stable, 8, stableAnalysis], [lowBass, 8, lowBassAnalysis],
+      [collapsed, 8, collapsedAnalysis], [delayedCollapsed, 12, delayedCollapsedAnalysis],
+      [dynamicFloat, 8, floatAnalysis]] as const) {
       const expected = separatePassMeasurements(path, duration);
       const measured = Object.fromEntries(Object.keys(expected).map(key =>
         [key, analysis.measurements[key as keyof typeof analysis.measurements]]));
@@ -92,6 +102,10 @@ async function main(): Promise<void> {
     assert(stableAnalysis.measurements.openingHighBandDropDb < 2, "stable high-band material must not resemble the Music3 degradation");
     assert.equal(stableAnalysis.measurements.mechanicalArtifactScore, 0);
     assert.equal(hasKnownMiniMaxMusic3OpeningDegradation(stableAnalysis), false);
+    assert(lowBassAnalysis.openingHighBand.meanDbfs < -55, "the low-bass fixture must contain negligible 5 kHz+ energy");
+    assert.equal(lowBassAnalysis.measurements.openingHighBandDropDb, 0);
+    assert.equal(hasKnownMiniMaxMusic3OpeningDegradation(lowBassAnalysis), false,
+      "a stable low-frequency-only sleep/meditation bed must not trigger the spectral-collapse retry");
     assert(
       collapsedAnalysis.measurements.openingHighBandDropDb > MAX_OPENING_HIGH_BAND_DROP_DB,
       "a post-opening high-band collapse must be caught from the native WAV",

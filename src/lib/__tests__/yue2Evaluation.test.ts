@@ -756,19 +756,31 @@ async function main(): Promise<void> {
         sourceBrief: { symbolicScorePolicy: "instrumental" } }), /requires a symbolic score/);
       assert.throws(() => validateYuE2EvaluationRequest({ ...current, job: { ...current.job, abc: undefined } }), /explicit score/);
     });
-    await test("natural source timing is restricted to repeat-playback primary and meditation music", () => {
-      for (const role of ["primary_music", "meditation_bed", "narration_bed", "short_form_bed"] as const) {
+    await test("natural source timing is restricted to repeat-playback primary, meditation, and sleep music", () => {
+      for (const role of ["primary_music", "meditation_bed", "sleep_sound_bed", "narration_bed", "short_form_bed"] as const) {
         for (const playback of ["once", "repeat"] as const) {
           const accepted = createAcceptedMusicArrangement({ ownerId: arrangement.ownerId, channelId: arrangement.channelId,
             runId: arrangement.runId, topic: arrangement.topic, sourceBrief: {},
             arrangement: { ...arrangement.arrangement, role, playback } });
           const scoped = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
           assert.ok(scoped.job.schema_version === 2);
-          const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed");
+          const natural = playback === "repeat" && (role === "primary_music" || role === "meditation_bed" || role === "sleep_sound_bed");
           assert.equal(scoped.job.source_duration_policy, natural ? "natural_loop" : "exact");
           assert.deepEqual(validateYuE2EvaluationRequest(scoped), scoped);
-          if (!natural) assert.throws(() => validateYuE2EvaluationRequest({ ...scoped,
-            job: { ...scoped.job, source_duration_policy: "natural_loop" } }), /accepted arrangement/);
+          const rejectedPolicies: Array<"exact" | "natural_loop" | undefined> = natural
+            ? ["exact", undefined] : ["natural_loop", undefined];
+          for (const policy of rejectedPolicies) {
+            const changed = clone(scoped);
+            assert.ok(changed.job.schema_version === 2);
+            if (policy === undefined) delete changed.job.source_duration_policy;
+            else changed.job.source_duration_policy = policy;
+            const { job_id: _oldId, ...body } = changed.job;
+            void _oldId;
+            changed.job.job_id = `yue2-eval-${yue2Sha256(canonicalJson({ version: changed.version,
+              programFingerprint: changed.programFingerprint, manifestSha256: changed.manifestSha256, request: body }))}`;
+            assert.throws(() => validateYuE2EvaluationRequest(changed), /accepted arrangement/,
+              `${role}/${playback} must reject source-duration policy ${String(policy)}`);
+          }
         }
       }
     });

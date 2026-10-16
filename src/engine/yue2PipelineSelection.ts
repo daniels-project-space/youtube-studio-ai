@@ -1,9 +1,15 @@
 import { z } from "zod";
+import { ChannelMusicRoleSchema, LoopableChannelMusicRoleSchema } from "./channelMusicRole";
 import { MusicArrangementIntentSchema, type MusicArrangementIntent } from "./acceptedMusicArrangement";
 import { getManifest } from "./registry";
 import { canonicalJson } from "@/lib/canonicalJson";
 import type { PipelineEntry } from "./types";
 import { YuE2SourceConfigSchema } from "./yue2SourceConfig";
+import {
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  YUE2_SCORED_MUSIC_VERSION,
+} from "./musicModuleVersions";
 
 export interface YuE2PipelineSelection {
   musicIntent: MusicArrangementIntent & Required<Pick<MusicArrangementIntent, "playback" | "role" | "requestedDurationSec">>;
@@ -13,7 +19,7 @@ export interface YuE2PipelineSelection {
 
 export const YuE2PipelineSelectionSchema = z.object({
   musicIntent: MusicArrangementIntentSchema.and(z.object({
-    playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "short_form_bed"]),
+    playback: z.enum(["repeat", "once"]), role: ChannelMusicRoleSchema,
     requestedDurationSec: z.number().int().min(10).max(300),
   })),
   sourceParams: YuE2SourceConfigSchema,
@@ -22,7 +28,7 @@ export const YuE2PipelineSelectionSchema = z.object({
 /** Exact read-only graph projection; executable manifest validation remains mandatory at runtime. */
 export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE2PipelineSelection): PipelineEntry[] {
   const selected = YuE2PipelineSelectionSchema.parse(input);
-  const musicVersion = "3.0.0-yue2-candidate", composerVersion = "3.0.0-yue2-score";
+  const musicVersion = YUE2_SCORED_MUSIC_VERSION, composerVersion = "3.1.0-yue2-score-grounding";
   const assemblyVersion = selected.musicIntent.playback === "once"
     ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop";
   const sourceParams = selected.sourceParams;
@@ -43,8 +49,9 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   }
   const versions = new Map([[composerIndex, composerVersion], [musicIndex, musicVersion], [assemblyIndex, assemblyVersion]]);
   if (source.some(entry => ["scene_planner", "keyframes", "loop_clips"].includes(entry.block))) {
-    if (selected.musicIntent.playback !== "repeat" || selected.musicIntent.role !== "primary_music") {
-      throw new Error("YuE2 loop visuals require repeat primary-music intent");
+    if (selected.musicIntent.playback !== "repeat" ||
+      !LoopableChannelMusicRoleSchema.safeParse(selected.musicIntent.role).success) {
+      throw new Error("YuE2 loop visuals require repeat primary-music, meditation, or sleep-sound intent");
     }
     const programIndex = indexOfOne(["music_program_plan"]), sceneIndex = indexOfOne(["scene_planner"]);
     const keyframeIndex = indexOfOne(["keyframes"]), clipsIndex = indexOfOne(["loop_clips"]);
@@ -60,7 +67,9 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   }
   for (const [index, version] of versions) {
     const entry = source[index];
-    if (entry.version !== undefined && entry.version !== version) {
+    const canonicalProviderMusicVersion = entry.block === "music" &&
+      [MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION, LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION].includes(entry.version ?? "");
+    if (entry.version !== undefined && entry.version !== version && !canonicalProviderMusicVersion) {
       throw new Error(`YuE2 selection cannot replace explicitly pinned ${entry.block}@${entry.version}`);
     }
   }

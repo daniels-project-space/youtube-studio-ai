@@ -63,6 +63,7 @@ import { assertFrozenUploadQaEvidence } from "@/engine/frozenPipelineQaAdmission
 import {
   PAID_STAGE_RECONCILIATION_MARKER,
   runPipeline as runEngine,
+  type RemoteBlockResult,
 } from "@/engine/runner";
 import { ExecutionError } from "@/engine/executionErrors";
 import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
@@ -207,11 +208,17 @@ import {
   getNarrativeSeriesPlanRecord,
 } from "@/lib/narrativeSeriesStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
+import type { MusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
-import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
+import {
+  createMusicAuditionCheckpoint,
+  createMusicAuditionCheckpointV2,
+  MusicProviderAuditionSourceSchema,
+} from "@/engine/musicAuditionCheckpoint";
 import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
 import { createAutomaticPreflightReceipt } from "@/lib/automaticWorkflow";
 import { createAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
+import { narrationTranscriptProofLanguagePreflightIssue } from "@/lib/narrationTranscriptProof";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -402,6 +409,12 @@ export interface RunPipelineInput {
    */
   editorialEvidencePacketInput?: unknown;
   /**
+   * Operator-supplied legal replay source for the opt-in chess episode route.
+   * The chess_replay_source block validates its strict source schema before
+   * deriving any narration or downstream episode artifacts.
+   */
+  chessReplaySource?: unknown;
+  /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
    * expensive blocks (topic_select / script_gen / stock_footage / music) reuse
@@ -414,6 +427,7 @@ export interface RunPipelineInput {
     footageKeys?: string[];
     thirdPartyStockEvidence?: ThirdPartyStockEvidenceReference;
     musicKey?: string;
+    musicReuseReceipt?: MusicReuseReceipt;
   };
 }
 
@@ -1849,6 +1863,9 @@ export const runPipelineTask = task({
         // plain Convex values/R2 keys; credentials and live publish policy are
         // deliberately excluded and continue to be rechecked at side effect time.
         seedStore = {
+          ...(typeof channel.language === "string" && channel.language.trim()
+            ? { channelLanguage: channel.language }
+            : {}),
           ...(channel.thumbnailer ? { thumbnailer: channel.thumbnailer } : {}),
           topicPool: channel.identity?.topicPool ?? [],
           styleGrammar: channel.identity?.styleGrammar ?? "",
@@ -1971,6 +1988,7 @@ export const runPipelineTask = task({
             seedStore["reuseThirdPartyStockEvidence"] = payload.reuse.thirdPartyStockEvidence;
           }
           if (payload.reuse.musicKey) seedStore["reuseMusicKey"] = payload.reuse.musicKey;
+          if (payload.reuse.musicReuseReceipt) seedStore["reuseMusicReceipt"] = payload.reuse.musicReuseReceipt;
           if (payload.reuse.language) seedStore["reuseLanguage"] = payload.reuse.language;
           log(`run-pipeline: render-group REUSE active (lang=${payload.reuse.language}, ${payload.reuse.footageKeys?.length ?? 0} clips)`);
         }
@@ -2218,6 +2236,18 @@ export const runPipelineTask = task({
         ...(programRoute ? { programRouteFingerprint: programRoute.fingerprint } : {}),
         ...(probeBudgetAdmission ? { budgetAdmission: probeBudgetAdmission } : {}),
       });
+      const narrationLanguageIssue = narrationTranscriptProofLanguagePreflightIssue({
+        entries: invocationCandidate.entries,
+        inheritedLanguage: invocationCandidate.seedStore["reuseLanguage"],
+        channelLanguage: invocationCandidate.seedStore["channelLanguage"],
+      });
+      if (narrationLanguageIssue) {
+        throw new ExecutionError(narrationLanguageIssue, {
+          code: "NARRATION_TRANSCRIPT_LANGUAGE_UNQUALIFIED",
+          retryable: false,
+          phase: "pipeline_preflight",
+        });
+      }
       preflight(resolved, { budgetUsd: invocationCandidate.budgetUsd });
       const invocationSha256 = pipelineInvocationSha256(invocationCandidate);
       const claimedInvocation = await convex.mutation(api.runs.claimInvocationSnapshot, {
@@ -2314,10 +2344,16 @@ export const runPipelineTask = task({
       // The music block revalidates its bytes/program/receipts before use.
       const preparedWeeklyMusic = seedStore["preparedMusic"];
       requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && entry.version === "3.0.0-yue2-candidate");
-      requiresMusicAuditionCheckpoint = entries.some((entry) =>
-        entry.block === "music" && entry.params?.provider === "minimax_music3" &&
-        preparedWeeklyMusic === undefined && !requiresYuE2AuditionCheckpoint,
-      );
+      requiresMusicAuditionCheckpoint = entries.some((entry) => {
+        if (entry.block !== "music" || requiresYuE2AuditionCheckpoint) return false;
+        const provider = String(entry.params?.provider ?? "");
+        if (!["minimax_music3", "mureka", "suno"].includes(provider)) return false;
+        const preparedProvider = preparedWeeklyMusic && typeof preparedWeeklyMusic === "object"
+          ? String((preparedWeeklyMusic as Record<string, unknown>).provider ?? "") : "";
+        return preparedWeeklyMusic === undefined
+          ? true
+          : preparedProvider === "mureka" || preparedProvider === "suno";
+      });
       const paramsByBlock = snapshotParamsByBlock(entries);
       log(
         `Production compile ${compilation.policyId}@${compilation.policyVersion} ${compilation.fingerprint}: ` +
@@ -2503,7 +2539,7 @@ export const runPipelineTask = task({
             }
           };
           let res:
-            | { ok: true; output: { patch: Record<string, unknown> } }
+            | { ok: true; output: RemoteBlockResult }
             | { ok: false; error: unknown }
             | undefined;
           let postDispatchFailure: unknown;
@@ -2564,7 +2600,7 @@ export const runPipelineTask = task({
             const childFailure = `${child.id} child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`;
             throw await failureWithRecordedCost(childFailure);
           }
-          return (res.output as { patch: Record<string, unknown> }).patch;
+          return res.output;
         },
       };
       await convex.mutation(api.runs.heartbeatExecutionLease, {
@@ -2599,16 +2635,37 @@ export const runPipelineTask = task({
         }
         if (isMusicBoundary) {
           const programKey = typeof result.store.channelMusicProgramKey === "string" ? result.store.channelMusicProgramKey : "";
-          const runtimeKey = typeof result.store.musicRuntimeReceiptKey === "string" ? result.store.musicRuntimeReceiptKey : "";
-          const nativeWavKey = typeof result.store.musicNativeWavKey === "string" ? result.store.musicNativeWavKey : "";
-          if (!programKey || !runtimeKey || !nativeWavKey) throw new Error("MiniMax music boundary is missing durable program/runtime/native-WAV outputs");
-          const [programBytes, runtimeBytes] = await Promise.all([getObjectBytes(programKey), getObjectBytes(runtimeKey)]);
-          const checkpoint = createMusicAuditionCheckpoint({
-            ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
-            channelMusicProgramKey: programKey, musicRuntimeReceiptKey: runtimeKey, musicNativeWavKey: nativeWavKey,
-            program: JSON.parse(Buffer.from(programBytes).toString("utf8")),
-            runtimeReceipt: JSON.parse(Buffer.from(runtimeBytes).toString("utf8")),
-          });
+          if (!programKey) throw new Error("music audition boundary is missing its durable program output");
+          const programBytes = await getObjectBytes(programKey);
+          const program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+          const provider = result.store.musicProvider;
+          const checkpoint = await (provider === "minimax_music3"
+            ? (() => {
+              const runtimeKey = typeof result.store.musicRuntimeReceiptKey === "string" ? result.store.musicRuntimeReceiptKey : "";
+              const nativeWavKey = typeof result.store.musicNativeWavKey === "string" ? result.store.musicNativeWavKey : "";
+              if (!runtimeKey || !nativeWavKey) throw new Error("MiniMax music boundary is missing durable runtime/native-WAV outputs");
+              return getObjectBytes(runtimeKey).then(runtimeBytes => createMusicAuditionCheckpoint({
+                ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+                channelMusicProgramKey: programKey, musicRuntimeReceiptKey: runtimeKey, musicNativeWavKey: nativeWavKey,
+                program,
+                runtimeReceipt: JSON.parse(Buffer.from(runtimeBytes).toString("utf8")),
+              }));
+            })()
+            : await (async () => {
+              if (provider !== "mureka" && provider !== "suno") throw new Error("music audition boundary has an unsupported provider");
+              const sourceKey = typeof result.store.musicAuditionSourceKey === "string" ? result.store.musicAuditionSourceKey : "";
+              const musicKey = typeof result.store.musicKey === "string" ? result.store.musicKey : "";
+              if (!sourceKey || !musicKey || typeof result.store.musicAuditionWavKey !== "string") {
+                throw new Error("provider music boundary is missing its durable source/audition outputs");
+              }
+              const sourceBytes = await getObjectBytes(sourceKey);
+              const source = MusicProviderAuditionSourceSchema.parse(JSON.parse(Buffer.from(sourceBytes).toString("utf8")));
+              return createMusicAuditionCheckpointV2({
+                ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+                channelMusicProgramKey: programKey, musicProviderAuditionSourceKey: sourceKey,
+                expectedMusicKey: musicKey, source, program,
+              });
+            })());
           await logSink.flush();
           const created = await convex.mutation(musicAuditionCheckpointsApi.createAwaiting, {
             ownerId, channelId: payload.channelId as Id<"channels">, runId: payload.runId as Id<"runs">,

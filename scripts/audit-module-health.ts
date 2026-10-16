@@ -92,8 +92,25 @@ function main(): void {
     const testers = new Set<string>();
     for (const [file, text] of contents) {
       if (own.has(file)) continue;
-      if (!stems.some((stem) => text.includes(stem))) continue;
-      (TEST.test(file) ? testers : importers).add(file);
+      const testFile = TEST.test(file);
+      const matchesStem = stems.some((stem) => text.includes(stem));
+      if (!matchesStem) continue;
+      (testFile ? testers : importers).add(file);
+    }
+    // Registry-driven integration tests may assert exact block IDs without
+    // importing the implementation file by name. Use this fallback only when
+    // filename/import matching found no tests, avoiding inflated counts from
+    // common IDs already covered through other modules.
+    if (testers.size === 0) {
+      const registeredIds = moduleEntry.paths.flatMap((path) => {
+        const text = contents.get(path) ?? "";
+        return [...text.matchAll(/\bid\s*:\s*["']([a-z][a-z0-9_-]{5,})["']/g)].map((match) => match[1]!);
+      });
+      for (const [file, text] of contents) {
+        if (TEST.test(file) && !own.has(file) && registeredIds.some((id) =>
+          text.includes(`"${id}"`) || text.includes(`'${id}'`),
+        )) testers.add(file);
+      }
     }
     const frameworkInvoked = moduleEntry.paths.some((path) => FRAMEWORK_ENTRY.test(path));
     rows.push({

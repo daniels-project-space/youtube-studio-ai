@@ -1,4 +1,5 @@
-import { MODULE_CONTRACTS } from "./moduleContracts";
+import type { ModuleManifest } from "./moduleManifest";
+import { GENERATED_MODULE_ABI } from "./generatedModuleAbi";
 import { artifactContract } from "./artifactSchemas";
 
 export interface ModuleArtifactSurface {
@@ -9,15 +10,23 @@ export interface ModuleArtifactSurface {
   opaque: boolean;
 }
 
-/**
- * The small, read-only contract view shared by operator surfaces.
- *
- * The executable manifest remains the authority for validation and execution;
- * this projection only makes the same ABI legible in the catalog. Keeping the
- * projection here prevents each screen from inventing a second list of inputs
- * or downstream handoffs. It intentionally reads the browser/server-safe
- * contract declarations rather than importing provider-heavy block runners.
- */
+export interface ModuleAbiEntry {
+  requiredInputs: string[];
+  optionalInputs: string[];
+  outputs: string[];
+  optionalOutputs: string[];
+  requiredCapabilities: string[];
+  capabilities: string[];
+  requiredDownstreamCapabilities: string[];
+  requiredDownstreamConsumes: Record<string, string>;
+}
+
+export interface ModuleAbiIndex {
+  artifacts: Record<string, ModuleArtifactSurface>;
+  modules: Record<string, ModuleAbiEntry>;
+}
+
+/** The operator-safe projection of the exact executable manifests. */
 export interface ModuleContractSurface {
   executableIds: readonly string[];
   missingExecutableIds: readonly string[];
@@ -40,85 +49,81 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
 
-function artifactSurface(key: string): ModuleArtifactSurface {
-  const contract = artifactContract(key);
+function artifactKeys(entries: readonly ModuleAbiEntry[], field: "requiredInputs" | "optionalInputs" | "outputs" | "optionalOutputs"): string[] {
+  return unique(entries.flatMap((entry) => entry[field]));
+}
+
+/** Stable projection shared by the generator and drift test. */
+export function moduleAbiFromManifests(manifests: readonly ModuleManifest[]): ModuleAbiIndex {
+  const artifacts: Record<string, ModuleArtifactSurface> = {};
+  const addArtifacts = (items: Readonly<Record<string, ModuleArtifactSurface>>) => {
+    for (const [key, artifact] of Object.entries(items)) {
+      const { type, version, persist, opaque } = artifact;
+      artifacts[key] = { key, type, version, persist, opaque };
+    }
+  };
+  const modules = Object.fromEntries(manifests
+    .map((manifest) => [manifest.id, {
+      requiredInputs: Object.keys(manifest.consumes).sort((a, b) => a.localeCompare(b)),
+      optionalInputs: Object.keys(manifest.optionalConsumes).sort((a, b) => a.localeCompare(b)),
+      outputs: Object.keys(manifest.produces).sort((a, b) => a.localeCompare(b)),
+      optionalOutputs: Object.keys(manifest.optionalProduces).sort((a, b) => a.localeCompare(b)),
+      requiredCapabilities: unique(manifest.requiredCapabilities),
+      capabilities: unique(manifest.capabilities),
+      requiredDownstreamCapabilities: unique(manifest.requiredDownstreamCapabilities),
+      requiredDownstreamConsumes: { ...manifest.requiredDownstreamConsumes },
+    } satisfies ModuleAbiEntry] as const)
+    .sort(([a], [b]) => a.localeCompare(b)));
+  for (const manifest of manifests) {
+    addArtifacts(manifest.consumes);
+    addArtifacts(manifest.optionalConsumes);
+    addArtifacts(manifest.produces);
+    addArtifacts(manifest.optionalProduces);
+    for (const key of Object.values(manifest.requiredDownstreamConsumes)) {
+      const { key: artifactKey, type, version, persist, opaque } = artifactContract(key);
+      artifacts[artifactKey] = { key: artifactKey, type, version, persist, opaque };
+    }
+  }
   return {
-    key: contract.key,
-    type: contract.type,
-    version: contract.version,
-    persist: contract.persist,
-    opaque: contract.opaque,
+    artifacts: Object.fromEntries(Object.entries(artifacts).sort(([a], [b]) => a.localeCompare(b))),
+    modules,
   };
 }
 
-function artifactSurfaces(keys: readonly string[]): ModuleArtifactSurface[] {
-  return unique(keys).map(artifactSurface);
-}
-
-/**
- * Resolve the exact declared contracts behind a catalog binding. Missing ids
- * are retained as an explicit warning instead of being silently omitted; a
- * card can therefore never imply that an unknown step has a contract.
- */
 export function moduleContractSurface(
   executableIds: readonly string[],
 ): ModuleContractSurface | undefined {
   if (!executableIds.length) return undefined;
-  const contracts = executableIds
-    .map((id) => MODULE_CONTRACTS[id])
-    .filter((contract): contract is NonNullable<typeof contract> => Boolean(contract));
-  const missingExecutableIds = executableIds.filter((id) => !MODULE_CONTRACTS[id]);
-  if (!contracts.length) {
-    return {
-      executableIds: [...executableIds],
-      missingExecutableIds: [...missingExecutableIds],
-      requiredInputs: [],
-      optionalInputs: [],
-      requiredInputContracts: [],
-      optionalInputContracts: [],
-      requiredCapabilities: [],
-      outputs: [],
-      optionalOutputs: [],
-      outputContracts: [],
-      optionalOutputContracts: [],
-      capabilities: [],
-      requiredDownstreamCapabilities: [],
-      requiredDownstreamConsumes: {},
-      downstreamContracts: {},
-    };
-  }
-  const requiredInputs = unique(contracts.flatMap((contract) => contract.requiredConsumes ?? []));
+  const entries = executableIds
+    .map((id) => GENERATED_MODULE_ABI.modules[id])
+    .filter((entry): entry is ModuleAbiEntry => Boolean(entry));
+  const missingExecutableIds = executableIds.filter((id) => !GENERATED_MODULE_ABI.modules[id]);
+  const requiredInputs = unique(entries.flatMap((entry) => entry.requiredInputs));
   const requiredInputSet = new Set(requiredInputs);
-  const optionalInputs = unique(
-    contracts
-      .flatMap((contract) => contract.optionalConsumes ?? [])
-      .filter((key) => !requiredInputSet.has(key)),
-  );
-  const optionalOutputs = unique(contracts.flatMap((contract) => contract.optionalProduces ?? []));
-  const downstreamBindings = Object.fromEntries(
-    contracts.flatMap((contract) => Object.entries(contract.requiredDownstreamConsumes ?? {})),
-  );
+  const optionalInputs = unique(entries.flatMap((entry) => entry.optionalInputs)
+    .filter((key) => !requiredInputSet.has(key)));
+  const outputs = unique(entries.flatMap((entry) => entry.outputs));
+  const requiredOutputSet = new Set(outputs);
+  const optionalOutputs = unique(entries.flatMap((entry) => entry.optionalOutputs)
+    .filter((key) => !requiredOutputSet.has(key)));
+  const downstreamBindings = Object.fromEntries(entries.flatMap((entry) => Object.entries(entry.requiredDownstreamConsumes)));
   return {
-    executableIds: executableIds.filter((id) => Boolean(MODULE_CONTRACTS[id])),
+    executableIds: entries.length
+      ? executableIds.filter((id) => Boolean(GENERATED_MODULE_ABI.modules[id]))
+      : [...executableIds],
     missingExecutableIds: [...missingExecutableIds],
     requiredInputs,
     optionalInputs,
-    requiredInputContracts: artifactSurfaces(requiredInputs),
-    optionalInputContracts: artifactSurfaces(optionalInputs),
-    requiredCapabilities: unique(contracts.flatMap((contract) => contract.requiredCapabilities ?? [])),
-    outputs: [],
+    requiredInputContracts: artifactKeys(entries, "requiredInputs").filter((key) => requiredInputSet.has(key)).map((key) => GENERATED_MODULE_ABI.artifacts[key]!),
+    optionalInputContracts: artifactKeys(entries, "optionalInputs").filter((key) => optionalInputs.includes(key)).map((key) => GENERATED_MODULE_ABI.artifacts[key]!),
+    requiredCapabilities: unique(entries.flatMap((entry) => entry.requiredCapabilities)),
+    outputs,
     optionalOutputs,
-    outputContracts: [],
-    optionalOutputContracts: artifactSurfaces(optionalOutputs),
-    capabilities: unique(contracts.flatMap((contract) => contract.capabilities)),
-    requiredDownstreamCapabilities: unique(
-      contracts.flatMap((contract) => contract.requiredDownstreamCapabilities ?? []),
-    ),
-    requiredDownstreamConsumes: Object.fromEntries(
-      contracts.flatMap((contract) => Object.entries(contract.requiredDownstreamConsumes ?? {})),
-    ),
-    downstreamContracts: Object.fromEntries(
-      Object.entries(downstreamBindings).map(([capability, artifact]) => [capability, artifactSurface(artifact)]),
-    ),
+    outputContracts: artifactKeys(entries, "outputs").filter((key) => requiredOutputSet.has(key)).map((key) => GENERATED_MODULE_ABI.artifacts[key]!),
+    optionalOutputContracts: artifactKeys(entries, "optionalOutputs").filter((key) => optionalOutputs.includes(key)).map((key) => GENERATED_MODULE_ABI.artifacts[key]!),
+    capabilities: unique(entries.flatMap((entry) => entry.capabilities)),
+    requiredDownstreamCapabilities: unique(entries.flatMap((entry) => entry.requiredDownstreamCapabilities)),
+    requiredDownstreamConsumes: downstreamBindings,
+    downstreamContracts: Object.fromEntries(Object.entries(downstreamBindings).map(([capability, key]) => [capability, GENERATED_MODULE_ABI.artifacts[key]])),
   };
 }

@@ -31,7 +31,11 @@ import { agentJson } from "@/agents/mastra";
 import { registerAllBlocks } from "@/engine/blocks";
 import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
+import { moduleCard } from "@/engine/moduleRegistry";
+import { FAMILY_KEYS, familyLengthCheckEnvelope, type FamilyKey } from "@/engine/families";
+import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "@/engine/routeOwnedRuntimeParams";
 import type { PipelineEntry } from "@/engine/types";
 import {
   assertPipelineMatchesContentLane,
@@ -142,12 +146,11 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   {
     block: "script_gen",
     purpose: "Writes the narration script in the channel's DNA register.",
-    whenToUse: "Core. Length and tone are the channel-defining knobs.",
+    whenToUse: "Core. The channel owns spoken length; tune tone and evidence controls only.",
     addable: false,
     removable: false,
     appliesTo: "narrated",
     params: [
-      { key: "maxSeconds", type: "number", min: 60, max: 2100, describe: "Target spoken length (sec). Drives the word budget; length_check band follows automatically." },
       { key: "style", type: "enum", options: ["generic", "crime", "shorts", "meditation"], describe: "Archetype tone UNDER the DNA register (DNA wins). crime=tension/withhold-reveal, meditation=slow guided, shorts=punchy." },
       { key: "endWithSummary", type: "boolean", describe: "Close with a recap section." },
       { key: "dataRich", type: "boolean", describe: "Force 3-6 concrete sourced figures into the narration (set automatically when visual_inserts is present)." },
@@ -202,13 +205,14 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "music",
-    purpose: "Generates a fingerprint-bound channel score with authored sections and transparent constant-gain mastering. Managed-provider failover is admission-safe; MiniMax-Music3 is explicit and never silently substituted.",
-    whenToUse: "Core. trackCount is the anti-repetition knob for longer videos (distinct tracks crossfaded vs one loop).",
+    purpose: "Generates the fingerprint-bound route-specific audio program with authored sections and transparent mastering; an optional bounded prompt adds secondary nuance, and this module owns audio only, not visual loops or footage.",
+    whenToUse: "Core when the route has an audio program. The sealed role sets foreground primary music or a narration-aware background, meditation, or sleep bed; trackCount controls distinct-track crossfades on longer videos.",
     addable: false,
     removable: false,
     params: [
       { key: "provider", type: "enum", options: ["suno", "mureka", "minimax_music3"], describe: "Primary provider. MiniMax-Music3 requires prominent UI attribution, generated-content disclosure, safeguards, operator license attestation, a reviewed qualification receipt, and a two-GPU Novita spot worker." },
-      { key: "model", type: "string", maxLen: 12, describe: "Suno model, e.g. V5 (highest quality)." },
+      { key: "model", type: "string", maxLen: 12, describe: "Optional provider-specific model ID; leave blank for the provider's default and set only a model qualified for this route." },
+      { key: "prompt", type: "string", maxLen: 300, describe: "Optional supplemental style/mood nuance; channel DNA stays primary, sleep routes suppress free-form direction, and MiniMax may trim it to preserve its strict caption limit." },
       { key: "trackCount", type: "number", min: 1, max: 8, describe: "Distinct clips crossfaded into the mix. ~1 per 5-7 min of video; 2 minimum for variety." },
     ],
   },
@@ -291,12 +295,11 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   {
     block: "assemble",
     purpose: "Loops the upscaled unit under the full music mix with the deblur-title intro.",
-    whenToUse: "Core for loop channels. durationSec is the product decision (stream length).",
+    whenToUse: "Core for loop channels. Stream length is operator-owned; tune intro treatment only.",
     addable: false,
     removable: false,
     appliesTo: "loop",
     params: [
-      { key: "durationSec", type: "number", min: 3600, max: 28800, describe: "One to eight hour final runtime." },
       { key: "deblurIntro", type: "boolean", describe: "Focus-pull title intro (the classic lofi open)." },
     ],
   },
@@ -447,9 +450,10 @@ function validateParams(
 ): { clean: Record<string, unknown>; rejectedKeys: string[] } {
   const clean: Record<string, unknown> = {};
   const rejectedKeys: string[] = [];
+  const routeOwned = new Set(ROUTE_OWNED_RUNTIME_PARAM_KEYS[tool.block] ?? []);
   for (const [k, v] of Object.entries(raw)) {
     const spec = tool.params.find((p) => p.key === k);
-    if (!spec || v === undefined || v === null) {
+    if (routeOwned.has(k) || !spec || v === undefined || v === null) {
       rejectedKeys.push(k);
       continue;
     }
@@ -483,7 +487,7 @@ function validateParams(
 }
 
 /** Cross-param invariants the LLM never has to remember (code owns them). */
-function enforceInvariants(pipeline: PipelineEntry[]): void {
+function enforceInvariants(pipeline: PipelineEntry[], family?: FamilyKey): void {
   const find = (b: string) => pipeline.find((e) => e.block === b);
   // narration pacing (pauses + voice speed) mirrors into the script word budget.
   const narr = find("narration_tts")?.params;
@@ -496,14 +500,15 @@ function enforceInvariants(pipeline: PipelineEntry[]): void {
   if (narr?.["ttsProvider"] === "elevenlabs" && sg) sg.params = { ...(sg.params ?? {}), voiceTags: true };
   // a data-viz layer requires a data-rich script.
   if (find("visual_inserts") && sg) sg.params = { ...(sg.params ?? {}), dataRich: true };
-  // length_check band follows the script target.
+  // Keep the quality gate aligned with the same family law used at design time.
   const maxSec = sg?.params?.["maxSeconds"];
   const lc = find("length_check");
-  if (typeof maxSec === "number" && lc) {
+  if (typeof maxSec === "number" && lc && family) {
+    const envelope = familyLengthCheckEnvelope(family, maxSec);
     lc.params = {
       ...(lc.params ?? {}),
-      minSeconds: Math.round(maxSec * 0.6),
-      maxSeconds: Math.round(maxSec * 1.6),
+      minSeconds: envelope.minSeconds,
+      maxSeconds: envelope.maxSeconds,
     };
   }
 }
@@ -522,12 +527,15 @@ export function applyArchitectPlan(
   registerAllBlocks();
   const log = opts.log ?? (() => {});
   const kind = familyKind(opts.family);
+  const family = FAMILY_KEYS.includes(opts.family as FamilyKey) ? opts.family as FamilyKey : undefined;
   // The architect can tune a lane, but it cannot exchange the channel's
   // primary visual engine. This also closes the swap pre-pass loophole where
   // producer-compatible blocks could replace one another before appliesTo was
   // evaluated.
   const contentLane = resolveContentLane({ family: opts.family, pipeline: base });
   assertPipelineMatchesContentLane(contentLane, base);
+  const validationSeeds = (entries: readonly PipelineEntry[]) =>
+    channelPipelineValidationSeedKeys(contentLane, undefined, entries);
   const byBlock = new Map([...ARCHITECT_TOOLBOX, ...(opts.extraTools ?? [])].map((t) => [t.block, t]));
 
   let pipeline: PipelineEntry[] = base.map((e) => ({
@@ -540,8 +548,8 @@ export function applyArchitectPlan(
   const tryValidated = (next: PipelineEntry[], op: { action: string; block: string }, reason?: string): boolean => {
     try {
       const probe = next.map((e) => ({ ...e }));
-      enforceInvariants(probe);
-      validatePipeline(probe);
+      enforceInvariants(probe, family);
+      validatePipeline(probe, validationSeeds(probe));
       assertPipelineMatchesContentLane(contentLane, probe);
       pipeline = probe;
       return true;
@@ -660,9 +668,10 @@ export function applyArchitectPlan(
   }
 
   // Final invariant pass on the winning pipeline.
-  enforceInvariants(pipeline);
+  enforceInvariants(pipeline, family);
   try {
-    validatePipeline(pipeline.map((e) => ({ ...e })));
+    const finalPipeline = pipeline.map((e) => ({ ...e }));
+    validatePipeline(finalPipeline, validationSeeds(finalPipeline));
     assertPipelineMatchesContentLane(contentLane, pipeline);
   } catch (e) {
     // Should be unreachable (incremental gates) — fall back to the floor.
@@ -695,7 +704,8 @@ export function applyArchitectPlan(
 
 /* ------------------------------ The agent ------------------------------ */
 
-function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
+export function renderArchitectToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
+  registerAllBlocks();
   return [...ARCHITECT_TOOLBOX, ...extra].filter((t) => !t.appliesTo || t.appliesTo === kind)
     .map((t) => {
       const params = t.params
@@ -703,12 +713,16 @@ function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
           const bounds =
             p.type === "number" ? ` (${p.min}-${p.max})`
             : p.type === "enum" || p.type === "enum_list" ? ` (${(p.options ?? []).join("|")})`
+            : p.type === "string" && p.maxLen ? ` (max ${p.maxLen} chars)`
             : "";
           return `    - ${p.key} [${p.type}${bounds}]: ${p.describe}`;
         })
         .join("\n");
       const caps = [t.addable ? "addable" : "", t.removable ? "removable" : "core"].filter(Boolean).join(", ");
       const contract = MODULE_CONTRACTS[t.block];
+      const outputArtifacts = getBlock(t.block)?.produces ?? [];
+      const requiredDownstreamBindings = Object.entries(contract?.requiredDownstreamConsumes ?? {})
+        .map(([capability, artifact]) => `${capability}=${artifact}`);
       const contractLine = contract
         ? [
             (contract.requiredConsumes ?? []).length
@@ -720,12 +734,21 @@ function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
             contract.capabilities.length
               ? `provides ${(contract.capabilities ?? []).join(", ")}`
               : "provides no capability",
+            outputArtifacts.length
+              ? `produces artifacts ${outputArtifacts.join(", ")}`
+              : "produces no declared artifacts",
             (contract.requiredDownstreamCapabilities ?? []).length
               ? `hands off to ${(contract.requiredDownstreamCapabilities ?? []).join(", ")}`
               : "no required downstream handoff",
+            requiredDownstreamBindings.length
+              ? `exact handoff bindings ${requiredDownstreamBindings.join(", ")}`
+              : "no exact downstream artifact bindings",
           ].join("; ")
         : "ABI UNREGISTERED — do not add this tool until its typed contract is registered";
-      return `  ${t.block} (${caps}) — ${t.purpose}\n    WHEN: ${t.whenToUse}\n    ABI: ${contractLine}${params ? `\n${params}` : ""}`;
+      const responsibility = moduleCard(t.block)?.does;
+      return `  ${t.block} (${caps}) — ${t.purpose}` +
+        `${responsibility ? `\n    MODULE RESPONSIBILITY: ${responsibility}` : ""}` +
+        `\n    WHEN: ${t.whenToUse}\n    ABI: ${contractLine}${params ? `\n${params}` : ""}`;
     })
     .join("\n");
 }
@@ -807,7 +830,7 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
       : []),
     ``,
     `YOUR TOOLBOX (the ONLY modules and params that exist — bounds are enforced):`,
-    renderToolbox(kind, input.forgedTools),
+    renderArchitectToolbox(kind, input.forgedTools),
     ``,
     `INTERROGATE THE IDENTITY (answer each through your decisions):`,
     `1. Which optional modules does THIS content actually need (data viz? quotes? portraits? shorts?) — and which present ones don't fit and should be REMOVED?`,

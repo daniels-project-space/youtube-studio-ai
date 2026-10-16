@@ -3,6 +3,27 @@
  * the critique however their family is configured, then use this small gate to
  * prevent an unreviewed or rejected narration from reaching paid audio/video.
  */
+const SCRIPT_CRITIQUE_HEAD_CHARS = 3_500;
+const SCRIPT_CRITIQUE_MIDDLE_CHARS = 3_000;
+const SCRIPT_CRITIQUE_TAIL_CHARS = 2_500;
+const SCRIPT_CRITIQUE_MAX_SOURCE_CHARS =
+  SCRIPT_CRITIQUE_HEAD_CHARS + SCRIPT_CRITIQUE_MIDDLE_CHARS + SCRIPT_CRITIQUE_TAIL_CHARS;
+
+/** Keep long-script review bounded without leaving the central narrative unseen. */
+export function scriptCritiqueExcerpt(narration: string): string {
+  if (narration.length <= SCRIPT_CRITIQUE_MAX_SOURCE_CHARS) return narration;
+
+  const latestMiddleStart = narration.length - SCRIPT_CRITIQUE_TAIL_CHARS - SCRIPT_CRITIQUE_MIDDLE_CHARS;
+  const centeredMiddleStart = Math.floor(narration.length / 2 - SCRIPT_CRITIQUE_MIDDLE_CHARS / 2);
+  const middleStart = Math.max(SCRIPT_CRITIQUE_HEAD_CHARS, Math.min(centeredMiddleStart, latestMiddleStart));
+  const middleEnd = middleStart + SCRIPT_CRITIQUE_MIDDLE_CHARS;
+  return [
+    narration.slice(0, SCRIPT_CRITIQUE_HEAD_CHARS),
+    narration.slice(middleStart, middleEnd),
+    narration.slice(-SCRIPT_CRITIQUE_TAIL_CHARS),
+  ].join("\n\n[... OMITTED ...]\n\n");
+}
+
 export function parseScriptCritique(value: unknown): { pass: boolean; issues: string[] } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("malformed script critique: expected an object with pass and issues");
@@ -12,7 +33,8 @@ export function parseScriptCritique(value: unknown): { pass: boolean; issues: st
       row.issues.length > 5 || row.issues.some((issue) => typeof issue !== "string" || !issue.trim() || issue.length > 140)) {
     throw new Error("malformed script critique: expected an explicit boolean verdict and at most five bounded text issues");
   }
-  return { pass: row.pass, issues: row.issues.map((issue: string) => issue.trim()) };
+  const issues = row.issues.map((issue: string) => issue.trim());
+  return { pass: row.pass && issues.length === 0, issues };
 }
 
 export function assertScriptCritiqueAccepted(input: {

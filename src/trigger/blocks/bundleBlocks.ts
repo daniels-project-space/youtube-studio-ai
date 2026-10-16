@@ -17,6 +17,8 @@ import { putObject, getObjectBytes } from "@/lib/storage";
 import { readBytes } from "@/lib/files";
 import { ExecutionError } from "@/engine/executionErrors";
 import { bundleFanoutDispatchSchedule, bundleFanoutEnvelope } from "@/lib/bundleFanout";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { groupMusicSoundProfileFingerprint, storedChannelMusicProvider } from "@/lib/groupMusicProfile";
 import {
   ThirdPartyStockEvidenceReferenceSchema,
   assertThirdPartyStockEvidenceMatchesFootageKeys,
@@ -64,6 +66,47 @@ export const emitBundle: Block = {
       return { bundleEmitted: false };
     }
 
+    const group = await c.query(api.channels.listGroup, { groupId });
+    const siblings = group.filter((g) => g.groupRole === "sibling" && g.status === "active");
+    const sourceProfile = groupMusicSoundProfileFingerprint({
+      family: channel.family,
+      contentLaneKey: channel.contentLane?.key,
+      provider: ctx.store["musicProvider"],
+      styleDNA: channel.styleDNA,
+    });
+    const runProfile = groupMusicSoundProfileFingerprint({
+      family: channel.family,
+      contentLaneKey: channel.contentLane?.key,
+      provider: ctx.store["musicProvider"],
+      styleDNA: ctx.store["styleDNA"],
+    });
+    const reusableMusicProfileBySibling = new Map<string, string>();
+    const musicProvider = ctx.store["musicProvider"];
+    const providerEvidenceKeys = {
+      program: ctx.store["channelMusicProgramKey"],
+      source: ctx.store["musicAuditionSourceKey"],
+      quality: ctx.store["musicQualityReceiptKey"],
+      auditionWav: ctx.store["musicAuditionWavKey"],
+    };
+    const hasReusableProviderEvidence = (musicProvider === "mureka" || musicProvider === "suno") &&
+      Object.values(providerEvidenceKeys).every((key) => typeof key === "string" && key.length > 0);
+    if (hasReusableProviderEvidence && sourceProfile && sourceProfile === runProfile) {
+      for (const sibling of siblings) {
+        const siblingProfile = groupMusicSoundProfileFingerprint({
+          family: sibling.family,
+          contentLaneKey: sibling.contentLane?.key,
+          provider: storedChannelMusicProvider(sibling),
+          styleDNA: sibling.styleDNA,
+        });
+        if (siblingProfile === sourceProfile) {
+          reusableMusicProfileBySibling.set(String(sibling._id), sourceProfile);
+        }
+      }
+    }
+    if (ctx.store["musicKey"] && reusableMusicProfileBySibling.size === 0) {
+      ctx.log("emit_bundle: channel music profiles are not explicitly equivalent; siblings will create their own sound");
+    }
+
     const topic = ctx.store["topic"] as string | undefined;
     const script = ctx.store["script"];
     const narrationText = ctx.store["narrationText"] as string | undefined;
@@ -79,6 +122,14 @@ export const emitBundle: Block = {
     const footageKeys: string[] = [];
     const footageSha256: string[] = [];
     let durableMusicKey: string | undefined;
+    let durableMusicSha256: string | undefined;
+    let durableMusicByteLength: number | undefined;
+    let durableProviderEvidence: {
+      program: { key: string; sha256: string };
+      source: { key: string; sha256: string };
+      quality: { key: string; sha256: string };
+      auditionWav: { key: string; sha256: string };
+    } | undefined;
     let durableThirdPartyStockEvidence: ThirdPartyStockEvidenceReference | undefined;
     try {
       let sourceStockManifest: ThirdPartyStockEvidenceManifest | undefined;
@@ -135,9 +186,24 @@ export const emitBundle: Block = {
       }
       // Copy the music track into the durable bundle path. Never fall back to
       // the base run key: cleanup can remove it before a queued sibling starts.
-      if (musicKey) {
+      if (musicKey && reusableMusicProfileBySibling.size > 0) {
         durableMusicKey = `${bundleDir}music.mp3`;
-        await putObject(durableMusicKey, await getObjectBytes(musicKey), { contentType: "audio/mpeg" });
+        const musicBytes = await getObjectBytes(musicKey);
+        await putObject(durableMusicKey, musicBytes, { contentType: "audio/mpeg" });
+        durableMusicSha256 = createHash("sha256").update(musicBytes).digest("hex");
+        durableMusicByteLength = musicBytes.byteLength;
+        const evidence: typeof durableProviderEvidence = {} as NonNullable<typeof durableProviderEvidence>;
+        for (const [name, sourceKey] of Object.entries(providerEvidenceKeys) as Array<
+          [keyof typeof providerEvidenceKeys, string]
+        >) {
+          const bytes = await getObjectBytes(sourceKey);
+          const sha256 = createHash("sha256").update(bytes).digest("hex");
+          const suffix = name === "auditionWav" ? "wav" : "json";
+          const key = `${bundleDir}music-evidence/${name}-${sha256}.${suffix}`;
+          await putObject(key, bytes, { contentType: suffix === "wav" ? "audio/wav" : "application/json" });
+          evidence[name] = { key, sha256 };
+        }
+        durableProviderEvidence = evidence;
       }
 
       const bundle = {
@@ -163,12 +229,11 @@ export const emitBundle: Block = {
     // dispatch key, including a replay after an accepted-but-lost response.
     let fanned = 0;
     const { idempotencyKeys, tasks } = await import("@trigger.dev/sdk");
-    const group = await c.query(api.channels.listGroup, { groupId });
     // Only ACTIVE siblings — a draft/disabled sibling (e.g. YouTube not yet
     // connected) shouldn't burn a render that would fail at upload. Enable a
     // sibling (Settings → ON) once it's ready and the next base run fans out to it.
-    const siblings = group.filter((g) => g.groupRole === "sibling" && g.status === "active");
     for (const sib of siblings) {
+      const reuseProfileFingerprint = reusableMusicProfileBySibling.get(String(sib._id));
       const envelope = bundleFanoutEnvelope({
         ownerId: ctx.ownerId,
         baseRunId: ctx.runId,
@@ -182,7 +247,27 @@ export const emitBundle: Block = {
           ...(durableThirdPartyStockEvidence !== undefined
             ? { thirdPartyStockEvidence: durableThirdPartyStockEvidence }
             : {}),
-          ...(durableMusicKey !== undefined ? { musicKey: durableMusicKey } : {}),
+          ...(durableMusicKey !== undefined && reuseProfileFingerprint !== undefined
+            ? { musicKey: durableMusicKey }
+            : {}),
+          ...(durableMusicKey !== undefined && reuseProfileFingerprint !== undefined &&
+            durableMusicSha256 !== undefined && durableMusicByteLength !== undefined
+            ? { musicReuseReceipt: createMusicReuseReceipt({
+                ownerId: ctx.ownerId,
+                baseRunId: ctx.runId,
+                baseChannelId: String(ctx.channelId),
+                siblingChannelId: String(sib._id),
+                family: String(channel.family),
+                contentLaneKey: String(channel.contentLane!.key),
+                provider: musicProvider as "mureka" | "suno",
+                musicKey: durableMusicKey,
+                audioSha256: durableMusicSha256,
+                audioByteLength: durableMusicByteLength,
+                soundProfileFingerprint: reuseProfileFingerprint,
+                baseMusicKey: musicKey!,
+                providerEvidence: durableProviderEvidence!,
+              }) }
+            : {}),
         },
       });
       const child = await c.mutation(api.runs.claimBundleFanoutRun, {

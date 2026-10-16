@@ -10,7 +10,7 @@ import {
 const finalMaster = { sha256: "a".repeat(64), durationSec: 12 };
 const visualReview = {
   reviewFingerprint: "review-123",
-  reviewReceiptVersion: "video-review/v5",
+  reviewReceiptVersion: "video-review/v6",
   reviewReceiptFingerprint: "b".repeat(64),
   releaseReceiptFingerprint: "c".repeat(64),
 };

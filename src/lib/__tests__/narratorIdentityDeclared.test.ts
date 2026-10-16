@@ -83,6 +83,23 @@ function main(): void {
     "the same niche must always resolve to the same voice, or a channel's voice drifts per run",
   );
 
+  const channelSeeds = ["channel_a", "channel_b", "channel_c", "channel_d"];
+  const channelVoices = new Set(channelSeeds.map((seed) => resolveVoiceId(undefined, "finance", seed)));
+  assert.ok(
+    channelVoices.size >= 2,
+    "same-niche channels must be spread across the fallback pool when stable channel identities are available",
+  );
+  assert.equal(
+    resolveVoiceId(undefined, "finance", "channel_a"),
+    resolveVoiceId(undefined, "finance", "channel_a"),
+    "a channel's fallback narrator must remain stable across runs",
+  );
+  assert.equal(
+    resolveVoiceId(undefined, "history", "channel_a"),
+    resolveVoiceId(undefined, "history", "channel_b"),
+    "deliberate niche mappings must still override channel fallback casting",
+  );
+
   // A deliberate mapping still wins over the spread — those were chosen.
   assert.equal(
     resolveVoiceId(undefined, "history"),
@@ -107,6 +124,13 @@ function main(): void {
   // A raw 32-hex reference id passes through untouched.
   const raw = "0123456789abcdef0123456789abcdef";
   assert.equal(resolveVoiceId(raw), raw, "a raw reference id must pass through");
+
+  const narrationBlock = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
+  assert.match(
+    narrationBlock,
+    /voiceIdentitySeed:\s*ctx\.channelId/,
+    "the production narration module must pass its stable channel identity to Fish fallback casting",
+  );
 
   // ---- the editor must not WRITE the convergence it used to display -------
   // The form defaulted to a real voice and its dirty-check compared against the

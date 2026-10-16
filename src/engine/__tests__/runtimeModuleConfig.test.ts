@@ -186,6 +186,77 @@ assert.equal(
   "the creation preview must materialize the same validated controls the runner applies",
 );
 assert.deepEqual(onboardingResolution.skippedBlockIds, ["metadata"]);
+const configuredMusicRoute = resolvePipelineModuleConfig({
+  entries: [
+    { block: "music_program_plan" },
+    { block: "music" },
+  ],
+  moduleConfig: { music: { provider: "suno", bodyMusicVol: 0.24 } },
+});
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music_program_plan")?.params?.provider,
+  "suno",
+  "the Music module's provider choice must reach its upstream program planner before it seals provider identity",
+);
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music")?.params?.provider,
+  "suno",
+  "the selected provider must remain consistent at generation after planning",
+);
+assert.equal(
+  configuredMusicRoute.effectivePipeline.find((entry) => entry.block === "music")?.params?.bodyMusicVol,
+  0.24,
+  "the Music module's explicit bed gain must reach the shared audio producer",
+);
+const migratedLegacyLoFi = resolvePipelineModuleConfig({
+  entries: [
+    { block: "music_program_plan" },
+    { block: "music" },
+  ],
+  moduleConfig: {
+    lofi: { provider: "suno", trackCount: 4, bodyMusicVol: 0.42, visualStyle: "lofi" },
+    music: { bodyMusicVol: 0.27 },
+  },
+});
+assert.equal(
+  migratedLegacyLoFi.effectivePipeline.find((entry) => entry.block === "music_program_plan")?.params?.provider,
+  "suno",
+  "legacy Lo-Fi provider selection migrates to the shared Music planner",
+);
+assert.equal(
+  migratedLegacyLoFi.effectivePipeline.find((entry) => entry.block === "music")?.params?.trackCount,
+  4,
+  "legacy Music-compatible track settings remain effective after module consolidation",
+);
+assert.equal(
+  migratedLegacyLoFi.effectivePipeline.find((entry) => entry.block === "music")?.params?.bodyMusicVol,
+  0.27,
+  "an explicit shared Music setting takes precedence over its legacy Lo-Fi value",
+);
+assert.deepEqual(
+  migratedLegacyLoFi.frozenModuleConfig.music,
+  { provider: "suno", trackCount: 4, bodyMusicVol: 0.27 },
+  "the frozen invocation stores only the canonical shared Music config and supported migrated values",
+);
+assert.deepEqual(migratedLegacyLoFi.skippedBlockIds, []);
+const directLegacyLoFi = mergeRuntimeModuleConfig({
+  entries: [{ block: "music" }],
+  paramsByBlock: { music: {} },
+  moduleConfig: { lofi: { provider: "suno", bodyMusicVol: 0.42 } },
+});
+assert.equal(
+  directLegacyLoFi.paramsByBlock.music.bodyMusicVol,
+  0.42,
+  "direct runtime invocation also migrates legacy Lo-Fi settings without the onboarding resolver",
+);
+assert.equal(directLegacyLoFi.frozenModuleConfig.lofi, undefined);
+const musicOnlyConfig = resolvePipelineModuleConfig({
+  entries: [{ block: "music" }],
+  moduleConfig: { music: { provider: "suno" } },
+});
+assert.equal(musicOnlyConfig.effectivePipeline.length, 1,
+  "provider fan-out must not invent a planner operation when the selected route has no planner");
+assert.equal(musicOnlyConfig.effectivePipeline[0]?.params?.provider, "suno");
 assert.throws(
   () => resolvePipelineModuleConfig({
     entries: routeOwnedEntries,

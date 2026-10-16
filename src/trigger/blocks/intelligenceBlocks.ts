@@ -15,6 +15,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
+import { parseShowBibleVoice } from "@/engine/showBibleVoice";
 import { filterDeliveryTimestamps } from "@/lib/metadataDelivery";
 import { childrenThumbnailDirection } from "@/engine/childrenVideoTreatment";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
@@ -426,10 +427,14 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
     const sealedTitleProfile = typeof automaticVideoPlan?.titleProfile === "string"
       ? automaticVideoPlan.titleProfile
       : undefined;
+    const configuredTitleProfile = ctx.params["titleProfile"];
+    const explicitTitleProfile = configuredTitleProfile === "auto"
+      ? sealedTitleProfile
+      : typeof configuredTitleProfile === "string"
+        ? configuredTitleProfile
+        : sealedTitleProfile;
     const titleProfile = resolveTitleProfile(
-      typeof ctx.params["titleProfile"] === "string"
-        ? String(ctx.params["titleProfile"])
-        : sealedTitleProfile,
+      explicitTitleProfile,
       {
         family: typeof ctx.store["family"] === "string" ? String(ctx.store["family"]) : undefined,
         contentLane: typeof ctx.store["contentLane"] === "string"
@@ -476,6 +481,8 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
     }
 
     const scriptDoc = ctx.store["script"] as { hook?: string; hookLoop?: string } | undefined;
+    const packageHook = typeof ctx.store["hook"] === "string" ? String(ctx.store["hook"]).trim() : "";
+    const channelVoice = parseShowBibleVoice(ctx.store["showBible"]);
 
     const viewEstimate = async (tags: string[]) => {
       let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
@@ -576,6 +583,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
         },
         topic,
         channelName,
+        channelVoice,
         ...(delivery ? { delivery } : {}),
         niche,
         persona,
@@ -585,6 +593,7 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
         episodeContext: serializedEpisodePrompt || undefined,
         coldOpen: scriptDoc?.hook ?? undefined,
         hookLoop: scriptDoc?.hookLoop ?? undefined,
+        packageHook: packageHook || undefined,
         quote: (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine ?? undefined,
         competitorTitles: competitors
           .flatMap((c) => c.topVideos)

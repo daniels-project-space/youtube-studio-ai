@@ -15,13 +15,15 @@ import {
 import { classifyExecutionError, ExecutionError } from "@/engine/executionErrors";
 import type { Block, StageContext } from "@/engine/types";
 import { freezeChannelInceptionProbeContext } from "@/lib/channelInceptionProbe";
+import { assertMusicReuseReceipt, createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
+import { groupMusicSoundProfileFingerprint } from "@/lib/groupMusicProfile";
 import { createSerializedProgramEpisodeContext } from "@/lib/serializedProgramEpisodeContext";
 import {
   serializedProgramEpisodeIdentity,
   serializedProgramEpisodeMemoryKey,
 } from "@/lib/serializedProgramEpisode";
 import { lofiBlocks, persistTopicAfterRouteValidation } from "../lofiBlocks";
-import { music as sharedMusic } from "../musicBlocks";
+import { music as sharedMusic, musicProgramPlan as sharedMusicProgramPlan } from "../musicBlocks";
 import { narratedBlocks } from "../narratedBlocks";
 import { quizPlanningBlocks } from "../quizPlanningBlocks";
 import { syntheticScenarioBlocks } from "../syntheticScenarioBlocks";
@@ -104,7 +106,7 @@ const serializedNarratedContext = createSerializedProgramEpisodeContext({
 });
 
 const topicSelect = runnable(lofiBlocks, "topic_select");
-const musicProgramPlan = runnable(lofiBlocks, "music_program_plan");
+const musicProgramPlan = sharedMusicProgramPlan.run;
 const scenePlanner = runnable(lofiBlocks, "scene_planner");
 const music = sharedMusic.run;
 const loopClips = runnable(lofiBlocks, "loop_clips");
@@ -123,23 +125,85 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const musicRoute = resolveChannelProgramRoute(musicBrief);
   const musicSeed = channelProgramRouteRunSeed({ route: musicRoute, programBrief: musicBrief });
   const topic = "Rainy city focus after midnight";
+  const episodeMusicCue = `${"The arrangement should keep a conversational, human-scale pulse while allowing the central motif to change color between sections. ".repeat(2)}FINAL_CHANNEL_CUE: let the felt piano answer the bass with a small unresolved phrase before the loop returns.`;
+  const musicStyleDNA = {
+    audio: {
+      genre: "dusty jazz-hop",
+      bpmRange: [68, 76],
+      instrumentation: ["felt piano", "upright bass"],
+      textures: ["soft vinyl noise"],
+      moodArc: "settle into focus, then resolve with quiet optimism",
+      loudnessLufs: -14,
+      loopable: true,
+    },
+  };
   const planned = await musicProgramPlan(stageContext({
     params: { visualStyle: "lofi", provider: "minimax_music3" },
     store: {
       channelProgramRoute: musicSeed,
       topic,
+      musicBrief: { musicPrompt: episodeMusicCue },
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
+      styleDNA: musicStyleDNA,
     },
   }));
   const sealed = planned.musicProgramPlan as {
     fingerprint: string;
     audio: { direction: string; providerPreference: string };
-    visual: { motionIntent: string };
+    visual: { motionIntent: string; visualStyle: string };
   };
   assert.match(sealed.fingerprint, /^[a-f0-9]{64}$/iu);
   assert.match(sealed.audio.direction, /Original instrumental program/u);
+  assert.match(sealed.audio.direction, /68-76 BPM/u);
+  assert.match(sealed.audio.direction, /dusty jazz-hop/u);
+  assert.match(sealed.audio.direction, /felt piano, upright bass/u);
+  assert.match(sealed.audio.direction, /soft vinyl noise/u);
+  assert.match(sealed.audio.direction, /settle into focus, then resolve with quiet optimism/u);
+  assert.match(sealed.audio.direction, /FINAL_CHANNEL_CUE: let the felt piano answer the bass/u,
+    "the sealed program must preserve specific late episode direction beyond the old 260-character cutoff");
+  assert.match(sealed.audio.direction, /No vocals, no lyrics, and a musically resolved seamless loop\.$/u,
+    "bounded episode direction must never displace the hard audio requirements");
   assert.equal(sealed.audio.providerPreference, "minimax_music3");
+  assert.equal(sealed.visual.visualStyle, "lofi");
+
+  const sleepBrief = brief({
+    family: "music_loop",
+    nicheKey: "lofi",
+    concept: "Soft nocturnal sound beds for uninterrupted sleep.",
+  });
+  const sleepPlan = await musicProgramPlan(stageContext({
+    store: {
+      channelProgramRoute: channelProgramRouteRunSeed({
+        route: resolveChannelProgramRoute(sleepBrief),
+        programBrief: sleepBrief,
+      }),
+      topic: "Rain over a quiet glasshouse",
+      visualBrief: {
+        promptStyle: "soft moonlit watercolor with restrained silver highlights",
+        footageQueries: [], palette: [], motion: "still", avoid: [],
+      },
+      styleDNA: {
+        audio: {
+          genre: "slow ambient drone",
+          bpmRange: [42, 52],
+          instrumentation: ["felted piano"],
+          textures: ["distant rain"],
+          moodArc: "settle gradually into an even, restful bed",
+          loudnessLufs: -20,
+          loopable: true,
+        },
+      },
+    },
+  }));
+  const sleepProgram = sleepPlan.musicProgramPlan as {
+    audio: { direction: string };
+    visual: { visualStyle: string };
+  };
+  assert.equal(sleepProgram.visual.visualStyle, "soft moonlit watercolor with restrained silver highlights");
+  assert.doesNotMatch(sleepProgram.visual.visualStyle, /lofi/iu);
+  assert.match(sleepProgram.audio.direction, /slow ambient drone/u);
+  assert.match(sleepProgram.audio.direction, /42-52 BPM/u);
 
   const scenes = await scenePlanner(stageContext({
     params: { visualStyle: "lofi" },
@@ -148,22 +212,45 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
       topic,
       niche: "rainy late-night focus",
       styleGrammar: "warm cinematic lofi",
+      styleDNA: {
+        audio: {
+          genre: "dusty jazz-hop",
+          bpmRange: [68, 76],
+          instrumentation: ["felt piano", "upright bass"],
+          textures: ["soft vinyl noise"],
+          moodArc: "settle into focus, then resolve with quiet optimism",
+          loudnessLufs: -14,
+          loopable: true,
+        },
+      },
       musicProgramPlan: planned.musicProgramPlan,
     },
   }));
-  assert.equal(scenes.sceneMusicPrompt, sealed.audio.direction);
+  assert.equal(scenes.sceneMusicPrompt, undefined, "scene planning does not publish an unconsumed music prompt");
   assert.equal(scenes.musicProgramMotionIntent, sealed.visual.motionIntent);
 
-  const reused = await music(stageContext({
-    store: {
-      channelProgramRoute: musicSeed,
-      topic,
-      musicProgramPlan: planned.musicProgramPlan,
-      reuseMusicKey: "owner/test/channel/program-route/reused-music.mp3",
+  const minimaxReuseReceipt = createMusicReuseReceipt({
+    ownerId: "owner-program-route-test", baseRunId: "base-run", baseChannelId: "base-channel",
+    siblingChannelId: "channel-program-route-test",
+    family: musicRoute.family, contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3",
+    musicKey: "owner/test/channel/program-route/reused-music.mp3",
+    audioSha256: "a".repeat(64), audioByteLength: 1_000,
+    baseMusicKey: "owner/owner-program-route-test/runs/base-run/audio/music.mp3",
+    providerEvidence: {
+      program: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/program.json", sha256: "c".repeat(64) },
+      source: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/source.json", sha256: "d".repeat(64) },
+      quality: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/quality.json", sha256: "e".repeat(64) },
+      auditionWav: { key: "owner/owner-program-route-test/group/fixture/bundle/base-run/music-evidence/audition.wav", sha256: "f".repeat(64) },
     },
-  }));
-  assert.equal(reused.musicProvider, "reuse");
-  assert.equal(reused.musicKey, "owner/test/channel/program-route/reused-music.mp3");
+    soundProfileFingerprint: groupMusicSoundProfileFingerprint({ family: musicRoute.family,
+      contentLaneKey: musicRoute.contentLaneKey, provider: "minimax_music3", styleDNA: musicStyleDNA })!,
+  });
+  assert.throws(() => assertMusicReuseReceipt({ receipt: minimaxReuseReceipt,
+    ownerId: "owner-program-route-test", siblingChannelId: "channel-program-route-test",
+    musicKey: "owner/test/channel/program-route/reused-music.mp3", currentFamily: musicRoute.family,
+    currentContentLaneKey: musicRoute.contentLaneKey, currentProvider: "minimax_music3",
+    currentStyleDNA: musicStyleDNA }), /MiniMax music reuse is disabled/u,
+  "MiniMax route reuse waits for its distinct worker/audition evidence transfer contract");
 
   await assert.rejects(
     music(stageContext({
@@ -396,6 +483,19 @@ async function reusedScriptsRetainTheirRouteBinding(): Promise<void> {
     /reused script does not match the frozen channel program route/,
     "a language sibling must not translate a script from another program route",
   );
+  await assert.rejects(
+    scriptGen(stageContext({
+      params: { language: "en" },
+      store: {
+        channelProgramRoute: narratedSeed,
+        topic: "How one river bent an old empire’s trade routes",
+        bannedWords: ["old map"],
+        reuseScript,
+      },
+    })),
+    /reused script violates channel language policy: old map/,
+    "a same-language reuse must still enforce the current channel language policy",
+  );
 }
 
 async function preparedWeeklyScriptsSkipCreativeTextGeneration(): Promise<void> {
@@ -419,6 +519,19 @@ async function preparedWeeklyScriptsSkipCreativeTextGeneration(): Promise<void> 
   }));
   assert.equal(result.script, preparedScript, "the prepared weekly script is retained verbatim");
   assert.equal(result.narrationText, preparedScript.narrationText);
+  await assert.rejects(
+    scriptGen(stageContext({
+      params: { language: "es" },
+      store: {
+        channelProgramRoute: narratedSeed,
+        topic: "How one hinge rewrote the archive",
+        bannedWords: ["overlooked hinge"],
+        preparedScript,
+      },
+    })),
+    /prepared weekly script violates channel language policy: overlooked hinge/,
+    "prepared narration must be checked against the current channel language policy before TTS",
+  );
   await assert.rejects(
     scriptGen(stageContext({
       store: {
@@ -468,10 +581,10 @@ async function documentaryScriptsUseOnlyTheReviewedEpisodePlan(): Promise<void> 
         topic: episodePlan.topic,
         documentaryEpisodePlan: episodePlan,
         narrationText: `${episodePlan.narrationText} Unreviewed addition.`,
-        script: generated.script,
+        script: { ...(generated.script as Record<string, unknown>), narrationText: `${episodePlan.narrationText} Unreviewed addition.` },
       },
     })),
-    /narration differs from its reviewed documentary source plan/,
+    /narrationText does not match the hook and ordered sections/,
     "script QA must reject altered narration before an external critic can approve it",
   );
   await assert.rejects(
@@ -490,7 +603,7 @@ async function serializedReuseRequiresTheExactEpisodeReceipt(): Promise<void> {
   const reuseScript = {
     hook: "The first answer is not the first question.",
     sections: [{ heading: "Start", narration: "Start with the question beneath the answer." }],
-    narrationText: "The first answer is not the first question. Start with the question beneath the answer.",
+    narrationText: "The first answer is not the first question.\n\nStart with the question beneath the answer.",
     estDurationSec: 12,
     programRouteFingerprint: serializedNarratedSeed.routeFingerprint,
   };

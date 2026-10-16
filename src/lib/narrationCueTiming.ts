@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  narrationTranscriptLexicalTokens,
   NarrationTranscriptProofSchema,
   type NarrationTranscriptProof,
 } from "./narrationTranscriptProof";
@@ -14,8 +15,8 @@ import {
 export const NARRATION_CUE_TIMING_EVIDENCE_VERSION = "narration-cue-timing/v1";
 
 const TIMING_TOLERANCE_SEC = 0.65;
-const MIN_MATCHED_TOKEN_RATIO = 0.68;
-const MIN_TIMING_ALIGNED_TOKEN_RATIO = 0.85;
+export const NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO = 0.68;
+export const NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO = 0.85;
 const MAX_TRANSCRIPT_LOOKAHEAD_WORDS = 96;
 
 const TimedSentenceSchema = z
@@ -47,15 +48,39 @@ export const NarrationCueTimingEvidenceSchema = z
     timingAlignedTokenRatio: z.number().min(0).max(1),
     maxTimingDriftSec: z.number().finite().nonnegative(),
   })
-  .strict();
+  .strict()
+  .superRefine((evidence, context) => {
+    if (evidence.matchedTokenCount > evidence.expectedTokenCount) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["matchedTokenCount"],
+        message: "matched cue-token count cannot exceed the expected count" });
+    }
+    if (evidence.timingAlignedTokenCount > evidence.matchedTokenCount) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["timingAlignedTokenCount"],
+        message: "timing-aligned count cannot exceed the matched count" });
+    }
+    const matchedRatio = Number((evidence.matchedTokenCount / evidence.expectedTokenCount).toFixed(4));
+    const alignedRatio = Number((evidence.timingAlignedTokenCount / evidence.matchedTokenCount).toFixed(4));
+    if (evidence.matchedTokenRatio !== matchedRatio) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["matchedTokenRatio"],
+        message: "matched-token ratio does not agree with its counts" });
+    }
+    if (evidence.timingAlignedTokenRatio !== alignedRatio) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["timingAlignedTokenRatio"],
+        message: "timing-aligned ratio does not agree with its counts" });
+    }
+    if (evidence.matchedTokenRatio < NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["matchedTokenRatio"],
+        message: "matched-token ratio is below the certified minimum" });
+    }
+    if (evidence.timingAlignedTokenRatio < NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["timingAlignedTokenRatio"],
+        message: "timing-aligned ratio is below the certified minimum" });
+    }
+  });
 
 export type NarrationCueTimingEvidence = z.infer<
   typeof NarrationCueTimingEvidenceSchema
 >;
-
-function tokens(value: string): string[] {
-  return value.toLowerCase().match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) ?? [];
-}
 
 function round(value: number): number {
   return Number(value.toFixed(4));
@@ -124,7 +149,7 @@ export function assertNarrationCueTimingEvidence(args: {
   const words = proof.data.transcript.words
     .map((word) => ({
       ...word,
-      tokens: tokens(word.text),
+      tokens: narrationTranscriptLexicalTokens(word.text),
       midpointSec: (word.startMs + word.endMs) / 2000,
     }))
     .filter((word) => word.tokens.length > 0);
@@ -148,7 +173,7 @@ export function assertNarrationCueTimingEvidence(args: {
     previousWordEnd = word.endMs;
   }
 
-  const cueTokens = cues.data.map((cue) => tokens(cue.text));
+  const cueTokens = cues.data.map((cue) => narrationTranscriptLexicalTokens(cue.text));
   const expectedTokenCount = cueTokens.reduce(
     (count, values) => count + values.length,
     0,
@@ -210,15 +235,15 @@ export function assertNarrationCueTimingEvidence(args: {
   }
 
   const matchedTokenRatio = matchedTokenCount / expectedTokenCount;
-  if (matchedTokenRatio < MIN_MATCHED_TOKEN_RATIO) {
+  if (matchedTokenRatio < NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO) {
     throw timingFailure(
-      `only ${(matchedTokenRatio * 100).toFixed(1)}% of cue words align to the independently transcribed narration (minimum ${(MIN_MATCHED_TOKEN_RATIO * 100).toFixed(0)}%)`,
+      `only ${(matchedTokenRatio * 100).toFixed(1)}% of cue words align to the independently transcribed narration (minimum ${(NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO * 100).toFixed(0)}%)`,
     );
   }
   const timingAlignedTokenRatio = timingAlignedTokenCount / matchedTokenCount;
-  if (timingAlignedTokenRatio < MIN_TIMING_ALIGNED_TOKEN_RATIO) {
+  if (timingAlignedTokenRatio < NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO) {
     throw timingFailure(
-      `only ${(timingAlignedTokenRatio * 100).toFixed(1)}% of matched cue words occur in their persisted time windows (minimum ${(MIN_TIMING_ALIGNED_TOKEN_RATIO * 100).toFixed(0)}%)`,
+      `only ${(timingAlignedTokenRatio * 100).toFixed(1)}% of matched cue words occur in their persisted time windows (minimum ${(NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO * 100).toFixed(0)}%)`,
     );
   }
 

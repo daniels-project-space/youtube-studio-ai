@@ -11,22 +11,34 @@ const manifest = JSON.parse(readFileSync('test-fixtures/title-baseline/manifest.
 let title = '';
 let generatorCalls = 0;
 let judgeCalls = 0;
+let pinnedCommentCalls = 0;
 let rejectedTitle = '';
 let generatedTitles: string[] | undefined;
 let preferredTitle = '';
 let forceCollapsedFirstSlate = false;
 let collapsedSlateAttempts = 0;
+let forceUncitedContradictionFirstJudge = false;
 const loader = Module as unknown as { _load: (request: string, ...rest: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (request, ...rest) {
   const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
   if (!request.endsWith('/creativeText')) return resolved;
   return { ...resolved, hasCreativeTextKey: () => true, creativeTextJson: async ({ prompt }: { prompt: string }) => {
-    if (prompt.includes('pinned comment')) return { comment: 'Which detail stood out?' };
+    if (prompt.includes('pinned comment')) {
+      pinnedCommentCalls++;
+      return { comment: 'Which detail stood out?' };
+    }
     if (prompt.includes('description + tags')) return { description: 'Fixture package.', tagsCsv: 'a,b,c,d,e' };
     if (prompt.startsWith('You are a YouTube CTR strategist')) {
       judgeCalls++;
       const rows = prompt.split('CANDIDATES:\n')[1].split('\n\n')[0].split('\n');
+      if (forceUncitedContradictionFirstJudge && judgeCalls === 1) {
+        return { rankings: rows.map((_, idx) => ({
+          idx, clickScore: 9, direct: 9, identityFit: 9, viewerMotivation: 9,
+          grounding: idx === 0 ? 'contradicted' : 'insufficient',
+          reason: 'The source does not establish this candidate.',
+        })) };
+      }
       return { rankings: rows.map((row, idx) => ({ idx, clickScore: preferredTitle && row.endsWith(preferredTitle) ? 10 : 9, direct: 9, identityFit: 9, viewerMotivation: 9,
         grounding: row.endsWith(rejectedTitle) && rejectedTitle ? 'insufficient' : 'supported',
         reason: 'Controlled admission response, not model-quality evidence.' })) };
@@ -65,6 +77,7 @@ async function main() {
       warmStartTitle: `${title} 999999`,
     });
     assert.equal(output.title, title, `${selected.channel}: invalid provisional claim cannot suppress a valid generated title`);
+    assert.equal(output.pinnedComment, '', 'unused pinned-comment compatibility output remains empty');
     assert.equal(generatorCalls, 1, 'No avoidable second paid generation');
     assert.equal(judgeCalls, 1);
   }
@@ -82,6 +95,25 @@ async function main() {
   assert.equal(reviewed.titleDecision.candidates.length, 2, 'Both meanings must reach the source-aware judge');
   assert.equal(generatorCalls, 1);
   assert.equal(judgeCalls, 1);
+
+  // An unsupported claim is not a contradiction. The real engine must reject
+  // an uncited verdict and use its bounded repair instead of sealing it.
+  rejectedTitle = '';
+  generatedTitles = ['Taxes Fund Public Schools', 'Where School Tax Money Goes'];
+  preferredTitle = generatedTitles[0];
+  forceUncitedContradictionFirstJudge = true;
+  generatorCalls = judgeCalls = 0;
+  const repairedGrounding = await craftMetadata({
+    topic: 'Taxes and public schools',
+    narrationText: 'Taxes fund public schools. School tax money goes to teachers and maintenance.',
+    competitorTitles: [{ title: 'Frozen evidence', views: 100 }],
+  });
+  assert.equal(repairedGrounding.title, generatedTitles[0]);
+  assert.equal(repairedGrounding.titleDecision.attempts, 2,
+    'the rejected contradiction must not be persisted as the selected decision');
+  assert.equal(generatorCalls, 2, 'the malformed semantic response gets one bounded slate repair');
+  assert.equal(judgeCalls, 2, 'the repaired slate receives one fresh semantic judgment');
+  forceUncitedContradictionFirstJudge = false;
 
   // All valid candidates remain auditable. The runner-up skips a filler-only
   // variant only after the semantic scores establish which version is best.
@@ -123,6 +155,7 @@ async function main() {
   assert.equal(judgeCalls, 1, 'the collapsed slate never reaches the paid semantic judge');
   forceCollapsedFirstSlate = false;
   collapsedSlateAttempts = 0;
+  assert.equal(pinnedCommentCalls, 0, 'metadata must not buy comments until the publishing flow consumes them');
 
   for (const [left, right] of [
     ['The Bridge Failed After 4 Years', 'The Bridge Failed After 40 Years'],

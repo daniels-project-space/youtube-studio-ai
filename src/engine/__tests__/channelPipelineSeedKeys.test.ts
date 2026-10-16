@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { createChannelProgramBrief } from "../channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "../channelProgramRoute";
 import { channelPipelineValidationSeedKeys } from "../channelPipelineSeedKeys";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+  selectChannelAwareScriptQa,
+} from "../channelAwareScriptQaSelection";
 import { childrenShowBibleSeedKeys } from "../childrenShowBible";
 import { contentLaneForFamily } from "../contentLane";
 import { designPipeline } from "../designer";
@@ -21,15 +26,31 @@ try {
     const seed = channelProgramRouteRunSeed({ route, programBrief: brief });
     const lane = contentLaneForFamily(family)!;
     const originalSeed = JSON.stringify(seed);
-    const keys = channelPipelineValidationSeedKeys(lane, seed);
-    assert.deepEqual(keys, ["contentLane", "channelProgramRoute"]);
-    assert.equal(keys.includes("workedExampleRequest"), false, "no nonexistent producer can be claimed as a seed");
     const design = designPipeline({ family, nicheKey: brief.nicheKey, programBrief: brief, programRoute: route });
+    const keys = channelPipelineValidationSeedKeys(lane, seed, design.pipeline);
+    assert.deepEqual(keys, [
+      "contentLane", "channelProgramRoute",
+      ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
+        ? ["channelName"] : []),
+      ...(design.pipeline.some(entry =>
+        (entry.block === "script_gen" && entry.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) ||
+        (entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) ? ["showBible"] : []),
+      ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
+    ]);
+    assert.equal(keys.includes("workedExampleRequest"), false, "no nonexistent producer can be claimed as a seed");
     const compiled = compilePipeline(validatePipeline(design.pipeline, keys));
     assert.deepEqual(compiled, design.compilation, `${family}: validation must agree with its actual designer`);
 
-    const withoutRoute = channelPipelineValidationSeedKeys(lane);
-    assert.deepEqual(withoutRoute, ["contentLane"]);
+    const withoutRoute = channelPipelineValidationSeedKeys(lane, undefined, design.pipeline);
+    assert.deepEqual(withoutRoute, [
+      "contentLane",
+      ...(design.pipeline.some(entry => entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)
+        ? ["channelName"] : []),
+      ...(design.pipeline.some(entry =>
+        (entry.block === "script_gen" && entry.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) ||
+        (entry.block === "qa_script" && entry.version === CHANNEL_AWARE_SCRIPT_QA_VERSION)) ? ["showBible"] : []),
+      ...(design.pipeline.some(entry => entry.block === "script_gen" || entry.block === "qa_script") ? ["bannedWords"] : []),
+    ]);
     if (family === "narrated_stock") {
       assert.deepEqual(compilePipeline(validatePipeline(design.pipeline, withoutRoute)), compiled);
     } else {
@@ -42,15 +63,30 @@ try {
     const otherLane = contentLaneForFamily(family === "whiteboard" ? "comic" : "whiteboard")!;
     assert.throws(() => channelPipelineValidationSeedKeys(otherLane, seed), /does not match.*content lane/);
     keys.push("test-only-mutation");
-    assert.deepEqual(channelPipelineValidationSeedKeys(lane, seed), ["contentLane", "channelProgramRoute"]);
+    assert.deepEqual(channelPipelineValidationSeedKeys(lane, seed, design.pipeline), keys.filter(key => key !== "test-only-mutation"));
     assert.equal(JSON.stringify(seed), originalSeed, "projection must not rewrite the frozen route");
   }
   const children = contentLaneForFamily("children_learning")!;
   assert.deepEqual(channelPipelineValidationSeedKeys(children), ["contentLane", ...childrenShowBibleSeedKeys(children)]);
   const music = contentLaneForFamily("music_loop")!;
+  assert.deepEqual(selectChannelAwareScriptQa([{ block: "script_gen" }, { block: "qa_script" }]), [
+    { block: "script_gen", version: CHANNEL_AWARE_SCRIPT_GEN_VERSION },
+    { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+  ], "new otherwise-unpinned script routes install writer and critic versions together");
+  const manuallyPinned = [
+    { block: "script_gen", version: "1.0.0-migration" }, { block: "qa_script" },
+  ];
+  assert.deepEqual(selectChannelAwareScriptQa(manuallyPinned), manuallyPinned,
+    "explicitly pinned legacy modules remain untouched");
   assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
     { block: "music_program_plan", version: "2.1.0-yue2-frozen-identity" },
   ]), ["contentLane", "channelProfile"]);
+  assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
+    { block: "script_gen" }, { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
+  ]), ["contentLane", "channelName", "showBible", "bannedWords"]);
+  assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
+    { block: "script_gen" }, { block: "qa_script" },
+  ]), ["contentLane", "bannedWords"], "legacy script QA does not gain new channel identity requirements");
   for (const version of [undefined, "2.0.0-yue2-intent"]) {
     assert.deepEqual(channelPipelineValidationSeedKeys(music, undefined, [
       { block: "music_program_plan", ...(version ? { version } : {}) },

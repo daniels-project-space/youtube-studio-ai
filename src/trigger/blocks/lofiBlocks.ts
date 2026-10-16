@@ -5,8 +5,8 @@
  * Music is owned by the shared musicBlocks module and registered separately.
  * Data flow (store keys), in pipeline order:
  *   topic_select  → topic
- *   scene_planner → scenes sceneMusicPrompt
- *   keyframes     → f1Url f1Key motionPrompt
+ *   scene_planner → scenes musicProgramMotionIntent
+ *   keyframes     → f1Key motionPrompt
  *   loop_clips    → loopRawKey loopRawUrl + two seam proofs
  *   upscale       → loopUnitKey loopUnitUrl loopUnitUpscaled loopUnitResolution
  *   music         → musicKey musicProvider musicUrl
@@ -33,7 +33,8 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
-import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
+import { assertFinalDurationMatchesTarget } from "@/lib/assembly/timeline";
+import { getVisualBrief } from "@/engine/creative/brief";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
@@ -48,14 +49,7 @@ import {
   parseChannelProgramRouteRunSeed,
   type ChannelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
-import {
-  createOriginalMusicProgramPlan,
-  selectOriginalMusicProvider,
-} from "@/engine/originalMusicProgram";
-import {
-  assertMusicProgramQualityReceipt,
-} from "@/engine/channelMusicProgram";
-import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
+import { appendMusicGenerationDisclosure, assertMusicQualityForPublish } from "./musicReleaseGate";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
 import {
@@ -103,10 +97,6 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaImage } from "@/lib/novitaMedia";
 import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
-import {
-  assertPinnedMiniMaxMusic3Receipt,
-  hasQualifiedMiniMaxMusic3,
-} from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, composeLoopSourceUnit, composeVideoSequenceUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureVideoBoundaryDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, type CaptionCue } from "@/lib/ffmpeg";
@@ -121,6 +111,7 @@ import { parseJsonLoose } from "@/lib/gemini";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
+import { loadTopicSelectionIdentity } from "./topicIdentity";
 import { produceAndCritique, validateCritiqueResponse } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -144,6 +135,7 @@ import { getNarrativeSeriesPlanRecord } from "@/lib/narrativeSeriesStateRuntime"
 import { createNarrativeShortOrigin, type NarrativeShortOrigin } from "@/lib/narrativeShortOrigin";
 import { z } from "zod";
 import { convex, str, recordAsset, routeSeedForTopicSelection, musicProgramForCurrentRoute } from "./blockContext";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./providerAwareMusic";
 
 /**
  * Topic-chunk structured-output schema (validated on both Mastra + REST).
@@ -213,9 +205,6 @@ import {
   requireChannelPublishAction,
   type ChannelPublishDecision,
 } from "@/lib/channelPublishPolicy";
-
-const MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE =
-  "Music generated with MiniMax-Music3. This video contains AI-generated audio.";
 
 function opt(ctx: StageContext, key: string): string | undefined {
   const v = ctx.store[key];
@@ -548,92 +537,6 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function appendMusicGenerationDisclosure(
-  ctx: StageContext,
-  description: string,
-): Promise<string> {
-  if (ctx.store["musicProvider"] !== "minimax_music3") return description;
-  const programKey = str(ctx, "channelMusicProgramKey");
-  const receiptKey = str(ctx, "musicRuntimeReceiptKey");
-  const [programBytes, receiptBytes] = await Promise.all([
-    getObjectBytes(programKey),
-    getObjectBytes(receiptKey),
-  ]);
-  let program: unknown;
-  let receipt: unknown;
-  try {
-    program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
-    receipt = JSON.parse(Buffer.from(receiptBytes).toString("utf8"));
-  } catch (error) {
-    throw new Error(
-      `MiniMax-Music3 disclosure evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const admitted = assertPinnedMiniMaxMusic3Receipt(receipt, program);
-  if (description.includes(MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE)) return description;
-  ctx.log(
-    `publish package: appended required ${admitted.license.uiAttribution} generated-audio disclosure ` +
-    `from runtime receipt ${admitted.requestKey.slice(0, 12)}`,
-  );
-  return `${description.trim()}\n\n${MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE}`;
-}
-
-/**
- * A worker qualification proves the installed graph is eligible to render; it
- * does not prove this song is free of the documented MiniMax/Comfy decode
- * degradation or has musical depth. The review workflow supplies this durable
- * receipt after actual section-by-section audition — never fabricated here.
- */
-async function assertMiniMaxMusicQualityForPublish(ctx: StageContext): Promise<void> {
-  if (ctx.store["musicProvider"] !== "minimax_music3") return;
-  const programKey = str(ctx, "channelMusicProgramKey");
-  const runtimeReceiptKey = str(ctx, "musicRuntimeReceiptKey");
-  const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");
-  const [programBytes, runtimeBytes, qualityBytes] = await Promise.all([
-    getObjectBytes(programKey),
-    getObjectBytes(runtimeReceiptKey),
-    getObjectBytes(qualityReceiptKey),
-  ]);
-  let program: unknown;
-  let runtimeReceipt: unknown;
-  let qualityReceipt: unknown;
-  try {
-    program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
-    runtimeReceipt = JSON.parse(Buffer.from(runtimeBytes).toString("utf8"));
-    qualityReceipt = JSON.parse(Buffer.from(qualityBytes).toString("utf8"));
-  } catch (error) {
-    throw new Error(
-      `MiniMax-Music3 per-track quality evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const runtime = assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, program);
-  const quality = assertMusicProgramQualityReceipt({ program, receipt: qualityReceipt });
-  if (
-    quality.output.contentSha256 !== runtime.output.contentSha256 ||
-    quality.output.byteLength !== runtime.output.byteLength ||
-    Math.abs(quality.output.durationSec - runtime.durationSec) > Math.max(0.1, runtime.durationSec * 0.001) ||
-    quality.output.sampleRate !== runtime.output.sampleRateHz ||
-    quality.output.channels !== runtime.output.channels ||
-    quality.output.codec !== runtime.output.codec
-  ) {
-    throw new Error("MiniMax-Music3 quality receipt is not bound to the exact native worker WAV");
-  }
-  const nativeWavKey = str(ctx, "musicNativeWavKey");
-  const expectedNativeWavKey =
-    `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
-  if (nativeWavKey !== expectedNativeWavKey) {
-    throw new Error("MiniMax-Music3 native WAV key is not bound to this run and immutable worker output");
-  }
-  assertMusicAuditionNativeBytes({
-    expected: runtime.output,
-    bytes: await getObjectBytes(nativeWavKey),
-  });
-  ctx.log(
-    `upload_draft: admitted human-auditioned and byte-verified per-track music receipt ${quality.fingerprint.slice(0, 12)} ` +
-    `for MiniMax request ${runtime.requestKey.slice(0, 12)}`,
-  );
-}
-
 /* --------------------------- 1. topic_select ---------------------------- */
 
 export const topicSelect: Block = {
@@ -708,23 +611,18 @@ export const topicSelect: Block = {
         ? "no_repeat"
         : "prefer_fresh";
 
-    // Channel identity (store seeds first; fall back to the channel doc).
-    const channel = await c
-      .query(api.channels.getChannel, { channelId })
-      .catch(() => null);
-    const id = (channel?.identity ?? {}) as {
-      persona?: string;
-      niche?: string;
-      styleGrammar?: string;
-      topicPool?: string[];
-      bannedWords?: string[];
-    };
-    const channelName = opt(ctx, "channelName") ?? channel?.name ?? "this channel";
-    const persona = opt(ctx, "persona") ?? id.persona ?? "";
-    const niche = opt(ctx, "niche") ?? id.niche ?? "";
-    const style = (ctx.store["styleGrammar"] as string | undefined) ?? id.styleGrammar ?? "";
-    const pool = (ctx.store["topicPool"] as string[] | undefined) ?? id.topicPool ?? [];
-    const bannedWords = (id.bannedWords ?? []).filter(Boolean);
+    // Use run-frozen identity and language policy. Older/direct invocations
+    // still fall back to the live channel row when their seed is incomplete.
+    const { channelName, persona, niche, style, pool, bannedWords } =
+      await loadTopicSelectionIdentity(ctx.store, () =>
+        c.query(api.channels.getChannel, { channelId }).catch((e) => {
+          ctx.log(
+            `topic_select: frozen channel identity unavailable; using channel-document fallback if present ` +
+              `(${e instanceof Error ? e.message : e})`,
+          );
+          return null;
+        }),
+      );
 
     // Used-topic history — FATAL if unreadable: selecting blind against an
     // unknown history is how channels repeat themselves. The content plan
@@ -745,9 +643,6 @@ export const topicSelect: Block = {
       ...plannedTopics.map(normalizeTopic),
     ]);
     const recentList = rememberedTopics.slice(-40);
-    // Phase 7: bias toward topics like past high-retention winners ("" until enough data).
-    const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
-
     // SERIES MODE — an ordered, numbered run (e.g. "7 Days of Stoic Calm"). The
     // episode number = how many of this series already exist + 1; each episode
     // gets a unique subtitle that continues the arc. When the series is finished
@@ -1023,34 +918,38 @@ export const topicSelect: Block = {
     if (!hasCreativeTextKey()) {
       throw new Error("topic_select: OPENROUTER_API_KEY missing — refusing silent pool fallback");
     }
-    const competitorRows = niche
-      ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
-          .catch((e) => {
-            // Same shape optimizeTopics has one layer up, and named for the same
-            // reason: an outage and a niche with no tracked competitors produce
-            // the same empty array, and this bet is written without the evidence
-            // either way.
-            ctx.log(
-              `topic_select: COMPETITOR EVIDENCE LOST — this bet is written without competitor ` +
-                `titles (${e instanceof Error ? e.message : e})`,
-            );
-            return [];
+    // These evidence sources are independent. Load them only for the ordinary
+    // topic-ranking path, and in parallel; episode continuations do not use
+    // performance or competitor evidence at all.
+    const [perfCtx, competitorRows, outliers] = await Promise.all([
+      loadPerformanceContext(ctx.keyPrefix),
+      niche
+        ? c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
+            .catch((e) => {
+              // An outage and a niche with no tracked competitors both produce
+              // an empty list, so make the lost evidence explicit.
+              ctx.log(
+                `topic_select: COMPETITOR EVIDENCE LOST — this bet is written without competitor ` +
+                  `titles (${e instanceof Error ? e.message : e})`,
+              );
+              return [];
+            })
+        : Promise.resolve([]),
+      niche
+        ? loadOutlierBank({
+            convex: c,
+            ownerId: ctx.ownerId,
+            niche,
+            query: [niche, ...pool.slice(0, 2)].filter(Boolean).join(" "),
+            log: (m) => ctx.log(m),
           })
-      : [];
+        : Promise.resolve([]),
+    ]);
     const competitorTitles = (competitorRows as { topVideos?: { title: string; views: number }[] }[])
       .flatMap((r) => r.topVideos ?? [])
       .sort((a, b) => b.views - a.views)
       .slice(0, 12)
       .map((v) => ({ title: v.title, views: v.views }));
-    const outliers = niche
-      ? await loadOutlierBank({
-          convex: c,
-          ownerId: ctx.ownerId,
-          niche,
-          query: [niche, ...pool.slice(0, 2)].filter(Boolean).join(" "),
-          log: (m) => ctx.log(m),
-        })
-      : [];
 
     const crafted = await craftTopics({
       channelName,
@@ -1118,93 +1017,11 @@ export const topicSelect: Block = {
 
 /* -------------------------- 1b. scene_planner --------------------------- */
 
-/**
- * Creates the immutable episode-level audio/visual brief consumed by both the
- * looping-scene planner and the paid music generation block.  The plan is
- * deterministic from the already-selected topic and frozen channel route; it
- * never calls a provider or grants render/publication authority.
- */
-export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
-  dna: import("@/engine/creative/types").StyleDNA | null;
-  niche?: string;
-}): Block {
-  return {
-  id: "music_program_plan",
-  consumes: ["topic"],
-  produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
-  run: async (ctx) => {
-    const topic = str(ctx, "topic");
-    const route = routeSeedForTopicSelection(ctx);
-    if (!route) {
-      throw new Error("music_program_plan: requires a sealed music-loop channel program route");
-    }
-    const requestedProvider = ctx.params["provider"];
-    if (sourceProvider && requestedProvider !== undefined && requestedProvider !== sourceProvider) {
-      throw new Error("music_program_plan: explicit provider conflicts with YuE2 source ownership");
-    }
-    if (
-      requestedProvider !== undefined &&
-      requestedProvider !== "minimax_music3" &&
-      requestedProvider !== "suno" &&
-      requestedProvider !== "mureka" &&
-      !(sourceProvider === "yue2" && requestedProvider === "yue2")
-    ) {
-      throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
-    }
-    const identity = readIdentity?.(ctx);
-    const dna = identity ? identity.dna
-      : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
-    const visual = getVisualBrief(ctx.store);
-    const audio = getMusicBrief(ctx.store);
-    const setting = [
-      visual?.setting,
-      visual?.world,
-      visual?.footageQueries?.[0],
-      ctx.params["setting"] as string | undefined,
-      dna?.setting,
-      identity ? identity.niche : ctx.store["niche"] as string | undefined,
-    ].map((value) => value?.toString().trim()).find(Boolean);
-    const audioDirection = [
-      `Original instrumental program for “${topic}”.`,
-      dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
-      dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
-      dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
-      audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
-      "No vocals, no lyrics, and a musically resolved seamless loop.",
-    ].filter(Boolean).join(" ");
-    const plan = createOriginalMusicProgramPlan({
-      route,
-      topic,
-      setting,
-      visualStyle: visualStyle(ctx),
-      motionIntent: sourceProvider === "yue2"
-        ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
-        : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
-      audioDirection,
-      // Select a provider once, before either paid branch is allowed to run.
-      // Automatic programs use MiniMax only when its independently qualified
-      // worker is ready; an explicit route selection always remains immutable.
-      providerPreference: sourceProvider ?? selectOriginalMusicProvider({
-        requestedProvider: requestedProvider === "yue2" ? undefined : requestedProvider,
-        minimaxQualified: hasQualifiedMiniMaxMusic3(),
-      }),
-    });
-    ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
-    return {
-      musicProgramPlan: plan,
-      musicProgramPlanFingerprint: plan.fingerprint,
-    };
-  },
-  };
-}
-
-export const musicProgramPlan = createMusicProgramPlanBlock();
-
 export function createScenePlannerBlock(planner: typeof planScenes = planScenes): Block {
   return {
   id: "scene_planner",
   consumes: ["topic"],
-  produces: ["scenes", "sceneMusicPrompt", "musicProgramMotionIntent"],
+  produces: ["scenes", "musicProgramMotionIntent"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
     const musicProgram = musicProgramForCurrentRoute(ctx, topic);
@@ -1255,9 +1072,6 @@ export function createScenePlannerBlock(planner: typeof planScenes = planScenes)
     );
     return {
       scenes: plan.scenes,
-      // The route-owned plan is the binding instruction. The derived planner
-      // prompt remains a legacy fallback for historical pipelines only.
-      sceneMusicPrompt: musicProgram?.audio.direction ?? plan.musicPrompt ?? "",
       // loop_clips reads this before its generic scene prompt.  Passing the
       // sealed intent through is what makes the program’s motion constraint a
       // real renderer input rather than decorative planning metadata.
@@ -1279,7 +1093,7 @@ export function createKeyframesBlock(
   return {
   id: "keyframes",
   consumes: ["scenes"],
-  produces: ["f1Url", "f1Key", "motionPrompt"],
+  produces: ["f1Key", "motionPrompt"],
   paid: true,
   run: async (ctx) => {
     // CLOUD REBUILD: one attested Novita still replaces the old local/Higgsfield
@@ -1385,9 +1199,10 @@ export function createKeyframesBlock(
             providers: ["openrouter"], tier: "final",
           });
           const v = parseJsonLoose<{ score?: unknown; issues?: unknown } | null>(raw);
+          const hasNoRepairs = Array.isArray(v?.issues) && v.issues.length === 0;
           const admission = validateCritiqueResponse({
             score: v?.score,
-            pass: typeof v?.score === "number" && v.score >= 0.8,
+            pass: typeof v?.score === "number" && v.score >= 0.8 && hasNoRepairs,
             issues: v?.issues,
           });
           if (!admission.pass || !admission.critique) {
@@ -1412,7 +1227,6 @@ export function createKeyframesBlock(
         { retryable: false, code: "KEYFRAME_QUALITY_REJECTED" },
       );
     }
-    const f1Url = loop.value.url;
     const f1Local = loop.value.local;
     ctx.log(`keyframes: best still after ${stills} attempt(s) (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted})`);
 
@@ -1462,7 +1276,6 @@ export function createKeyframesBlock(
 
     ctx.log(`keyframes ok: still=${f1Key}`);
     return {
-      f1Url,
       f1Key,
       motionPrompt,
       [COST_PATCH_KEY]: imageCostUsd,
@@ -1921,9 +1734,8 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
 
     if (options?.exactFinalDuration) {
       const delivered = await probe(finalPath);
-      if (!Number.isFinite(delivered.durationSec) || Math.abs(delivered.durationSec - durationSec) > 0.001) {
-        throw new Error(`assemble: rendered final duration ${delivered.durationSec}s does not match ${durationSec}s`);
-      }
+      assertFinalDurationMatchesTarget(delivered.durationSec, durationSec, 30, "assemble final master");
+      videoDurationSec = delivered.durationSec;
     }
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await persistRenderedFile(videoKey, finalPath, { contentType: "video/mp4" }, {
@@ -2818,7 +2630,7 @@ export const uploadDraft: Block = {
         `upload_draft: final quality evidence did not clear its hard gates — ${quality.data.release.blockers.join("; ")}`,
       );
     }
-    await assertMiniMaxMusicQualityForPublish(ctx);
+    await assertMusicQualityForPublish(ctx);
     const lane = resolveContentLane({ stored: ctx.store["contentLane"], pipeline: [] });
     if (
       quality.data.episode.lane.key !== lane.key ||
@@ -3514,7 +3326,6 @@ export const shortsSpinoff: Block = {
 
 export const lofiBlocks: Block[] = [
   topicSelect,
-  musicProgramPlan,
   scenePlanner,
   keyframes,
   loopClips,
@@ -3532,8 +3343,12 @@ export const lofiBlocks: Block[] = [
  * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
  *   competitor_research → music plan/music → scene_planner → keyframes
  *   → loop_clips(2×15s) → upscale(short source unit) → metadata
- *   → assemble(packet-looped 1–8h master) → qa_visual
- *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → upload_draft → notify
+ *   → assemble(packet-looped 1–8h master)
+ *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → qa_visual
+ *   → upload_draft → notify
+ *
+ * Final visual QA follows thumbnail generation because it reviews the finished
+ * master and its thumbnail together before the private draft can be uploaded.
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
  * seoDatabank / competitors are in the store before `metadata` optimises the
@@ -3547,14 +3362,15 @@ export const lofiBlocks: Block[] = [
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
-  { block: "music_program_plan" },
+  { block: "music_program_plan", params: { visualStyle: "lofi ambient" } },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
-  { block: "music", params: { provider: "suno" } },
+  { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },

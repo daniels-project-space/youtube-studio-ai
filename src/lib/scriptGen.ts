@@ -8,7 +8,15 @@ import { creativeTextJson, hasCreativeTextKey, scriptCreativeTextModel } from "@
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
-import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import type { ShowBibleVoice } from "@/engine/showBibleVoice";
+import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
+import { assembleScriptNarration } from "@/engine/scriptNarration";
+import {
+  channelBannedWordsDirective,
+  findChannelBannedWords,
+  readChannelBannedWords,
+} from "@/engine/channelLanguagePolicy";
 
 export interface ScriptSection {
   heading: string;
@@ -109,8 +117,12 @@ export interface Script {
 
 export interface ScriptRequest {
   topic: string;
+  /** Topicraft's cold-open intent, subordinate to the admitted evidence. */
+  topicPromise?: string;
   channelName?: string;
   persona?: string;
+  /** Bounded editorial identity; visual motif and render doctrines are excluded. */
+  channelVoice?: ShowBibleVoice;
   // NO styleGrammar. It was declared here and passed by script_gen, and read at
   // zero sites while persona, niche, channelName, style and language beside it
   // are each read at four or more — the asymmetry that made it look like an
@@ -156,6 +168,8 @@ export interface ScriptRequest {
    * script must be written in (beats the generic per-archetype tone).
    */
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
+  /** Frozen channel identity language the narration must not contain. */
+  bannedWords?: string[];
   /**
    * The channel renders spoken numbers as on-screen motion graphics
   * (visual_inserts) — the script must SPEAK concrete, attributable figures.
@@ -234,6 +248,7 @@ function programRouteClause(req: Pick<ScriptRequest, "programRoute">): string {
   if (!route) return "";
   return [
     `SEALED CHANNEL PROGRAM ROUTE: ${route.routeKey} (${route.routeFingerprint}).`,
+    channelProgramContextPrompt(route),
     `VIEWER JOB: ${route.directives.viewerJob}`,
     `CLAIM MODE: ${route.directives.claimMode}.`,
     "SCRIPT RULES (non-negotiable):",
@@ -317,6 +332,35 @@ export function sanitizeSpoken(text: string, opts?: { keepAudioTags?: boolean })
   );
 }
 
+export function normalizeScriptClosingLine(value: unknown): string {
+  return typeof value === "string" ? sanitizeSpoken(value).replace(/\s+/g, " ").trim() : "";
+}
+
+export function scriptClosingLineIssue(value: unknown): string | undefined {
+  const line = normalizeScriptClosingLine(value);
+  if (!line) return "script closing line is missing";
+  if (Array.from(line).length > 80) return "script closing line exceeds 80 characters";
+  if (line.split(/\s+/u).length > 10) return "script closing line must be 10 or fewer spoken words";
+  return undefined;
+}
+
+export function scriptLanguagePolicyIssue(
+  script: Pick<Script, "narrationText">,
+  bannedWords: unknown,
+): string | undefined {
+  const matches = findChannelBannedWords(script.narrationText, readChannelBannedWords(bannedWords));
+  return matches.length ? `channel language policy: ${matches.slice(0, 8).join(", ")}` : undefined;
+}
+
+export function assertScriptLanguagePolicy(
+  script: Pick<Script, "narrationText">,
+  bannedWords: unknown,
+  source = "scriptGen",
+): void {
+  const issue = scriptLanguagePolicyIssue(script, bannedWords);
+  if (issue) throw new Error(`${source} violates ${issue}`);
+}
+
 /** Strip structure-scaffold prefixes the model leaks into chapter headings. */
 function cleanHeading(h: string): string {
   return h
@@ -326,13 +370,10 @@ function cleanHeading(h: string): string {
 }
 
 function assemble(hook: string, sections: ScriptSection[]): string {
-  return [hook, ...sections.map((s) => s.narration)]
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .join("\n\n");
+  return assembleScriptNarration(hook, sections);
 }
 
-// CRAFT_RULES targets <15-word sentences; ~14 is the observed mean.
+// Duration estimate: observed average words per spoken sentence for sentence-gap accounting.
 const AVG_WORDS_PER_SENTENCE = 14;
 
 /**
@@ -366,7 +407,7 @@ function styleGuidance(req: ScriptRequest): string {
   const { style, language, narrative, niche } = req;
   // The channel's OWN narrative DNA outranks the generic per-archetype tone —
   // a finance documentary channel must not inherit the stoic-essay register.
-  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.delivery)
+  const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.pacing || narrative.delivery)
     ? "WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER (it overrides any generic tone below): " +
       [
         narrative.scriptStyle ? `script style: ${narrative.scriptStyle}` : "",
@@ -391,7 +432,15 @@ function styleGuidance(req: ScriptRequest): string {
   const weeklyPreparation = req.weeklyPreparationBrief?.trim()
     ? `\n\nFROZEN WEEKLY PREPARATION (follow this episode-specific brief; do not quote it): ${req.weeklyPreparationBrief.trim()}`
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
+  const voiceLines = showBibleVoicePromptLines(req.channelVoice);
+  const voiceClause = voiceLines.length
+    ? `FROZEN CHANNEL CREATIVE IDENTITY — this authored contract defines the channel voice and outranks ` +
+      `generic voice archetype or style guidance that follows; honor it without copying its wording. ` +
+      `Episode route, source evidence, safety constraints, and locked narrative DNA remain authoritative.\n` +
+      `${voiceLines.join("\n")}\n`
+    : "";
+  return dnaClause + voiceClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) +
+    channelBannedWordsDirective(req.bannedWords ?? []) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 
 /**
@@ -480,6 +529,9 @@ async function synthFullScriptOneShot(
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         playbookFull(req),
         voiceTagClause(req),
+        req.priorIssues?.length
+          ? `A previous complete draft exceeded its duration ceiling. Write more concisely without dropping the central argument or ending: ${req.priorIssues.join("; ")}`
+          : "",
         CRAFT_RULES,
         ARC_RULES,
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
@@ -487,6 +539,7 @@ async function synthFullScriptOneShot(
           `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
           `a distinct idea in depth (about 250-450 words each). Do NOT pad or stop short.`,
         `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
+        `Also return closing_line: one resonant takeaway of no more than 10 spoken words and 80 characters.`,
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
           `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
         ].filter(Boolean).join("\n\n"),
@@ -501,7 +554,8 @@ async function synthFullScriptOneShot(
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
-    let wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+    const hookWordCount = spoken(req, crafted.coldOpen).split(/\s+/).filter(Boolean).length;
+    let wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
     // TOP-UP before surrendering to the chunked path: the chunked fallback costs
     // 10-25 MORE Pro calls. If the one-shot under-delivered but got most of the
     // way there, ONE continuation call closes the gap far cheaper; accept ≥80%.
@@ -532,7 +586,7 @@ async function synthFullScriptOneShot(
           .filter((s) => s.narration.length > 0);
         // Splice the continuation in BEFORE the final (conclusion-shaped) section.
         sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
-        wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+        wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
       } catch (e) {
         log(`scriptGen one-shot top-up failed (${e instanceof Error ? e.message : e})`);
       }
@@ -557,10 +611,11 @@ async function synthFullScriptOneShot(
       log(`scriptGen one-shot (${model}): trimmed ${before}→${wordCount} words to honor the length ceiling (${overCap})`);
     }
     const hook = spoken(req, crafted.coldOpen);
-    const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const closingLine = normalizeScriptClosingLine(o.closing_line);
     const narrationText = assemble(hook, sections);
-    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+    const duration = estSeconds(narrationText, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${duration}s) ✓`);
+    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
     const detail = oneShotTimedOut
       ? `timed out after ${ONE_SHOT_TIMEOUT_MS}ms (provider request aborted)`
@@ -626,8 +681,8 @@ async function synthLongScript(
     const head = await creativeTextJson<{ closing_line?: string }>({
       prompt:
         `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
-        `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
-        `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
+        `THE QUOTE of the episode: one resonant, quotable line (<=10 spoken words and <=80 characters) ` +
+        `that distills its lesson, shown on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
       // MEASURED: this exact prompt returns nothing at 300 or 500 (0/3 each),
       // 2/3 at 700, 3/3 at 1200. Reasoning is mandatory on this route and is
@@ -656,7 +711,7 @@ async function synthLongScript(
   if (queue.length === 0) throw new Error("scriptGen: long-form outline produced no sections");
 
   const sections: ScriptSection[] = [];
-  let total = 0;
+  let total = words(hookRaw);
   let i = 0;
   let refills = 0;
   while (total < targetWords && sections.length < 60) {
@@ -685,6 +740,9 @@ async function synthLongScript(
       styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
+      req.priorIssues?.length
+        ? `The previous complete draft exceeded its duration ceiling. Keep this section concise and do not repeat earlier material. Fix: ${req.priorIssues.join("; ")}`
+        : "",
       CRAFT_RULES,
       "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
       `Return STRICT JSON {"narration":string}.`,
@@ -754,10 +812,11 @@ async function synthLongScript(
   }
 
   const hook = spoken(req, hookRaw);
-  const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
+  const closingLine = normalizeScriptClosingLine(closingRaw);
   const narrationText = assemble(hook, sections);
-  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+  const duration = estSeconds(narrationText, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: duration });
+  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -902,10 +961,17 @@ export async function translateScript(
   };
 }
 
+export function assertScriptVoiceInputForRoute(req: ScriptRequest): void {
+  if (req.programRoute && !req.persona?.trim()) {
+    throw new Error("scriptGen: route-bound production script requires its frozen channel persona");
+  }
+}
+
 export async function synthScript(
   req: ScriptRequest,
   log: Logger = () => {},
 ): Promise<Script> {
+  assertScriptVoiceInputForRoute(req);
   const maxSeconds = req.maxSeconds ?? 240;
   const gapSec = req.sentenceGapSec ?? 0;
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget
@@ -926,12 +992,16 @@ export async function synthScript(
   const crafted = req.precraftedHook ?? await craftHook({
     topic: req.topic,
     channelName: req.channelName,
+    bannedWords: req.bannedWords,
     niche: req.niche,
     persona: req.persona,
+    channelVoice: req.channelVoice,
+    programRoute: req.programRoute,
     narrative: req.narrative,
     style: req.style,
     playbookDigest: playbookFull(req) || undefined,
     directorIdea: req.structure?.hook?.trim() || undefined,
+    topicPromise: req.topicPromise,
     seriesNote: req.series
       ? `episode ${req.series.episode} of ${req.series.total} of "${req.series.name}"` +
         (req.series.previousSummary ? `; the previous episode: ${req.series.previousSummary}` : "")
@@ -945,7 +1015,8 @@ export async function synthScript(
 
   // Long-form (>~7 min) needs chunked generation — one call can't write it.
   if (maxSeconds > 420) {
-    return bindProgramRoute(req, await synthLongScript(req, crafted, maxSeconds, wordBudget, log));
+    const script = await synthLongScript(req, crafted, maxSeconds, wordBudget, log);
+    return bindProgramRoute(req, script);
   }
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook
@@ -984,12 +1055,12 @@ export async function synthScript(
       : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences.",
     "ENDING AWARENESS: the video holds a brief OUTRO card after the narration, so the narration must land on a " +
       "single DEFINITIVE closing sentence — a clean, conclusive final thought, never trailing off mid-idea. Then " +
-      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 12 words) that distills " +
+      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 10 spoken words and ≤ 80 characters) that distills " +
       "today's lesson, shown on the outro card as the takeaway the viewer carries.",
     "Return STRICT JSON only:",
     `{
   "sections": [ { "heading": string (short label), "narration": string (the spoken words for this section) } ],
-  "closing_line": string (<= 12 words — THE QUOTE: the episode's lesson distilled, quotable)
+  "closing_line": string (<= 10 spoken words and <= 80 characters — THE QUOTE: the episode's lesson distilled, quotable)
 }`,
     "CRITICAL: the narration is fed directly to a text-to-speech voice. Output PLAIN SPOKEN text ONLY. " +
       "Do NOT use asterisks, slashes, underscores, hashes, backticks, bullet points, markdown, emphasis " +
@@ -1010,8 +1081,7 @@ export async function synthScript(
   };
 
   const rawClosing = (raw as { closing_line?: unknown }).closing_line;
-  const closingLine =
-    typeof rawClosing === "string" ? sanitizeSpoken(rawClosing).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  const closingLine = normalizeScriptClosingLine(rawClosing);
   const hook = spoken(req, crafted.coldOpen);
   const sections: ScriptSection[] = Array.isArray(raw.sections)
     ? raw.sections
@@ -1035,7 +1105,8 @@ export async function synthScript(
   // continuation call splices extra body sections before the outro; still
   // short → fail LOUD (a thin script is a real failure, never a silent ship).
   const countWords = (t: string) => t.split(/\s+/).filter(Boolean).length;
-  let wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+  const hookWordCount = countWords(hook);
+  let wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
   const minWords = Math.round(wordBudget * 0.8);
   if (wordCount < minWords) {
     const missing = wordBudget - wordCount;
@@ -1047,12 +1118,22 @@ export async function synthScript(
         prompt: [
           `You are CONTINUING a YouTube narration script about "${req.topic}".`,
           programRouteClause(req),
+          seriesClause(req.series),
+          hookMandate(crafted),
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
+          playbookFull(req),
           voiceTagClause(req),
+          structureClause,
+          req.priorIssues?.length
+            ? `The previous draft was rejected for these issues; the new material MUST avoid them:\n${req.priorIssues.map((issue) => `- ${issue}`).join("\n")}`
+            : "",
           CRAFT_RULES,
-          `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
-          `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) ` +
-            `that fit BEFORE the final summary/outro section, each developing a distinct new idea in depth.`,
+          `Already-written narration (including the fixed cold open; do NOT repeat or contradict it):\n` +
+            [`Cold open: ${hook}`, ...sections.map((section) => `${section.heading}: ${section.narration}`)].join("\n"),
+          `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total), ` +
+            `${req.endWithSummary === false
+              ? "appending them after the existing sections; no summary section is required"
+              : "placing them before the final summary/outro section"}. Develop distinct new ideas in depth.`,
           `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
             `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
         ].filter(Boolean).join("\n\n"),
@@ -1063,9 +1144,10 @@ export async function synthScript(
           narration: spoken(req, typeof s.narration === "string" ? s.narration : ""),
         }))
         .filter((s) => s.narration.length > 0);
-      // Splice the continuation in BEFORE the final (summary/outro-shaped) section.
-      sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
-      wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+      // Keep a requested summary last; otherwise the continuation follows all existing sections.
+      const insertionIndex = req.endWithSummary === false ? sections.length : Math.max(1, sections.length - 1);
+      sections.splice(insertionIndex, 0, ...extra);
+      wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
     } catch (e) {
       log(`scriptGen short: top-up failed (${e instanceof Error ? e.message : e})`);
     }

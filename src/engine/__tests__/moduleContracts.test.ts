@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
-import { allManifests, getManifest } from "@/engine/registry";
+import { allManifests, get as getBlock, getManifest } from "@/engine/registry";
 import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { designPipeline } from "@/engine/designer";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
@@ -15,11 +15,12 @@ import {
   PRIVATE_PROBE_CONTRACT_POLICY,
   PipelinePolicyError,
 } from "@/engine/pipelineCompiler";
-import { declaredArtifactStore } from "@/engine/runner";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   CATALOG_EXECUTION_BINDINGS,
   catalogExecutionBinding,
+  assessGoldenPromotion,
   GOLDEN_PROMOTION_PROOFS,
   selectGoldenProductionModules,
   type GoldenPromotionProof,
@@ -68,6 +69,47 @@ function literalStrings(property: ts.ObjectLiteralElementLike | undefined): stri
     .map((element) => element.text);
 }
 
+function importedSourcePath(sourcePath: string, moduleName: string): string | undefined {
+  const candidate = moduleName.startsWith("@/")
+    ? join(process.cwd(), "src", `${moduleName.slice(2)}.ts`)
+    : resolvePath(dirname(sourcePath), `${moduleName}.ts`);
+  return existsSync(candidate) ? candidate : undefined;
+}
+
+function resolveStringConstant(
+  name: string,
+  source: ts.SourceFile,
+  seen = new Set<string>(),
+): string | undefined {
+  const key = `${source.fileName}:${name}`;
+  if (seen.has(key)) return undefined;
+  seen.add(key);
+
+  for (const statement of source.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || declaration.name.text !== name || !declaration.initializer) continue;
+        if (ts.isStringLiteral(declaration.initializer)) return declaration.initializer.text;
+        if (ts.isIdentifier(declaration.initializer)) {
+          const local = resolveStringConstant(declaration.initializer.text, source, seen);
+          if (local !== undefined) return local;
+        }
+      }
+    }
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.importClause?.namedBindings || !ts.isNamedImports(statement.importClause.namedBindings)) continue;
+    const imported = statement.importClause.namedBindings.elements.find(element => element.name.text === name);
+    if (!imported) continue;
+    const path = importedSourcePath(source.fileName, statement.moduleSpecifier.text);
+    if (!path) continue;
+    const importedSource = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const importedName = imported.propertyName?.text ?? imported.name.text;
+    const resolved = resolveStringConstant(importedName, importedSource, seen);
+    if (resolved !== undefined) return resolved;
+  }
+  return undefined;
+}
+
 function directContractAudit(additionalSources: Record<string, string> = {}): void {
   const blockDir = join(process.cwd(), "src/trigger/blocks");
   const extras: string[] = [];
@@ -75,8 +117,9 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
   const sources = Object.fromEntries(readdirSync(blockDir).filter(name => name.endsWith(".ts"))
     .map(file => [file, readFileSync(join(blockDir, file), "utf8")]));
   for (const [file, text] of Object.entries({ ...sources, ...additionalSources })) {
+    const sourcePath = file.includes("/") ? join(process.cwd(), file) : join(blockDir, file);
     const source = ts.createSourceFile(
-      file,
+      sourcePath,
       text,
       ts.ScriptTarget.Latest,
       true,
@@ -97,15 +140,7 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
       if (versionProperty && ts.isPropertyAssignment(versionProperty)) {
         const expression = versionProperty.initializer;
         if (ts.isStringLiteral(expression)) version = expression.text;
-        else if (ts.isIdentifier(expression)) {
-          for (const statement of source.statements) {
-            if (!ts.isVariableStatement(statement)) continue;
-            for (const declaration of statement.declarationList.declarations) {
-              if (ts.isIdentifier(declaration.name) && declaration.name.text === expression.text &&
-                declaration.initializer && ts.isStringLiteral(declaration.initializer)) version = declaration.initializer.text;
-            }
-          }
-        }
+        else if (ts.isIdentifier(expression)) version = resolveStringConstant(expression.text, source);
         assert.ok(version, `cannot resolve explicit ${id} version in ${file}`);
       }
       const manifest = getManifest(id, version);
@@ -155,18 +190,37 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
           node.argumentExpression &&
           ts.isStringLiteral(node.argumentExpression)
         ) {
-          const key = node.argumentExpression.text;
-          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file})`);
+          if (ts.isStringLiteral(node.argumentExpression)) {
+            const key = node.argumentExpression.text;
+            if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file})`);
+          } else {
+            ambientReads.push(`${id}.[computed store key] (${file})`);
+          }
+        }
+        if (
+          ts.isPropertyAccessExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "ctx" &&
+          node.expression.name.text === "store"
+        ) {
+          const key = node.name.text;
+          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, property access)`);
         }
         if (
           ts.isCallExpression(node) &&
           ts.isIdentifier(node.expression) &&
           ["str", "opt"].includes(node.expression.text) &&
           node.arguments.length >= 2 &&
-          ts.isStringLiteral(node.arguments[1])
+          ts.isIdentifier(node.arguments[0]) &&
+          node.arguments[0].text === "ctx"
         ) {
-          const key = node.arguments[1].text;
-          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, helper)`);
+          if (ts.isStringLiteral(node.arguments[1])) {
+            const key = node.arguments[1].text;
+            if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, helper)`);
+          } else {
+            ambientReads.push(`${id}.[computed helper key] (${file}, helper)`);
+          }
         }
         ts.forEachChild(node, visit);
       };
@@ -179,15 +233,27 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
     walk(source);
   }
   assert.deepEqual([...new Set(extras)].sort(), [], "module returned undeclared artifacts");
-  assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared literal store reads");
+  assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared or unprovable store reads");
 }
 
 function calibratedDirectContractAudit(): void {
   directContractAudit();
+  assert.doesNotThrow(() => directContractAudit({ "imported-version-fixture.ts": `
+    import { YUE2_SCORED_MUSIC_VERSION as selectedVersion } from "@/engine/musicModuleVersions";
+    const block = { id: "music", version: selectedVersion, produces: [],
+      run: ctx => { const topic = ctx.store["topic"]; void topic; return {}; } };
+  ` }), "the source audit must resolve imported version constants without weakening input checks");
   assert.throws(() => directContractAudit({ "version-negative-fixture.ts": `
     const block = { id: "music", version: "3.0.0-yue2-candidate", produces: [],
       run: ctx => { const illegal = ctx.store["undeclared_fixture_input"]; } };
-  ` }), /undeclared literal store reads/);
+  ` }), /undeclared or unprovable store reads/);
+  assert.throws(() => directContractAudit({ "computed-read-fixture.ts": `
+    const block = { id: "music", produces: [], run: ctx => {
+      const one = ctx.store[dynamicInput];
+      const two = ctx.store.undeclared_fixture_input;
+      const three = str(ctx, dynamicInput);
+    } };
+  ` }), /undeclared or unprovable store reads/);
 }
 
 function contractInputDeclarationsAreUnambiguous(): void {
@@ -201,6 +267,31 @@ function contractInputDeclarationsAreUnambiguous(): void {
     overlaps,
     [],
     "every module must declare each input as required or optional, never both",
+  );
+  for (const key of ["introApplied", "narrationStartSec"]) {
+    assert.ok(
+      MODULE_CONTRACTS.captions.optionalConsumes?.includes(key),
+      `captions must declare its optional ${key} clock evidence for runner admission`,
+    );
+  }
+}
+
+function contractOverridesPreserveBlockInputs(): void {
+  const dropped: string[] = [];
+  for (const [blockId, contract] of Object.entries(MODULE_CONTRACTS)) {
+    if (!contract.requiredConsumes) continue;
+    const block = getBlock(blockId);
+    if (!block) continue;
+    const required = new Set(contract.requiredConsumes);
+    const optional = new Set(contract.optionalConsumes ?? []);
+    for (const key of block.consumes) {
+      if (!required.has(key) && !optional.has(key)) dropped.push(`${blockId}.${key}`);
+    }
+  }
+  assert.deepEqual(
+    dropped.sort(),
+    [],
+    "contract overrides must keep every block-declared input required or explicitly optional",
   );
 }
 
@@ -218,6 +309,13 @@ function compileRepresentativeFamilies(): void {
     if (design.available) {
       assert.ok(design.compilation, `${family} must carry an exact production-contract compilation`);
       assert.equal(design.compilation?.policyId, "production-contract");
+      if (family === "quizyear") {
+        const rendererIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_year");
+        const criticIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_critic_spec");
+        const metadataIndex = design.pipeline.findIndex((entry) => entry.block === "quiz_metadata");
+        assert.ok(rendererIndex >= 0 && criticIndex > rendererIndex && metadataIndex > criticIndex,
+          "QuizYear critic and audience package must follow the approved renderer in dependency order");
+      }
       assert.ok(
         Number.isFinite(design.compilation?.reservedMaxCostUsd) &&
           (design.compilation?.reservedMaxCostUsd ?? -1) >= 0,
@@ -252,8 +350,9 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
       "emit_bundle",
     ]).has(entry.block),
   );
+  const validationSeeds = channelPipelineValidationSeedKeys(production.contentLane, undefined, privateProbe);
   const compilation = compilePipeline(
-    validatePipeline(privateProbe),
+    validatePipeline(privateProbe, validationSeeds),
     PRIVATE_PROBE_CONTRACT_POLICY,
   );
   assert.equal(compilation.policyId, "private-probe-contract");
@@ -270,9 +369,37 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
     assert(compilation.capabilities.includes(capability), `private probe must retain ${capability}`);
   }
   assert.throws(
-    () => compilePipeline(validatePipeline(privateProbe)),
+    () => compilePipeline(validatePipeline(privateProbe, validationSeeds)),
     /publish\.connector_bound/,
     "the ordinary production policy must continue to reject a non-uploading pipeline",
+  );
+}
+
+function visualReviewOwnershipIsFormatSpecificAndFailClosed(): void {
+  const generated = designPipeline({ family: "cinematic", publishMode: "draft" });
+  const withoutShotReview = generated.pipeline.filter((entry) => entry.block !== "qa_shots");
+  const validationSeeds = [
+    ...channelPipelineValidationSeedKeys(generated.contentLane, undefined, withoutShotReview),
+    // Even an externally seeded clip cannot stand in for the required review
+    // stage on the generated Novita chain.
+    "footageClips",
+  ];
+  assert.throws(
+    () => compilePipeline(validatePipeline(withoutShotReview, validationSeeds)),
+    /required Novita render-chain module is missing: qa_shots/,
+    "generated footage must retain its independent shot-review owner",
+  );
+
+  const integrated = designPipeline({ family: "whiteboard", publishMode: "draft" });
+  assert.ok(integrated.compilation, "the integrated Whiteboard module must compile with its own review contract");
+  assert.equal(
+    integrated.pipeline.some((entry) => entry.block === "qa_shots"),
+    false,
+    "a module that owns visual review must not need an unrelated shot-review stage",
+  );
+  assert.ok(
+    integrated.compilation.capabilities.includes("visuals.story_aligned"),
+    "integrated review must expose the same production capability as the standalone reviewer",
   );
 }
 
@@ -352,9 +479,10 @@ function crewRemovalAndOrderFail(): void {
     lengthMinutes: 3,
     publishMode: "draft",
   });
+  const seeds = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
   const withoutDirector = design.pipeline.filter((entry) => entry.block !== "director_brief");
   assert.throws(
-    () => compilePipeline(validatePipeline(withoutDirector)),
+    () => compilePipeline(validatePipeline(withoutDirector, seeds)),
     (error) => error instanceof PipelinePolicyError && /director_treatment|structure/.test(error.message),
   );
 
@@ -364,7 +492,7 @@ function crewRemovalAndOrderFail(): void {
   const stockIndex = reordered.findIndex((entry) => entry.block === "stock_footage");
   reordered.splice(stockIndex + 1, 0, dp);
   assert.throws(
-    () => compilePipeline(validatePipeline(reordered)),
+    () => compilePipeline(validatePipeline(reordered, seeds)),
     (error) => error instanceof PipelinePolicyError && /visualBrief.*before/.test(error.message),
   );
 }
@@ -386,10 +514,8 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
       publishMode: "draft",
     });
     if (!design.available) continue;
-    const resolved = validatePipeline(
-      design.pipeline,
-      channelPipelineValidationSeedKeys(design.contentLane),
-    );
+    const seedKeys = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
+    const resolved = validatePipeline(design.pipeline, seedKeys);
     const producers = new Map<string, { index: number; block: string }>();
     resolved.manifests.forEach((manifest, index) => {
       for (const artifact of [
@@ -406,7 +532,7 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
         edges++;
         const withoutProducer = design.pipeline.filter((_, index) => index !== producer.index);
         assert.throws(
-          () => validatePipeline(withoutProducer),
+          () => validatePipeline(withoutProducer, seedKeys),
           /consumes .*not produced|requires upstream capability|requires downstream capability/,
           `${family}: removing ${producer.block} must break ${consumer.id}.${artifact}`,
         );
@@ -416,7 +542,7 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
         const adjustedConsumerIndex = consumerIndex - (producer.index < consumerIndex ? 1 : 0);
         reordered.splice(adjustedConsumerIndex + 1, 0, entry);
         assert.throws(
-          () => validatePipeline(reordered),
+          () => validatePipeline(reordered, seedKeys),
           /consumes .*not produced|requires upstream capability|requires downstream capability/,
           `${family}: moving ${producer.block} behind ${consumer.id} must break ${artifact}`,
         );
@@ -444,7 +570,7 @@ function wholePipelineMutationGuards(): void {
     });
     if (!design.available || design.pipeline.length < 3) continue;
     coveredFamilies++;
-    const seeds = channelPipelineValidationSeedKeys(design.contentLane);
+    const seeds = channelPipelineValidationSeedKeys(design.contentLane, undefined, design.pipeline);
     const valid = validatePipeline(design.pipeline, seeds);
 
     assert.throws(
@@ -637,6 +763,33 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     "Golden certification without an immutable proof receipt is insufficient",
   );
 
+  const musicModule = GOLDEN_MODULES.find((module) => module.key === "music")!;
+  const musicBinding = catalogExecutionBinding(musicModule.key);
+  const musicManifests = musicBinding.executableIds.map((id) => {
+    const manifest = manifests.find((candidate) => candidate.id === id);
+    assert.ok(manifest, `test fixture needs manifest ${id}`);
+    return {
+      ...manifest,
+      certification: { status: "golden" as const, evidence: "test promotion receipt" },
+      ...(id === "music" ? { qualityContract: { required: false, failClosed: false } } : {}),
+    };
+  });
+  assert.ok(manifests.find((manifest) => manifest.id === "music")?.qualityContract.required,
+    "the paid music generator must declare its own byte-bound audition/release quality contract");
+  assert.ok(musicModule.gates.includes("byte-bound source audition and quality receipt before release"),
+    "the Golden music standard must test the actual output-review boundary");
+  const musicProof = proofFor({ ...musicModule, status: "reference" }, musicManifests);
+  const musicDecision = assessGoldenPromotion({
+    module: { ...musicModule, status: "reference" },
+    manifests: musicManifests,
+    proof: musicProof,
+  });
+  assert.equal(musicDecision.promoted, false,
+    "a planner's quality contract must not qualify the separately paid music generator");
+  assert.ok(musicDecision.blockers.some((blocker) =>
+    blocker.includes("paid modules lack their own required fail-closed quality contract: music")),
+  "promotion diagnostics must name the paid module whose own quality contract is missing");
+
   const incompleteProof: GoldenPromotionProof = {
     ...proofFor(packageOpening, [certified]),
     gates: proofFor(packageOpening, [certified]).gates.slice(1),
@@ -820,6 +973,16 @@ function configurationSpecificCostEnvelopes(): void {
       2 * comicPanels * PRICE.visionGraderUsd,
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
   );
+  assert.equal(
+    envelope("music", { provider: "mureka", trackCount: 4 }),
+    4 * PRICE.musicTrackUsd,
+    "Mureka music reservation must cover additional jobs needed to honor the requested track count",
+  );
+  assert.equal(
+    envelope("music", { provider: "suno", trackCount: 4 }),
+    4 * PRICE.musicTrackUsd,
+    "music reservation must cover the larger provider path without reserving unreachable quota failover spend",
+  );
 
   const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
   const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
@@ -932,9 +1095,11 @@ function main(): void {
   );
   calibratedDirectContractAudit();
   contractInputDeclarationsAreUnambiguous();
+  contractOverridesPreserveBlockInputs();
   compileRepresentativeFamilies();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
+  visualReviewOwnershipIsFormatSpecificAndFailClosed();
   runtimeConfigurationIsCompiledBeforeSpendReservation();
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();

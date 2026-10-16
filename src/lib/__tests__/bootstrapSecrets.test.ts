@@ -8,6 +8,7 @@ async function main() {
     "BOOTSTRAP_SHARED_FIXTURE", "BOOTSTRAP_RETRY_FIXTURE", "BOOTSTRAP_MISSING_FIXTURE",
     "TELEGRAM_CHAT_ID", "TELEGRAM_ADMIN_CHAT_ID",
     "OPENRELAY_API_KEY", "OPENRELAY_ORG_ID",
+    "MANAGEMENT_PROJECT_SECRET",
   ];
   const savedEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
   const reads = new Map<string, number>();
@@ -38,6 +39,8 @@ async function main() {
         ? { SALAD_API_KEY: secretSentinel, SALAD_ORG: "vault-org", SALAD_PROJECT: "fixture-project" }
         : service === "openrouter"
           ? { BOOTSTRAP_RETRY_FIXTURE: "recovered" }
+          : service === "render-engine"
+            ? { MANAGEMENT_PROJECT_SECRET: "fixture-management-project-secret".padEnd(64, "x") }
           : service === "youtube"
             ? { OPENRELAY_API_KEY: secretSentinel, OPENRELAY_ORG_ID: "studio-org" }
             : { BOOTSTRAP_SHARED_FIXTURE: service };
@@ -76,6 +79,10 @@ async function main() {
     }), /unsupported vault service/, "Studio must not read another project's shared OpenRelay key");
     assert.deepEqual([...reads.entries()], beforeRejectedService);
 
+    assert.equal(reads.has("render-engine"), false, "general bootstrap must not hydrate Engine capabilities");
+    await bootstrapSecrets(log, { services: ["render-engine"], required: ["MANAGEMENT_PROJECT_SECRET"] });
+    assert.equal(reads.get("render-engine"), 1, "Engine project capability is explicitly opt-in");
+
     await Promise.all(Array.from({ length: 4 }, () => bootstrapSecrets(log)));
     assert.ok(reads.size > 10, "exercise the real default service list, not a substitute bootstrap");
     for (const [service, count] of reads) {
@@ -84,6 +91,7 @@ async function main() {
     assert.equal(reads.has("gemini"), false, "generic bootstrap cannot hydrate sealed thumbnail credentials");
     assert.equal(reads.has("novita"), false, "generic bootstrap cannot hydrate retired generation credentials");
     assert.equal(reads.has("openrelay"), false, "shared provider credentials cannot shadow Studio's key");
+    assert.equal(reads.get("render-engine"), 1, "general bootstrap does not reread the Engine service");
     assert.equal(process.env.OPENRELAY_API_KEY, secretSentinel);
     assert.equal(process.env.OPENRELAY_ORG_ID, "studio-org");
     assert.equal(process.env.BOOTSTRAP_SHARED_FIXTURE, "cloudflare", "default service order must preserve alias precedence");

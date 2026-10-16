@@ -124,7 +124,7 @@ export type YuE2BoundEvaluationRequest = YuE2EvaluationRequest | YuE2AcceptedArr
 
 function sourceDurationPolicy(accepted: z.infer<typeof AcceptedMusicArrangementSchema>) {
   const arrangement = accepted.arrangement;
-  return arrangement.playback === "repeat" && ["primary_music", "meditation_bed"].includes(arrangement.role)
+  return arrangement.playback === "repeat" && ["primary_music", "meditation_bed", "sleep_sound_bed"].includes(arrangement.role)
     ? "natural_loop" as const : "exact" as const;
 }
 
@@ -195,8 +195,8 @@ export function validateYuE2EvaluationRequest(value: unknown): YuE2BoundEvaluati
     (request.acceptedArrangement.symbolicScorePolicy !== undefined &&
       (request.job.schema_version !== 2 || request.job.score_policy !== request.acceptedArrangement.symbolicScorePolicy)) ||
     (request.job.schema_version === 2 && request.job.requested_duration_sec !== request.acceptedArrangement.arrangement.requestedDurationSec) ||
-    (request.job.schema_version === 2 && request.job.source_duration_policy === "natural_loop" &&
-      sourceDurationPolicy(request.acceptedArrangement) !== "natural_loop") ||
+    (request.job.schema_version === 2 &&
+      request.job.source_duration_policy !== sourceDurationPolicy(request.acceptedArrangement)) ||
     request.job.style !== projectAcceptedMusicArrangementToYuEStyle(request.acceptedArrangement)
   )) {
     throw new Error("YuE2 evaluation must preserve the accepted arrangement fingerprint and exact projected style");

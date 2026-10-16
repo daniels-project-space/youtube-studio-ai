@@ -2,21 +2,36 @@
  * Shared music generation and prepared-track reuse for every channel family.
  * Provider admission, receipt verification, mastering and spend stay together.
  */
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
-import { COST_PATCH_KEY, type Block } from "@/engine/types";
-import { getMusicBrief } from "@/engine/creative/brief";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { getMusicBrief, getVisualBrief } from "@/engine/creative/brief";
+import { acceptedMusicArrangementForRun } from "@/engine/acceptedMusicArrangement";
+import { createOriginalMusicProgramPlan, selectOriginalMusicProvider } from "@/engine/originalMusicProgram";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE } from "@/engine/pricing";
 import {
   assertMusicProgramQualityReceipt,
   createChannelMusicProgram,
+  music3StructuredCaptionWordCount,
+  musicFallbackProfileForRole,
+  musicProviderPromptForProgram,
   ChannelMusicProgramSchema,
   ChannelMusicProviderSchema,
+  musicRoleForRoute,
+  resolveMusicModuleBodyMusicVol,
+  type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY,
+  MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY,
+} from "@/engine/musicModuleVersions";
 import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
-import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
+import {
+  assertMusicAuditionNativeBytes,
+  createMusicProviderAuditionSource,
+  musicRunAudioPrefix,
+} from "@/engine/musicAuditionCheckpoint";
 import {
   generateMureka,
   generateSuno,
@@ -29,6 +44,7 @@ import {
 import {
   assertPinnedMiniMaxMusic3Receipt,
   generateMiniMaxMusic3,
+  hasQualifiedMiniMaxMusic3,
   type MiniMaxMusic3Receipt,
 } from "@/lib/minimaxMusic3";
 import {
@@ -36,17 +52,19 @@ import {
   measureNativeMusicQuality,
   type NativeMusicQualityAnalysis,
 } from "@/lib/nativeMusicQuality";
-import { probe, crossfadeConcatAudio, masterAudioTransparentGain } from "@/lib/ffmpeg";
+import { decodeMusicAuditionPcmWav, probe, crossfadeConcatAudio, masterAudioTransparentGain } from "@/lib/ffmpeg";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { assertMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { join } from "node:path";
 import {
   str,
   recordAsset,
   channelProgramRouteFromContext,
   musicProgramForCurrentRoute,
+  routeSeedForTopicSelection,
 } from "./blockContext";
 
 // Accepted Mureka/Suno jobs do not expose a durable replay receipt yet. Keep
@@ -54,6 +72,224 @@ import {
 // existing cost-carrying terminal catch instead of the whole-task timeout.
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
 const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+
+export function musicTrackVariationDirection(role: ChannelMusicRole): string {
+  switch (role) {
+    case "sleep_sound_bed":
+      return "preserve the continuous beatless texture and stable level; vary only a barely perceptible timbral or spatial detail, with no pulse, melody, chord change, transient, swell, or climax";
+    case "meditation_bed":
+      return "preserve the same gentle energy and sealed pulse-or-no-pulse direction; use subtle timbral variation without a startling event or climax";
+    case "narration_bed":
+      return "preserve the stable harmonic floor and restrained dynamics; vary only accompaniment beneath speech, with no lead melody or attention-grabbing event";
+    case "short_form_bed":
+      return "preserve the channel instrumentation and identity; use a distinct concise progression with one clear reveal and no added climax";
+    case "primary_music":
+      return "preserve the channel instrumentation and identity, with a distinct compatible melodic progression";
+  }
+}
+
+export function musicDnaTempoDirection(input: {
+  role: ChannelMusicRole;
+  tempoMode?: "metered" | "unmetered";
+  bpmRange?: readonly [number, number];
+}): string {
+  if (input.role === "sleep_sound_bed" || input.tempoMode === "unmetered" || !input.bpmRange) return "";
+  return `${input.bpmRange[0]}-${input.bpmRange[1]} BPM`;
+}
+
+export async function generateMusicTrackSet(input: {
+  prompt: string;
+  trackCount: number;
+  variationDirection: string;
+  generate: (request: {
+    prompt: string;
+    remainingTrackCount: number;
+    generationIndex: number;
+  }) => Promise<{ jobId: string; tracks: MusicTrack[] }>;
+  onCompletedGeneration?: () => void;
+}): Promise<{ tracks: MusicTrack[]; jobIds: string[]; generationCount: number }> {
+  if (!Number.isSafeInteger(input.trackCount) || input.trackCount < 1 || input.trackCount > 8) {
+    throw new Error("music: track count must be an integer between 1 and 8");
+  }
+  const tracks: MusicTrack[] = [];
+  const jobIds: string[] = [];
+  while (tracks.length < input.trackCount) {
+    const generationIndex = jobIds.length;
+    const prompt = generationIndex === 0
+      ? input.prompt
+      : `${input.prompt}\nPart ${generationIndex + 1}: ${input.variationDirection}.`;
+    const result = await input.generate({
+      prompt,
+      remainingTrackCount: input.trackCount - tracks.length,
+      generationIndex,
+    });
+    input.onCompletedGeneration?.();
+    if (!result.tracks.length) throw new Error("music: provider generation returned no tracks");
+    jobIds.push(result.jobId);
+    tracks.push(...result.tracks.slice(0, input.trackCount - tracks.length));
+  }
+  return { tracks, jobIds, generationCount: jobIds.length };
+}
+
+async function retainProviderMusicAuditionSource(input: {
+  ctx: StageContext;
+  provider: "mureka" | "suno";
+  program: ChannelMusicProgram;
+  musicKey: string;
+  sourcePath: string;
+  sourceBytes: Uint8Array;
+  durationSec: number;
+}): Promise<{ musicAuditionSourceKey: string; musicAuditionWavKey: string }> {
+  const directory = await makeRunTempDir(input.ctx.runId);
+  const wavPath = join(directory, "provider-music-audition.wav");
+  await decodeMusicAuditionPcmWav(input.sourcePath, wavPath, input.durationSec);
+  const auditionWavBytes = await readBytes(wavPath);
+  const auditionWavSha256 = sha256BytesHex(auditionWavBytes);
+  const audioPrefix = musicRunAudioPrefix(input.ctx.ownerId, input.ctx.runId);
+  const musicAuditionWavKey = `${audioPrefix}music-audition-${auditionWavSha256}.wav`;
+  const source = createMusicProviderAuditionSource({
+    ownerId: input.ctx.ownerId,
+    channelId: String(input.ctx.channelId),
+    runId: input.ctx.runId,
+    provider: input.provider,
+    program: input.program,
+    sourceMusicKey: input.musicKey,
+    sourceBytes: input.sourceBytes,
+    durationSec: input.durationSec,
+    auditionWavKey: musicAuditionWavKey,
+    auditionWavBytes,
+  });
+  const musicAuditionSourceKey = `${audioPrefix}music-provider-audition-${source.fingerprint}.json`;
+  await Promise.all([
+    putObject(musicAuditionWavKey, auditionWavBytes, { contentType: "audio/wav" }),
+    putObject(musicAuditionSourceKey, Buffer.from(JSON.stringify(source)), { contentType: "application/json" }),
+  ]);
+  await recordAsset(input.ctx, "music_provider_audition_source", musicAuditionSourceKey, {
+    provider: input.provider,
+    sourceMusicKey: input.musicKey,
+    sourceContentSha256: source.sourceOutput.contentSha256,
+    auditionWavKey: musicAuditionWavKey,
+    auditionContentSha256: source.auditionOutput.contentSha256,
+    programFingerprint: input.program.fingerprint,
+    spendUsd: 0,
+  });
+  return { musicAuditionSourceKey, musicAuditionWavKey };
+}
+
+/** Seals one episode's audio identity and the visual intent used by loop consumers. */
+function boundedMusicDirection(value: string, maximum: number): string {
+  if (value.length <= maximum) return value;
+  const contentLimit = Math.max(0, maximum - 3);
+  const boundary = value.lastIndexOf(" ", contentLimit);
+  return `${value.slice(0, boundary > 0 ? boundary : contentLimit).trimEnd()}...`;
+}
+
+export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
+  dna: import("@/engine/creative/types").StyleDNA | null;
+  niche?: string;
+}): Block {
+  return {
+    id: "music_program_plan",
+    consumes: ["topic"],
+    produces: ["musicProgramPlan"],
+    run: async ctx => {
+      const topic = str(ctx, "topic");
+      const route = routeSeedForTopicSelection(ctx);
+      if (!route) throw new Error("music_program_plan: requires a sealed music-loop channel program route");
+      const requestedProvider = ctx.params["provider"];
+      if (sourceProvider && requestedProvider !== undefined && requestedProvider !== sourceProvider) {
+        throw new Error("music_program_plan: explicit provider conflicts with YuE2 source ownership");
+      }
+      if (requestedProvider !== undefined && requestedProvider !== "minimax_music3" && requestedProvider !== "suno" &&
+        requestedProvider !== "mureka" && !(sourceProvider === "yue2" && requestedProvider === "yue2")) {
+        throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
+      }
+      const identity = readIdentity?.(ctx);
+      const dna = identity ? identity.dna
+        : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+      const visual = getVisualBrief(ctx.store);
+      const audio = getMusicBrief(ctx.store);
+      const setting = [visual?.setting, visual?.world, visual?.footageQueries?.[0], ctx.params["setting"] as string | undefined,
+        dna?.setting, identity ? identity.niche : ctx.store["niche"] as string | undefined]
+        .map(value => value?.toString().trim()).find(Boolean);
+      const channelAudioDirection = [
+        `Original instrumental program for “${topic}”.`,
+        dna?.audio?.genre ? `Preserve the channel sound: ${boundedMusicDirection(dna.audio.genre, 120)}.` : "",
+        dna?.audio?.bpmRange?.length === 2
+          ? `Keep the channel tempo within ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM.`
+          : "",
+        dna?.audio?.instrumentation?.length
+          ? `Instrumentation: ${boundedMusicDirection(dna.audio.instrumentation.join(", "), 180)}.`
+          : "",
+        dna?.audio?.textures?.length
+          ? `Texture: ${boundedMusicDirection(dna.audio.textures.join(", "), 120)}.`
+          : "",
+        dna?.audio?.moodArc
+          ? `Preserve the channel's emotional arc: ${boundedMusicDirection(dna.audio.moodArc, 160)}.`
+          : "",
+      ].filter(Boolean).join(" ");
+      const episodePrefix = "Episode mood movement: ";
+      const audioRequirements = "No vocals, no lyrics, and a musically resolved seamless loop.";
+      const boundedChannelDirection = boundedMusicDirection(
+        channelAudioDirection,
+        900 - audioRequirements.length - 2,
+      );
+      const episodeDirectionBudget = Math.max(
+        0,
+        900 - boundedChannelDirection.length - episodePrefix.length - audioRequirements.length - 3,
+      );
+      const episodeDirection = audio?.musicPrompt?.trim().slice(0, Math.min(520, episodeDirectionBudget));
+      const audioDirection = [
+        boundedChannelDirection,
+        episodeDirection ? `${episodePrefix}${episodeDirection}.` : "",
+        audioRequirements,
+      ].filter(Boolean).join(" ");
+      const visualStyle = (ctx.params["visualStyle"] as string | undefined) ??
+        (ctx.store["visualStyle"] as string | undefined) ?? visual?.promptStyle ?? dna?.colorGrade ??
+        "channel-native ambient";
+      const plan = createOriginalMusicProgramPlan({
+        route,
+        topic,
+        setting,
+        visualStyle,
+        motionIntent: sourceProvider === "yue2"
+          ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
+          : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
+        audioDirection,
+        providerPreference: sourceProvider ?? selectOriginalMusicProvider({
+          requestedProvider: requestedProvider === "yue2" ? undefined : requestedProvider,
+          minimaxQualified: hasQualifiedMiniMaxMusic3(),
+        }),
+      });
+      ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
+      return { musicProgramPlan: plan };
+    },
+  };
+}
+
+export const musicProgramPlan = createMusicProgramPlanBlock();
+
+export function musicFallbackPromptForRoute(input: {
+  family?: string;
+  contentLaneKey?: string;
+  role?: ChannelMusicRole;
+  topic: string;
+  channelIdentitySeed: string;
+  profileVersion?: "legacy" | "channel-identity-short-form/v1";
+}): string {
+  const family = input.family?.toLowerCase() ?? "";
+  const contentLaneKey = input.contentLaneKey?.toLowerCase() ?? "";
+  const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
+  const profile = musicFallbackProfileForRole({
+    role,
+    family,
+    contentLaneKey,
+    channelIdentitySeed: input.channelIdentitySeed,
+    profileVersion: input.profileVersion,
+  });
+  const lyricRule = role === "sleep_sound_bed" ? "no vocals or lyrics" : "no vocals, no lyrics";
+  return `${profile.prompt}, evoking "${input.topic}"; ${lyricRule}`;
+}
 
 export const music: Block = {
   id: "music",
@@ -66,6 +302,8 @@ export const music: Block = {
     "channelMusicProgramFingerprint",
     "musicRuntimeReceiptKey",
     "musicNativeWavKey",
+    "musicAuditionSourceKey",
+    "musicAuditionWavKey",
     "musicQualityReviewStatus",
   ],
   paid: true,
@@ -76,6 +314,7 @@ export const music: Block = {
     // route could attach a sibling's track without proving it belongs to this
     // episode program.
     const musicProgram = musicProgramForCurrentRoute(ctx, topic);
+    const musicRoute = channelProgramRouteFromContext(ctx);
     if (musicProgram?.audio.providerPreference === "yue2") {
       throw new Error("music: sealed YuE2 program requires the YuE2 candidate module; legacy generation and reuse cannot substitute for it");
     }
@@ -119,22 +358,59 @@ export const music: Block = {
     // (identical audio bed; only narration differs) — no Mureka/Suno generation.
     const reuseMusicKey = ctx.store["reuseMusicKey"] as string | undefined;
     if (reuseMusicKey) {
-      ctx.log(`music: REUSED base music track ${reuseMusicKey} (no generation)`);
-      let reuseUrl = "";
-      try { reuseUrl = publicUrl(reuseMusicKey); } catch { reuseUrl = `r2://${reuseMusicKey}`; }
-      return {
-        musicKey: reuseMusicKey,
-        musicProvider: "reuse",
-        musicUrl: reuseUrl,
-        musicQualityReviewStatus: "not-required-reused-master",
-        [COST_PATCH_KEY]: 0,
-      };
+      try {
+        assertMusicReuseReceipt({
+          receipt: ctx.store["reuseMusicReceipt"],
+          ownerId: ctx.ownerId,
+          siblingChannelId: String(ctx.channelId),
+          musicKey: reuseMusicKey,
+          currentFamily: musicRoute?.family,
+          currentContentLaneKey: musicRoute?.contentLaneKey,
+          currentProvider: provider,
+          currentStyleDNA: ctx.store["styleDNA"],
+        });
+        ctx.log(`music: REUSED profile-matched base track ${reuseMusicKey} (no generation)`);
+        let reuseUrl = "";
+        try { reuseUrl = publicUrl(reuseMusicKey); } catch { reuseUrl = `r2://${reuseMusicKey}`; }
+        return {
+          musicKey: reuseMusicKey,
+          musicProvider: "reuse",
+          musicUrl: reuseUrl,
+          musicQualityReviewStatus: "not-required-reused-master",
+          [COST_PATCH_KEY]: 0,
+        };
+      } catch (error) {
+        ctx.log(`music: ignored incompatible render-group master and will generate for this channel: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     // Phase 2 grounding: "Suno generated by the STYLE OF THE CHANNEL" — the frozen
     // Style DNA audio spec (genre/instrumentation/textures/BPM/loop) is the
-    // channel's locked SOUND and WINS. Priority: DNA spec > Composer crew brief
-    // (per-video nuance, only when there is no DNA) > explicit param > default.
-    const composerPrompt = getMusicBrief(ctx.store)?.musicPrompt;
+    // channel's locked SOUND. Composer and module directions add episode nuance;
+    // neither may replace that identity or a specialized sleep-bed contract.
+    const composerBrief = getMusicBrief(ctx.store);
+    const acceptedArrangement = acceptedMusicArrangementForRun(ctx.store["acceptedMusicArrangement"], {
+      ownerId: ctx.ownerId,
+      channelId: String(ctx.channelId),
+      runId: ctx.runId,
+      topic,
+      sourceBrief: ctx.store["musicBrief"],
+    });
+    const acceptedTempoMode = acceptedArrangement?.arrangement.tempoMode;
+    const composerPrompt = composerBrief?.musicPrompt;
+    const configuredPrompt = typeof ctx.params.prompt === "string"
+      ? ctx.params.prompt.trim().replace(/\s+/gu, " ").slice(0, 300)
+      : "";
+    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const channelRole = dna?.audio.role;
+    const composerRole = composerBrief?.musicIntent?.role;
+    if (channelRole && composerRole && channelRole !== composerRole) {
+      throw new Error(`music: Composer role ${composerRole} conflicts with locked channel audio role ${channelRole}`);
+    }
+    const selectedRole = channelRole ?? composerRole ?? musicRoleForRoute(
+      musicRoute?.family ?? "",
+      musicRoute?.contentLaneKey ?? "",
+    );
+    const sleepBed = selectedRole === "sleep_sound_bed";
     const studioAudioRecipe = studioPostproductionRecipeProjectionFromUnknown(
       ctx.store["studioAudioRecipeProjection"],
       "audio_recipe",
@@ -142,8 +418,14 @@ export const music: Block = {
     const studioAudioDirection = studioAudioRecipe.promptAddenda.length
       ? ` Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
       : "";
-    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const preserveRequiredStudioDirection =
+      (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true;
     const a = dna?.audio;
+    const dnaTempoDirection = musicDnaTempoDirection({
+      role: selectedRole,
+      tempoMode: acceptedTempoMode ?? composerBrief?.musicIntent?.tempoMode,
+      bpmRange: a?.bpmRange,
+    });
     const dnaPrompt = a?.genre?.trim()
       ? [
           `${a.genre} instrumental, evoking "${topic}".`,
@@ -158,7 +440,7 @@ export const music: Block = {
           // first clause) — an author who wrote "opens tense, resolves
           // warmer" wants that shift reaching the model, not truncated away.
           a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim()}.` : "",
-          `${a.bpmRange?.[0] ?? 70}-${a.bpmRange?.[1] ?? 88} BPM, ${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
+          `${dnaTempoDirection ? `${dnaTempoDirection}, ` : ""}${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
         ].filter(Boolean).join(" ")
       : "";
     // BLEND, not override: the DNA is the channel's locked sound (identity
@@ -180,61 +462,113 @@ export const music: Block = {
     // The lofi family still gets its own brief; everything else draws from a
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
-    const musicRoute = channelProgramRouteFromContext(ctx);
-    const isLoopFamily = musicRoute?.family === "music_loop";
-    const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
-    const lastResort = isLoopFamily
-      ? `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
-        `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
-        `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`
-      : `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
-    const basePrompt =
-      (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
-      (composerPrompt && composerPrompt.trim()) ||
-      (typeof ctx.params.prompt === "string" ? ctx.params.prompt.trim() : "") ||
-      lastResort;
-    const prompt = [
-      musicProgram?.audio.direction,
-      basePrompt,
-      studioAudioDirection,
-    ].filter(Boolean).join(" ");
-    ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "default"}${studioAudioDirection ? " + approved Studio audio direction" : ""}`);
-
-    const route = channelProgramRouteFromContext(ctx);
+    const route = musicRoute;
+    const musicProfileVersion = (ctx.params as Record<PropertyKey, unknown>)[CHANNEL_IDENTITY_SHORT_FORM_MUSIC_POLICY] === true
+      ? "channel-identity-short-form/v1" as const
+      : "legacy" as const;
     const channelIdentityFingerprint = sha256Hex(canonicalJson({
       ownerId: ctx.ownerId,
       channelId: ctx.channelId,
       channelName: ctx.store["channelName"] ?? null,
       routeFingerprint: route?.routeFingerprint ?? null,
       styleDNA: dna,
-      musicBrief: getMusicBrief(ctx.store) ?? null,
     }));
-    const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
+    const lastResort = musicFallbackPromptForRoute({
+      family: musicRoute?.family,
+      contentLaneKey: musicRoute?.contentLaneKey,
+      role: selectedRole,
+      topic,
+      channelIdentitySeed: channelIdentityFingerprint,
+      profileVersion: musicProfileVersion,
+    });
+    const basePrompt =
+      (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
+      (composerPrompt && composerPrompt.trim()) ||
+      configuredPrompt ||
+      lastResort;
+    const moduleDirectionPrefix = "Additional module direction, subordinate to the locked channel sound and route contract:";
+    let modulePromptDirection = configuredPrompt && !sleepBed && (dnaPrompt || composerPrompt?.trim())
+      ? `${moduleDirectionPrefix} ${configuredPrompt}`
+      : "";
+    const stableComposerDirection = [
+      musicProgram?.audio.direction,
+      dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+      dnaPrompt ? arcNote : basePrompt,
+      studioAudioDirection,
+    ].filter(Boolean).join(" ");
+    const makeChannelMusicProgram = (moduleDirection: string): ChannelMusicProgram => createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
-      family: route?.family ?? "music_loop",
-      contentLaneKey: route?.contentLaneKey ?? "music_loop",
+      family: route?.family,
+      contentLaneKey: route?.contentLaneKey,
       topic,
+      role: selectedRole,
+      musicProfileVersion,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
+      tempoMode: acceptedTempoMode ?? composerBrief?.musicIntent?.tempoMode,
       genre: a?.genre,
       instrumentation: a?.instrumentation,
       textures: a?.textures,
       bpmRange: a?.bpmRange,
       moodArc: a?.moodArc,
+      studioTextureDirection: sleepBed && preserveRequiredStudioDirection
+        ? studioAudioRecipe.promptAddenda.join(" ")
+        : undefined,
       // DNA is already represented by the structured identity fields. Carry
       // its episode nuance, or the selected non-DNA prompt, without duplicating it.
-      composerDirection: [
-        musicProgram?.audio.direction,
-        dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
-        dnaPrompt ? arcNote : basePrompt,
-        studioAudioDirection,
-      ].filter(Boolean).join(" ") || undefined,
-      targetLufs: Number(a?.loudnessLufs ?? -16),
-      bodyMusicVol: 1,
+      composerDirection: [stableComposerDirection, moduleDirection].filter(Boolean).join(" ") || undefined,
+      targetLufs: a?.loudnessLufs,
+      bodyMusicVol: resolveMusicModuleBodyMusicVol(ctx.params.bodyMusicVol, dna?.audio?.bodyMusicVol),
     });
+    let channelMusicProgram: ChannelMusicProgram = preparedProgram ?? makeChannelMusicProgram(
+      provider === "minimax_music3" ? "" : modulePromptDirection,
+    );
+    if (!preparedProgram && provider === "minimax_music3" && modulePromptDirection) {
+      const words = configuredPrompt.split(/\s+/u);
+      let low = 1;
+      let high = words.length;
+      let bestCount = 0;
+      let bestProgram = channelMusicProgram;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const retained = words.slice(0, middle).join(" ");
+        const direction = retained ? `${moduleDirectionPrefix} ${retained}` : "";
+        let candidate: ChannelMusicProgram;
+        try {
+          candidate = makeChannelMusicProgram(direction);
+        } catch (error) {
+          if (!String(error).includes("structured caption must contain 250–450 words")) throw error;
+          high = middle - 1;
+          continue;
+        }
+        if (music3StructuredCaptionWordCount(candidate.generation.structuredCaption) <= 450) {
+          bestCount = middle;
+          bestProgram = candidate;
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
+      }
+      const retained = words.slice(0, bestCount).join(" ");
+      modulePromptDirection = retained ? `${moduleDirectionPrefix} ${retained}` : "";
+      channelMusicProgram = bestProgram;
+      if (bestCount < words.length) ctx.log(
+        `music: MiniMax caption budget kept ${bestCount}/${words.length} words of supplemental module direction; locked identity and role requirements were preserved`,
+      );
+    }
+    ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "route-aware default"}` +
+      `${modulePromptDirection ? " + supplemental module direction" : ""}` +
+      `${sleepBed && configuredPrompt ? " + sleep contract suppresses free-form module direction" : ""}` +
+      `${studioAudioDirection
+        ? sleepBed
+          ? preserveRequiredStudioDirection
+            ? " + approved Studio texture direction constrained by the beatless sleep contract"
+            : " + Studio audio direction withheld by this legacy sleep-module version"
+          : " + approved Studio audio direction"
+        : ""}`);
     const channelMusicProgramKey =
-      `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${channelMusicProgram.fingerprint}.json`;
+      `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}channel-music-program-${channelMusicProgram.fingerprint}.json`;
     await putObject(
       channelMusicProgramKey,
       Buffer.from(JSON.stringify(channelMusicProgram, null, 2)),
@@ -285,6 +619,8 @@ export const music: Block = {
 
       let musicRuntimeReceiptKey: string | undefined;
       let musicNativeWavKey: string | undefined;
+      let musicAuditionSourceKey: string | undefined;
+      let musicAuditionWavKey: string | undefined;
       if (preparedMusic.provider === "minimax_music3") {
         const minimax = preparedMusic.minimax;
         if (!minimax) {
@@ -325,7 +661,7 @@ export const music: Block = {
         });
         assertMusicAuditionNativeBytes({ expected: runtime.output, bytes: nativeWavBytes });
         musicNativeWavKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-native-${runtime.output.contentSha256}.wav`;
         await putObject(musicNativeWavKey, nativeWavBytes, { contentType: "audio/wav" });
         await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
           source: "prepared-weekly-music",
@@ -339,6 +675,18 @@ export const music: Block = {
           reviewBinding: "native-worker-wav",
         });
         musicRuntimeReceiptKey = minimax.runtimeReceiptKey;
+      } else {
+        const retained = await retainProviderMusicAuditionSource({
+          ctx,
+          provider: preparedMusic.provider,
+          program: channelMusicProgram,
+          musicKey: preparedMusic.musicKey,
+          sourcePath: preparedMasterPath,
+          sourceBytes: masterBytes,
+          durationSec: measuredDurationSec,
+        });
+        musicAuditionSourceKey = retained.musicAuditionSourceKey;
+        musicAuditionWavKey = retained.musicAuditionWavKey;
       }
       let musicUrl: string;
       try {
@@ -356,7 +704,7 @@ export const music: Block = {
         runtimeReceiptKey: musicRuntimeReceiptKey,
         trackHumanAuditionStatus: preparedMusic.provider === "minimax_music3"
           ? "passed-prepared-weekly-review"
-          : "not-required-provider-route",
+          : "pending_private_draft_review",
       });
       ctx.log(
         `music: consumed prepared weekly ${preparedMusic.provider} master ` +
@@ -370,31 +718,35 @@ export const music: Block = {
         channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
         musicRuntimeReceiptKey,
         musicNativeWavKey,
+        musicAuditionSourceKey,
+        musicAuditionWavKey,
         musicQualityReviewStatus: preparedMusic.provider === "minimax_music3"
           ? "passed-prepared-weekly-audition"
-          : "not-required-provider-route",
+          : "awaiting-human-audition",
         [COST_PATCH_KEY]: 0,
       };
     }
-    const providerPrompt = provider === "minimax_music3"
+    const providerPrompt = provider === "minimax_music3" || channelMusicProgram.role === "sleep_sound_bed"
       ? channelMusicProgram.generation.structuredCaption
-      : [
-          prompt,
-          `Arrangement map: ${channelMusicProgram.generation.sections.map((section) =>
-            `${section.label} ${Math.round(section.startFraction * 100)}-${Math.round(section.endFraction * 100)}%: ${section.instruction}`,
-          ).join(" ")}`,
-        ].join(" ");
+      : musicProviderPromptForProgram(channelMusicProgram, basePrompt, [
+          studioAudioDirection,
+          modulePromptDirection,
+          dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+          composerPrompt,
+          musicProgram?.audio.direction,
+        ].filter(Boolean).join(" "), 900,
+        (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true);
 
-    // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
-    // longer than a few minutes. trackCount asks for N distinct clips that get
-    // crossfade-concatenated (3s tri — the proven legacy-autostudio recipe)
-    // into one continuous mix before looping. A Suno generation returns TWO
-    // clips for one credit, so cost = ceil(N/2) generations. Default 2 = double
-    // the unique audio at the old single-track price.
+    // MULTI-TRACK MIX: a single looped track reads as stale on long videos.
+    // trackCount asks for N distinct clips, crossfade-concatenated before the
+    // final mix is looped. Suno returns up to two clips per generation; Mureka
+    // is called again until its accepted choices fill the requested count.
     // NaN here produced NaN, so the track loop ran zero times and the video
     // shipped with no music at all — the quietest possible failure.
     const trackCount = boundedInteger(ctx.params.trackCount, 2, 1, 8);
-    const sunoModel = (ctx.params.model as string | undefined) ?? "V5";
+    const modelOverride = typeof ctx.params.model === "string" ? ctx.params.model.trim() : "";
+    if (modelOverride.length > 12) throw new Error("music: provider model ID must be at most 12 characters");
+    const sunoModel = provider === "suno" && modelOverride ? modelOverride : "V5";
     const mixTitle = (String(ctx.store["channelName"] ?? "") || topic).slice(0, 60);
     const tmp = await makeRunTempDir(ctx.runId);
 
@@ -465,7 +817,7 @@ export const music: Block = {
             break;
           }
           const rejectedKey =
-            `${ctx.keyPrefix}runs/${ctx.runId}/audio/rejected/minimax-music3-native-${candidate.receipt.output.contentSha256}.wav`;
+            `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}rejected/minimax-music3-native-${candidate.receipt.output.contentSha256}.wav`;
           await putObject(rejectedKey, candidate.audio, { contentType: "audio/wav" });
           await recordAsset(ctx, "minimax_music3_rejected_native_wav", rejectedKey, {
             requestKey: candidate.receipt.requestKey,
@@ -487,7 +839,7 @@ export const music: Block = {
         minimaxReceipt = result.receipt;
         minimaxLocalPath = await writeBytes(join(tmp, "minimax-music3.wav"), result.audio);
         musicNativeWavKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
         await putObject(musicNativeWavKey, result.audio, { contentType: "audio/wav" });
         await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
           requestKey: result.receipt.requestKey,
@@ -506,7 +858,7 @@ export const music: Block = {
           reviewBinding: "native-worker-wav",
         });
         musicRuntimeReceiptKey =
-          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-runtime-${result.receipt.requestKey}.json`;
+          `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}minimax-music3-runtime-${result.receipt.requestKey}.json`;
         await putObject(
           musicRuntimeReceiptKey,
           Buffer.from(JSON.stringify(result.receipt, null, 2)),
@@ -532,41 +884,51 @@ export const music: Block = {
           durationSec: result.receipt.durationSec,
         }];
       } else if (prov === "suno") {
-        const gens = Math.ceil(trackCount / 2);
-        for (let g = 0; g < gens && tracks.length < trackCount; g++) {
-          const varied =
-            g === 0
-              ? providerPrompt
-              : `${providerPrompt} Part ${g + 1} of a continuous mix: same instrumentation, key family and mood, a different melodic progression.`;
-          ctx.log(`music: suno ${sunoModel} generation ${g + 1}/${gens} (custom mode, WAV upgrade)…`);
-          const res = await generateSuno({
-            prompt: varied,
-            model: sunoModel,
-            title: mixTitle,
-            // WAV upgrade only when EXPLICITLY requested (lofi sets it): a
-            // narrated bed sits ducked -22dB under voice — inaudible benefit,
-            // and a failed WAV poll burned up to 3 min/clip of pure waiting.
-            wantClips: Math.min(2, trackCount - tracks.length),
-            preferWav: ctx.params.preferWav === true,
-            timeoutMs: 600_000,
-          });
-          generations++;
-          billedGenerations++;
-          jobIds.push(res.jobId);
-          tracks.push(...res.tracks.slice(0, trackCount - tracks.length));
-        }
-      } else {
-        ctx.log(`music: generating via ${prov}…`);
-        const res = await generateMureka({
+        const result = await generateMusicTrackSet({
           prompt: providerPrompt,
-          model: ctx.params.model as string | undefined,
-          timeoutMs: 600_000,
+          trackCount,
+          variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
+          generate: ({ prompt, remainingTrackCount, generationIndex }) => {
+            ctx.log(`music: suno ${sunoModel} generation ${generationIndex + 1} (custom mode, WAV upgrade)…`);
+            return generateSuno({
+              prompt,
+              model: prov === provider ? sunoModel : "V5",
+              title: mixTitle,
+              // WAV upgrade only when EXPLICITLY requested (lofi sets it): a
+              // narrated bed sits ducked -22dB under voice — inaudible benefit,
+              // and a failed WAV poll burned up to 3 min/clip of pure waiting.
+              wantClips: Math.min(2, remainingTrackCount),
+              preferWav: ctx.params.preferWav === true,
+              timeoutMs: 600_000,
+            });
+          },
+          onCompletedGeneration: () => {
+            generations += 1;
+            billedGenerations += 1;
+          },
         });
-        generations = 1;
-        billedGenerations++;
-        usedProvider = res.provider;
-        jobIds = [res.jobId];
-        tracks = res.tracks;
+        jobIds = result.jobIds;
+        tracks = result.tracks;
+        usedProvider = "suno";
+      } else {
+        ctx.log(`music: generating ${trackCount} requested Mureka tracks…`);
+        const result = await generateMusicTrackSet({
+          prompt: providerPrompt,
+          trackCount,
+          variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
+          generate: ({ prompt }) => generateMureka({
+            prompt,
+            model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
+            timeoutMs: 600_000,
+          }),
+          onCompletedGeneration: () => {
+            generations += 1;
+            billedGenerations += 1;
+          },
+        });
+        jobIds = result.jobIds;
+        tracks = result.tracks;
+        usedProvider = "mureka";
       }
     };
 
@@ -638,8 +1000,28 @@ export const music: Block = {
     }
     local = loopedMusic;
 
-    const musicKey = `${ctx.keyPrefix}runs/${ctx.runId}/music.mp3`;
-    await putObject(musicKey, await readBytes(local), { contentType: "audio/mpeg" });
+    const musicKey = `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}music.mp3`;
+    const musicBytes = await readBytes(local);
+    await putObject(musicKey, musicBytes, { contentType: "audio/mpeg" });
+    let musicAuditionSourceKey: string | undefined;
+    let musicAuditionWavKey: string | undefined;
+    if (usedProvider !== "minimax_music3") {
+      const sourceProbe = await probe(local);
+      if (!sourceProbe.hasAudio || sourceProbe.hasVideo || sourceProbe.durationSec < 6 || sourceProbe.durationSec > 300) {
+        throw new Error("music: mastered provider output is not an auditionable 6–300 second audio-only source");
+      }
+      const retained = await retainProviderMusicAuditionSource({
+        ctx,
+        provider: usedProvider,
+        program: channelMusicProgram,
+        musicKey,
+        sourcePath: local,
+        sourceBytes: musicBytes,
+        durationSec: sourceProbe.durationSec,
+      });
+      musicAuditionSourceKey = retained.musicAuditionSourceKey;
+      musicAuditionWavKey = retained.musicAuditionWavKey;
+    }
     await recordAsset(ctx, "music", musicKey, {
       provider: usedProvider,
       jobId: jobIds.join(","),
@@ -671,12 +1053,12 @@ export const music: Block = {
       channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
       musicRuntimeReceiptKey,
       musicNativeWavKey,
+      musicAuditionSourceKey,
+      musicAuditionWavKey,
       // An operational worker qualification is not an audition of this track.
       // The owner/review flow adds musicQualityReceiptKey after section review;
       // upload_draft rejects a MiniMax release until that proof is present.
-      musicQualityReviewStatus: usedProvider === "minimax_music3"
-        ? "awaiting-human-audition"
-        : "not-required-provider-route",
+      musicQualityReviewStatus: "awaiting-human-audition",
       // Keep spend from successful generations made before provider failover;
       // resetting the selected provider's tracks must not erase paid work.
       [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations + billedAttestedCostUsd,

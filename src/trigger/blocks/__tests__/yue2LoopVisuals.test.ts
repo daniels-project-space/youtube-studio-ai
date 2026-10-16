@@ -11,7 +11,7 @@ import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
-let approved = false, verifies = 0, checks = 0, renders = 0;
+let approved = false, approvedRole = "primary_music", verifies = 0, checks = 0, renders = 0;
 let revokeAt = Infinity;
 let images = 0;
 async function main() {
@@ -21,7 +21,7 @@ async function main() {
       verifyApprovedYuE2Source: async (_ctx: StageContext, playback: string) => {
         assert.equal(playback, "repeat"); verifies++;
         if (!approved) throw new Error("source not approved");
-        return { arrangement: { arrangement: { role: "primary_music" } }, assertCurrent: async () => {
+        return { arrangement: { arrangement: { role: approvedRole } }, assertCurrent: async () => {
           checks++; if (checks >= revokeAt) throw new Error("approval withdrawn before next take");
         } };
       } };
@@ -47,6 +47,7 @@ async function main() {
     const { designPipeline } = require("@/engine/designer");
     const { runPipeline } = require("@/engine/runner") as typeof import("@/engine/runner");
     const { validatePipeline } = require("@/engine/validate") as typeof import("@/engine/validate");
+    const { admitYuE2LoopSource } = require("@/trigger/blocks/yue2LoopVisuals") as typeof import("@/trigger/blocks/yue2LoopVisuals");
     registerAllBlocks();
     const brief = createChannelProgramBrief({ family: "music_loop", nicheKey: "lofi", locale: "en",
       concept: "Quiet original instrumental sessions with calm seamless loop visuals." });
@@ -59,6 +60,15 @@ async function main() {
     assert.equal(allManifests().includes(program), false);
     const legacy = await getManifest("music_program_plan").execute(ctx);
     const planned = await program.execute(ctx);
+    const plannedContext = { ...ctx, store: { ...ctx.store, ...planned } };
+    approved = true;
+    for (const role of ["primary_music", "meditation_bed", "sleep_sound_bed"]) {
+      approvedRole = role;
+      assert.equal((await admitYuE2LoopSource(plannedContext)).arrangement.arrangement.role, role);
+    }
+    approvedRole = "narration_bed";
+    await assert.rejects(() => admitYuE2LoopSource(plannedContext), /primary-music, meditation, or sleep-sound/);
+    approved = false; approvedRole = "primary_music"; verifies = 0;
     const sealed = OriginalMusicProgramPlanSchema.parse(planned.musicProgramPlan);
     assert.equal(sealed.version, "original-music-program-plan/v2-yue2");
     assert.equal(sealed.audio.providerPreference, "yue2");

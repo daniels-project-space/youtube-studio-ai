@@ -4,6 +4,7 @@ import {
   produceAndCritique,
   validateCritiqueResponse,
 } from "@/engine/critiqueLoop";
+import { createModuleCritiqueScope } from "@/lib/moduleCritiqueEvidence";
 
 const valid = validateCritiqueResponse({
   score: 0.84,
@@ -23,9 +24,11 @@ for (const invalid of [
   { score: Number.NaN, pass: true, issues: [] },
   { score: 1.1, pass: true, issues: [] },
   { score: 0.5, pass: "true", issues: [] },
+  { score: 0.5, pass: false, issues: [] },
   { score: 0.5, pass: false, issues: ["  "] },
   { score: 0.5, pass: false, issues: ["x".repeat(501)] },
   { score: 0.5, pass: false, issues: [], fatal: "no" },
+  { score: 1, pass: true, issues: [], fatal: true },
   { score: 0.5, pass: false, issues: Array.from({ length: 33 }, () => "too many") },
   null,
 ]) {
@@ -36,6 +39,35 @@ for (const invalid of [
 }
 
 async function main(): Promise<void> {
+  for (const invalidMaxIters of [0, -1, 1.5, 9, Number.POSITIVE_INFINITY]) {
+    let produced = 0;
+    await assert.rejects(() => produceAndCritique({
+      maxIters: invalidMaxIters,
+      produce: async () => { produced += 1; return "candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [] }),
+    }), /maxIters must be an integer from 1 to 8/u);
+    assert.equal(produced, 0, "invalid retry bounds must be rejected before generation");
+  }
+  for (const invalidThreshold of [Number.NaN, -0.01, 1.01, Number.POSITIVE_INFINITY]) {
+    let produced = 0;
+    await assert.rejects(() => produceAndCritique({
+      threshold: invalidThreshold,
+      maxIters: 1,
+      produce: async () => { produced += 1; return "candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [] }),
+    }), /threshold must be a finite number from 0 to 1/u);
+    assert.equal(produced, 0, "invalid quality thresholds must be rejected before generation");
+  }
+  let boundedProductions = 0;
+  const boundedLoop = await produceAndCritique({
+    threshold: 1,
+    maxIters: 8,
+    produce: async () => { boundedProductions += 1; return "candidate"; },
+    critique: async () => ({ score: 0.5, pass: false, issues: ["below threshold"] }),
+  });
+  assert.equal(boundedLoop.iterations, 8);
+  assert.equal(boundedProductions, 8, "the documented maximum remains available to quality-sensitive callers");
+
   let produced = 0;
   await assert.rejects(
     () => produceAndCritique({
@@ -50,7 +82,105 @@ async function main(): Promise<void> {
   );
   assert.equal(produced, 1, "a malformed first verdict must stop before a second paid-capable attempt");
 
-  console.log("CRITIQUE LOOP ADMISSION PASS — malformed shared verdicts fail closed");
+  let fatalCandidateProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "fatal-pass-contradiction",
+      maxIters: 2,
+      produce: async () => { fatalCandidateProductions += 1; return "unsafe candidate"; },
+      critique: async () => ({ score: 1, pass: true, issues: [], fatal: true }),
+    }),
+    /fatal-pass-contradiction: malformed critique response.*fatal critique cannot pass/u,
+  );
+  assert.equal(fatalCandidateProductions, 1, "a contradictory fatal verdict must fail before another producer attempt");
+
+  let unhelpfulRejectionProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "empty-rejection-guidance",
+      threshold: 0.8,
+      maxIters: 2,
+      produce: async () => { unhelpfulRejectionProductions += 1; return "candidate"; },
+      critique: async () => ({ score: 0.2, pass: false, issues: [] }),
+    }),
+    /empty-rejection-guidance: malformed critique response.*actionable issue/u,
+  );
+  assert.equal(unhelpfulRejectionProductions, 1, "a rejection without repair guidance must not buy another candidate");
+
+  let belowThresholdProductions = 0;
+  await assert.rejects(
+    () => produceAndCritique({
+      label: "below-threshold-guidance",
+      threshold: 0.8,
+      maxIters: 2,
+      produce: async () => { belowThresholdProductions += 1; return "candidate"; },
+      critique: async () => ({ score: 0.79, pass: true, issues: [] }),
+    }),
+    /below-threshold-guidance: rejected critique must include at least one actionable issue/u,
+  );
+  assert.equal(belowThresholdProductions, 1, "a below-threshold candidate must have actionable repair guidance");
+
+  const scope = createModuleCritiqueScope();
+  const accepted = await scope.run(() => produceAndCritique({
+    label: "script:hook",
+    maxIters: 2,
+    threshold: 0.8,
+    produce: async (_issues, iter) => ({ iter }),
+    critique: async (_candidate, iter) => iter === 1
+      ? { score: 0.61, pass: false, issues: ["sharpen opening", "ground claim"] }
+      : { score: 0.86, pass: true, issues: [] },
+  }));
+  assert.equal(accepted.accepted, true);
+  assert.deepEqual(scope.snapshot(), [{
+    label: "script:hook",
+    scores: [0.61, 0.86],
+    passes: [false, true],
+    fatalIterations: [false, false],
+    issueCounts: [2, 0],
+    accepted: true,
+    fatal: false,
+    completed: true,
+  }]);
+
+  const rejectedScope = createModuleCritiqueScope();
+  const bestEffort = await rejectedScope.run(() => produceAndCritique({
+    label: "script:below-bar",
+    maxIters: 1,
+    threshold: 0.8,
+    produce: async () => "candidate",
+    critique: async () => ({ score: 0.67, pass: false, issues: ["weak payoff"] }),
+  }));
+  assert.equal(bestEffort.accepted, false);
+  assert.deepEqual(rejectedScope.snapshot(), [{
+    label: "script:below-bar",
+    scores: [0.67],
+    passes: [false],
+    fatalIterations: [false],
+    issueCounts: [1],
+    accepted: false,
+    fatal: false,
+    completed: true,
+  }], "a returned best-effort candidate must remain distinct from an accepted gate");
+
+  const failedScope = createModuleCritiqueScope();
+  await assert.rejects(() => failedScope.run(() => produceAndCritique({
+    label: "script:malformed",
+    maxIters: 1,
+    produce: async () => "candidate",
+    critique: async () => ({ score: Number.NaN, pass: true, issues: [] } as never),
+  })));
+  assert.deepEqual(failedScope.snapshot(), [{
+    label: "script:malformed",
+    scores: [],
+    passes: [],
+    fatalIterations: [],
+    issueCounts: [],
+    accepted: false,
+    fatal: false,
+    completed: false,
+  }], "failed/untrusted critique attempts remain visible in the module receipt");
+
+  console.log("CRITIQUE LOOP ADMISSION PASS — malformed verdicts fail closed and gate evidence is retained");
 }
 
 void main();

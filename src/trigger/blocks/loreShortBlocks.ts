@@ -55,6 +55,8 @@ import {
 } from "@/lib/storyboardCritic";
 import { synthNarration } from "@/lib/tts";
 import {
+  channelCritiqueContextFromStore,
+  channelCreatorDirection,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -144,21 +146,7 @@ export function loreBeatCount(targetSeconds: number): number {
 /** Channel doctrine + lane grounding for this block's critique. */
 function loreCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
   const lane = ctx.store["contentLane"];
-  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
-    ? String((lane as { key?: unknown }).key)
-    : undefined;
-  const text = (key: string): string | undefined => {
-    const value = ctx.store[key];
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
-  };
-  return {
-    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
-    ...(text("persona") ? { persona: text("persona")! } : {}),
-    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
-    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
-    ...(laneKey ? { contentLaneKey: laneKey } : {}),
-    laneEmphasis: laneQualityPolicy(lane).emphasis,
-  };
+  return channelCritiqueContextFromStore(ctx.store, laneQualityPolicy(lane).emphasis);
 }
 
 /**
@@ -262,6 +250,7 @@ async function settleLorePlanWithCritique(
   brief: { topic: string; narrator: string; nScenes: number },
   channel: ChannelCritiqueContext,
 ): Promise<CritiquedLorePlan> {
+  const channelDirection = channelCreatorDirection(channel);
   const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
   const maxIters = Math.max(1, Math.min(2, laneQuality.maxCritiqueIters));
 
@@ -271,7 +260,7 @@ async function settleLorePlanWithCritique(
     maxIters,
     log: (message) => ctx.log(message),
     channel,
-    produce: (priorIssues) => planLoreShortStory(brief, (m) => ctx.log(`lore-plan: ${m}`), priorIssues),
+    produce: (priorIssues) => planLoreShortStory({ ...brief, channelDirection }, (m) => ctx.log(`lore-plan: ${m}`), priorIssues),
     critique: async (plan, iter) => {
       const hard = loreStoryDefects(plan, brief.nScenes);
       const graded = await gradeLoreStory({ plan, topic: brief.topic, narrator: brief.narrator, channel });
@@ -333,6 +322,7 @@ async function planLoreWithCritique(
     narrator: brief.narrator,
     nScenes: brief.nScenes,
     criticDoctrine: channel.criticDoctrine ?? null,
+    channelDirection: channelCreatorDirection(channel),
     contentLaneKey: channel.contentLaneKey ?? null,
   });
   const cached = await loadStoryCheckpoint(checkpointKey);
@@ -366,6 +356,7 @@ export async function planLoreWithCritiqueOutcome(
     narrator: brief.narrator,
     nScenes: brief.nScenes,
     criticDoctrine: channel.criticDoctrine ?? null,
+    channelDirection: channelCreatorDirection(channel),
     contentLaneKey: channel.contentLaneKey ?? null,
   });
   const cached = await loadStoryOutcomeCheckpoint(checkpointKey);

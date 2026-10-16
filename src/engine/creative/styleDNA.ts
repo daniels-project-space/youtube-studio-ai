@@ -17,7 +17,9 @@ import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { produceAndCritique } from "@/engine/critiqueLoop";
+import { ChannelMusicRoleSchema } from "@/engine/channelMusicRole";
 import type { FamilyKey } from "@/engine/families";
+import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
 import {
   channelProgramBriefPositioningText,
   type ChannelProgramBrief,
@@ -26,6 +28,8 @@ import { attachReferenceQualityContract } from "./referenceQuality";
 import type { QualityBar, QualityDimension, StyleDNA } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
+/** Confidence at or above this value is "established" only when grounding gaps are empty. */
+export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /** Visual signals mined by `refreshNicheResearchCore` (nicheIntelligence). */
 export interface ThumbnailStyleGuide {
@@ -94,6 +98,7 @@ const dnaSchema = z.object({
     subject: z.string(),
   }),
   audio: z.object({
+    role: ChannelMusicRoleSchema,
     genre: z.string(),
     bpmMin: z.number(),
     bpmMax: z.number(),
@@ -101,6 +106,7 @@ const dnaSchema = z.object({
     textures: z.array(z.string()),
     moodArc: z.string(),
     loudnessLufs: z.number(),
+    bodyMusicVol: z.number().min(0).max(1).optional(),
     loopable: z.boolean(),
   }),
   narrative: z
@@ -118,11 +124,12 @@ const dnaSchema = z.object({
     playlistStrategy: z.string(),
   }),
 });
-type RawDNA = z.infer<typeof dnaSchema>;
+export type StyleDNADraft = z.infer<typeof dnaSchema>;
+type RawDNA = StyleDNADraft;
 
 /** The different-model critic's verdict on a DNA draft (specificity + fidelity). */
 const critiqueSchema = z.object({
-  score: z.number(),
+  score: z.number().finite().min(0).max(1),
   issues: z.array(z.string()),
 });
 
@@ -141,6 +148,20 @@ const GENERIC_TELLS = [
   "various elements",
   "a focused channel",
 ];
+
+export function styleDNAConfidence(input: {
+  hasVision: boolean;
+  hasTitles: boolean;
+  hasDatabank: boolean;
+  accepted: boolean;
+}): number {
+  let confidence = 0.45;
+  if (input.hasVision) confidence += 0.3;
+  if (input.hasTitles) confidence += 0.15;
+  if (input.hasDatabank) confidence += 0.1;
+  if (!input.accepted) confidence = Math.min(confidence * 0.7, ESTABLISHED_CONFIDENCE - 0.01);
+  return Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100;
+}
 
 /**
  * Trustworthy facts the model must not be allowed to fudge — folded into the
@@ -162,14 +183,46 @@ function nameWorldIssues(raw: RawDNA, channelName: string): string[] {
   return issues;
 }
 
-function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string): string[] {
+export function inspectStyleDNADraft(raw: StyleDNADraft, narrated: boolean, channelName: string): string[] {
   const issues: string[] = [];
   if (!raw.recurringSubject?.trim()) issues.push("recurringSubject is empty — the channel has no locked identity");
   if (!raw.setting?.trim()) issues.push("setting is empty — no recurring world to anchor every video");
+  if (!raw.composition?.trim()) issues.push("composition is empty — no repeatable framing identity");
+  if (!raw.colorGrade?.trim()) issues.push("colorGrade is empty — no repeatable visual treatment");
   if (clampHexes(raw.palette, 6).length < 2) issues.push("palette has fewer than 2 valid hex colors");
   if (clampStrs(raw.motifs, 8).length < 2) issues.push("fewer than 2 motifs — visual identity under-specified");
+  if (clampStrs(raw.variationAxes, 6).length < 1) issues.push("variationAxes has no approved variation");
+  if (clampStrs(raw.motionVocabulary, 8).length < 1) issues.push("motionVocabulary has no permitted motion");
+  if (!raw.motionDiscipline?.trim()) issues.push("motionDiscipline is empty");
+  if (clampStrs(raw.visualAvoid, 10).length < 1) issues.push("visualAvoid has no explicit anti-patterns");
+  if (!ChannelMusicRoleSchema.safeParse(raw.audio?.role).success) {
+    issues.push("audio.role must declare a supported channel music purpose");
+  }
   if (!raw.audio?.genre?.trim()) issues.push("audio.genre is empty");
-  if (narrated && !raw.narrative) issues.push("narrated family but no narrative block (voiceProfile/scriptStyle missing)");
+  if (
+    !Number.isFinite(raw.audio?.bpmMin) || !Number.isFinite(raw.audio?.bpmMax) ||
+    raw.audio.bpmMin < 30 || raw.audio.bpmMin > 300 || raw.audio.bpmMax < 30 || raw.audio.bpmMax > 300
+  ) {
+    issues.push("audio BPM bounds must stay within 30–300 so the music module can preserve the declared tempo");
+  }
+  if (Number.isFinite(raw.audio?.bpmMin) && Number.isFinite(raw.audio?.bpmMax) && raw.audio.bpmMin > raw.audio.bpmMax) {
+    issues.push("audio BPM minimum exceeds its maximum");
+  }
+  if (clampStrs(raw.audio?.instrumentation, 8).length < 1) issues.push("audio.instrumentation is empty");
+  if (clampStrs(raw.audio?.textures, 4).length < 1) issues.push("audio.textures is empty");
+  if (!raw.audio?.moodArc?.trim()) issues.push("audio.moodArc is empty");
+  if (
+    !Number.isFinite(raw.audio?.loudnessLufs) || raw.audio.loudnessLufs < -23 || raw.audio.loudnessLufs > -12
+  ) {
+    issues.push("audio.loudnessLufs must stay within -23 to -12 LUFS so the music module can honor the intended master level");
+  }
+  if (narrated && !raw.narrative) {
+    issues.push("narrated family but no narrative block (voiceProfile/scriptStyle missing)");
+  } else if (narrated && raw.narrative) {
+    for (const key of ["scriptStyle", "hookStyle", "pacing", "voiceProfile", "delivery"] as const) {
+      if (!raw.narrative[key]?.trim()) issues.push(`narrative.${key} is empty`);
+    }
+  }
   const blob = JSON.stringify(raw).toLowerCase();
   for (const tell of GENERIC_TELLS) {
     if (blob.includes(tell)) issues.push(`generic phrasing "${tell}" — replace with something specific to THIS channel`);
@@ -178,14 +231,57 @@ function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string
   return issues;
 }
 
-/** Families that narrate (so a missing narrative block is a real grounding gap). */
-const NARRATED: ReadonlySet<FamilyKey> = new Set<FamilyKey>([
-  "narrated_stock",
-  "cinematic",
-  "sleep",
-  "shorts",
-  "whiteboard",
-] as FamilyKey[]);
+export function resolveStyleDNAReview(input: {
+  deterministicIssues: readonly string[];
+  criticScore: unknown;
+  criticIssues?: readonly string[];
+}): { score: number; pass: boolean; issues: string[] } {
+  const validCriticScore = typeof input.criticScore === "number" &&
+    Number.isFinite(input.criticScore) && input.criticScore >= 0 && input.criticScore <= 1
+    ? input.criticScore
+    : undefined;
+  const criticResponded = validCriticScore !== undefined;
+  const criticScore = validCriticScore ?? 0.5;
+  const score = input.deterministicIssues.length ? Math.min(criticScore, 0.6) : criticScore;
+  const issues = [...input.deterministicIssues, ...(input.criticIssues ?? [])];
+  if (!criticResponded) {
+    issues.push("independent identity critic unavailable or returned an invalid score");
+  } else if (criticScore < 0.8 && !(input.criticIssues?.length)) {
+    issues.push(`independent identity critic score ${criticScore.toFixed(2)} is below the 0.80 acceptance bar`);
+  }
+  if (criticResponded && criticScore >= 0.8 && input.criticIssues?.length) {
+    issues.push("independent identity critic identified repair issues despite its passing score");
+  }
+  return {
+    score,
+    pass: input.deterministicIssues.length === 0 && criticResponded && criticScore >= 0.8 &&
+      !(input.criticIssues?.length),
+    issues,
+  };
+}
+
+/** Keep the critic anchored to the creator's declared identity, not just research. */
+export function styleDNAIdentityAuditContext(
+  input: Pick<StyleDNAInput, "family" | "name" | "programBrief" | "persona" | "styleGrammar">,
+): string {
+  const program = input.programBrief
+    ? channelProgramBriefPositioningText(input.programBrief)
+    : undefined;
+  return [
+    `Channel name: ${input.name}`,
+    `Family: ${input.family}`,
+    program ? `Declared program:\n${program}` : "",
+    input.persona ? `Creator-declared persona: ${input.persona}` : "",
+    input.styleGrammar ? `Creator-declared style grammar: ${input.styleGrammar}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+/** Keep Style DNA's voice requirements aligned with channel inception ownership. */
+const NARRATED: ReadonlySet<FamilyKey> = new Set(
+  Object.values(CHANNEL_INCEPTION_FAMILY_POLICIES)
+    .filter((policy) => policy.requiresNarrativePlaybook)
+    .map((policy) => policy.family),
+);
 
 /**
  * Honest, ungrounded skeleton — used ONLY when there is no LLM at all. It is
@@ -336,7 +432,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `- motionDiscipline: camera/motion rules (e.g. locked tripod, no pans/zooms)`,
     `- visualAvoid: anti-patterns to NEVER render (include the niche's "cheap" tells)`,
     `- thumbnail: {composition (subject-on-third, high-contrast, mobile-legible), textRule (<=3 words/mood-phrase/none), palette (3-4 hex, contrast pushed past the video grade), subject}`,
-    `- audio: {genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), loopable}`,
+    `- audio: {role, genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), optional bodyMusicVol (0..1 channel mix gain), loopable}. Choose role from channel purpose: primary_music for music-led, narration_bed for spoken programs, meditation_bed for meditation, sleep_sound_bed for unattended sleep, short_form_bed for Shorts.`,
     narrated
       ? `- narrative: {scriptStyle, hookStyle, pacing, voiceProfile (timbre/age/pace/warmth), delivery (emotional direction)}`
       : `- narrative: omit (this family has no narration)`,
@@ -367,8 +463,8 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
         });
       },
       critique: async (raw) => {
-        const det = deterministicIssues(raw, narrated, input.name);
-        let llmScore = det.length ? 0.5 : 0.8;
+        const det = inspectStyleDNADraft(raw, narrated, input.name);
+        let criticScore: unknown;
         let llmIssues: string[] = [];
         try {
           const v = await agentJson({
@@ -377,21 +473,24 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
             prompt: [
               `Audit this channel's STYLE DNA for GENUINE specificity and fidelity to the research.`,
               `It MUST be custom to THIS channel — generic boilerplate that could describe any channel is a FAILURE.`,
+              `AUTHORITATIVE CHANNEL IDENTITY (must not be displaced by competitor research):\n${styleDNAIdentityAuditContext(input)}`,
+              `Judge identity fit separately from research fidelity. The recurring subject, setting, motifs, audio and narrative voice must express the declared program and persona; research may inform execution and packaging, not replace them.`,
               g.text ? `RESEARCH THE DNA SHOULD REFLECT (reverse-engineered from real top performers):\n${g.text}` : `No external research was available — judge whether the DNA is at least vividly genre-specific.`,
               `DNA DRAFT:\n${JSON.stringify(raw)}`,
               `Score 0..1 — 1.0 = a concrete locked recurring subject + setting, palette/motifs/motion that clearly derive from the research and the niche's real conventions; 0.0 = vague filler.`,
               `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Penalize vague adjectives, any field copy-pasteable to another channel, and anything not grounded in the research.`,
             ].join("\n\n"),
           });
-          llmScore = Math.max(0, Math.min(1, Number(v.score) || 0));
+          criticScore = v.score;
           llmIssues = clampStrs(v.issues, 6);
         } catch (e) {
           log(`styleDNA: critic failed (${e instanceof Error ? e.message : e}) — deterministic-only this iter`);
         }
-        // Deterministic failures cap the score and block acceptance outright.
-        const score = det.length ? Math.min(llmScore, 0.6) : llmScore;
-        const pass = det.length === 0 && llmScore >= 0.8;
-        return { score, pass, issues: [...det, ...llmIssues] };
+        return resolveStyleDNAReview({
+          deterministicIssues: det,
+          criticScore,
+          criticIssues: llmIssues,
+        });
       },
     });
   } catch (e) {
@@ -402,13 +501,13 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   }
   const raw = loop.value;
 
-  // Earn confidence from real grounding AND from clearing the specificity bar.
-  let confidence = 0.45; // the LLM ran and produced a structured spec
-  if (g.hasVision) confidence += 0.3;
-  if (g.hasTitles) confidence += 0.15;
-  if (g.hasDatabank) confidence += 0.1;
-  if (!loop.accepted) confidence *= 0.7; // critic never cleared the bar → flag for Doctor
-  confidence = Math.min(1, Number(confidence.toFixed(2)));
+  // Confidence alone must never establish a draft that failed its specificity review.
+  const confidence = styleDNAConfidence({
+    hasVision: g.hasVision,
+    hasTitles: g.hasTitles,
+    hasDatabank: g.hasDatabank,
+    accepted: loop.accepted,
+  });
   const gaps = [...g.gaps];
   if (!loop.accepted) {
     gaps.push(
@@ -442,12 +541,14 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       subject: raw.thumbnail.subject.trim(),
     },
     audio: {
+      role: raw.audio.role,
       genre: raw.audio.genre.trim(),
       bpmRange: [bpmMin, bpmMax],
       instrumentation: clampStrs(raw.audio.instrumentation, 8),
       textures: clampStrs(raw.audio.textures, 4),
       moodArc: raw.audio.moodArc.trim(),
       loudnessLufs: Number.isFinite(raw.audio.loudnessLufs) ? raw.audio.loudnessLufs : -14,
+      ...(raw.audio.bodyMusicVol === undefined ? {} : { bodyMusicVol: raw.audio.bodyMusicVol }),
       loopable: raw.audio.loopable,
     },
     narrative: raw.narrative
@@ -477,7 +578,6 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   return dna;
 }
 
-/** Confidence at/above which a channel's grounding is "established" (Doctor-free). */
 /**
  * Self-contained deterministic engines can only MOVE in specific ways: the
  * distiller used to promise papercraft parallax/breathing cutouts the comic
@@ -491,8 +591,6 @@ const ENGINE_MOTION_LIMITS: Record<string, string> = {
     "ENGINE MOTION LIMITS (hard): a hand draws line-art and lettered labels onto a whiteboard, panel by panel, synced to narration. Do NOT promise camera moves, parallax, color-grade shifts or animated characters.",
 };
 
-export const ESTABLISHED_CONFIDENCE = 0.7;
-
 /* --------------------------- Quality Bar ------------------------------ */
 
 /**
@@ -505,13 +603,26 @@ export const ESTABLISHED_CONFIDENCE = 0.7;
  * reviewer, and visual IDs (identity/footage/motion) also reach the cinematic
  * asset and shot graders.
  */
-const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
+type QualityDimensionId =
+  | "identity"
+  | "loop_seam"
+  | "music"
+  | "thumbnail"
+  | "script"
+  | "voice"
+  | "footage"
+  | "hook"
+  | "captions"
+  | "pacing"
+  | "motion";
+
+const FAMILY_DIMENSIONS: Record<FamilyKey, readonly QualityDimensionId[]> = {
   music_loop: ["identity", "loop_seam", "music", "thumbnail"],
   narrated_stock: ["identity", "script", "footage", "voice", "thumbnail"],
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
   sleep: ["identity", "music", "voice", "thumbnail"],
-  whiteboard: ["identity", "script", "footage", "thumbnail"],
-  shorts: ["hook", "captions", "pacing", "thumbnail"],
+  whiteboard: ["identity", "script", "footage", "motion", "thumbnail"],
+  shorts: ["identity", "hook", "captions", "pacing", "thumbnail"],
   // The page renderer is self-contained, but its story, narration, visual
   // grammar, and constrained page/camera motion remain independently
   // inspectable in the render review.
@@ -531,37 +642,33 @@ const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
 };
 
 /**
- * Derive the per-channel bar from its DNA. Each dimension's description is
- * grounded in the DNA so the critic judges conformance to THIS channel, and the
- * deterministic floors (loop seam SSIM, music LUFS) are the un-gameable anchors.
+ * Derive the reviewer-facing per-channel bar from its DNA. Hard measured gates
+ * belong to the owning pipeline modules; this rubric is not itself an evaluator.
  * `target` mean of 1.6 / 2 ≈ the 80% bar the operator asked for.
  */
 export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): QualityBar {
-  const ids = FAMILY_DIMENSIONS[family] ?? ["identity", "thumbnail"];
-  const desc: Record<string, string> = {
+  const ids = FAMILY_DIMENSIONS[family];
+  const desc: Record<QualityDimensionId, string> = {
     identity: `Reads unmistakably as "${dna.recurringSubject || "this channel"}" in "${dna.setting || "its setting"}" — palette ${dna.palette.join("/") || "on-brand"}, motifs (${dna.motifs.join(", ") || "—"}); only ${dna.variationAxes.join("/") || "approved axes"} may vary.`,
     loop_seam: `Seamless loop — no visible pop/velocity-flip at the boundary; only ${dna.motionVocabulary.join(", ") || "subtle ambient motion"}; ${dna.motionDiscipline || "camera locked"}.`,
-    music: `${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
+    music: `${dna.audio.role ? `${dna.audio.role}: ` : ""}${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; emotional arc: ${dna.audio.moodArc}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
     thumbnail: `${dna.thumbnail.subject || dna.recurringSubject || "clear subject"}; ${dna.thumbnail.composition || "subject-on-third, high-contrast, mobile-legible"}; text: ${dna.thumbnail.textRule || "≤3 words"}.`,
     script: dna.narrative ? `${dna.narrative.scriptStyle}; hook: ${dna.narrative.hookStyle}; pacing: ${dna.narrative.pacing}.` : "On-brand script with a strong hook and tight pacing.",
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",
     footage: `On-theme visuals that match the narration; ${dna.composition || "strong composition"}; grade: ${dna.colorGrade || "on-brand"}; avoid: ${dna.visualAvoid.join(", ") || "off-brand shots"}.`,
-    hook: "Scroll-stopping in the first 1-2s; clear payoff promise.",
+    hook: dna.narrative
+      ? `Scroll-stopping in the first 1-2s; clear payoff promise, using this channel's hook style: ${dna.narrative.hookStyle}.`
+      : "Scroll-stopping in the first 1-2s; clear payoff promise.",
     captions: "Time-critical on-screen copy is mobile-legible and correctly timed: karaoke captions where narrated; otherwise prompts, options, timer, and reveal text stay readable without covering the answer or subject.",
-    pacing: "Tight, pattern-interrupted pacing with no dead air.",
+    pacing: dna.narrative
+      ? `Follow this channel's intended pacing: ${dna.narrative.pacing}. Transitions should earn the next beat; preserve intentional rests and avoid unplanned dead air.`
+      : "Keep the pacing purposeful for this format; transitions should earn the next beat, and avoid unplanned dead air.",
     motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
-  // Deterministic floors the iteration loop cannot game.
-  const floors: Record<string, Pick<QualityDimension, "metric" | "op" | "threshold">> = {
-    loop_seam: { metric: "seam_ssim", op: ">=", threshold: 0.9 },
-    music: { metric: "lufs_abs_err", op: "<=", threshold: 1.5 },
-  };
-
   const dimensions: QualityDimension[] = ids.map((id) => ({
     id,
-    description: desc[id] ?? `Meets the channel's standard for ${id}.`,
+    description: desc[id],
     minScore: 1, // must be at least "acceptable" (0-1-2 scale)
-    ...(floors[id] ?? {}),
   }));
 
   return attachReferenceQualityContract(family, { target: 1.6, dimensions, refreshedAt: now });

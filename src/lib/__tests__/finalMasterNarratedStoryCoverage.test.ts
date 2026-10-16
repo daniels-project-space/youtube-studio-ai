@@ -30,6 +30,7 @@ import {
 import {
   assertFinalMasterNarratedStoryCoverageReceiptBinding,
   deriveFinalMasterNarratedStoryCoverage,
+  finalMasterNarratedStoryCoverageReleaseIssues,
   parseFinalMasterNarratedStoryCoverageAuditBytes,
 } from "@/lib/finalMasterNarratedStoryCoverage";
 
@@ -196,6 +197,19 @@ assert.equal(
   substituted.receipt.coverage.failingBeatCount,
   1,
   "a substituted beat must fail its own narration-semantic calibration instead of hiding in a whole-transcript pass",
+);
+assert.deepEqual(
+  finalMasterNarratedStoryCoverageReleaseIssues({
+    ...substituted.receipt.coverage,
+    coverageRatio: 0.97,
+  }),
+  ["final-master narrated Story Spine has 1 beat(s) below per-beat token/timing coverage minimums"],
+  "a short failed beat must block release even when longer beats keep weighted coverage above 95%",
+);
+assert.deepEqual(
+  finalMasterNarratedStoryCoverageReleaseIssues(derived.receipt.coverage),
+  [],
+  "all-beats-passing known-good output remains eligible",
 );
 
 assert.throws(

@@ -79,7 +79,13 @@ async function main(): Promise<void> {
   assert.ok(archetype, "quiz-year archetype must exist");
   const blocks = archetype.pipeline.map((p) => p.block);
   assert.ok(blocks.includes("quiz_year"), "the archetype must actually run the engine");
-  assert.ok(blocks.includes("compliance_check"), "compliance gates before the engine runs");
+  const safetyIndex = blocks.indexOf("quiz_topic_safety");
+  const rendererIndex = blocks.indexOf("quiz_year");
+  const criticIndex = blocks.indexOf("quiz_critic_spec");
+  const metadataIndex = blocks.indexOf("quiz_metadata");
+  assert.ok(safetyIndex >= 0 && safetyIndex < rendererIndex, "the certified topic-safety gate must run before the engine");
+  assert.ok(rendererIndex < criticIndex && criticIndex < metadataIndex,
+    "critic and audience package must follow the rendered episode in dependency order");
   assert.ok(
     !blocks.includes("quiz_short_release"),
     "the ordinary QuizYear archetype must not execute the separately supervised private-release adjunct",
@@ -207,9 +213,9 @@ async function main(): Promise<void> {
   assert.deepEqual(binding.executableIds, [
     "quiz_topic_plan",
     "quiz_topic_safety",
+    "quiz_year",
     "quiz_critic_spec",
     "quiz_metadata",
-    "quiz_year",
   ]);
   const dormantPortraitRelease = GOLDEN_MODULES.find((m) => m.key === "quiz-short-private-release");
   assert.ok(dormantPortraitRelease, "the dormant portrait release must have its own non-active catalog card");
@@ -388,6 +394,30 @@ async function main(): Promise<void> {
       q("Q3", "1900", "In what year was C discovered?"),
     ]),
     [],
+  );
+  const malformedOptions = q("Q8", "1781", "In what year was the event?");
+  malformedOptions.options.pop();
+  assert.ok(
+    quizSetDefects([malformedOptions]).some((defect) => defect.includes("exactly four choices")),
+    "a quiz card with fewer than four options must not pass the unified round gate",
+  );
+  const duplicateOptions = q("Q9", "1781", "In what year was the event?");
+  duplicateOptions.options[1] = { ...duplicateOptions.options[1]!, label: " 1781 " };
+  assert.ok(
+    quizSetDefects([duplicateOptions]).some((defect) => defect.includes("duplicate choice labels")),
+    "duplicate visible choices must fail even when the correct-option count is one",
+  );
+  const emptyOption = q("Q11", "1781", "In what year was the event?");
+  emptyOption.options[2] = { ...emptyOption.options[2]!, label: "   " };
+  assert.ok(
+    quizSetDefects([emptyOption]).some((defect) => defect.includes("empty choice label")),
+    "a blank visible choice must fail instead of rendering as a missing option",
+  );
+  const mismatchedAnswer = q("Q10", "1781", "In what year was the event?");
+  mismatchedAnswer.options[0] = { ...mismatchedAnswer.options[0]!, label: "1782" };
+  assert.ok(
+    quizSetDefects([mismatchedAnswer]).some((defect) => defect.includes("does not match the answer label")),
+    "the revealed answer label must be the choice marked correct",
   );
   assert.ok(
     quizSetDefects([

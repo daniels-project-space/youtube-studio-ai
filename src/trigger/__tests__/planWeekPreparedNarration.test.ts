@@ -4,6 +4,7 @@ import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
 import type { PlanWeekPreparationManifest, PlanWeekPreparedNarration } from "@/lib/planWeekPreparation";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { narrationSpeedForStyleDNA } from "@/engine/golden";
 
 const base = {
   ownerId: "owner-1",
@@ -28,6 +29,11 @@ const parsed = assertPlanWeekPreparedNarrationArgs({
 assert.equal(parsed.provider, "qwen3");
 assert.equal(parsed.speed, 0.96);
 assert.equal(parsed.baseGapSec, 0.9);
+assert.equal(narrationSpeedForStyleDNA({ pacing: "slow and unhurried" }), 0.93);
+assert.equal(narrationSpeedForStyleDNA({ delivery: "measured documentary" }), 0.96);
+assert.equal(narrationSpeedForStyleDNA({ delivery: "sleep meditation" }), 0.88);
+assert.equal(narrationSpeedForStyleDNA({ pacing: "urgent and energetic" }), 1.05);
+assert.equal(narrationSpeedForStyleDNA({ pacing: "warm and articulate" }), undefined);
 
 assert.throws(
   () => assertPlanWeekPreparedNarrationArgs({ ...base, manifestKey: "owner/foreign/not-a-manifest" }),
@@ -88,7 +94,14 @@ const source = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPrepared
 const rateGateAt = source.indexOf("assertNarrationDeliveryRate({");
 const persistAt = source.indexOf("await persistPreparedResult(audioKey");
 assert.ok(rateGateAt >= 0 && persistAt > rateGateAt, "prepared narration must clear the measured pace gate before retained audio is written");
-assert.match(source, /composeQwenNarrationInstruction\([\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
-  "weekly Qwen direction must include frozen Style DNA when no explicit module instruction exists");
+assert.match(source, /composeQwenNarrationInstruction\([\s\S]*voiceProfile: dnaNarrative\?\.voiceProfile[\s\S]*delivery: dnaNarrative\?\.delivery[\s\S]*pacing: dnaNarrative\?\.pacing/u,
+  "weekly Qwen direction must include frozen voice identity and delivery Style DNA when no explicit module instruction exists");
+assert.match(source, /narrationSpeedForStyleDNA\(dnaNarrative\)/u,
+  "weekly narration must use the same Style DNA speed resolver as live narration");
+assert.match(source, /numberOr\(config\.sentenceGapSec, physics\.sentenceGap/u,
+  "weekly narration must inherit the niche's sentence-air default when no override is frozen");
+const liveSource = readFileSync(resolve(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
+assert.match(liveSource, /narrationSpeedForStyleDNA\(dnaPacing\)/u,
+  "live narration must share its Style DNA speed rule with prepared narration");
 
 console.log("weekly prepared narration producer contract passed");

@@ -12,18 +12,17 @@
 import { CHANNEL_INCEPTION_CATALOG_MODULES } from "./channelInceptionContracts";
 
 /**
- * CRAFT_RULES — research-backed retention craft injected into every script prompt
- * (short, long, per-section, hook). Channel-agnostic; the Show Bible adds the
- * channel-specific doctrine on top. Sources: faceless-retention studies 2026
- * (hook<7s, <15-word sentences, one idea/60-90s, mid-video pattern break).
+ * CRAFT_RULES — retention principles injected into every script prompt. The
+ * research signals are useful averages, not universal forms: the channel and
+ * sealed route decide how they should sound, especially for calm formats.
  */
 export const CRAFT_RULES = [
-  "RETENTION CRAFT (apply throughout, this is non-negotiable):",
-  "- HOOK: the first 1-2 spoken lines must hook within ~7 seconds — a curiosity gap, a bold/contrarian claim, a pattern interrupt, or direct second-person address (\"you\"). No slow throat-clearing or \"in this video\" intros.",
-  "- SENTENCES: short and spoken — average UNDER 15 words. Vary rhythm. No run-ons.",
-  "- ONE IDEA AT A TIME: deliver one clear, complete idea roughly every 60-90 seconds; always move forward, never stall or pad.",
-  "- MIDPOINT RE-HOOK: around the middle, insert a deliberate pattern break — a pointed question to the viewer, a vivid concrete example, or a tonal shift — to recover the attention dip where audiences usually drop.",
-  "- DIRECT ADDRESS: speak to \"you\" where natural; make abstract ideas concrete and felt before explaining them.",
+  "RETENTION CRAFT (channel-aware principles, not a universal style template):",
+  "- OPENING: give the viewer a clear reason to stay in the first lines, in the channel's authored register. Calm, sleep, and meditation formats may begin gently; do not force suspense, bold claims, interruption, or direct address against their voice.",
+  "- SENTENCES: favor clear, speakable phrasing, but let sentence length, pauses, repetition, and rhythm serve the channel's delivery. Short sentences are a tool, not a mandatory average or a reason to flatten a calm cadence.",
+  "- PROGRESSION: keep the experience purposeful and free of padding. Explanatory formats can advance through a new complete idea about every 60-90 seconds; calm formats may progress through a sensory image, gradual variation, return to a motif, or intentional space.",
+  "- MIDPOINT: use a re-engagement beat only when the channel or sealed route calls for one. It may be a quiet return to the central promise; never force a dramatic pattern break into a format built for calm.",
+  "- DIRECT ADDRESS: speak to \"you\" where natural and consistent with the authored channel voice; make abstract ideas concrete without inventing urgency.",
 ].join("\n");
 
 /**
@@ -366,6 +365,18 @@ export function narrationPhysicsFor(niche?: string): NarrationPhysics & { archet
   const key = doctrine?.voice ?? "";
   const phys = NARRATION_PHYSICS[key];
   return phys ? { ...phys, archetype: key } : { ...DEFAULT_NARRATION_PHYSICS, archetype: key || "default" };
+}
+
+/** Resolve an authored channel pacing direction into the shared TTS rate override. */
+export function narrationSpeedForStyleDNA(narrative?: { pacing?: unknown; delivery?: unknown }): number | undefined {
+  const pacing = typeof narrative?.pacing === "string" ? narrative.pacing : "";
+  const delivery = typeof narrative?.delivery === "string" ? narrative.delivery : "";
+  const direction = `${pacing} ${delivery}`.toLowerCase();
+  if (/sleep|meditat|hypnot|very slow|drowsy/u.test(direction)) return 0.88;
+  if (/slow|gentle|calm|soothing|unhurried/u.test(direction)) return 0.93;
+  if (/measured|deliberate|contemplative|documentary/u.test(direction)) return 0.96;
+  if (/fast|energetic|punchy|rapid|urgent/u.test(direction)) return 1.05;
+  return undefined;
 }
 
 /**
@@ -1180,7 +1191,14 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "module generates only the configured number of distinct tracks, crossfades them into one mastered " +
       "mix, persists the mix before downstream assembly, and accounts for accepted provider work exactly. " +
       "It is selected only for channels whose concrete pipeline contains the music block.",
-    gates: ["bounded track count", "provider receipt accounting", "persisted mix before assembly", "no implicit per-channel selection"],
+    gates: [
+      "bounded track count",
+      "provider receipt accounting",
+      "persisted mix before assembly",
+      "role-specific sound program",
+      "byte-bound source audition and quality receipt before release",
+      "no implicit per-channel selection",
+    ],
     status: "active",
   },
   {

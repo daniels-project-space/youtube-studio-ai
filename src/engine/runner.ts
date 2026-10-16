@@ -15,7 +15,6 @@ import {
   type ArtifactRef,
   type Block,
   type CostModelUsageKind,
-  type ModelUsageCostSnapshot,
   type ResumeRehydrationRequest,
   type RunStageSink,
   type StageContext,
@@ -31,12 +30,20 @@ import {
   type ExecutionRetryScope,
 } from "./executionErrors";
 import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
-import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
-import { createModuleScorecard } from "@/lib/moduleScorecard";
+import { declaredArtifactStore } from "./declaredArtifactStore";
+import {
+  createModelUsageScope,
+  trackedCostForKinds,
+  trackedUsageForKinds,
+  type ModelUsageSummary,
+} from "@/lib/modelUsage";
+import { createModuleScorecard, type ModuleScorecardArtifact } from "@/lib/moduleScorecard";
+import { createModuleCritiqueScope, type ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
+import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
-import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageReuseHash } from "./stageReuse";
+import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageMeasurementFingerprints, stageReuseHash } from "./stageReuse";
 import { STAGE_REUSE_RECONCILIATION_MARKER, type StageReuseReceipt, type StageReuseOutputIdentity } from "./stageReuseContract";
 
 export interface RunPipelineOptions {
@@ -88,7 +95,7 @@ export interface RunPipelineOptions {
   runRemoteBlock?: (
     blockId: string,
     params: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
+  ) => Promise<RemoteBlockResult>;
   /**
    * Optional non-failure execution boundary. Once this exact sequential block
    * has written its durable `ok` stage, the runner returns `awaiting_review`
@@ -98,6 +105,19 @@ export interface RunPipelineOptions {
    */
   stopAfterBlockId?: string;
 }
+
+export type RemoteBlockResult = {
+  patch: Record<string, unknown>;
+  /** Missing on older child deployments; null when attempt history is incomplete. */
+  convexUsage?: ConvexUsageCounts | null;
+  /** Compact child usage; omitted by older tasks and unknown after a retry. */
+  moduleUsage?: {
+    providerCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    critiqueEvidence?: ModuleCritiqueReceipt[] | null;
+  } | null;
+};
 
 /**
  * Durable error marker shared with remote-child dispatch. A stage carrying it
@@ -199,31 +219,6 @@ function visualRepairFromError(error: unknown): VisualRepairSignal[] | undefined
   return signals.length ? signals : undefined;
 }
 
-function trackedUsageForKinds(
-  summary: ModelUsageSummary,
-  kinds?: ReadonlySet<CostModelUsageKind>,
-): ModelUsageCostSnapshot {
-  return summary.groups.reduce<ModelUsageCostSnapshot>(
-    (total, group) => {
-      if (kinds && !kinds.has(group.kind)) return total;
-      return {
-        calls: total.calls + group.calls,
-        cacheHits: total.cacheHits + group.cacheHits,
-        costUsd: total.costUsd + group.costUsd,
-        unpricedCalls: total.unpricedCalls + group.unpricedCalls,
-      };
-    },
-    { calls: 0, cacheHits: 0, costUsd: 0, unpricedCalls: 0 },
-  );
-}
-
-function trackedCostForKinds(
-  summary: ModelUsageSummary,
-  kinds: ReadonlySet<CostModelUsageKind>,
-): number {
-  return trackedUsageForKinds(summary, kinds).costUsd;
-}
-
 /**
  * Upgrade persisted outputs from module-contract versions that predate a
  * required field. A legacy thumbnail has no evidence that it passed the new
@@ -313,72 +308,6 @@ function artifactSummary(value: unknown): string {
   if (Array.isArray(value)) return `[array:${value.length}]`;
   if (value && typeof value === "object") return `[object:${Object.keys(value as object).length} keys]`;
   return String(value);
-}
-
-/** Isolate declared inputs; local nested edits must not rewrite upstream artifacts. */
-export function declaredArtifactStore(
-  manifest: ModuleManifest,
-  store: Record<string, unknown>,
-  optionalFallbacks: Set<string>,
-  log: (message: string) => void = () => {},
-): Readonly<Record<string, unknown>> {
-  const required = new Set(Object.keys(manifest.consumes));
-  const optional = new Set(Object.keys(manifest.optionalConsumes));
-  const allowed = new Set([...required, ...optional]);
-  // Clone only declared artifacts, preserving aliases within this module's
-  // snapshot. Descriptor access must not expose the original objects either.
-  const snapshot = Object.assign(Object.create(null), structuredClone(Object.fromEntries(
-    [...allowed].filter((key) => Object.hasOwn(store, key)).map((key) => [key, store[key]]),
-  ))) as Record<string, unknown>;
-  const assertAllowed = (property: PropertyKey): string | null => {
-    if (typeof property === "symbol") return null;
-    const key = String(property);
-    if (!allowed.has(key)) {
-      throw new Error(
-        `module "${manifest.id}" attempted undeclared artifact read "${key}"; add it to consumes/optionalConsumes`,
-      );
-    }
-    return key;
-  };
-  return new Proxy(snapshot, {
-    get(target, property, receiver) {
-      const key = assertAllowed(property);
-      if (key === null) return Reflect.get(target, property, receiver);
-      if (optional.has(key) && !Reflect.has(target, key) && !optionalFallbacks.has(key)) {
-        optionalFallbacks.add(key);
-        log(`module ${manifest.id}: optional artifact "${key}" absent; deterministic fallback recorded`);
-      }
-      return Reflect.get(target, property, receiver);
-    },
-    has(target, property) {
-      const key = assertAllowed(property);
-      return key === null ? Reflect.has(target, property) : Reflect.has(target, key);
-    },
-    ownKeys(target) {
-      return [...allowed].filter((key) => Reflect.has(target, key));
-    },
-    getOwnPropertyDescriptor(target, property) {
-      const key = assertAllowed(property);
-      return key === null
-        ? Reflect.getOwnPropertyDescriptor(target, property)
-        : Reflect.getOwnPropertyDescriptor(target, key);
-    },
-    set() {
-      throw new Error(`module "${manifest.id}" attempted to mutate the read-only artifact store`);
-    },
-    deleteProperty() {
-      throw new Error(`module "${manifest.id}" attempted to delete from the read-only artifact store`);
-    },
-    defineProperty() {
-      throw new Error(`module "${manifest.id}" attempted to redefine the read-only artifact store`);
-    },
-    setPrototypeOf() {
-      throw new Error(`module "${manifest.id}" attempted to change the read-only artifact store prototype`);
-    },
-    preventExtensions() {
-      throw new Error(`module "${manifest.id}" attempted to seal the read-only artifact store`);
-    },
-  });
 }
 
 function assertProduced(manifest: ModuleManifest, patch: Record<string, unknown>): void {
@@ -941,11 +870,14 @@ export async function runPipeline(
       Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
     );
     let invocationHash: string;
+    let measurementFingerprints: ReturnType<typeof stageMeasurementFingerprints>;
     try {
-      invocationHash = stageInvocationHash({
+      const invocation = {
         ownerId: opts.ownerId, runId: opts.runId, channelId: opts.channelId, keyPrefix: opts.keyPrefix,
         manifest, params, store, inputRefs, inputIdentities: artifactIdentities,
-      });
+      };
+      invocationHash = stageInvocationHash(invocation);
+      measurementFingerprints = stageMeasurementFingerprints(invocation);
     } catch (error) {
       return await refuseUnverifiedReuse(error instanceof Error ? error.message : "invalid input identity");
     }
@@ -1283,6 +1215,9 @@ export async function runPipeline(
     };
     const usageScope = createModelUsageScope();
     const imageUsageScope = createImageUsageScope();
+    const convexUsageScope = createConvexUsageScope();
+    const critiqueScope = createModuleCritiqueScope();
+    let scorecardArtifacts: ModuleScorecardArtifact[] = [];
     const ctx: Omit<StageContext, "store"> = {
       ownerId: opts.ownerId,
       runId: opts.runId,
@@ -1314,6 +1249,8 @@ export async function runPipeline(
     let observedCost = 0;
     let checkpointAdjustedCost = 0;
     let costAccounted = false;
+    let remoteConvexUsage: ConvexUsageCounts | null = null;
+    let remoteModuleUsage: RemoteBlockResult["moduleUsage"] = null;
     let usageReported = false;
     let imageUsageReported = false;
     let executedStore: Readonly<Record<string, unknown>> | undefined;
@@ -1354,7 +1291,10 @@ export async function runPipeline(
       if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {
         // Dispatch to a child task (large-2x render). Orchestrator suspends here.
         log(`block remote-dispatch: ${block.id}`);
-        patch = await opts.runRemoteBlock(block.id, params);
+        const remoteResult = await opts.runRemoteBlock(block.id, params);
+        patch = remoteResult.patch;
+        remoteConvexUsage = remoteResult.convexUsage ?? null;
+        remoteModuleUsage = remoteResult.moduleUsage ?? null;
         // The child uploaded its outputs to R2 and returned R2 keys; materialize
         // local paths so downstream blocks on THIS worker can consume them. Take
         // the BEST-EFFORT restored outputs even when rehydrate reports ok:false:
@@ -1374,12 +1314,12 @@ export async function runPipeline(
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
         patch = await checkpointCostScope.run(() =>
-          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, () => {
+          convexUsageScope.run(() => usageScope.run(() => imageUsageScope.run(() => critiqueScope.run(() => runBlockWithRetry(block, () => {
             // Snapshot after input rehydration, and start every retry from the
             // producer's artifacts rather than a failed attempt's local edits.
             executedStore = declaredArtifactStore(manifest, store, optionalFallbacks, log);
             return { ...ctx, store: executedStore };
-          }, retries, log))),
+          }, retries, log))))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
@@ -1419,6 +1359,14 @@ export async function runPipeline(
       }, invocationHash);
       assertProduced(manifest, patch);
       const producedRefs = await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
+      scorecardArtifacts = producedRefs.map((artifact) => ({
+        key: artifact.key,
+        artifactId: artifact.artifactId,
+        type: artifact.type,
+        schemaVersion: artifact.schemaVersion,
+        producerVersion: artifact.producerVersion,
+        payloadSha256: artifact.payloadHash,
+      }));
       Object.assign(store, patch);
 
       // Publish-grade receipts can be intentionally complete enough for R2
@@ -1433,17 +1381,31 @@ export async function runPipeline(
         moduleId: block.id,
         status: "passed",
         outputValid: true,
+        moduleVersion: manifest.version,
+        ...measurementFingerprints,
+        outputArtifacts: scorecardArtifacts,
+        oracleFingerprint: null,
         oracleScore: null,
         falsePasses: null,
         falseRejects: null,
         wallTimeMs: Date.now() - stageStartedAt,
-        providerCalls: modelUsage.calls + imageUsage.calls,
-        inputTokens: modelUsage.inputTokens,
-        outputTokens: modelUsage.outputTokens,
+        providerCalls: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.providerCalls ?? null
+          : modelUsage.calls + imageUsage.calls,
+        inputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.inputTokens ?? null
+          : modelUsage.inputTokens,
+        outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.outputTokens ?? null
+          : modelUsage.outputTokens,
+        critiqueEvidence: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.critiqueEvidence ?? null
+          : critiqueScope.snapshot(),
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: null,
-        convexWrites: null,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.writes ?? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.actions ?? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: cost,
         capturedAt: Date.now(),
       });
@@ -1459,6 +1421,7 @@ export async function runPipeline(
         ...(!isRemoteExecution && checkpointCosts.receipts.length ? { checkpointCostReceipts: checkpointCosts.receipts } : {}),
         outputs: persistedStageOutputs,
         reuseReceipt: executionReceipt,
+        moduleScorecard: scorecard,
       });
       for (const identity of executionReceipt.outputIdentities) artifactIdentities[identity.key] = identity;
       stages.push({ block: block.id, status: "ok" });
@@ -1499,17 +1462,31 @@ export async function runPipeline(
         moduleId: block.id,
         status: "failed",
         outputValid: false,
+        moduleVersion: manifest.version,
+        ...measurementFingerprints,
+        outputArtifacts: scorecardArtifacts,
+        oracleFingerprint: null,
         oracleScore: null,
         falsePasses: null,
         falseRejects: null,
         wallTimeMs: Date.now() - stageStartedAt,
-        providerCalls: failureModelUsage.calls + failureImageUsage.calls,
-        inputTokens: failureModelUsage.inputTokens,
-        outputTokens: failureModelUsage.outputTokens,
+        providerCalls: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.providerCalls ?? null
+          : failureModelUsage.calls + failureImageUsage.calls,
+        inputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.inputTokens ?? null
+          : failureModelUsage.inputTokens,
+        outputTokens: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.outputTokens ?? null
+          : failureModelUsage.outputTokens,
+        critiqueEvidence: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock
+          ? remoteModuleUsage?.critiqueEvidence ?? null
+          : critiqueScope.snapshot(),
         triggerRuns: null,
         triggerWaits: null,
-        convexReads: null,
-        convexWrites: null,
+        convexReads: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.reads ?? null : convexUsageScope.snapshot().reads,
+        convexWrites: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.writes ?? null : convexUsageScope.snapshot().writes,
+        convexActions: opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock ? remoteConvexUsage?.actions ?? null : convexUsageScope.snapshot().actions,
         estimatedCostUsd: observedCost,
         capturedAt: Date.now(),
       });
@@ -1522,6 +1499,7 @@ export async function runPipeline(
         finishedAt: Date.now(),
         ...(observedCost > 0 ? { cost: Math.max(costBaseline.priorCost, costBaseline.carriedCost + checkpointAdjustedCost) } : {}),
         ...(!isRemoteExecution && checkpointCostScope.snapshot().receipts.length ? { checkpointCostReceipts: checkpointCostScope.snapshot().receipts } : {}),
+        moduleScorecard: failedScorecard,
         error: message,
       });
       stages.push({ block: block.id, status: "failed" });

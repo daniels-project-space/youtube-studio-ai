@@ -9,6 +9,7 @@
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,6 +45,7 @@ import {
 } from "@/lib/narrationPerformance";
 import { narrationTtsCost } from "@/engine/pricing";
 import { planStorySpine } from "@/engine/storySpine";
+import { narrationSpeedForStyleDNA } from "@/engine/golden";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   createQwenNarrationSourceEvidence,
@@ -288,7 +290,7 @@ export const planWeekPreparedNarrationTask = task({
     const payload = assertPlanWeekPreparedNarrationArgs(rawPayload);
     await bootstrapSecrets(() => undefined, { services: ["cloudflare"] });
     const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-narration");
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-narration", planWeekMusicRole(manifest));
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     const sidecarKey = planWeekPreparedNarrationKey(scope);
     const audioKey = planWeekPreparedNarrationAudioKey(scope);
@@ -307,19 +309,24 @@ export const planWeekPreparedNarrationTask = task({
     const config = moduleConfig(manifest);
     const seed = seedRecord(manifest);
     const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "fish");
-    const speed = assertNarrationSpeed(payload.speed ?? numberOr(config.ttsSpeed, 1), "weekly prepared narration speed");
-    const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, 0.85);
+    const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
+      ? (seed.styleDNA as { narrative?: { voiceProfile?: unknown; pacing?: unknown; delivery?: unknown } }).narrative
+      : undefined;
+    const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
+    const configuredSpeed = payload.speed ?? (config.ttsSpeed === undefined ? undefined : config.ttsSpeed);
+    const speed = assertNarrationSpeed(
+      configuredSpeed ?? narrationSpeedForStyleDNA(dnaNarrative) ?? physics.speed,
+      "weekly prepared narration speed",
+    );
+    const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, physics.sentenceGap ?? 0.85);
     const jitterSec = payload.jitterSec ?? numberOr(config.sentenceGapJitter, 0.2);
     const cadence = planNarrationCadence({ sentences, baseGapSec, jitterSec });
     const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
     const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
-    const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
-      ? (seed.styleDNA as { narrative?: { pacing?: unknown; delivery?: unknown } }).narrative
-      : undefined;
-    const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
     const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
       explicit: config.qwenInstruction,
       editorialBrief: manifest.prompts.narration,
+      voiceProfile: dnaNarrative?.voiceProfile,
       delivery: dnaNarrative?.delivery,
       pacing: dnaNarrative?.pacing,
       archetype: physics.archetype,

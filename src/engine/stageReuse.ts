@@ -104,6 +104,43 @@ export function stageInvocationHash(args: StageReuseInvocation): string {
     deferredConsumes: manifest.deferredConsumes });
 }
 
+/** Stable cross-run measurement identities, separate from run-scoped reuse keys. */
+export function stageMeasurementFingerprints(args: StageReuseInvocation): {
+  inputFingerprint: string;
+  configurationFingerprint: string;
+} {
+  const { manifest, params, store, inputIdentities, channelId } = args;
+  const inputs = Object.fromEntries([...new Set([
+    ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
+  ])].sort().map((key) => {
+    const raw = store[key];
+    const projected = manifest.resumeInputProjections?.[key] === "own_block_entry";
+    const value = projected && raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)[manifest.id] : raw;
+    const identity = projected ? undefined : inputIdentities?.[key];
+    const valueHash = value === undefined ? undefined : stageReuseHash(portable({ [key]: value, ...mediaSiblings(key, store) }));
+    if (identity && valueHash !== undefined && identity.portablePayloadHash !== valueHash) {
+      throw new Error(`input "${key}" changed from its accepted producer output`);
+    }
+    return [key, valueHash !== undefined
+      ? { valueHash }
+      : identity?.deferred ? { valueHash: identity.portablePayloadHash, deferred: true } : { absent: true }];
+  }));
+  const contracts = (record: ModuleManifest["consumes"]) => Object.fromEntries(
+    Object.entries(record).map(([key, contract]) => [key, { type: contract.type, version: contract.version }]),
+  );
+  return {
+    inputFingerprint: stageReuseHash({ channelIdentity: stageReuseHash(channelId), inputs }),
+    configurationFingerprint: stageReuseHash({
+      params,
+      consumes: contracts(manifest.consumes), optionalConsumes: contracts(manifest.optionalConsumes),
+      produces: contracts(manifest.produces), optionalProduces: contracts(manifest.optionalProduces),
+      providerProfiles: manifest.providerProfiles, resumeInputProjections: manifest.resumeInputProjections,
+      deferredConsumes: manifest.deferredConsumes,
+    }),
+  };
+}
+
 /** Cached consumers need no bytes. New execution must understand deferred data. */
 export function assertDeferredInputsExecutable(manifest: ModuleManifest, store: Readonly<Record<string, unknown>>,
   identities: Readonly<Record<string, StageReuseOutputIdentity>>): void {

@@ -198,6 +198,7 @@ export interface LoreStoryBrief {
   narrator: string;
   topic: string;
   nScenes: number;
+  channelDirection?: string;
 }
 
 /**
@@ -222,10 +223,11 @@ export async function planLoreShortStory(
   for (let attempt = 0; attempt < 3; attempt++) {
     plan = await creativeTextJsonPro<LorePlan>({
       prompt:
-        `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
-        `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
-        `(mix short punchy lines with a few longer ones; let it breathe). NARRATOR: ${brief.narrator}. TOPIC: ${brief.topic}. ` +
-        `Compose a tight narration ARC across EXACTLY ${brief.nScenes} beats that BUILDS: a calm opening, rising dread, a climax, a cold resolution. ` +
+        `Write a distinctive lore micro-documentary: a single ` +
+        `figure narrates history in FIRST PERSON with deliberate, vivid pacing suited to the channel direction below. ` +
+        (brief.channelDirection ?? "") +
+        `Vary sentence length naturally; let the subject and channel voice determine the mood. NARRATOR: ${brief.narrator}. TOPIC: ${brief.topic}. ` +
+        `Compose a tight narration arc across EXACTLY ${brief.nScenes} beats: establish a compelling question, develop it with concrete discoveries, deliver a meaningful turn or payoff, and end with a resonant close suited to the topic. ` +
         `Return STRICT JSON {"scenes":[{...}]} with EXACTLY ${brief.nScenes} scene objects IN ORDER, each with: ` +
         `"line" = that beat's spoken narration sentence (vary length 6–22 words for rhythm); ` +
         `"shot" = the cinematic SHOT TYPE, chosen for rhythm and to vary across beats: one of "wide establishing", "sweeping aerial", "slow low-angle hero", "intimate close", "dramatic reveal", "looming over-the-shoulder", "vast vista"; ` +

@@ -4,12 +4,15 @@ import { runPipeline } from "@/engine/runner";
 import { validatePipeline } from "@/engine/validate";
 import type { Script } from "@/lib/scriptGen";
 import { OPENROUTER_MODELS } from "@/lib/openRouter";
+import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 
 // Transport fixtures only: the registered script_gen, synthScript, craftHook,
 // hook lint/judge, provider decoder and produceAndCritique loop are all real.
 const hook = "The locked garden gate held Mira outside until a tiny seed revealed its secret.";
 const opening = "Mira found the seed beside a cracked stone in the garden wall. She placed it in a pot and waited near the gate. Each morning she carried water from the well. Nothing changed until a green shoot bent toward the stone. Its roots were following a hidden stream. That small discovery would show her how to open the gate.";
 const loop = "Show how Mira discovers the stream and opens the locked garden gate.";
+const topicPromise = "Follow the hidden stream to learn how Mira opens the locked garden gate.";
+const mismatchedTopicPromise = "Find the brass key beneath the fountain that opens the garden gate.";
 const sections = [
   { heading: "The dry garden", narration: "Mira inspected the wall before touching the rusty latch. The soil beside it was dry and hard. Yet the little shoot stayed green through the afternoon heat. She pressed her fingers into the earth and found a cool patch beneath the stone. Water was moving where she could not see it." },
   { heading: "Following the roots", narration: "She carefully lifted the loose stone and followed the roots. They led toward a narrow channel hidden beneath the path. A fallen branch had blocked its entrance. Mira pulled the branch free, and water began to run again. The stream reached a small wooden wheel beside the gate and slowly turned it." },
@@ -31,6 +34,11 @@ const malformed: Array<[string, unknown]> = [
 interface RecordedRequest { kind: "candidates" | "judge" | "script" | "critic"; prompt: string }
 
 async function main(): Promise<void> {
+  const normalizedBans = readChannelBannedWords(["  forbidden   phrase ", "FORBIDDEN PHRASE"]);
+  assert.deepEqual(normalizedBans, ["forbidden phrase"]);
+  assert.deepEqual(findChannelBannedWords("A FORBIDDEN\n phrase appeared.", normalizedBans), ["forbidden phrase"]);
+  assert.deepEqual(findChannelBannedWords("Secrets are not the singular word.", ["secret"]), [],
+    "literal policy does not reject partial-word matches");
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.OPENROUTER_API_KEY;
   let requests: RecordedRequest[] = [];
@@ -50,24 +58,49 @@ async function main(): Promise<void> {
       let value: unknown;
       if (prompt.startsWith("You are the cold-open director.")) {
         kind = "candidates";
+        if (currentLabel.startsWith("topic-promise")) {
+          const expectedPromise = currentLabel === "topic-promise" ? topicPromise : mismatchedTopicPromise;
+          assert.ok(prompt.includes(expectedPromise), "the spoken cold-open prompt receives Topicraft's promise");
+          assert.match(prompt, /strategic intent only, NOT evidence/);
+          assert.match(prompt, /Existing cold-open fact checks remain authoritative/);
+        }
+        if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         assert.equal(body.max_tokens, 3200);
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
+        if (currentLabel.startsWith("topic-promise")) {
+          const expectedPromise = currentLabel === "topic-promise" ? topicPromise : mismatchedTopicPromise;
+          assert.ok(prompt.includes(expectedPromise), "the independent retention judge receives Topicraft's promise");
+          assert.match(prompt, /editorial intent, NOT evidence/);
+          assert.match(prompt, /Score low for ignoring, contradicting, or overstating it/);
+        }
         assert.equal(body.max_tokens, 1400);
         // Four provider candidates intentionally collapse to one unique
         // survivor before judging; return exactly one verdict for the actual
         // candidate list so the strict hook admission contract is exercised
         // without manufacturing scores for removed candidates.
         value = { verdicts: Array.from({ length: 1 }, () => ({ punch: 9, specificity: 9, curiosity: 9,
-          voiceMatch: 9, promise: 9, honest: true, note: "Concrete fictional garden mystery." })), best: 0 };
+          voiceMatch: 9, promise: currentLabel === "topic-promise-mismatch" ? 1 : 9,
+          honest: true, note: currentLabel === "topic-promise-mismatch"
+            ? "This cold open does not fulfill the planned brass-key promise."
+            : "Concrete fictional garden mystery." })), best: 0 };
       } else if (prompt.startsWith("Write a YouTube narration script about:")) {
         kind = "script";
         assert.equal(body.max_tokens, 13000);
+        if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
         const attempt = requests.filter((request) => request.kind === "script").length + 1;
+        const overlong = currentLabel.startsWith("duration-overlong") &&
+          (currentLabel.endsWith("exhausted") || attempt === 1);
+        const excessWords = overlong ? ` ${Array.from({ length: 180 }, (_, index) => `extra${index}`).join(" ")}` : "";
         value = { sections: sections.map((section) => ({ ...section,
-          narration: `${section.narration}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
-          closing_line: "Follow the small clue and restore what gives life." };
+          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${excessWords}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
+          closing_line:
+            currentLabel === "closing-line-exhausted" || (currentLabel === "closing-line-retry" && attempt === 1)
+              ? "Carry the seed through the garden gate to find the hidden stream"
+              : currentLabel === "closing-line-length-retry" && attempt === 1
+                ? "A".repeat(81)
+              : "Follow the warm stone to the truth." };
       } else if (prompt.startsWith("Critique this YouTube narration draft for quality")) {
         kind = "critic";
         assert.equal(body.max_tokens, 2500, "critic budget is not lowered");
@@ -84,19 +117,37 @@ async function main(): Promise<void> {
         usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130, cost: 0.003 } });
     };
 
-    async function run(label: string, values: unknown[]) {
+    async function run(label: string, values: unknown[], bannedWords: string[] = [], topicBetPromise?: string) {
       currentLabel = label; verdicts = values; requests = [];
       const stages: Array<{ block: string; status: string }> = [];
       const logs: string[] = [];
-      const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 45, style: "shorts" } }], ["topic", "niche"]), {
+      const result = await runPipeline(validatePipeline([{ block: "script_gen", params: { maxSeconds: 75, style: "shorts" } }], ["topic", "niche"]), {
         ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
         keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
-        seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction" },
+        seedStore: {
+          topic: "Mira and the locked garden gate", niche: "original fantasy fiction", bannedWords,
+          channelName: "Quiet Garden Stories",
+          persona: "Patient, gentle stories for reflective listeners.",
+          showBible: {
+            positioning: "Patient stories that reveal meaning through small, observed details.",
+            vibe: "Gentle, grounded, and quietly curious.",
+            worksInSpace: ["Let the scene breathe before explaining its meaning."],
+            avoidInSpace: ["Do not force a suspense cliffhanger."],
+          },
+          styleGrammar: "Watercolor lighthouse artwork with teal borders.",
+          ...(topicBetPromise === undefined ? {} : {
+            topicBet: { topic: "Mira and the locked garden gate", hookPromise: topicBetPromise },
+          }),
+        },
         sink: { async upsert(row) { stages.push({ block: row.block, status: row.status }); } },
         log: (message) => { logs.push(message); },
       });
-      assert.equal(requests.filter((request) => request.kind === "candidates").length, 1, `${label}: hook candidates generated exactly once`);
-      assert.equal(requests.filter((request) => request.kind === "judge").length, 1, `${label}: hook judge runs exactly once`);
+      const expectedHookAttempts = label === "topic-promise-mismatch" ? 2 : 1;
+      const expectedJudgeCalls = label === "topic-promise-mismatch" ? 1 : expectedHookAttempts;
+      assert.equal(requests.filter((request) => request.kind === "candidates").length, expectedHookAttempts,
+        `${label}: bounded Hookcraft candidate attempts`);
+      assert.equal(requests.filter((request) => request.kind === "judge").length, expectedJudgeCalls,
+        `${label}: judge provider calls match the expected bounded reuse path`);
       assert.ok(logs.some((line) => /4 generated, 1 unique, 1 pass lint/.test(line)), "real deterministic hook lint ran before duplicate candidates were judged");
       assert.equal(Object.hasOwn(result.store, "scriptApproved"), false, "generation never substitutes for independent qa_script approval");
       return { result, stages, logs };
@@ -106,6 +157,11 @@ async function main(): Promise<void> {
     assert.equal(good.result.ok, true, good.result.error);
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic"]);
     const script = good.result.store.script as Script;
+    const internalCriticPrompt = requests.find((request) => request.kind === "critic")?.prompt ?? "";
+    assert.match(internalCriticPrompt, /Patient stories that reveal meaning through small, observed details/);
+    assert.match(internalCriticPrompt, /Let the scene breathe before explaining its meaning/);
+    assert.doesNotMatch(internalCriticPrompt, /Watercolor lighthouse artwork|teal borders/,
+      "script critique must not grade prose against the visual module's style grammar");
     assert.equal(script.crafted?.verdict.judged, true, "the actual hook judge admitted this fixture");
     assert.equal(script.crafted.hook, hook);
     assert.ok(script.hook.startsWith(hook));
@@ -113,6 +169,83 @@ async function main(): Promise<void> {
     assert.ok(script.narrationText.includes(sections[2].narration));
     assert.equal(good.result.store.narrationText, script.narrationText);
     assert.ok(good.logs.some((line) => /1 iter, accepted/.test(line)));
+
+    const promised = await run("topic-promise", [{ pass: true, issues: [] }], [], topicPromise);
+    assert.equal(promised.result.ok, true, promised.result.error);
+    assert.equal(requests.filter((request) => request.kind === "candidates").length, 1);
+
+    const contradictedPromise = await run("topic-promise-mismatch", [], [], mismatchedTopicPromise);
+    assert.equal(contradictedPromise.result.ok, false, "a promise-mismatched cold open must fail closed");
+    assert.match(contradictedPromise.result.error ?? "", /planned brass-key promise/);
+    assert.ok(contradictedPromise.logs.some((line) => /attempt 2 rejected -> FAILING LOUD/.test(line)),
+      "the second generated slate exhausts Hookcraft's existing bounded repair policy");
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "candidates"],
+      "the byte-identical repeated judge prompt does not make a duplicate provider call");
+    assert.equal(requests.some((request) => request.kind === "script"), false,
+      "script synthesis cannot spend after both Hookcraft slates fail Topicraft promise review");
+
+    const bannedRetry = await run("banned-word-retry", [{ pass: true, issues: [] }], ["forbidden phrase"]);
+    assert.equal(bannedRetry.result.ok, true, bannedRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "deterministic policy catches the first draft before critic spend and retries once");
+    assert.doesNotMatch((bannedRetry.result.store.script as Script).narrationText, /forbidden phrase/i);
+
+    currentLabel = "stale-topic-promise";
+    requests = [];
+    const stalePromise = await runPipeline(validatePipeline(
+      [{ block: "script_gen", params: { maxSeconds: 75, style: "shorts" } }], ["topic", "niche"],
+    ), {
+      ownerId: "owner-generation-test", channelId: "channel-generation-test", runId: "run-generation-test",
+      keyPrefix: "owners/owner-generation-test/", budgetUsd: 1, defaultRetries: 2,
+      seedStore: { topic: "Mira and the locked garden gate", niche: "original fantasy fiction",
+        topicBet: { topic: "A stale topic", hookPromise: topicPromise } },
+      sink: { async upsert() {} }, log: () => {},
+    });
+    assert.equal(stalePromise.ok, false);
+    assert.match(stalePromise.error ?? "", /topicBet does not belong to the selected topic/);
+    assert.equal(requests.length, 0, "a stale Topicraft promise fails before paid provider calls");
+
+    const closingLineRetry = await run("closing-line-retry", [{ pass: true, issues: [] }]);
+    assert.equal(closingLineRetry.result.ok, true, closingLineRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "overlong outro copy is rejected before critic spend and gets the existing single retry");
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(
+      "script closing line must be 10 or fewer spoken words",
+    ), "closing-line contract issue reaches the retry prompt");
+    assert.equal((closingLineRetry.result.store.script as Script).closingLine, "Follow the warm stone to the truth.");
+
+    const closingLineLengthRetry = await run("closing-line-length-retry", [{ pass: true, issues: [] }]);
+    assert.equal(closingLineLengthRetry.result.ok, true, closingLineLengthRetry.result.error);
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(
+      "script closing line exceeds 80 characters",
+    ), "the character ceiling independently reaches the retry prompt");
+    assert.equal((closingLineLengthRetry.result.store.script as Script).closingLine, "Follow the warm stone to the truth.");
+
+    const durationRetry = await run("duration-overlong-retry", [{ pass: true, issues: [] }]);
+    assert.equal(durationRetry.result.ok, true, durationRetry.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
+      "overlong narration is caught before critic spend and receives one informed retry");
+    assert.match(requests.filter((request) => request.kind === "script")[1].prompt, /exceeds the .* ceiling/,
+      "duration remediation reaches the regeneration prompt");
+    assert.ok((durationRetry.result.store.script as Script).estDurationSec <= 75 * 1.12,
+      "the accepted retry must meet the measured duration ceiling");
+    assert.ok((durationRetry.result.store.script as Script).narrationText.includes(sections[2].narration),
+      "duration correction preserves the decisive ending rather than trimming it off");
+
+    const durationExhausted = await run("duration-overlong-exhausted", []);
+    assert.equal(durationExhausted.result.ok, false);
+    assert.match(durationExhausted.result.error ?? "", /duration remained above the .* ceiling after the informed retry/);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script"],
+      "repeated overlong narration fails before paid critique and downstream work");
+    assert.equal(Object.hasOwn(durationExhausted.result.store, "narrationText"), false);
+
+    const closingLineExhausted = await run("closing-line-exhausted", []);
+    assert.equal(closingLineExhausted.result.ok, false);
+    assert.match(closingLineExhausted.result.error ?? "", /independent narrative critique did not clear the quality bar/);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script"],
+      "an invalid closing line after the one retry never reaches paid critique or publication");
+    assert.equal(Object.hasOwn(closingLineExhausted.result.store, "script"), false);
+    assert.equal(Object.hasOwn(closingLineExhausted.result.store, "narrationText"), false);
 
     const repaired = await run("false-then-true", [{ pass: false, issues: [remediation] }, { pass: true, issues: [] }]);
     assert.equal(repaired.result.ok, true, repaired.result.error);
@@ -124,6 +257,16 @@ async function main(): Promise<void> {
     assert.equal(revisedScript.hook, script.hook, "regeneration retains the already-judged hook");
     assert.ok(revisedScript.narrationText.includes("Clear water kept the wooden wheel moving."), "the accepted second draft is returned");
     assert.ok(repaired.logs.some((line) => /2 iter, accepted/.test(line)));
+
+    const contradictory = await run("pass-with-findings", [
+      { pass: true, issues: [remediation] },
+      { pass: true, issues: [] },
+    ]);
+    assert.equal(contradictory.result.ok, true, contradictory.result.error);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic", "script", "critic"],
+      "a passing flag with findings is treated as a rejection and uses the existing single-retry path");
+    assert.ok(requests.filter((request) => request.kind === "script")[1].prompt.includes(remediation),
+      "findings from a contradictory critic response reach the script repair prompt");
 
     const withoutIssues = await run("false-without-issues", [{ pass: false, issues: [] }, { pass: true, issues: [] }]);
     assert.equal(withoutIssues.result.ok, true, withoutIssues.result.error);

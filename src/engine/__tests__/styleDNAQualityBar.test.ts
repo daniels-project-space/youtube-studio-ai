@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { buildQualityBar } from "@/engine/creative/styleDNA";
-import type { FamilyKey } from "@/engine/families";
+import { FAMILIES, type FamilyKey } from "@/engine/families";
 import type { StyleDNA } from "@/engine/creative/types";
 
 const DNA: StyleDNA = {
@@ -49,14 +49,15 @@ const DNA: StyleDNA = {
 };
 
 const SPECIALIST_EXPECTED: Record<
-  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear" | "shorts">,
+  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear" | "shorts" | "whiteboard">,
   readonly string[]
 > = {
   comic: ["identity", "script", "voice", "footage", "motion", "thumbnail"],
   documentary_collage_short: ["identity", "script", "voice", "footage", "captions", "pacing", "thumbnail"],
   loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
   quizyear: ["identity", "hook", "captions", "pacing", "thumbnail", "music"],
-  shorts: ["hook", "captions", "pacing", "thumbnail", "voice"],
+  shorts: ["identity", "hook", "captions", "pacing", "thumbnail", "voice"],
+  whiteboard: ["identity", "script", "footage", "motion", "thumbnail", "voice"],
 };
 
 for (const [family, expectedIds] of Object.entries(SPECIALIST_EXPECTED) as Array<
@@ -77,6 +78,66 @@ for (const [family, expectedIds] of Object.entries(SPECIALIST_EXPECTED) as Array
     `${family} must not invent deterministic floors without a matching evaluator`,
   );
 }
+
+for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+  const bar = buildQualityBar(family, DNA, 123);
+  assert.ok(bar.dimensions.length > 0, `${family} must define a reviewer scorecard`);
+  assert.ok(
+    bar.dimensions.every((dimension) => dimension.description.length > 24),
+    `${family} must not fall back to generic dimension guidance`,
+  );
+  assert.ok(
+    bar.dimensions.every((dimension) => dimension.metric === undefined),
+    `${family} must not advertise an unbound deterministic quality floor`,
+  );
+}
+
+const music = buildQualityBar("sleep", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "music",
+);
+assert.match(music?.description ?? "", /emotional arc: unease to clarity/);
+
+const voice = buildQualityBar("narrated_stock", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "voice",
+);
+assert.match(voice?.description ?? "", /measured documentary narrator/);
+assert.match(voice?.description ?? "", /delivery: calm and precise/);
+
+const shortsIdentity = buildQualityBar("shorts", DNA, 123).dimensions.find(
+  (dimension) => dimension.id === "identity",
+);
+assert.match(shortsIdentity?.description ?? "", /archivist at a brass desk/);
+assert.match(shortsIdentity?.description ?? "", /rain-lit records room/);
+assert.match(shortsIdentity?.description ?? "", /era\/weather/);
+
+const shortsBar = buildQualityBar("shorts", DNA, 123);
+assert.match(
+  shortsBar.dimensions.find((dimension) => dimension.id === "hook")?.description ?? "",
+  /open with the consequential fact/,
+);
+assert.match(
+  shortsBar.dimensions.find((dimension) => dimension.id === "pacing")?.description ?? "",
+  /each beat earns the next reveal/,
+);
+
+const deliberateRestPacing = buildQualityBar("children_learning", {
+  ...DNA,
+  narrative: {
+    ...DNA.narrative!,
+    pacing: "gentle call-and-response with a full breath for learners to answer",
+  },
+}, 123).dimensions.find((dimension) => dimension.id === "pacing");
+assert.match(deliberateRestPacing?.description ?? "", /full breath for learners to answer/);
+assert.match(deliberateRestPacing?.description ?? "", /preserve intentional rests/);
+assert.doesNotMatch(deliberateRestPacing?.description ?? "", /pattern-interrupted/u);
+
+const whiteboardMotion = buildQualityBar("whiteboard", {
+  ...DNA,
+  motionVocabulary: ["hand reveals each diagram line", "labels appear with narration"],
+  motionDiscipline: "keep the drawing hand visible and reveal legible marks in speech order",
+}, 123).dimensions.find((dimension) => dimension.id === "motion");
+assert.match(whiteboardMotion?.description ?? "", /hand reveals each diagram line/);
+assert.match(whiteboardMotion?.description ?? "", /speech order/);
 
 const loreMotion = buildQualityBar("loreshort", DNA, 123).dimensions.find(
   (dimension) => dimension.id === "motion",

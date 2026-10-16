@@ -3,16 +3,19 @@ import Module, { createRequire } from "node:module";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { createOriginalMusicProgramPlan } from "@/engine/originalMusicProgram";
+import { MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY } from "@/engine/musicModuleVersions";
 import { ChannelMusicProgramSchema, music3StructuredCaptionWordCount, type ChannelMusicProgram } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { MusicError } from "@/lib/music";
 import { sha256Hex, sha256BytesHex } from "@/lib/sha256";
 import { PLAN_WEEK_PREPARATION_VERSION, planWeekPreparationKey, type PlanWeekPreparationManifest } from "@/lib/planWeekPreparation";
 import type { PlanWeekPreparedMusicArgs } from "../planWeekPreparedMusic";
 
 type Provider = "mureka" | "suno" | "minimax_music3";
 const boundaryStop = new Error("test stopped at paid provider boundary");
-let dispatched: { provider: Provider; prompt: string; program?: ChannelMusicProgram }[] = [];
+let dispatched: { provider: Provider; prompt: string; model?: string; program?: ChannelMusicProgram }[] = [];
+let failureProvider: Provider | null = null;
 let persisted: ChannelMusicProgram | undefined;
 let manifestBytes: Uint8Array = new Uint8Array();
 let manifestKey = "";
@@ -20,11 +23,14 @@ const claims = new Map<string, Uint8Array>();
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
+const originalMurekaKey = process.env.MUREKA_API_KEY;
+const originalSunoKey = process.env.SUNO_API_KEY;
 let networkCalls = 0;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in direction tests"); };
 
-const dispatch = async (provider: Provider, input: { prompt?: string; program?: ChannelMusicProgram }) => {
-  dispatched.push({ provider, prompt: input.program?.generation.structuredCaption ?? input.prompt!, program: input.program });
+const dispatch = async (provider: Provider, input: { prompt?: string; model?: string; program?: ChannelMusicProgram }) => {
+  dispatched.push({ provider, prompt: input.program?.generation.structuredCaption ?? input.prompt!, model: input.model, program: input.program });
+  if (provider === failureProvider) throw new MusicError("provider rejected before generation", { safeToFallback: true });
   throw boundaryStop;
 };
 loader._load = function (id, ...args) {
@@ -44,8 +50,8 @@ loader._load = function (id, ...args) {
   const actual = originalLoad.call(this, id, ...args);
   if (id === "@/lib/music") return {
     ...actual as object,
-    generateMureka: (input: { prompt: string }) => dispatch("mureka", input),
-    generateSuno: (input: { prompt: string }) => dispatch("suno", input),
+    generateMureka: (input: { prompt: string; model?: string }) => dispatch("mureka", input),
+    generateSuno: (input: { prompt: string; model?: string }) => dispatch("suno", input),
   };
   if (id === "@/lib/minimaxMusic3") return { ...actual as object, generateMiniMaxMusic3: (input: { program: ChannelMusicProgram }) => dispatch("minimax_music3", input) };
   if (id === "@/lib/files") return { ...actual as object, makeRunTempDir: async () => "/tmp/music-direction-unused" };
@@ -64,6 +70,8 @@ const studio = { ...studioCore, fingerprint: sha256Hex(canonicalJson(studioCore)
 const dna = { audio: { genre: "driving orchestral percussion", instrumentation: ["timpani", "low strings"], textures: ["dry room"], bpmRange: [110, 120], moodArc: "urgent pursuit resolves decisively", loopable: false } };
 const brief = createChannelProgramBrief({ family: "music_loop", nicheKey: "lofi", locale: "en", concept: "Original instrumental sessions with a distinct channel sound." });
 const route = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(brief), programBrief: brief });
+const sleepBrief = createChannelProgramBrief({ family: "sleep", nicheKey: "lifestyle", locale: "en", concept: "A stable, beatless overnight soundscape." });
+const sleepRoute = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(sleepBrief), programBrief: sleepBrief });
 
 async function main() {
   const loadWithProviderFixtures = createRequire(__filename);
@@ -71,12 +79,33 @@ async function main() {
   const { planWeekPreparedMusicTask } = loadWithProviderFixtures("../planWeekPreparedMusic") as {
     planWeekPreparedMusicTask: { run: (args: PlanWeekPreparedMusicArgs) => Promise<unknown> };
   };
-  async function runtime(provider: Provider, prompt: string, store: Record<string, unknown> = {}, error?: RegExp) {
+  async function runtime(
+    provider: Provider,
+    prompt: string,
+    store: Record<string, unknown> = {},
+    error?: RegExp,
+    model?: string,
+    expectedProviders: Provider[] = [provider],
+    preserveStudioDirection = false,
+  ) {
     dispatched = []; persisted = undefined;
+    const runtimeStore: Record<string, unknown> = { topic, channelProgramRoute: route, ...store };
+    if (runtimeStore.channelProgramRoute === route && runtimeStore.musicProgramPlan === undefined) {
+      runtimeStore.musicProgramPlan = createOriginalMusicProgramPlan({
+        route,
+        topic,
+        audioDirection: "An original loopable Music Loop score.",
+        providerPreference: provider,
+      });
+    }
     const ctx: StageContext = {
       ownerId: "owner-direction", channelId: "channel-direction", runId: "run-direction",
       keyPrefix: "owner/direction/channel/music/", budgetUsd: 5, log: () => {},
-      params: { provider, prompt }, store: { topic, ...store },
+      params: {
+        provider, prompt,
+        ...(model === undefined ? {} : { model }),
+        ...(preserveStudioDirection ? { [MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY]: true } : {}),
+      }, store: runtimeStore,
     };
     if (error) {
       await assert.rejects(music.run(ctx), error);
@@ -85,8 +114,7 @@ async function main() {
       return "";
     }
     await assert.rejects(music.run(ctx), /test stopped at paid provider boundary/);
-    assert.equal(dispatched.length, 1);
-    assert.equal(dispatched[0].provider, provider);
+    assert.deepEqual(dispatched.map(({ provider: used }) => used), expectedProviders);
     assert.ok(persisted);
     ChannelMusicProgramSchema.parse(persisted);
     if (provider === "minimax_music3") {
@@ -116,22 +144,68 @@ async function main() {
 
   const flat = "Keep a flat nocturnal pulse with no build, drop, or climax.";
   const active = "Propulsive championship percussion for high energy athletic training.";
+  process.env.MUREKA_API_KEY = "fixture-mureka";
+  process.env.SUNO_API_KEY = "fixture-suno";
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "  ");
+  assert.equal(dispatched[0]!.model, undefined, "blank model control must preserve Mureka's provider default");
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "  ");
+  assert.equal(dispatched[0]!.model, "V5", "blank model control must preserve the existing Suno default");
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "MurekaX");
+  assert.equal(dispatched[0]!.model, "MurekaX", "Mureka's selected provider receives its model override");
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "SunoCustom");
+  assert.equal(dispatched[0]!.model, "SunoCustom", "Suno's selected provider receives its model override");
+  failureProvider = "mureka";
+  await runtime("mureka", "Warm instrumental detail.", {}, undefined, "MurekaX", ["mureka", "suno"]);
+  assert.equal(dispatched[0]!.model, "MurekaX");
+  assert.equal(dispatched[1]!.model, "V5", "Mureka model IDs must not leak into Suno fallback");
+  failureProvider = "suno";
+  await runtime("suno", "Warm instrumental detail.", {}, undefined, "SunoCustom", ["suno", "mureka"]);
+  assert.equal(dispatched[0]!.model, "SunoCustom");
+  assert.equal(dispatched[1]!.model, undefined, "Suno model IDs must not leak into Mureka fallback");
+  failureProvider = null;
   for (const provider of ["mureka", "suno", "minimax_music3"] as const) {
+    const sleepPrompt = await runtime(provider, "Use a driving 120 BPM groove with a strong pulse.", {
+      channelProgramRoute: sleepRoute,
+      studioAudioRecipeProjection: studio,
+      styleDNA: { audio: {
+        genre: "soft nocturnal ambient",
+        instrumentation: ["warm sustained pad", "distant piano harmonics"],
+        textures: ["steady filtered noise", "quiet room air"],
+        bpmRange: [120, 120],
+        moodArc: "A driving 120 BPM groove with a strong pulse.",
+        loopable: true,
+      } },
+    }, undefined, undefined, [provider], true);
+    assert.equal(persisted!.mix.targetLufs, -20, "an unconfigured sleep route must retain the sleep-specific mastering target");
+    assert.equal(persisted!.mix.narrationPriority, true, "the canonical guided-sleep route gives narration foreground priority");
+    assert.equal(persisted!.mix.bodyMusicVol, 0.1026, "the canonical guided-sleep route defaults to narrated-bed gain");
+    assert.match(sleepPrompt, /unmetered and beatless/u);
+    assert.match(sleepPrompt, /diffuse, sustained background texture/u);
+    assert.match(sleepPrompt, /Approved Studio texture direction \(timbre or spatial detail only/u);
+    assert.ok(sleepPrompt.includes(studioCore.promptAddenda[0]), "the strict sleep module preserves its approved Studio audio texture direction");
+    assert.doesNotMatch(sleepPrompt, /The melodic lead belongs/u);
+    assert.match(sleepPrompt, /warm sustained pad/u);
+    assert.doesNotMatch(sleepPrompt, /\b120\s*BPM\b|driving orchestral percussion|strong pulse|resolves back to the tonic/iu);
+    assert.doesNotMatch(sleepPrompt, /flat dynamics with no section development|abrupt key, tempo|melody that masks narration/u);
+
     for (const intent of [flat, active]) {
       const caption = await runtime(provider, intent);
+      assert.equal(persisted!.mix.targetLufs, -16, "the primary-music default remains music-forward after role-default correction");
       assert.ok(caption.includes(intent));
       assert.ok(persisted!.generation.structuredCaption.includes(intent), "selected prompt is sealed, even for text-only providers");
       assert.ok(!caption.includes(intent === flat ? active : flat));
     }
     const composer = "Follow the episode's rain motif, ending with crystalline silence.";
-    const composerOnly = await runtime(provider, "IGNORED_EXPLICIT_GENRE", { musicBrief: { musicPrompt: composer } });
+    const composerOnly = await runtime(provider, "glassy harmonic", { musicBrief: { musicPrompt: composer } });
     assert.ok(composerOnly.includes(composer));
-    assert.ok(!composerOnly.includes("IGNORED_EXPLICIT_GENRE"));
-    const caption = await runtime(provider, "IGNORED_EXPLICIT_GENRE", { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
+    assert.ok(composerOnly.includes("glassy harmonic"));
+    const moduleNuance = "Keep a glass harmonic under the episode's rain motif.";
+    const caption = await runtime(provider, moduleNuance, { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
     assert.ok(caption.includes(dna.audio.genre));
     assert.ok(caption.includes(composer));
+    if (provider !== "minimax_music3") assert.ok(caption.includes(moduleNuance));
+    assert.ok(music3StructuredCaptionWordCount(caption) <= 450);
     assert.ok(caption.includes(studioCore.promptAddenda[0]));
-    assert.ok(!caption.includes("IGNORED_EXPLICIT_GENRE"));
     assert.ok(!caption.includes("to study and relax to"));
     assert.match(caption, /natural ending/i);
     assert.match(await runtime(provider, "IGNORED_EXPLICIT_GENRE", { styleDNA: { audio: { ...dna.audio, loopable: true } } }), /loop-friendly, resolves back to the tonic/i);
@@ -141,20 +215,47 @@ async function main() {
     assert.ok(sealed.includes(sealedDirection));
     assert.ok(sealed.includes(flat));
   }
+  const rhythmicStudioCore = {
+    ...studioCore,
+    promptAddenda: ["Add a strong pulse under the sleeping listener's breath."],
+  };
+  const rhythmicStudio = {
+    ...rhythmicStudioCore,
+    fingerprint: sha256Hex(canonicalJson(rhythmicStudioCore)),
+  };
+  await runtime("suno", "Safe ambient texture.", {
+    channelProgramRoute: sleepRoute,
+    studioAudioRecipeProjection: rhythmicStudio,
+    styleDNA: { audio: {
+      genre: "soft nocturnal ambient",
+      instrumentation: ["warm sustained pad", "distant piano harmonics"],
+      textures: ["quiet room air"],
+      bpmRange: [120, 120],
+      moodArc: "steady and quiet",
+      loopable: true,
+    } },
+  }, /sleep soundscape cannot include rhythmic generation direction: strong pulse/u, undefined, ["suno"], true);
+  await runtime("suno", "A safe background score.", { channelProgramRoute: undefined });
+  assert.equal(persisted!.family, "unclassified");
+  assert.equal(persisted!.contentLaneKey, "unclassified");
+  assert.equal(persisted!.role, "narration_bed");
+  assert.equal(persisted!.mix.bodyMusicVol, 0.1026,
+    "legacy runs without a route must not inherit LoFi's primary-music gain");
   for (const intent of [flat, active]) assert.ok((await weekly(intent)).includes(intent));
   const composer = "Let this episode's motif dissolve into glass harmonics.";
-  const weeklyDna = await weekly("IGNORED_EXPLICIT_GENRE", { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
+  const weeklyNuance = "Add a barely audible glass harmonic.";
+  const weeklyDna = await weekly(weeklyNuance, { styleDNA: dna, musicBrief: { musicPrompt: composer }, studioAudioRecipeProjection: studio });
   assert.ok(weeklyDna.includes(dna.audio.genre));
   assert.ok(weeklyDna.includes(composer));
+  assert.ok(weeklyDna.includes(weeklyNuance));
   assert.ok(weeklyDna.includes(studioCore.promptAddenda[0]));
-  assert.ok(!weeklyDna.includes("IGNORED_EXPLICIT_GENRE"));
   assert.match(weeklyDna, /natural ending/i);
   assert.match(await weekly(flat, { styleDNA: { audio: { ...dna.audio, loopable: true } } }), /loop-friendly, resolves back to the tonic/i);
-  assert.ok(!(await weekly("IGNORED_EXPLICIT_GENRE", { styleDNA: dna })).includes("IGNORED_EXPLICIT_GENRE"));
+  assert.ok((await weekly(weeklyNuance, { styleDNA: dna })).includes(weeklyNuance));
   for (const field of ["composerDirection", "musicPrompt"]) {
     const caption = await weekly("IGNORED_EXPLICIT_GENRE", {}, { [field]: composer });
     assert.ok(caption.includes(composer));
-    assert.ok(!caption.includes("IGNORED_EXPLICIT_GENRE"));
+    assert.ok(caption.includes("Additional module direction"));
   }
   const sealedDirection = "Preserve the sealed prepared session's metallic pulse.";
   const plan = createOriginalMusicProgramPlan({ route, topic, audioDirection: sealedDirection, providerPreference: "mureka" });
@@ -178,10 +279,14 @@ async function main() {
   assert.ok((await weekly(longDirection)).includes("CRITICAL_ENDING_INSTRUCTION"));
   await runtime("minimax_music3", `${"preserve ".repeat(460)}CRITICAL_ENDING_INSTRUCTION`, {}, /450|word/i);
   assert.equal(networkCalls, 0);
-  console.log("SHARED MUSIC DIRECTION PASS: real runtime and weekly boundaries; channel intent, DNA precedence, episode nuance, sealed direction, Studio additions, lossless bounds, no network");
+  console.log("SHARED MUSIC DIRECTION PASS: real runtime and weekly boundaries; channel intent, beatless sleep across providers, DNA precedence, episode nuance, sealed direction, Studio additions, lossless bounds, no network");
 }
 
 void main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   loader._load = originalLoad;
   globalThis.fetch = originalFetch;
+  if (originalMurekaKey === undefined) delete process.env.MUREKA_API_KEY;
+  else process.env.MUREKA_API_KEY = originalMurekaKey;
+  if (originalSunoKey === undefined) delete process.env.SUNO_API_KEY;
+  else process.env.SUNO_API_KEY = originalSunoKey;
 });

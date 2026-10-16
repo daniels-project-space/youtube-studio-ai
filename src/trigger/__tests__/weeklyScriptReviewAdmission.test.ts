@@ -9,13 +9,18 @@ const manifest: PlanWeekPreparationManifest = {
   channelSlug: "archive", batchId: "batch", itemId: "episode", itemKey: "week:0", requestKey: "week", frozenAt: 1,
   plan: { topic: "The old lock", title: "The old lock", description: "A source-bound history.",
     sceneSeed: "An archive", thumbnailKey: "owner/review-owner/old.jpg", thumbnailSource: "planner_artwork" },
-  execution: { pipeline: [{ block: "script_gen" }, { block: "qa_script" }, { block: "narration_tts" }],
-    moduleConfig: {}, seedStore: { persona: "Curious history listeners" } },
+  execution: { pipeline: [{ block: "script_gen" },
+    { block: "qa_script", version: "2.0.0-channel-aware" }, { block: "narration_tts" }],
+    moduleConfig: {}, seedStore: { channelName: "Inked Histories", persona: "Curious history listeners",
+      criticDoctrine: "Ground each reveal in named historical evidence.", contentLane: "narrated_documentary",
+      showBible: { positioning: "Evidence-led stories from overlooked history.", vibe: "Curious and measured.",
+        worksInSpace: ["Named archival details"], avoidInSpace: ["Unsupported dramatic claims"] },
+      styleDNA: { narrative: { scriptStyle: "Measured, vivid archival storytelling.", pacing: "Build clarity before suspense." } } } },
   prompts: { script: "Source", narration: "Voice", shotlist: "Shots", visual: "Archive" },
 };
 const encode = (value: unknown) => Buffer.from(canonicalJson(value));
 const script = { hook: "An old lock.", sections: [{ heading: "Archive", narration: "A missing pin.", role: "outro" }],
-  narrationText: "An old lock. A missing pin.", estDurationSec: 12 };
+  narrationText: "An old lock.\n\nA missing pin.", estDurationSec: 12 };
 const scriptKey = planWeekPreparedScriptKey(manifest), manifestKey = planWeekPreparationKey(manifest);
 const reviewKey = `${scriptKey}.review.json`;
 const objects = new Map<string, Uint8Array>();
@@ -68,6 +73,9 @@ async function main() {
     assert.ok(objects.has(`${reviewKey}.dispatch.json`), "claim must precede actual transport");
     assert.ok(body.messages.at(-1).content.includes(script.narrationText));
     assert.ok(body.messages.at(-1).content.includes("Curious history listeners"));
+    assert.ok(body.messages.at(-1).content.includes("Inked Histories"));
+    assert.ok(body.messages.at(-1).content.includes("Ground each reveal in named historical evidence."));
+    assert.ok(body.messages.at(-1).content.includes("Measured, vivid archival storytelling."));
     return Response.json({ id: "review-fixture", model: body.model,
       choices: [{ message: { content: JSON.stringify(verdict) } }],
       usage: { prompt_tokens: 200, completion_tokens: 30, total_tokens: 230, ...charge } });
@@ -112,7 +120,7 @@ async function main() {
     swapped.script.narrationText = "Substituted narration with a different promise.";
     swapped.scriptSha256 = sha256Hex(canonicalJson(swapped.script));
     objects.set(scriptKey, encode(swapped));
-    await assert.rejects(() => task.run(payload), /binding mismatch/);
+    await assert.rejects(() => task.run(payload), /narrationText does not match the hook and ordered sections/);
     assert.equal(calls, 1); assert.equal(tts, 1);
 
     payload = reset(); writeMode = "denied";

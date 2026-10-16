@@ -42,7 +42,9 @@ import {
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
 import { buildPreparedFootageSidecar } from "@/trigger/minimaxH3WeeklyBatch";
-import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
+import { ChannelMusicProgramSchema, musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
+import { RENDER_ENGINE_STUDIO_PROJECT_NAME } from "@/lib/renderEngineStudioProject";
 import { planWeekPreparedMusicProgram } from "@/lib/planWeekPreparedMusicProgram";
 import {
   claimPlanItem,
@@ -175,7 +177,7 @@ const preparedScript = {
   script: {
     hook: "The old lock was never meant to open.",
     sections: [{ heading: "The mechanism", narration: "One missing pin changed the kingdom.", role: "outro" as const }],
-    narrationText: "The old lock was never meant to open. One missing pin changed the kingdom.",
+    narrationText: "The old lock was never meant to open.\n\nOne missing pin changed the kingdom.",
     estDurationSec: 14,
     programRouteFingerprint: "a".repeat(64),
     crafted: {
@@ -344,7 +346,7 @@ const engineH3Prepared = {
   ...h3Prepared,
   renderer: {
     kind: "render-engine-h3" as const,
-    projectName: "youtube-studio-ai" as const,
+    projectName: RENDER_ENGINE_STUDIO_PROJECT_NAME,
     workflowId: "workflow123",
     profileRevisionSha256: "4".repeat(64),
   },
@@ -434,6 +436,14 @@ assert.throws(
   /binding mismatch/,
   "a receipt cannot name a different script than the one it carries",
 );
+const inconsistentPreparedScript = structuredClone(preparedScript);
+inconsistentPreparedScript.script.narrationText = "A different version of the narration.";
+inconsistentPreparedScript.scriptSha256 = sha256Hex(canonicalJson(inconsistentPreparedScript.script));
+assert.throws(
+  () => assertPlanWeekPreparedScriptBinding({ prepared: inconsistentPreparedScript, manifest }),
+  /narrationText does not match the hook and ordered sections/,
+  "a correctly re-hashed weekly receipt still rejects narration that diverges from its structured script",
+);
 const preparedNarration = {
   version: PLAN_WEEK_PREPARED_NARRATION_VERSION,
   manifestSha256: pointer.manifestSha256,
@@ -521,11 +531,111 @@ const preparedMusic = {
   },
   createdAt: Date.now() - 200,
 };
+const roleBoundMusicManifest = structuredClone(musicManifest);
+roleBoundMusicManifest.execution.seedStore = {
+  family: "narrated_stock",
+  contentLane: { key: "documentary" },
+  musicBrief: { musicIntent: { role: "meditation_bed" } },
+};
+const roleBoundMusicProgram = planWeekPreparedMusicProgram(roleBoundMusicManifest, "mureka");
+assert.equal(roleBoundMusicProgram.role, "meditation_bed",
+  "weekly preparation preserves the Composer's explicit role just like the runtime music module");
+assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.16,
+  "a meditation bed on a narrated route must preserve the narration foreground");
+assert.equal(roleBoundMusicProgram.mix.narrationPriority, true,
+  "prepared music must not discard voice-masking priority when the sound role is meditation");
+assert.equal(roleBoundMusicProgram.mix.targetLufs, -18,
+  "a prepared meditation bed uses the shared role-specific master target");
+
+const shortFormMusicManifest = structuredClone(musicManifest);
+shortFormMusicManifest.execution.pipeline = [{ block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION }];
+shortFormMusicManifest.execution.seedStore = {
+  family: "shorts",
+  contentLane: { key: "shorts" },
+  channelName: "Quick Archive",
+};
+const shortFormMusicProgram = planWeekPreparedMusicProgram(shortFormMusicManifest, "mureka");
+const shortFormIdentityFingerprint = sha256Hex(canonicalJson({
+  ownerId: shortFormMusicManifest.ownerId,
+  channelId: shortFormMusicManifest.channelId,
+  channelName: "Quick Archive",
+  routeFingerprint: null,
+  styleDNA: null,
+}));
+const expectedShortFormIdentity = musicFallbackProfileForRole({
+  role: "short_form_bed",
+  family: "shorts",
+  contentLaneKey: "shorts",
+  channelIdentitySeed: shortFormIdentityFingerprint,
+  profileVersion: "channel-identity-short-form/v1",
+});
+assert.equal(shortFormMusicProgram.role, "short_form_bed");
+assert.equal(shortFormMusicProgram.channelIdentityFingerprint, shortFormIdentityFingerprint,
+  "weekly music uses the same stable channel-only identity binding as runtime generation");
+assert.equal(shortFormMusicProgram.identity.genre, expectedShortFormIdentity.genre);
+assert.deepEqual(shortFormMusicProgram.identity.instrumentation, expectedShortFormIdentity.instrumentation);
+assert.deepEqual(shortFormMusicProgram.identity.textures, expectedShortFormIdentity.textures);
+assert.equal(shortFormMusicProgram.identity.moodArc, expectedShortFormIdentity.moodArc);
+
+const wrongRoleShortFormManifest = structuredClone(roleBoundMusicManifest);
+wrongRoleShortFormManifest.execution.pipeline = [{ block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION }];
+assert.throws(() => planWeekPreparedMusicProgram(wrongRoleShortFormManifest, "mureka"),
+  /requires the short_form_bed role/,
+  "the short-form version cannot leak its fallback identity into meditation routes");
+
+const guidedSleepMusicManifest = structuredClone(musicManifest);
+guidedSleepMusicManifest.execution.seedStore = {
+  family: "sleep",
+  contentLane: { key: "ambient_guided" },
+};
+const guidedSleepMusicProgram = planWeekPreparedMusicProgram(guidedSleepMusicManifest, "mureka");
+assert.equal(guidedSleepMusicProgram.role, "sleep_sound_bed");
+assert.equal(guidedSleepMusicProgram.mix.bodyMusicVol, 0.1026,
+  "prepared guided-sleep music keeps narration foreground priority");
+assert.equal(guidedSleepMusicProgram.mix.targetLufs, -20,
+  "prepared guided-sleep music uses the sleep-specific master target");
+
+const authoredMusicGainManifest = structuredClone(guidedSleepMusicManifest);
+authoredMusicGainManifest.execution.pipeline.push({ block: "music", params: { bodyMusicVol: 0.31 } });
+authoredMusicGainManifest.execution.seedStore = {
+  ...guidedSleepMusicManifest.execution.seedStore,
+  styleDNA: { audio: { genre: "soft rain", bodyMusicVol: 0.16, loudnessLufs: -19 } },
+};
+authoredMusicGainManifest.execution.moduleConfig.music = { bodyMusicVol: 0.28 };
+const authoredMusicProgram = planWeekPreparedMusicProgram(authoredMusicGainManifest, "mureka");
+assert.equal(authoredMusicProgram.mix.bodyMusicVol, 0.28,
+  "explicit module config overrides creation-time music params and Style DNA defaults");
+const creationParamMusicManifest = structuredClone(guidedSleepMusicManifest);
+creationParamMusicManifest.execution.pipeline.push({ block: "music", params: { bodyMusicVol: 0.31 } });
+const creationParamMusicProgram = planWeekPreparedMusicProgram(creationParamMusicManifest, "mureka");
+assert.equal(creationParamMusicProgram.mix.bodyMusicVol, 0.31,
+  "week-ahead preparation preserves a Music control selected during channel creation");
+const malformedMusicParamsManifest = structuredClone(creationParamMusicManifest);
+malformedMusicParamsManifest.execution.pipeline = [
+  { block: "music", params: ["invalid"] },
+];
+malformedMusicParamsManifest.execution.moduleConfig.music = { bodyMusicVol: 0.24 };
+assert.equal(planWeekPreparedMusicProgram(malformedMusicParamsManifest, "mureka").mix.bodyMusicVol, 0.24,
+  "week-ahead preparation ignores malformed pipeline params while preserving explicit module config");
+const legacyLofiMusicConfigManifest = structuredClone(guidedSleepMusicManifest);
+legacyLofiMusicConfigManifest.execution.moduleConfig.lofi = { bodyMusicVol: 0.42 };
+legacyLofiMusicConfigManifest.execution.moduleConfig.music = {};
+assert.equal(planWeekPreparedMusicProgram(legacyLofiMusicConfigManifest, "mureka").mix.bodyMusicVol, 0.42,
+  "an empty shared Music config must not mask a legacy Lo-Fi setting during week-ahead preparation");
+const migratedLofiMusicConfigManifest = structuredClone(guidedSleepMusicManifest);
+migratedLofiMusicConfigManifest.execution.moduleConfig.lofi = { bodyMusicVol: 0.42 };
+migratedLofiMusicConfigManifest.execution.moduleConfig.music = { bodyMusicVol: 0.27 };
+assert.equal(planWeekPreparedMusicProgram(migratedLofiMusicConfigManifest, "mureka").mix.bodyMusicVol, 0.27,
+  "an explicit shared Music setting takes precedence over retained legacy Lo-Fi config");
+assert.equal(authoredMusicProgram.mix.targetLufs, -19,
+  "prepared tracks preserve the channel-authored loudness target");
 assert.equal(
   assertPlanWeekPreparedMusicBinding({ prepared: preparedMusic, manifest: musicManifest }).musicProgram.fingerprint,
   preparedMusic.musicProgram.fingerprint,
   "a prepared MiniMax master binds the frozen episode, sealed music program, and all required audit artifacts",
 );
+let schemaRejectedMusicMutation = false;
+let bindingRejectedMusicMutation = false;
 for (const mutate of [
   (program: typeof preparedMusic.musicProgram) => { program.identity.genre = "unrelated stadium metal"; },
   (program: typeof preparedMusic.musicProgram) => { program.channelIdentityFingerprint = "a".repeat(64); },
@@ -536,11 +646,18 @@ for (const mutate of [
   mutate(changed);
   const body: Partial<typeof changed> = { ...changed };
   delete body.fingerprint;
-  const musicProgram = ChannelMusicProgramSchema.parse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+  const parsed = ChannelMusicProgramSchema.safeParse({ ...body, fingerprint: sha256Hex(canonicalJson(body)) });
+  if (!parsed.success) {
+    schemaRejectedMusicMutation = true;
+    continue;
+  }
+  bindingRejectedMusicMutation = true;
   assert.throws(() => assertPlanWeekPreparedMusicBinding({
-    prepared: { ...preparedMusic, musicProgram }, manifest: musicManifest,
+    prepared: { ...preparedMusic, musicProgram: parsed.data }, manifest: musicManifest,
   }), /music.*(program|binding).*mismatch/, "a valid self-hash must not authorize a different frozen music direction");
 }
+assert.equal(schemaRejectedMusicMutation, true, "internally inconsistent mutations fail at the music-program schema boundary");
+assert.equal(bindingRejectedMusicMutation, true, "valid self-hashed mutations still fail at the frozen preparation binding");
 for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
   const frozen = structuredClone(musicManifest);
   frozen.execution.seedStore = {
@@ -559,14 +676,22 @@ for (const family of ["music_loop", "sleep", "shorts", "narrated_stock"]) {
     const wrongProvider = { ...frozen, execution: { ...frozen.execution,
       moduleConfig: { ...frozen.execution.moduleConfig, music: { provider: provider === "suno" ? "mureka" : "suno" } } } };
     assert.throws(() => planWeekPreparedMusicProgram(wrongProvider, provider), /provider does not match the frozen route/);
-    for (const changed of [
+    const changedBrief = { ...frozen, execution: { ...frozen.execution,
+      seedStore: { ...frozen.execution.seedStore, musicBrief: { musicPrompt: "Replace the episode with an aggressive solo." } } } };
+    if (family === "sleep") {
+      assert.equal(planWeekPreparedMusicProgram(changedBrief, provider).fingerprint, musicProgram.fingerprint,
+        "the sleep role owns a stable soundscape and rejects composer directions that would add movement");
+    }
+    const changedManifests = [
       { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, channelName: "Different channel personality" } } },
-      { ...frozen, execution: { ...frozen.execution, seedStore: { ...frozen.execution.seedStore, musicBrief: { musicPrompt: "Replace the episode with an aggressive solo." } } } },
       { ...frozen, execution: { ...frozen.execution, moduleConfig: { ...frozen.execution.moduleConfig, music: { generationDurationSec: 240 } } } },
-    ]) {
+      ...(family === "sleep" ? [] : [changedBrief]),
+    ];
+    for (const changed of changedManifests) {
       assert.throws(() => assertPlanWeekPreparedMusicBinding({
         prepared: { ...receipt, manifestSha256: planWeekPreparationManifestSha256(changed) }, manifest: changed,
-      }), /music program binding mismatch/, "rewriting the outer manifest hash cannot reuse stale channel direction");
+      }), /music program binding mismatch/,
+      `rewriting the outer manifest hash cannot reuse stale channel direction: ${JSON.stringify(changed.execution.seedStore)}`);
     }
   }
 }
@@ -654,6 +779,43 @@ assert.equal(
   manifest.prompts.script,
   "an exact content-addressed preparation packet is admissible",
 );
+const promisedManifest = {
+  ...manifest,
+  plan: { ...manifest.plan, topicPromise: "See why this evidence changes the original explanation." },
+};
+assert.equal(assertPlanWeekPreparationManifestBinding({
+  manifest: promisedManifest,
+  pointer: { ...pointer, manifestSha256: planWeekPreparationManifestSha256(promisedManifest) },
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  itemKey,
+  requestKey,
+  channelSlug,
+  topic: promisedManifest.plan.topic,
+  title: promisedManifest.plan.title,
+  thumbnailKey,
+  thumbnailSource: "planner_artwork",
+  topicPromise: promisedManifest.plan.topicPromise,
+}).plan.topicPromise, promisedManifest.plan.topicPromise,
+"the Topicraft promise is an immutable, row-bound preparation input");
+assert.throws(() => assertPlanWeekPreparationManifestBinding({
+  manifest: promisedManifest,
+  pointer: { ...pointer, manifestSha256: planWeekPreparationManifestSha256(promisedManifest) },
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  itemKey,
+  requestKey,
+  channelSlug,
+  topic: promisedManifest.plan.topic,
+  title: promisedManifest.plan.title,
+  thumbnailKey,
+  thumbnailSource: "planner_artwork",
+}), /binding mismatch/u,
+"a prepared-script reader cannot omit or substitute the frozen Topicraft promise");
 assert.throws(
   () => assertPlanWeekPreparationManifestBinding({
     manifest: { ...manifest, plan: { ...manifest.plan, title: "Changed after freezing" } },

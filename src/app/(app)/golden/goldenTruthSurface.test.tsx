@@ -31,6 +31,9 @@ async function main(): Promise<void> {
   assert.match(html, /Children’s Video Treatment/);
   assert.match(html, /Children’s Show Bible/);
   assert.match(html, /REGISTERED PIPELINE MODULE/);
+  assert.match(html, /CATALOG ACTIVE/);
+  assert.doesNotMatch(html, />ACTIVE</,
+    "catalog status must not imply that an unpromoted module is Golden-certified");
   assert.match(html, /Private child-editor review only/);
   assert.match(html, /Open children review desk/);
   assert.match(html, /IC controls remain unavailable until exact workflow/);

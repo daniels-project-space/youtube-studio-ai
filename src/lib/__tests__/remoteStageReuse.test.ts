@@ -17,6 +17,12 @@ import * as stageReuseContract from "@/engine/stageReuseContract";
 import { createVisualArtifactAttempt } from "@/engine/visualArtifactAttemptLedger";
 import * as renderAdmission from "@/lib/renderBlockAdmission";
 import * as invocationSnapshots from "@/lib/pipelineInvocationSnapshot";
+import * as convexUsage from "@/lib/convexUsage";
+import * as imageUsage from "@/lib/imageUsage";
+import * as modelUsage from "@/lib/modelUsage";
+import * as moduleCritiqueEvidence from "@/lib/moduleCritiqueEvidence";
+import { produceAndCritique } from "@/engine/critiqueLoop";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { admitFrozenRemoteChildStage, reconstructFrozenRemoteChildPipeline } from "@/lib/remoteChildBudgetAdmission";
 import { selectRehydrationSubset } from "@/lib/rehydrate";
@@ -63,7 +69,7 @@ const receiverContext = TaskRunContext.parse({
 
 type Mutation = "seed" | "output" | "missing-receipt" | "params" | "module" | "restoration" | "missing-second-receipt" | "missing-outputs" | "missing-stage" | "failed-stage" | "input-mutation";
 type VersionCase = "v2" | "missing-v2" | "fingerprint-drift" | "historical-v1";
-type WorkerMutation = "wrong-version" | "missing-actual" | "missing-context" | "project" | "environment" | "run-version" | "deployment-version" | "missing-binding";
+type WorkerMutation = "wrong-version" | "missing-actual" | "missing-context" | "project" | "environment" | "run-version" | "deployment-version" | "missing-binding" | "undeclared-read";
 function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?: WorkerMutation,
   remoteId?: "novita_render_images" | "novita_render_video") {
   const calls = { admission: 0, stages: 0, bootstrap: 0, rehydrate: 0, paid: 0, begin: 0, finish: 0, artifactQueries: 0,
@@ -86,9 +92,36 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     consumes: ["narrationText", "narrationKey", "narrationLocalPath", "scriptApproved"],
     produces: ["videoKey"],
     async run(ctx: StageContext) {
+      if (workerMutation === "undeclared-read") void ctx.store["ambientSecret"];
+      if (mutation === "input-mutation") {
+        (ctx.store as Record<string, unknown>).narrationText = "Changed inside renderer.";
+      }
       calls.paid++;
       observedStageBudget = ctx.stageBudgetUsd;
-      observedStore = structuredClone(ctx.store);
+      observedStore = Object.fromEntries(Object.keys(ctx.store).map((key) => [key, structuredClone(ctx.store[key])]));
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/query");
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/mutation");
+      convexUsage.recordConvexHttpRequest("https://studio.convex.cloud/api/action");
+      modelUsage.recordModelUsage({
+        provider: "fixture", model: "fixture-text", kind: "text",
+        inputTokens: 17, outputTokens: 9, reportedCostUsd: 0.01,
+      });
+      imageUsage.recordImageUsage({
+        provider: "fixture", model: "fixture-image", route: "fixture-route",
+        images: 1, width: 64, height: 64, costUsd: 0.02,
+      });
+      if (ctx.modelUsageAccounting?.(["text"]).calls !== 1 || ctx.modelUsageCostUsd?.(["text"]) !== 0.01) {
+        throw new Error("remote module did not receive its model usage accounting scope");
+      }
+      if (ctx.imageUsageAccounting?.().calls !== 1) {
+        throw new Error("remote module did not receive its image usage accounting scope");
+      }
+      await produceAndCritique({
+        label: "remote:quality-probe",
+        maxIters: 1,
+        produce: async () => ({ output: "fixture" }),
+        critique: async () => ({ score: 0.87, pass: true, issues: [] }),
+      });
       await ctx.checkpointVisualArtifactAttempts!([createVisualArtifactAttempt({
         adapterId: "remote_reuse_test", scopeFingerprint: "a".repeat(64),
         attemptId: "render-attempt-1", ordinal: 1,
@@ -96,7 +129,6 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
         review: { verdict: "accepted", gateId: "fixture_gate", reviewVersion: "test/v1", notes: [] },
         repair: { kind: "initial" },
       })]);
-      if (mutation === "input-mutation") (ctx.store as Record<string, unknown>).narrationText = "Changed inside renderer.";
       return { videoKey: "owners/remote-reuse/final.mp4", __costUsd: 0.2 };
     },
   };
@@ -108,7 +140,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     } : {}),
   }));
   const entries: PipelineEntry[] = manifests.map((manifest) => ({ block: manifest.id, params: { mode: "exact" } }));
-  const seedStore = { sourceText: "White moves the pawn from e2 to e4." };
+  const seedStore = { sourceText: "White moves the pawn from e2 to e4.", ambientSecret: "must stay hidden" };
   const snapshot: invocationSnapshots.PipelineInvocationSnapshot = {
     version: 1, ...scope, source: "channel", entries, seedStore, budgetUsd: 10,
     remoteBlocks: [renderer.id], defaultRetries: 1,
@@ -247,6 +279,11 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "node:crypto": crypto,
     "@trigger.dev/sdk/v3": { logger: { info() {}, warn() {}, error() {} } },
     "@/lib/studioConvexHttpClient": { StudioConvexHttpClient: Client },
+    "@/lib/convexUsage": convexUsage,
+    "@/lib/imageUsage": imageUsage,
+    "@/lib/modelUsage": modelUsage,
+    "@/lib/moduleCritiqueEvidence": moduleCritiqueEvidence,
+    "@/engine/declaredArtifactStore": { declaredArtifactStore },
     "@/engine/blocks": { registerAllBlocks() {} },
     "@/engine/convexSink": { makeConvexSink: () => sink },
     "@/engine/artifactSchemas": artifactSchemas,
@@ -284,14 +321,23 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
     "@/lib/renderChildLease": { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS: 60_000 },
     "@/trigger/remoteChildCostTransport": costTransport,
   };
-  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{ patch: Record<string, unknown> }> } };
+  const loaded = { exports: {} as { executeRenderBlock: (input: RenderBlockInput, options: RenderBlockRunnerOptions) => Promise<{
+    patch: Record<string, unknown>;
+    convexUsage: convexUsage.ConvexUsageCounts | null;
+    moduleUsage: {
+      providerCalls: number;
+      inputTokens: number;
+      outputTokens: number;
+      critiqueEvidence: moduleCritiqueEvidence.ModuleCritiqueReceipt[];
+    } | null;
+  }> } };
   new Function("require", "module", "exports", "process", compiledRunner)(
     (name: string) => {
       assert.ok(Object.hasOwn(modules, name), `unisolated remote worker import: ${name}`);
       return modules[name];
     }, loaded, loaded.exports, { env: { NEXT_PUBLIC_CONVEX_URL: "https://never-used.invalid" } },
   );
-  const run = async () => {
+  const run = async (attemptNumber = options.attemptNumber) => {
     const ctx = structuredClone(receiverContext);
     const worker = { id: "worker_fixture", version: workerVersion, contentHash: "fixture" };
     if (workerMutation === "wrong-version") {
@@ -310,7 +356,7 @@ function harness(mutation?: Mutation, versionCase?: VersionCase, workerMutation?
       return await loaded.exports.executeRenderBlock({
         ...scope, leaseOwner: "parent", executionLeaseToken: 1, dispatchKey: "child-dispatch",
         blockId: renderer.id, params: entries[2]!.params ?? {}, budgetUsd: snapshot.budgetUsd, seedStore: snapshot.seedStore,
-      }, { ...options, ...(remoteId ? { machineClass: "offloaded" as const } : {}),
+      }, { ...options, attemptNumber, ...(remoteId ? { machineClass: "offloaded" as const } : {}),
         ...(versionCase && versionCase !== "historical-v1" && workerMutation !== "missing-context"
         ? { workerContext: ctx } : {}) });
     } finally {
@@ -325,6 +371,23 @@ async function main() {
   const unchanged = harness();
   const result = await unchanged.run();
   assert.equal(result.patch.__costUsd, 0.2);
+  assert.deepEqual(result.convexUsage, { reads: 1, writes: 1, actions: 1 },
+    "child reports only Convex calls made inside the module execution scope");
+  assert.deepEqual(result.moduleUsage, {
+    providerCalls: 2,
+    inputTokens: 17,
+    outputTokens: 9,
+    critiqueEvidence: [{
+      label: "remote:quality-probe",
+      scores: [0.87],
+      passes: [true],
+      fatalIterations: [false],
+      issueCounts: [0],
+      accepted: true,
+      fatal: false,
+      completed: true,
+    }],
+  }, "child reports measured provider usage and its real module critique result");
   assert.equal(unchanged.calls.paid, 1);
   assert.equal(unchanged.calls.begin, 1);
   assert.equal(unchanged.calls.finish, 1);
@@ -349,10 +412,18 @@ async function main() {
   assert.equal(unchanged.calls.artifactQueries, 0, "historical artifacts must not replace selected identities");
   assert.equal(unchanged.observedStore()!.narrationLocalPath, "/new-worker/narration.mp3");
   assert.equal(unchanged.observedStore()!.scriptApproved, true);
+  assert.equal(Object.hasOwn(unchanged.observedStore()!, "ambientSecret"), false,
+    "remote module receives only declared inputs, not ambient seed artifacts");
   assert.deepEqual(unchanged.rows, unchanged.savedRowsBefore, "worker-local restoration must not rewrite durable outputs");
   assert.equal(unchanged.writtenArtifacts.length, 1);
   assert.deepEqual(unchanged.writtenArtifacts[0]!.artifacts[0]!.inputArtifactIds, unchanged.expectedLineage,
     "real checkpoint writer binds original selected refs after temp paths move");
+  const retried = harness();
+  assert.equal((await retried.run(2)).convexUsage, null,
+    "a retried Trigger task does not undercount earlier failed-attempt module calls");
+  const retriedUsage = await harness().run(2);
+  assert.equal(retriedUsage.moduleUsage, null,
+    "a retried Trigger task does not undercount earlier failed-attempt model/image calls");
 
   for (const mutation of ["seed", "output", "missing-receipt", "params", "module", "restoration", "missing-second-receipt", "missing-outputs", "missing-stage", "failed-stage"] as const) {
     const candidate = harness(mutation);
@@ -366,10 +437,9 @@ async function main() {
     }
   }
   const lateMutation = harness("input-mutation");
-  await assert.rejects(lateMutation.run(), /STAGE_REUSE_RECONCILIATION_REQUIRED/);
-  assert.equal(lateMutation.calls.paid, 1);
+  await assert.rejects(lateMutation.run(), /attempted to mutate the read-only artifact store/);
+  assert.equal(lateMutation.calls.paid, 0, "module input mutation is refused before provider work");
   assert.equal(lateMutation.calls.finish, 1);
-  assert.equal(lateMutation.acceptedCost(), 0.2, "post-execution input mutation preserves already-observed remote cost");
   assert.deepEqual(lateMutation.rows, lateMutation.savedRowsBefore);
   try {
     for (const versionCase of ["v2", "historical-v1"] as const) {
@@ -436,6 +506,13 @@ async function main() {
       assert.equal(candidate.acceptedCost(), undefined);
       assert.deepEqual(candidate.rows, candidate.savedRowsBefore);
     }
+    const undeclaredRead = harness(undefined, undefined, "undeclared-read");
+    await assert.rejects(
+      undeclaredRead.run(),
+      /module "timeline_assemble" attempted undeclared artifact read "ambientSecret"/,
+    );
+    assert.equal(undeclaredRead.calls.paid, 0,
+      "undeclared remote reads fail before entering module provider work");
   } finally {
     _clear();
   }

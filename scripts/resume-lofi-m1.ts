@@ -57,10 +57,9 @@ async function main(): Promise<void> {
   });
   if (!channel) throw new Error(`channel not found: ${channelId}`);
 
-  // Presign the prior clips + F1 still so the resume blocks can fetch them.
+  // Presign only the prior clips needed by the resume blocks.
   const clip1Url = await presignDownload(`${priorPrefix}clip1.mp4`, { expiresIn: 3600 });
   const clip2Url = await presignDownload(`${priorPrefix}clip2.mp4`, { expiresIn: 3600 });
-  const f1Url = await presignDownload(`${priorPrefix}f1.png`, { expiresIn: 3600 });
 
   const runId = await convex.mutation(api.runs.createRun, {
     ownerId: OWNER,
@@ -76,7 +75,6 @@ async function main(): Promise<void> {
     channelName: channel.name,
     palette: channel.identity?.palette ?? [],
     topic: channel.identity?.topicPool?.[0] ?? "rainy neon rooftop at midnight",
-    f1Url,
     clip1Url,
     clip2Url,
     // assemble declares it consumes the R2 KEYS (it reads the URLs from store);

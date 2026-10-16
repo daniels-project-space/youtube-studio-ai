@@ -34,10 +34,9 @@ import {
   MUSIC_LOOP_REVIEW_SECONDS, MusicLoopReviewCoverageSchema, type MusicLoopReviewCoverage,
 } from "./musicLoopReviewCoverage";
 
-// v5 adds typed reference-criterion coverage and a full SHA-256 review
-// fingerprint. A receipt made under an earlier schema cannot attest the
-// current independent-review or global sampled-batch coverage guarantees.
-export const VISUAL_REVIEW_VERSION = "video-review/v5" as const;
+// v6 adds per-lock visual verdicts and binds their sampled evidence coverage.
+// Earlier manifests cannot attest that every timed Story Spine lock was judged.
+export const VISUAL_REVIEW_VERSION = "video-review/v6" as const;
 /** Post-review result schema; kept separate so `reviewFingerprint` stays a plan/intent binding. */
 export const VISUAL_REVIEW_RECEIPT_VERSION = "visual-review-receipt/v1" as const;
 /** Opt-in, evidence-bound score emitted once for every broad reviewer batch. */
@@ -46,23 +45,27 @@ export const VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION =
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
-export type VisualReviewCategory =
-  | "overlay_off_canvas"
-  | "overlay_occlusion"
-  | "overlay_collision"
-  | "caption_cutoff"
-  | "caption_unreadable"
-  | "wrong_footage"
-  | "repeated_clip"
-  | "narration_mismatch"
-  | "continuity_break"
-  | "reveal_failure"
-  | "black_frame"
-  | "frozen_frame"
-  | "transition_break"
-  | "intro_card"
-  | "outro_card"
-  | "general_visual";
+const VISUAL_REVIEW_CATEGORY_VALUES = [
+  "overlay_off_canvas",
+  "overlay_occlusion",
+  "overlay_collision",
+  "caption_cutoff",
+  "caption_unreadable",
+  "wrong_footage",
+  "repeated_clip",
+  "narration_mismatch",
+  "continuity_break",
+  "reveal_failure",
+  "black_frame",
+  "frozen_frame",
+  "transition_break",
+  "intro_card",
+  "outro_card",
+  "general_visual",
+] as const;
+export type VisualReviewCategory = (typeof VISUAL_REVIEW_CATEGORY_VALUES)[number];
+const VISUAL_REVIEW_CATEGORIES = new Set<string>(VISUAL_REVIEW_CATEGORY_VALUES);
+const VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC = 0.5;
 export type EvidenceReason = "intro" | "outro" | "scene" | "uniform" | "cue" | "overlay" | "focus";
 
 export type NormalizedRect = [number, number, number, number];
@@ -71,6 +74,64 @@ export interface VisualReviewTranscriptCue {
   text: string;
   startSec: number;
   endSec: number;
+}
+
+export interface FinalMasterNarrationStartResolution {
+  readonly startSec: number;
+  readonly source: "declared" | "intro" | "master_start";
+  readonly rejectedDeclaredStart: boolean;
+  readonly rejectedIntroOffset: boolean;
+}
+
+export function resolveFinalMasterNarrationStartSec(input: {
+  readonly narrationStartSec: unknown;
+  readonly introApplied: unknown;
+  readonly introSec: unknown;
+  readonly finalMasterDurationSec: number;
+  readonly productionQa: boolean;
+}): FinalMasterNarrationStartResolution {
+  const duration = input.finalMasterDurationSec;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("final-master visual review requires a valid master duration");
+  }
+  const parseOffset = (value: unknown): number | undefined => {
+    if (typeof value !== "number" && (typeof value !== "string" || value.trim() === "")) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= duration ? parsed : undefined;
+  };
+  const declaredStart = input.narrationStartSec === undefined
+    ? undefined
+    : parseOffset(input.narrationStartSec);
+  const rejectedDeclaredStart = input.narrationStartSec !== undefined &&
+    declaredStart === undefined;
+  if (declaredStart !== undefined) {
+    return {
+      startSec: declaredStart,
+      source: "declared",
+      rejectedDeclaredStart: false,
+      rejectedIntroOffset: false,
+    };
+  }
+  if (rejectedDeclaredStart && input.productionQa) {
+    throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
+  }
+  if (input.introApplied !== true) {
+    return { startSec: 0, source: "master_start", rejectedDeclaredStart, rejectedIntroOffset: false };
+  }
+
+  const introOffset = parseOffset(input.introSec);
+  if (introOffset === undefined) {
+    if (input.productionQa) {
+      throw new Error("qa_visual: applied intro lacks a valid narration offset within the final master duration");
+    }
+    return { startSec: 0, source: "master_start", rejectedDeclaredStart, rejectedIntroOffset: true };
+  }
+  return {
+    startSec: introOffset,
+    source: "intro",
+    rejectedDeclaredStart,
+    rejectedIntroOffset: false,
+  };
 }
 
 /**
@@ -94,6 +155,7 @@ export function finalMasterTranscriptCues(input: {
   if (!Number.isFinite(input.finalMasterDurationSec) || input.finalMasterDurationSec <= 0) {
     throw new Error("final-master visual review requires a valid master duration");
   }
+  let previousEnd = Number.NEGATIVE_INFINITY;
   return Object.freeze(input.sentenceTimings.map((rawCue, index) => {
     if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) {
       throw new Error(`final-master visual review narration cue ${index} is malformed`);
@@ -102,14 +164,18 @@ export function finalMasterTranscriptCues(input: {
     const start = Number(cue["start"]);
     const end = Number(cue["end"]);
     const text = typeof cue["text"] === "string" ? cue["text"].trim() : "";
-    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
       throw new Error(`final-master visual review narration cue ${index} is invalid`);
+    }
+    if (start < previousEnd) {
+      throw new Error(`final-master visual review narration cue ${index} is out of order or overlaps its predecessor`);
     }
     const startSec = Number((input.narrationStartSec + start).toFixed(3));
     const endSec = Number((input.narrationStartSec + end).toFixed(3));
     if (endSec > input.finalMasterDurationSec + 0.75) {
       throw new Error(`final-master visual review narration cue ${index} extends beyond the master`);
     }
+    previousEnd = end;
     return { text, startSec, endSec };
   }));
 }
@@ -143,7 +209,7 @@ export interface VisualReviewCreativeLock {
 /**
  * A source-bound, renderer-independent visual mechanic to attest against the
  * supplied evidence. This deliberately stays distinct from `qualityCriteria`,
- * which is a small prose context block rather than a typed review contract.
+   * which is bounded prose context rather than a typed review contract.
  */
 export interface VisualReviewReferenceCriterion {
   id: string;
@@ -170,6 +236,15 @@ export interface VisualReviewReferenceCriterionReceipt {
   id: string;
   scope: VisualReviewReferenceCriterionScope;
   verdict: VisualReviewReferenceCriterionVerdict;
+  evidenceFrameIds: string[];
+}
+
+export type VisualReviewCreativeLockVerdict = "pass" | "fail" | "not_observable";
+
+export interface VisualReviewCreativeLockAssessment {
+  shotId: string;
+  verdict: VisualReviewCreativeLockVerdict;
+  assessment: string;
   evidenceFrameIds: string[];
 }
 
@@ -459,15 +534,19 @@ export function channelVisualReviewProfile(
     typeof showBible?.["dpDoctrine"] === "string" ? showBible["dpDoctrine"] : undefined,
     100,
   );
+  if ((input.qualityDimensions?.length ?? 0) > MAX_QUALITY_BAR_DIMENSIONS) {
+    throw new Error(`qualityDimensions may contain at most ${MAX_QUALITY_BAR_DIMENSIONS} entries`);
+  }
+  if ((input.qualityCriteria?.length ?? 0) > MAX_QUALITY_BAR_DIMENSIONS) {
+    throw new Error(`qualityCriteria may contain at most ${MAX_QUALITY_BAR_DIMENSIONS} scorecard entries`);
+  }
   const qualityDimensions = (input.qualityDimensions ?? [])
     .map((dimension) => compactReviewContext(dimension, 60))
-    .filter((dimension): dimension is string => Boolean(dimension))
-    .slice(0, 8);
+    .filter((dimension): dimension is string => Boolean(dimension));
   const qualityCriteria = (input.qualityCriteria ?? [])
-    .map((criterion) => compactReviewContext(criterion, 360))
+    .map((criterion) => compactReviewContext(criterion, MAX_REVIEW_QUALITY_CRITERION_CHARS))
     .filter((criterion): criterion is string => Boolean(criterion))
-    .filter((criterion, index, values) => values.indexOf(criterion) === index)
-    .slice(0, 6);
+    .filter((criterion, index, values) => values.indexOf(criterion) === index);
   const channelWorld = [
     channelName ? `Channel: ${channelName}` : "",
     persona ? `Audience/persona: ${persona}` : "",
@@ -557,6 +636,16 @@ export interface VisualReviewEvidence {
     requiredFocusFrameCount?: number;
     /** Missing required focus frames make the review fail closed. */
     missingFocusFrameCount?: number;
+    /** Sampled witness coverage only; this does not claim continuous shot realization. */
+    creativeLocks?: {
+      requestedCount: number;
+      frameWitnessedCount: number;
+      passedCount: number;
+      missingFrameLockIds: string[];
+      notObservableLockIds: string[];
+      failedLockIds: string[];
+      assessments: VisualReviewCreativeLockAssessment[];
+    };
     musicLoop?: MusicLoopReviewCoverage;
   };
   manifestKey?: string;
@@ -737,14 +826,20 @@ const DEFAULT_STRUCTURE =
 // moderately richer mechanics contract remains reviewable without silently
 // truncating it into generic reviewer context.
 const MAX_REFERENCE_CRITERIA = 12;
+const MAX_QUALITY_BAR_DIMENSIONS = 8;
+const MAX_REVIEW_QUALITY_CRITERIA = 20;
+const MAX_REVIEW_QUALITY_CRITERION_CHARS = 780;
 
 const REASON_PRIORITY: Record<EvidenceReason, number> = {
   focus: 100,
+  // Scene boundaries and narration cues both carry story-level evidence.
+  // Keeping them in one tier prevents abundant detected cuts from consuming
+  // the semantic budget before any image-to-narration checks are sampled.
+  scene: 85,
   overlay: 90,
   intro: 80,
   outro: 80,
-  scene: 55,
-  cue: 45,
+  cue: 85,
   uniform: 25,
 };
 
@@ -772,6 +867,15 @@ function priority(candidate: FrameCandidate): number {
 function evenlyPick<T>(values: readonly T[], count: number): T[] {
   if (values.length <= count) return [...values];
   return Array.from({ length: count }, (_, index) => values[Math.floor((index * values.length) / count)]);
+}
+
+function evenlyPickAcrossSpan<T>(values: readonly T[], count: number): T[] {
+  if (values.length <= count) return [...values];
+  if (count <= 0) return [];
+  if (count === 1) return [values[Math.floor((values.length - 1) / 2)]!];
+  return Array.from({ length: count }, (_, index) =>
+    values[Math.round((index * (values.length - 1)) / (count - 1))]!,
+  );
 }
 
 /**
@@ -912,11 +1016,18 @@ export function planVisualReviewEvidence(input: {
     .map(([, candidate]) => candidate)
     .sort((a, b) => a.tSec - b.tSec);
   const remainingCapacity = Math.max(0, maxFrames - reserved.length);
-  const semantic = [...candidates.entries()]
+  const semanticCandidates = [...candidates.entries()]
     .filter(([key, candidate]) => !coverageKeys.has(key) && [...candidate.reasons].some((reason) => reason !== "uniform"))
     .map(([, candidate]) => candidate)
-    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec)
-    .slice(0, remainingCapacity);
+    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec);
+  const semantic: FrameCandidate[] = [];
+  const priorityTiers = [...new Set(semanticCandidates.map(priority))].sort((a, b) => b - a);
+  for (const tierPriority of priorityTiers) {
+    const tier = semanticCandidates.filter((candidate) => priority(candidate) === tierPriority);
+    const slots = remainingCapacity - semantic.length;
+    if (slots <= 0) break;
+    semantic.push(...(tier.length > slots ? evenlyPickAcrossSpan(tier, slots) : tier));
+  }
   const supplementalUniform = [...candidates.entries()]
     .filter(([key, candidate]) => !coverageKeys.has(key) && candidate.reasons.size === 1 && candidate.reasons.has("uniform"))
     .map(([, candidate]) => candidate)
@@ -931,6 +1042,15 @@ export function planVisualReviewEvidence(input: {
     tSec: candidate.tSec,
     selectionReasons: sortedReasons(candidate.reasons),
   }));
+}
+
+export function missingVisualReviewCreativeLockIds(
+  locks: readonly VisualReviewCreativeLock[],
+  frames: readonly Pick<VisualReviewFrame, "tSec">[],
+): string[] {
+  return locks
+    .filter((lock) => !frames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec))
+    .map((lock) => lock.shotId);
 }
 
 /**
@@ -1036,7 +1156,13 @@ async function extractFrames(
   return extracted;
 }
 
-function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): string | undefined {
+const MAX_NEAREST_NARRATION_CUE_GAP_SEC = 1;
+
+export function narrationCueForVisualFrame(
+  cues: readonly VisualReviewTranscriptCue[],
+  tSec: number,
+): string | undefined {
+  if (!Number.isFinite(tSec)) return undefined;
   // Intro/outro frames live outside the narrated source window. Nearest-cue
   // fallback is useful only for small pauses *inside* narration; applying it
   // before the first word or after the last one falsely tells the reviewer an
@@ -1044,13 +1170,20 @@ function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): 
   const narrationStartSec = cues.reduce((earliest, cue) => Math.min(earliest, cue.startSec), Number.POSITIVE_INFINITY);
   const narrationEndSec = cues.reduce((latest, cue) => Math.max(latest, cue.endSec), Number.NEGATIVE_INFINITY);
   if (tSec < narrationStartSec || tSec > narrationEndSec) return undefined;
-  const cue = cues.find((item) => item.startSec <= tSec && item.endSec >= tSec) ??
-    cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
-      if (!nearest) return item;
-      const a = Math.abs((item.startSec + item.endSec) / 2 - tSec);
-      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
-      return a < b ? item : nearest;
-    }, undefined);
+  const activeCue = cues.find((item) =>
+    item.startSec <= tSec &&
+    (item.endSec > tSec || (tSec === narrationEndSec && item.endSec === narrationEndSec))
+  );
+  const cue = activeCue ?? cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
+    if (!nearest) return item;
+    const distanceToInterval = (candidate: VisualReviewTranscriptCue) =>
+      tSec < candidate.startSec ? candidate.startSec - tSec : Math.max(0, tSec - candidate.endSec);
+    return distanceToInterval(item) < distanceToInterval(nearest) ? item : nearest;
+  }, undefined);
+  if (cue && !activeCue) {
+    const gapSec = tSec < cue.startSec ? cue.startSec - tSec : tSec - cue.endSec;
+    if (gapSec > MAX_NEAREST_NARRATION_CUE_GAP_SEC) return undefined;
+  }
   return cue?.text?.replace(/\s+/g, " ").trim().slice(0, 180) || undefined;
 }
 
@@ -1058,13 +1191,7 @@ function creativeLockForFrame(
   locks: readonly VisualReviewCreativeLock[],
   tSec: number,
 ): VisualReviewCreativeLock | undefined {
-  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec) ??
-    locks.reduce<VisualReviewCreativeLock | undefined>((nearest, lock) => {
-      if (!nearest) return lock;
-      const a = Math.abs((lock.startSec + lock.endSec) / 2 - tSec);
-      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
-      return a < b ? lock : nearest;
-    }, undefined);
+  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec);
 }
 
 function reviewerPrompt(
@@ -1075,7 +1202,7 @@ function reviewerPrompt(
   collectBroadQualityScore: boolean,
 ): string {
   const timeline = frames.map((frame) => {
-    const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
+    const transcript = narrationCueForVisualFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
     const creativeLock = creativeLockForFrame(intent.creativeLocks ?? [], frame.descriptor.tSec);
     const reasons = frame.descriptor.selectionReasons.join(",");
     const lockText = creativeLock
@@ -1092,9 +1219,11 @@ function reviewerPrompt(
     .filter(Boolean)
     .slice(0, 4);
   const qualityCriteria = (intent.qualityCriteria ?? [])
-    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 360))
-    .filter(Boolean)
-    .slice(0, 6);
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, MAX_REVIEW_QUALITY_CRITERION_CHARS))
+    .filter(Boolean);
+  if (qualityCriteria.length > MAX_REVIEW_QUALITY_CRITERIA) {
+    throw new Error(`visual review qualityCriteria may contain at most ${MAX_REVIEW_QUALITY_CRITERIA} entries`);
+  }
   const referenceCriteriaInstructions = referenceCriteria.length
     ? `REFERENCE-MECHANICS CRITERIA\n` +
       `These are original, source-bound production mechanics, not an automatic comparison with any reference channel. ` +
@@ -1102,6 +1231,14 @@ function reviewerPrompt(
       `A [global] criterion must return pass from every sampled broad-review batch before it clears this sampled-evidence gate; this never claims continuous or master-wide coverage. A [frame] criterion may be attested by matching evidence from one or more batches. ` +
       `Every receipt must cite one or more IDs from this batch's FRAME LEDGER; never invent frame IDs.\n` +
       `${referenceCriteria.map((item) => `- ${item.id} [${item.scope}]: "${item.criterion}"`).join("\n")}\n\n`
+    : "";
+  const observedCreativeLocks = (intent.creativeLocks ?? []).filter((lock) =>
+    frames.some((frame) => frame.descriptor.tSec >= lock.startSec && frame.descriptor.tSec <= lock.endSec),
+  );
+  const creativeLockInstructions = observedCreativeLocks.length
+    ? `STORY / SHOT LOCK ASSESSMENTS\n` +
+      `For every listed lock, return exactly one creativeLockAssessments entry. Judge whether the visible frame(s) in this batch support the literal narrated moment and each authored continuity/visual constraint; do not infer unseen frames. Use pass only when the supplied evidence supports the lock, fail when it contradicts the lock, and not_observable when evidence is insufficient. Cite only matching FRAME LEDGER IDs whose timestamps fall within that lock.\n` +
+      `${observedCreativeLocks.map((lock) => `- ${lock.shotId} @${lock.startSec.toFixed(1)}-${lock.endSec.toFixed(1)}s: "${lock.expected.slice(0, 700)}" criteria: ${lock.acceptanceCriteria.slice(0, 5).map((criterion) => `"${criterion.slice(0, 220)}"`).join("; ")}`).join("\n")}\n\n`
     : "";
   const broadQualityScoreInstructions = phase === "broad" && collectBroadQualityScore
     ? `WIDE-SAMPLE QUALITY SCORE\n` +
@@ -1134,6 +1271,7 @@ function reviewerPrompt(
         `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
       : "") +
     referenceCriteriaInstructions +
+    creativeLockInstructions +
     broadQualityScoreInstructions +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
@@ -1156,7 +1294,7 @@ function reviewerPrompt(
     `Use general_visual only for another visible mood, composition, or aesthetic concern that does not fit a typed category. ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
-    `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|narration_mismatch|continuity_break|reveal_failure|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
+    `"category":"${VISUAL_REVIEW_CATEGORY_VALUES.join("|")}",` +
     `"confidence":0..1,"observed":"what is visibly wrong","expected":"what should be visible",` +
     `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],` +
     (referenceCriteria.length
@@ -1167,11 +1305,6 @@ function reviewerPrompt(
       : "") +
     `"summary":"<=100 words"}.`
   );
-}
-
-function normalizeSeverity(value: unknown): VisualReviewSeverity {
-  const raw = String(value ?? "minor").toLowerCase();
-  return raw === "critical" || raw === "major" ? raw : "minor";
 }
 
 function normalizeCategory(value: unknown, observed: string): VisualReviewCategory {
@@ -1276,12 +1409,67 @@ function parseReferenceCriteriaReceipt(
   return { referenceCriteria, complete };
 }
 
+function parseCreativeLockAssessments(
+  receipt: Record<string, unknown>,
+  requested: readonly VisualReviewCreativeLock[],
+  frameTimeById: ReadonlyMap<string, number>,
+): { assessments: VisualReviewCreativeLockAssessment[]; complete: boolean } {
+  if (requested.length === 0) return { assessments: [], complete: true };
+  const rows = receipt.creativeLockAssessments;
+  if (!Array.isArray(rows)) return { assessments: [], complete: false };
+  const requestedById = new Map(requested.map((lock) => [lock.shotId, lock]));
+  let complete = requestedById.size === requested.length && rows.length === requestedById.size;
+  const seen = new Set<string>();
+  const assessments: VisualReviewCreativeLockAssessment[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      complete = false;
+      continue;
+    }
+    const item = row as Record<string, unknown>;
+    const shotId = typeof item.shotId === "string" ? item.shotId.trim() : "";
+    const lock = requestedById.get(shotId);
+    const verdict = item.verdict;
+    const assessment = typeof item.assessment === "string" ? item.assessment.trim() : "";
+    const rawFrameIds = item.evidenceFrameIds;
+    if (
+      !lock || seen.has(shotId) ||
+      (verdict !== "pass" && verdict !== "fail" && verdict !== "not_observable") ||
+      !assessment || assessment.length > 800 ||
+      !Array.isArray(rawFrameIds) || rawFrameIds.length === 0 ||
+      rawFrameIds.some((id) => typeof id !== "string" || !frameTimeById.has(id))
+    ) {
+      complete = false;
+      continue;
+    }
+    const evidenceFrameIds = [...new Set(rawFrameIds as string[])];
+    const allFramesRelevant = evidenceFrameIds.every((id) => {
+      const tSec = frameTimeById.get(id);
+      return tSec !== undefined && tSec >= lock.startSec - VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC &&
+        tSec <= lock.endSec + VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC;
+    });
+    if (!allFramesRelevant) {
+      complete = false;
+      continue;
+    }
+    seen.add(shotId);
+    assessments.push({
+      shotId,
+      verdict,
+      assessment: assessment.slice(0, 500),
+      evidenceFrameIds,
+    });
+  }
+  if (seen.size !== requestedById.size) complete = false;
+  return { assessments, complete };
+}
+
 function parseModelDefects(
   raw: string,
   frames: readonly ExtractedFrame[],
-  intent: VisualReviewIntent,
   phase: "broad" | "focus",
   requestedReferenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+  requestedCreativeLocks: readonly VisualReviewCreativeLock[],
   collectBroadQualityScore: boolean,
 ): {
   defects: VisualReviewDefect[];
@@ -1289,8 +1477,10 @@ function parseModelDefects(
   complete: boolean;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   referenceCriteriaComplete: boolean;
+  creativeLockAssessments: VisualReviewCreativeLockAssessment[];
   broadQualityScore?: number;
 } {
+  const emptyCreativeLockAssessments: VisualReviewCreativeLockAssessment[] = [];
   let parsed: unknown;
   try {
     parsed = parseJsonLoose<unknown>(raw);
@@ -1301,6 +1491,7 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -1310,6 +1501,7 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   const receipt = parsed as Record<string, unknown>;
@@ -1332,42 +1524,86 @@ function parseModelDefects(
       complete: false,
       referenceCriteria: [],
       referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+      creativeLockAssessments: emptyCreativeLockAssessments,
     };
   }
   const parsedReferenceCriteria = parseReferenceCriteriaReceipt(receipt, frames, requestedReferenceCriteria);
-  const known = new Set(frames.map((frame) => frame.descriptor.id));
-  let complete = true;
+  const frameTimeById = new Map(frames.map((frame) => [frame.descriptor.id, frame.descriptor.tSec]));
+  const parsedCreativeLockAssessments = parseCreativeLockAssessments(
+    receipt,
+    requestedCreativeLocks,
+    frameTimeById,
+  );
+  let complete = parsedCreativeLockAssessments.complete;
   const defects = reportedDefects.flatMap((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       complete = false;
       return [];
     }
-    const observed = String(item["observed"] ?? item["issue"] ?? "").trim();
-    if (!observed) {
+    const observed = typeof item["observed"] === "string" ? item["observed"].trim() : "";
+    const expected = typeof item["expected"] === "string" ? item["expected"].trim() : "";
+    const suggestedRepair = typeof item["suggestedRepair"] === "string" ? item["suggestedRepair"].trim() : "";
+    const startSec = item["startSec"];
+    const endSec = item["endSec"];
+    const rawSeverity = typeof item["severity"] === "string" ? item["severity"].trim().toLowerCase() : "";
+    const rawCategory = typeof item["category"] === "string" ? item["category"].trim().toLowerCase() : "";
+    const confidence = item["confidence"];
+    if (
+      !observed ||
+      !expected ||
+      !suggestedRepair ||
+      typeof startSec !== "number" ||
+      !Number.isFinite(startSec) ||
+      startSec < 0 ||
+      typeof endSec !== "number" ||
+      !Number.isFinite(endSec) ||
+      endSec < startSec ||
+      (rawSeverity !== "critical" && rawSeverity !== "major" && rawSeverity !== "minor") ||
+      typeof confidence !== "number" ||
+      !Number.isFinite(confidence) ||
+      confidence < 0 ||
+      confidence > 1 ||
+      !VISUAL_REVIEW_CATEGORIES.has(rawCategory)
+    ) {
       complete = false;
       return [];
     }
-    const startSec = clamp(finite(item["startSec"] ?? item["tSec"], frames[0]?.descriptor.tSec ?? 0), 0, Number.MAX_SAFE_INTEGER);
-    const endSec = Math.max(startSec, finite(item["endSec"], startSec));
-    const ids = Array.isArray(item["evidenceFrameIds"])
-      ? item["evidenceFrameIds"].map(String).filter((id) => known.has(id))
+    const rawFrameIds = item["evidenceFrameIds"];
+    const ids = Array.isArray(rawFrameIds)
+      ? rawFrameIds.filter((id): id is string => typeof id === "string").map((id) => id.trim())
       : [];
-    const evidenceFrameIds = ids.length ? [...new Set(ids)] : nearestFrameId(frames, startSec);
-    const category = normalizeCategory(item["category"], observed);
-    const severity = normalizeSeverity(item["severity"]);
-    const confidence = clamp(finite(item["confidence"], 0.65), 0, 1);
+    if (
+      !Array.isArray(rawFrameIds) ||
+      ids.length !== rawFrameIds.length ||
+      ids.length === 0 ||
+      ids.some((id) => !frameTimeById.has(id))
+    ) {
+      complete = false;
+      return [];
+    }
+    const evidenceFrameIds = [...new Set(ids)];
+    const hasTemporallyRelevantEvidence = evidenceFrameIds.some((id) => {
+      const frameTime = frameTimeById.get(id);
+      return frameTime !== undefined && frameTime >= startSec - VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC &&
+        frameTime <= endSec + VISUAL_REVIEW_EVIDENCE_TIME_TOLERANCE_SEC;
+    });
+    if (!hasTemporallyRelevantEvidence) {
+      complete = false;
+      return [];
+    }
+    const category = normalizeCategory(rawCategory, observed);
     const key = `${phase}|${category}|${roundTime(startSec)}|${observed.slice(0, 120)}`;
     return [{
       id: createHash("sha256").update(key).digest("hex").slice(0, 16),
       startSec,
       endSec,
-      severity,
+      severity: rawSeverity as VisualReviewSeverity,
       category,
       confidence,
       observed,
-      expected: String(item["expected"] ?? intent.expectedStructure ?? DEFAULT_STRUCTURE).slice(0, 300),
+      expected: expected.slice(0, 300),
       evidenceFrameIds,
-      suggestedRepair: String(item["suggestedRepair"] ?? "Inspect and repair the owning render stage").slice(0, 240),
+      suggestedRepair: suggestedRepair.slice(0, 240),
       source: "vision" as const,
     } satisfies VisualReviewDefect];
   });
@@ -1377,6 +1613,7 @@ function parseModelDefects(
     complete,
     referenceCriteria: parsedReferenceCriteria.referenceCriteria,
     referenceCriteriaComplete: parsedReferenceCriteria.complete,
+    creativeLockAssessments: parsedCreativeLockAssessments.assessments,
     ...(broadQualityScore === undefined ? {} : { broadQualityScore }),
   };
 }
@@ -1483,12 +1720,14 @@ async function reviewBatches(
   incompleteReceiptCount: number;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   incompleteReferenceCriteriaReceiptCount: number;
+  creativeLockAssessments: VisualReviewCreativeLockAssessment[];
   broadQualityScores: number[];
   incompleteBroadQualityScoreCount: number;
 }> {
   const defects: VisualReviewDefect[] = [];
   const summaries: string[] = [];
   const criteriaReceipts: VisualReviewReferenceCriterionReceipt[] = [];
+  const creativeLockAssessments: VisualReviewCreativeLockAssessment[] = [];
   let incompleteReceiptCount = 0;
   let incompleteReferenceCriteriaReceiptCount = 0;
   const broadQualityScores: number[] = [];
@@ -1510,9 +1749,20 @@ async function reviewBatches(
         { cause: error },
       );
     }
-    const parsed = parseModelDefects(raw, batch, intent, phase, referenceCriteria, collectBroadQualityScore);
+    const batchCreativeLocks = (intent.creativeLocks ?? []).filter((lock) =>
+      batch.some((frame) => frame.descriptor.tSec >= lock.startSec && frame.descriptor.tSec <= lock.endSec),
+    );
+    const parsed = parseModelDefects(
+      raw,
+      batch,
+      phase,
+      referenceCriteria,
+      batchCreativeLocks,
+      collectBroadQualityScore,
+    );
     defects.push(...parsed.defects);
     criteriaReceipts.push(...parsed.referenceCriteria);
+    creativeLockAssessments.push(...parsed.creativeLockAssessments);
     if (!parsed.complete) incompleteReceiptCount += 1;
     if (!parsed.referenceCriteriaComplete) incompleteReferenceCriteriaReceiptCount += 1;
     if (phase === "broad" && collectBroadQualityScore) {
@@ -1527,6 +1777,7 @@ async function reviewBatches(
     incompleteReceiptCount,
     referenceCriteria: criteriaReceipts,
     incompleteReferenceCriteriaReceiptCount,
+    creativeLockAssessments,
     broadQualityScores,
     incompleteBroadQualityScoreCount,
   };
@@ -1569,6 +1820,57 @@ function aggregateReferenceCriteria(
     return { id: criterion.id, scope: criterion.scope, verdict, evidenceFrameIds };
   });
   return { referenceCriteria, incompleteGlobalCriteria };
+}
+
+function aggregateCreativeLockAssessments(input: {
+  locks: readonly VisualReviewCreativeLock[];
+  broadFrames: readonly Pick<VisualReviewFrame, "id" | "tSec">[];
+  assessments: readonly VisualReviewCreativeLockAssessment[];
+}): NonNullable<VisualReviewEvidence["coverage"]["creativeLocks"]> | undefined {
+  if (input.locks.length === 0) return undefined;
+  const expectedBatchCounts = new Map<string, number>();
+  for (let index = 0; index < input.broadFrames.length; index += FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST) {
+    const batch = input.broadFrames.slice(index, index + FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST);
+    for (const lock of input.locks) {
+      if (batch.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec)) {
+        expectedBatchCounts.set(lock.shotId, (expectedBatchCounts.get(lock.shotId) ?? 0) + 1);
+      }
+    }
+  }
+  const assessments = input.locks.map((lock): VisualReviewCreativeLockAssessment => {
+    const matching = input.assessments.filter((assessment) => assessment.shotId === lock.shotId);
+    const hasFrame = input.broadFrames.some((frame) => frame.tSec >= lock.startSec && frame.tSec <= lock.endSec);
+    const verdict: VisualReviewCreativeLockVerdict = matching.some((assessment) => assessment.verdict === "fail")
+      ? "fail"
+      : !hasFrame || matching.length !== (expectedBatchCounts.get(lock.shotId) ?? 0) ||
+          matching.some((assessment) => assessment.verdict !== "pass")
+        ? "not_observable"
+        : "pass";
+    return {
+      shotId: lock.shotId,
+      verdict,
+      assessment: matching.map((assessment) => assessment.assessment).join(" | ").slice(0, 500) ||
+        (hasFrame ? "The broad reviewer did not provide a complete lock assessment." : "No broad-review frame sampled this lock."),
+      evidenceFrameIds: [...new Set(matching.flatMap((assessment) => assessment.evidenceFrameIds))].sort(),
+    };
+  }).sort((left, right) => left.shotId.localeCompare(right.shotId));
+  const missingFrameLockIds = input.locks
+    .filter((lock) => !expectedBatchCounts.has(lock.shotId))
+    .map((lock) => lock.shotId)
+    .sort();
+  const failedLockIds = assessments.filter((assessment) => assessment.verdict === "fail").map((assessment) => assessment.shotId);
+  const notObservableLockIds = assessments
+    .filter((assessment) => assessment.verdict === "not_observable")
+    .map((assessment) => assessment.shotId);
+  return {
+    requestedCount: input.locks.length,
+    frameWitnessedCount: input.locks.length - missingFrameLockIds.length,
+    passedCount: assessments.filter((assessment) => assessment.verdict === "pass").length,
+    missingFrameLockIds,
+    notObservableLockIds,
+    failedLockIds,
+    assessments,
+  };
 }
 
 function defaultReviewer(input: VisualReviewerInput): Promise<string> {
@@ -1663,6 +1965,9 @@ export function visualReviewReceiptFingerprint(input: VisualReviewReceiptFingerp
             .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec || left.reason.localeCompare(right.reason)),
           requiredFocusFrameCount: input.evidence.coverage.requiredFocusFrameCount ?? null,
           missingFocusFrameCount: input.evidence.coverage.missingFocusFrameCount ?? null,
+          ...(input.evidence.coverage.creativeLocks
+            ? { creativeLocks: input.evidence.coverage.creativeLocks }
+            : {}),
           ...(input.evidence.coverage.musicLoop ? { musicLoop: input.evidence.coverage.musicLoop } : {}),
         },
       },
@@ -1933,6 +2238,7 @@ export async function reviewRender(
         incompleteReceiptCount: 0,
         referenceCriteria: [],
         incompleteReferenceCriteriaReceiptCount: 0,
+        creativeLockAssessments: [],
         broadQualityScores: [],
         incompleteBroadQualityScoreCount: 0,
       };
@@ -1956,6 +2262,11 @@ export async function reviewRender(
     broadBatchCount,
   );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
+  const creativeLockCoverage = aggregateCreativeLockAssessments({
+    locks: intent.creativeLocks ?? [],
+    broadFrames: broad.map((frame) => frame.descriptor),
+    assessments: firstPass.creativeLockAssessments,
+  });
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
     !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.01),
   ).length;
@@ -1981,6 +2292,7 @@ export async function reviewRender(
             missingFocusFrameCount,
           }
         : {}),
+      ...(creativeLockCoverage ? { creativeLocks: creativeLockCoverage } : {}),
     },
   };
   if (opts.persistEvidence !== false) {
@@ -2035,9 +2347,14 @@ export async function reviewRender(
   const failedReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "fail");
   const unobservableReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "not_observable");
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
-  const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
+  const failedCreativeLocks = creativeLockCoverage?.failedLockIds ?? [];
+  const incompleteCreativeLocks = [...new Set([
+    ...(creativeLockCoverage?.missingFrameLockIds ?? []),
+    ...(creativeLockCoverage?.notObservableLockIds ?? []),
+  ])];
+  const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length || failedCreativeLocks.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
+    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || incompleteCreativeLocks.length > 0 || coverageIncomplete
       ? "needs_human"
       : "pass";
   // This intentionally happens after `persistEvidence`: the receipt binds the
@@ -2081,6 +2398,11 @@ export async function reviewRender(
       : "",
     focusCoverageIncomplete
       ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
+      : "",
+    failedCreativeLocks.length
+      ? `Story Spine visual locks failed: ${failedCreativeLocks.slice(0, 8).join(", ")}`
+      : incompleteCreativeLocks.length
+      ? `Story Spine visual locks lack a complete broad-review assessment: ${incompleteCreativeLocks.slice(0, 8).join(", ")}`
       : "",
   ].filter(Boolean).join(" | ").slice(0, 1000);
   // Record that the critique was channel-grounded: the review fingerprint

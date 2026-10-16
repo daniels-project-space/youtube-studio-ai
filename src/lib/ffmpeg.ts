@@ -3795,6 +3795,40 @@ export async function probe(path: string): Promise<ProbeResult> {
   };
 }
 
+export async function decodeMusicAuditionPcmWav(
+  inputPath: string,
+  outputPath: string,
+  durationSec: number,
+): Promise<{ durationSec: number; byteLength: number }> {
+  if (!Number.isFinite(durationSec) || durationSec < 6 || durationSec > 300) {
+    throw new FfmpegError("music audition decode requires a measured 6–300 second source");
+  }
+  await run(FFMPEG, [
+    "-hide_banner", "-nostdin", "-y", "-i", inputPath,
+    "-map", "0:a:0", "-vn", "-ac", "2", "-ar", "32000", "-c:a", "pcm_s16le",
+    "-t", String(durationSec), outputPath,
+  ], 600_000);
+  const { stdout } = await run(FFPROBE, [
+    "-v", "error", "-select_streams", "a:0", "-show_entries",
+    "stream=codec_name,sample_rate,channels:format=duration", "-of", "json", outputPath,
+  ], 30_000);
+  const result = JSON.parse(stdout) as {
+    streams?: Array<{ codec_name?: string; sample_rate?: string; channels?: number }>;
+    format?: { duration?: string };
+  };
+  const audio = result.streams?.[0];
+  const measuredDurationSec = Number(result.format?.duration);
+  if (audio?.codec_name !== "pcm_s16le" || audio.sample_rate !== "32000" || audio.channels !== 2 ||
+      !Number.isFinite(measuredDurationSec) || Math.abs(measuredDurationSec - durationSec) > Math.max(0.1, durationSec * 0.001)) {
+    throw new FfmpegError("music audition decode did not produce the exact stereo 32 kHz PCM review format");
+  }
+  const { size } = await stat(outputPath);
+  if (!Number.isSafeInteger(size) || size < 44 || size > 50_000_000) {
+    throw new FfmpegError("music audition WAV exceeds its retained review bounds");
+  }
+  return { durationSec: measuredDurationSec, byteLength: size };
+}
+
 /* --------------------------- intro card (Remotion) ---------------------- */
 
 /** npx invocation for a single CLI command with a timeout. */

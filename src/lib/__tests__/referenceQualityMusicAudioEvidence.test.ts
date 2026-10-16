@@ -36,7 +36,7 @@ const routeSeed = channelProgramRouteRunSeed({
 });
 const reviewReceipt = createVisualReviewReleaseReceipt({
   reviewFingerprint: "b".repeat(64),
-  reviewReceiptVersion: "video-review/v5",
+  reviewReceiptVersion: "video-review/v6",
   reviewReceiptFingerprint: "c".repeat(64),
   verdict: "pass",
   summary: "The retained final-master review passed.",

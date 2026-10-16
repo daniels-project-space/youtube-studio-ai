@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import { createChannelProgramBrief, type ChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
+import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+import { REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE } from "@/engine/reviewedDataStoryChannelIntake";
 import { channelBuildIntentFingerprint } from "@/lib/channelBuildRequestKey";
 import { POST } from "./route";
 
@@ -226,6 +228,75 @@ async function main() {
         assert.match((await selected.json() as { error: string }).error, /yue2Music/,
           "the creator must refuse an unsupported source choice, not attest its legacy preview");
       }
+      const sourceParams = {
+        seed: 42,
+        personalCreatorAcknowledged: true,
+        maxCostUsd: 0.04,
+        executionPolicy: {
+          schema_version: 1,
+          provider: "openrelay",
+          allocation_basis: "supervised_dispatch_wall_time",
+          rate_source: "operator_configured",
+          rate_reference: "synthetic preview fixture, not a current price",
+          runtime_id: "youtube-studio-fixture",
+          hourly_rate_usd_micros: 180000,
+          max_execution_seconds: 600,
+          termination_grace_seconds: 10,
+          reserved_allocation_usd_micros: 30500,
+        },
+      };
+      const yue2Music = {
+        musicIntent: { playback: "once", role: "short_form_bed", requestedDurationSec: 30 },
+        sourceParams,
+      } as const;
+      const yue2Brief = createChannelProgramBrief({
+        family: "shorts",
+        nicheKey: "educational",
+        locale: "en",
+        concept: "Original short-form science programming for curious adults.",
+      });
+      const yue2Design = designFor(yue2Brief);
+      const yue2Preview = compileChannelPipelinePreview({ programBrief: yue2Brief, yue2Music });
+      const exactYuE2Design = {
+        ...yue2Design,
+        yue2Music,
+        pipelinePreviewSnapshot: yue2Preview,
+        budget: 0,
+      };
+      const supervisedOnly = await POST(request({
+        requestKey: requestKey(exactYuE2Design),
+        design: exactYuE2Design,
+      }));
+      assert.equal(supervisedOnly.status, 409);
+      const held = await supervisedOnly.json() as { error: string; runtimeBlockers?: string[] };
+      assert.match(held.error, /not qualified for automatic channel creation yet/);
+      assert.deepEqual(held.runtimeBlockers, [
+        "Render Engine production does not yet advertise the scored-source YuE2 contract.",
+        "No accepted RTX 3090 render has completed independent output and shutdown qualification.",
+      ]);
+
+      const reviewedBrief = createChannelProgramBrief({
+        family: "narrated_stock",
+        nicheKey: "educational",
+        locale: "en",
+        concept: "Source-attributed data storytelling built from a reviewed public evidence ledger.",
+      });
+      const reviewedDesign = {
+        ...designFor(reviewedBrief),
+        capabilitySelections: [creativeCapabilitySelection("source_attributed_data_story")],
+        supervisedDataStoryIntake: REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE,
+        yue2Music,
+      };
+      const reviewedYuE2 = await POST(request({
+        requestKey: requestKey(reviewedDesign),
+        mode: REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE,
+        design: reviewedDesign,
+      }));
+      assert.equal(reviewedYuE2.status, 409,
+        "supervised data-story intake must not bypass YuE2's production qualification hold");
+      const reviewedHold = await reviewedYuE2.json() as { error: string; runtimeBlockers?: string[] };
+      assert.match(reviewedHold.error, /not qualified for automatic channel creation yet/);
+      assert.deepEqual(reviewedHold.runtimeBlockers, held.runtimeBlockers);
     } finally { globalThis.fetch = originalFetch; }
     const exactPreview = await POST(request({
       requestKey: requestKey(exactPreviewDesign),

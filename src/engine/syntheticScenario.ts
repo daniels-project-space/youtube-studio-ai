@@ -124,3 +124,50 @@ export function syntheticScenarioWritingDirective(contract: SyntheticScenarioCon
     "Make the viewer care through concrete stakes, trade-offs, reversals, and a payoff—not by pretending the scenario happened.",
   ].join(" ");
 }
+
+/** Shared audible-opening gate for live runs and prepared narration admission. */
+export function assertSyntheticScenarioOpeningDisclosure(
+  contract: SyntheticScenarioContract,
+  narration: string,
+): SyntheticScenarioDisclosure {
+  const opening = narration
+    .replace(/\[[^\]\r\n]{1,120}\]/g, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 40)
+    .join(" ")
+    .toLocaleLowerCase();
+  const disclosureText = contract.visibleDisclosure.toLocaleLowerCase();
+  const disclosureIndex = opening.indexOf(disclosureText);
+  if (disclosureIndex < 0) {
+    throw new Error(
+      `scenario_disclosure_gate: narration must say "${contract.visibleDisclosure}" within its first 40 spoken words`,
+    );
+  }
+  const beforeDisclosure = opening.slice(0, disclosureIndex);
+  if (/\b(?:not|never|isn't|isnt)\s+(?:a\s+)?$/u.test(beforeDisclosure)) {
+    throw new Error(
+      "scenario_disclosure_gate: the opening must affirm, not negate, the fictional-scenario disclosure",
+    );
+  }
+  if (!/\billustrative\b/u.test(opening) || !/\bassumptions?\b/u.test(opening)) {
+    throw new Error(
+      "scenario_disclosure_gate: the first 40 spoken words must describe the scenario as illustrative assumptions",
+    );
+  }
+  const disclaimsRealOutcome =
+    /\b(?:not|never|rather than|instead of)\s+(?:(?:a|an|the)\s+)?(?:(?:real|actual|measured|observed)(?:[- ]world)?\s+)?(?:simulation|result|outcome|event|finding|fact)s?\b/u.test(opening) ||
+    /\bnot\s+based\s+on\s+(?:a\s+)?(?:real|actual)\s+(?:simulation|event|outcome|finding|fact)s?\b/u.test(opening);
+  if (!disclaimsRealOutcome) {
+    throw new Error(
+      "scenario_disclosure_gate: the first 40 spoken words must say this is not a real simulation or real-world result",
+    );
+  }
+  return {
+    version: SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
+    profile: contract.profile,
+    visibleDisclosure: contract.visibleDisclosure,
+    openingVerified: true,
+  };
+}

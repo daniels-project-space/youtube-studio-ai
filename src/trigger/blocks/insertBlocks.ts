@@ -34,7 +34,7 @@ import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
-import { numericMentions } from "@/lib/numericClaims";
+import { numericMentions, unmatchedNumericUnits } from "@/lib/numericClaims";
 import { sourceCitationOccurs } from "@/lib/sourceCitation";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 
@@ -182,7 +182,10 @@ export function unspokenRenderedField(
     ...(item.xLabels ?? []).map((x, i) => [`xLabels[${i}]`, x] as [string, unknown]),
     ...(item.events ?? []).map((e, i) => [`events[${i}].label`, e.label] as [string, unknown]),
   ];
-  for (const [scope, fields] of [[inSentence, quantities], [inNarration, frames]] as const) {
+  for (const [scope, source, fields] of [
+    [inSentence, sentence, quantities],
+    [inNarration, narration || sentence, frames],
+  ] as const) {
     for (const [name, value] of fields) {
       if (value === undefined || value === null) continue;
       const rendered = String(value);
@@ -194,6 +197,7 @@ export function unspokenRenderedField(
       if (claims.some((claim) => !scope.has(claim.key) && !(allowZeroAxis && claim.key === '0:0'))) {
         return { field: name, rendered };
       }
+      if (unmatchedNumericUnits(rendered, source).length > 0) return { field: name, rendered };
     }
   }
   return null;
@@ -491,7 +495,7 @@ export const visualInserts: Block = {
       }
       const unspoken = unspokenRenderedField(it, t.text, narrationText);
       if (unspoken !== null) {
-        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${unspoken.field}="${unspoken.rendered}" renders a number not spoken in the sentence ("${t.text.slice(0, 60)}…")`);
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${unspoken.field}="${unspoken.rendered}" renders a number or unit not spoken in the sentence ("${t.text.slice(0, 60)}…")`);
         continue;
       }
       if (!anchorsSpoken(it, t.text)) {

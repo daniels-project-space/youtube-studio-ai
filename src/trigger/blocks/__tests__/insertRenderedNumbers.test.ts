@@ -136,7 +136,7 @@ function main(): void {
   // ---- what must still get through ---------------------------------------
   // Narration says "534 thousand"; rendering the full figure is formatting.
   assert.ok(
-    clean({ value: "$534,000", anchorValues: ["534"] }, "The programme added 534 thousand jobs."),
+    clean({ value: "534,000", anchorValues: ["534"] }, "The programme added 534 thousand jobs."),
     "expanding a spoken magnitude word must not be treated as invention",
   );
   // And the reverse: the script says the long number, the chart abbreviates.
@@ -224,6 +224,97 @@ function main(): void {
     "value",
     "recognising number words must not admit numbers that were never said",
   );
+  assert.equal(
+    offender({ value: "10.9%" }, "Returns are ten point two percent."),
+    "value",
+    "a nearby decimal must not pass because its integer part matches a spoken decimal",
+  );
+  assert.ok(
+    clean({ value: "10.2%" }, "Returns are ten point two percent."),
+    "the exact spoken decimal remains admissible",
+  );
+  assert.equal(
+    offender({ value: "$2.9 million" }, "The bank held two million dollars."),
+    "value",
+    "a nearby magnitude must not pass because its leading digit and scale were spoken",
+  );
+  assert.ok(
+    clean({ value: "$2 million" }, "The bank held two million dollars."),
+    "the exact spoken magnitude remains admissible",
+  );
+  assert.equal(
+    offender({ value: "$10" }, "Growth reached 10%."),
+    "value",
+    "an amount must not pass when only the same percentage was spoken",
+  );
+  assert.equal(
+    offender({ value: "10 percentage points" }, "The rate increased by 10 percent."),
+    "value",
+    "percentage points and percent must not be conflated",
+  );
+  assert.equal(
+    offender({ value: "€10" }, "The cost was $10."),
+    "value",
+    "distinct currencies must not share numeric-presence credit",
+  );
+  assert.ok(
+    clean({ value: "$10" }, "The cost was ten dollars."),
+    "symbol and spoken aliases for the same currency remain admissible",
+  );
+  assert.equal(
+    offender({ title: "$10" }, "Growth reached 10%.", "The cost was $10. Growth reached 10%."),
+    null,
+    "a frame may use an exact unit-bearing claim established elsewhere in the narration",
+  );
+  assert.equal(
+    offender({ title: "$10" }, "Growth reached 10%.", "The cost was 10%. Growth reached 10%."),
+    "title",
+    "frame units must match the full narration, not merely its numeric value",
+  );
+  assert.equal(
+    offender(
+      { bars: [{ label: "Growth", value: 10, display: "$10" }] },
+      "Growth reached 10%.",
+      "The cost was ten dollars. Growth reached 10%.",
+    ),
+    "bars[0].display",
+    "a quantity cannot borrow its matching unit from another narration sentence",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The change was two percent."),
+    "value",
+    "a rendered negative must not pass when narration states only a positive magnitude",
+  );
+  assert.ok(
+    clean({ value: "-2%" }, "The change was negative two percent."),
+    "an explicitly spoken negative remains admissible",
+  );
+  assert.ok(
+    clean({ bars: [
+      { label: "Before", value: -2, display: "-2%" },
+      { label: "After", value: 5, display: "5%" },
+    ] }, "The two changes were minus two and five percent."),
+    "a trailing unit in a coordinated pair applies to both spoken values",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The changes were minus two, but five percent."),
+    "value",
+    "a unit must not cross an unrelated conjunction",
+  );
+  assert.equal(
+    offender({ value: "-2%" }, "The changes were minus two and five percentage points."),
+    "value",
+    "a coordinated value cannot inherit a different explicit unit",
+  );
+  assert.ok(
+    clean({ value: "2 years" }, "It lasts from two to four years."),
+    "an explicit range unit applies to both endpoints",
+  );
+  assert.equal(
+    offender({ value: "2%" }, "It lasts from two to four years."),
+    "value",
+    "a range endpoint cannot borrow the other endpoint's mismatched unit",
+  );
 
   // ---- quantity is pinned to its sentence; frame may cite the script -------
   const script =
@@ -285,7 +376,7 @@ function main(): void {
   // no way to tell an over-tight gate from a lying director.
   assert.match(
     SOURCE,
-    /\$\{unspoken\.field\}="\$\{unspoken\.rendered\}" renders a number not spoken/,
+    /\$\{unspoken\.field\}="\$\{unspoken\.rendered\}" renders a number or unit not spoken/,
     "the drop must log which field carried the unspoken number",
   );
 

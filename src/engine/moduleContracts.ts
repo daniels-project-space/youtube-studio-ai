@@ -280,7 +280,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "narrativeSeriesRunSelector",
-      "plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool",
+      "plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool", "bannedWords",
       // A sealed program route constrains every selection path, including
       // planned and render-group-reused topics.
       "channelProgramRoute",
@@ -371,14 +371,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // but the runtime block itself refuses to mint a plan without these two
     // route-owned seeds.  The automatic route requires both blocks.
     optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "visualStyle","channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
+      // Optional runtime inputs supplied by the route-aware planner or channel identity.
+      "visualStyle", "channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
   music_arrangement_plan: contract(["music.arrangement.accepted"], {
     requiredConsumes: ["topic", "musicBrief"],
+    optionalConsumes: ["channelProgramRoute", "channelName"],
     requiredCapabilities: ["crew.accepted_music_arrangement"],
     providerProfiles: [local],
     qualityRequired: true,
@@ -424,21 +424,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   music: contract(["audio.music_generated"], {
     optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "channelProgramRoute","reuseMusicKey", "preparedMusic", "musicQualityReceiptKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
+      // Runtime inputs not in the block's base consumes must be admitted here;
+      // the runner's Proxy rejects every undeclared store read.
+      "acceptedMusicArrangement", "channelProgramRoute", "reuseMusicKey", "reuseMusicReceipt", "preparedMusic", "musicQualityReceiptKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
     providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
-    // Reserve both the requested generation count and one alternate-provider
-    // failover. A partially completed primary attempt must never be invisible.
+    // Both providers may return a short batch, so reserve the bounded worst
+    // case of one paid job per requested clip. Quota failover is only possible
+    // before a primary job is accepted and therefore cannot add paid jobs.
     maxCostUsdFor: (params) => {
       if (params["provider"] === "minimax_music3") {
         return boundedNumber(params["maxCostUsd"], 5, 0.01, 10);
       }
       const tracks = Math.ceil(boundedNumber(params["trackCount"], 2, 1, 8));
-      const sunoGenerations = Math.ceil(tracks / 2);
-      return (sunoGenerations + 1) * PRICE.musicTrackUsd;
+      return tracks * PRICE.musicTrackUsd;
     },
+    // The generated mix remains pending until the exact retained source has a
+    // byte-bound audition receipt; upload_draft independently enforces it.
+    qualityRequired: true,
   }),
   assemble: contract(["master.assembled"], {
     optionalConsumes: [
@@ -453,9 +456,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     {
       deferredConsumes: ["finalMasterReleaseCertificate"],
       optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey", "musicNativeWavKey", "musicQualityReceiptKey",
+        // Music is absent on non-music routes; when present, retain its source
+        // identity and audition evidence through the final upload package.
+        "channelMusicProgramKey", "channelMusicProgramFingerprint", "musicProvider", "musicKey", "reuseMusicReceipt", "styleDNA",
+        "musicAuditionSourceKey", "musicAuditionWavKey", "musicRuntimeReceiptKey", "musicNativeWavKey",
+        "musicQualityReceiptKey", "musicQualityReviewStatus", "finalMasterReleaseCertificate",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
         // Last-hop package-art verification for a current fictional scenario.
         "topic", "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure",
@@ -521,7 +526,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   metadata: contract(["package.metadata"], {
     optionalConsumes: [
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona", "planItemId",
-      "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
+      "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle", "hook",
+      "showBible",
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
       "clickbaitLevel",
@@ -607,13 +613,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation", "preparedScript",
-      "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan",
+      "bannedWords", "showBible",
+      "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan", "topicBet",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
     optionalConsumes: [
             // Per-channel grounding for the hook produce→critique loop (P1-4).
-      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "showBible", "styleDNA",
+      // Topicraft's promise is only a strategy hint; Hookcraft verifies it against narration.
+      "topic", "topicBet",
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
@@ -621,7 +630,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
-      "documentaryEpisodePlan", "editorialEvidencePacket"],
+      "documentaryEpisodePlan", "editorialEvidencePacket", "bannedWords"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
@@ -688,7 +697,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   entity_imagery: contract(["visuals.entities"], {
     optionalConsumes: [
       // Per-channel grounding for the entity-selection produce→critique loop (P1-4).
-      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment",
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment", "showBible",
     ],
   }),
   intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey"] }),
@@ -701,7 +710,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
-      "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
+      "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays", "narrationStartSec",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
       // Explicit renderer provenance lets assembly keep native MiniMax H3
       // footage out of the legacy LTX film-finish branch.
@@ -727,7 +736,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // No chapterPlan. It is read by assembly, inserts and the retention
     // analyst; captions builds its chapter list from the script's own sections
     // and never touched it. Found by scripts/audit-inert-consumes.ts.
-    optionalConsumes: ["script", "sentenceTimings", "introSec"],
+    optionalConsumes: ["script", "sentenceTimings", "introSec", "introApplied", "narrationStartSec"],
+    optionalProduces: ["captionsKey"],
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
@@ -995,10 +1005,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: [
       "casefileSourcePacket",
       "casefileSourceAdmission",
-      "casefileEvidenceShotMapInput",
       "sceneManifest",
       "shotList",
     ],
+    optionalConsumes: ["casefileEvidenceShotMapInput"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -1364,6 +1374,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "persona",
       "styleGrammar",
       "criticDoctrine",
+      "showBible",
+      "styleDNA",
+      "bannedWords",
     ],
     providerProfiles: [managed],
     // Two planning candidates and two critic verdicts are the hard maximum.
@@ -1390,6 +1403,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
         // undeclared read, so this threw the moment its branch ran.
         "contentLane", "researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette",
         "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName", "visualRepair",
+        "persona", "styleGrammar", "criticDoctrine", "showBible", "styleDNA", "bannedWords",
       ],
       providerProfiles: [managed, local],
       // 16 panels × five sealed one-worker image envelopes, plus
@@ -1409,7 +1423,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // every generated beat. It is optional for frozen legacy invocations,
       // but must be declared whenever a current channel supplies it so the
       // guarded stage store can admit the read.
-      optionalConsumes: ["visualBrief", "styleDNA", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
+      optionalConsumes: ["visualBrief", "styleDNA", "showBible", "bannedWords", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane", "selfContainedStoryReceipt", "channelProgramRoute"],
       providerProfiles: [managed, local],
       maxCostUsd: 30,
       maxCostUsdFor: (params, context) => loreShortCostCeiling(params, context),
@@ -1468,7 +1482,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "channelName", "contentLane","researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
+      "channelName", "persona", "criticDoctrine", "showBible", "bannedWords", "contentLane", "researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes the live direct-Novita primary/recovery panel
@@ -1488,6 +1502,12 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "script",
       "narrationText",
       "musicKey",
+      "musicProvider",
+      "channelMusicProgramKey",
+      "musicAuditionSourceKey",
+      "musicAuditionWavKey",
+      "musicQualityReceiptKey",
+      "styleDNA",
       "footageClips",
       "footageKeys",
       "thirdPartyStockEvidence",

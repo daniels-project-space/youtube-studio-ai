@@ -34,7 +34,7 @@ assert.match(
 );
 assert.match(
   reviewSource,
-  /video-review\/v5/,
+  /video-review\/v6/,
   "a pre-schema receipt must not be mistaken for current non-Google evidence",
 );
 assert.match(
@@ -47,20 +47,23 @@ assert.match(
   /visual-review-wide-sample-quality\/v1/,
   "the opt-in broad quality score must carry a stable receipt-bound schema version",
 );
-const phraseReviewer = async () => JSON.stringify({
-  defects: [{
-    startSec: 6,
-    endSec: 10,
-    severity: "major",
-    category: "general_visual",
-    confidence: 0.9,
-    observed: "A large white rectangular overlay is covering the face and upper body of the main character.",
-    expected: "The face must remain visible.",
-    evidenceFrameIds: ["f001"],
-    suggestedRepair: "Move the overlay away from the face.",
-  }],
-  summary: "Known visual phrasing.",
-});
+const phraseReviewer = async (input: { frames: readonly { id: string; tSec: number }[] }) => {
+  const citedFrame = input.frames.find((frame) => frame.tSec >= 5.5 && frame.tSec <= 10.5);
+  return JSON.stringify({
+    defects: citedFrame ? [{
+      startSec: 6,
+      endSec: 10,
+      severity: "major",
+      category: "general_visual",
+      confidence: 0.9,
+      observed: "A large white rectangular overlay is covering the face and upper body of the main character.",
+      expected: "The face must remain visible.",
+      evidenceFrameIds: [citedFrame.id],
+      suggestedRepair: "Move the overlay away from the face.",
+    }] : [],
+    summary: "Known visual phrasing.",
+  });
+};
 
 function makeBadComic(input: string, output: string): void {
   // The two obvious faults are deliberately present only in the 6–10s window:
@@ -153,6 +156,25 @@ async function main(): Promise<void> {
     comicProfile.identityReferenceCriterion?.criterion ?? "",
     /silver-haired archivist.*midnight municipal archives.*#101827/i,
     "the typed identity gate must carry concrete recurring subject, world, and palette instead of only a channel name",
+  );
+
+  const fullQualityProfile = channelVisualReviewProfile({
+    contentLaneKey: "documentary_short",
+    qualityDimensions: Array.from({ length: 8 }, (_, index) => `dimension-${index + 1}`),
+    qualityCriteria: [
+      ...Array.from({ length: 7 }, (_, index) => `scorecard criterion ${index + 1}`),
+      `long criterion ${"x".repeat(700)} REQUIRED_SENTINEL`,
+    ],
+  });
+  assert.match(fullQualityProfile.channelWorld ?? "", /dimension-8/);
+  assert.match(fullQualityProfile.qualityCriteria[7] ?? "", /REQUIRED_SENTINEL/);
+  assert.throws(
+    () => channelVisualReviewProfile({
+      contentLaneKey: "documentary_short",
+      qualityCriteria: Array.from({ length: 9 }, (_, index) => `scorecard criterion ${index + 1}`),
+    }),
+    /at most 8 scorecard entries/,
+    "scorecard overflow must fail explicitly rather than silently dropping module standards",
   );
 
   const whiteboardProfile = channelVisualReviewProfile({
@@ -297,7 +319,7 @@ async function main(): Promise<void> {
   const referenceCriteriaPassed = await reviewRender(fixture, 18, {
     title: "Typed reference-criteria fixture",
     expectTitleCard: false,
-    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    qualityCriteria: Array.from({ length: 17 }, (_, index) => `Generic prose criterion ${index + 1}`),
     referenceCriteria,
   }, {
     runId: "visual-review-reference-criteria",
@@ -314,7 +336,8 @@ async function main(): Promise<void> {
   assert.deepEqual(referenceCriteriaPassed.referenceCriteria.map((criterion) => criterion.id), referenceCriteria.map((criterion) => criterion.id));
   assert(referenceCriteriaPassed.referenceCriteria.every((criterion) => criterion.scope === "global"), "typed mechanics must default to sampled broad-review coverage");
   assert.match(referenceCriteriaPrompt, /REFERENCE-MECHANICS CRITERIA/, "typed mechanics must reach the existing reviewer request");
-  assert.match(referenceCriteriaPrompt, /reference-mechanic-7/, "typed mechanics must not be truncated by the six-item QualityBar cap");
+  assert.match(referenceCriteriaPrompt, /reference-mechanic-7/, "typed mechanics must remain independent from prose criteria");
+  assert.match(referenceCriteriaPrompt, /Generic prose criterion 17/, "all bounded scorecard and downstream criteria must reach the final reviewer prompt");
 
   const receiptWithDifferentPersistedFrameKey = visualReviewReceiptFingerprint({
     ran: referenceCriteriaPassed.ran,
@@ -356,7 +379,7 @@ async function main(): Promise<void> {
   const outputChangedReceipt = await reviewRender(fixture, 18, {
     title: "Typed reference-criteria fixture",
     expectTitleCard: false,
-    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    qualityCriteria: Array.from({ length: 17 }, (_, index) => `Generic prose criterion ${index + 1}`),
     referenceCriteria,
   }, {
     runId: "visual-review-reference-criteria-output-change",
@@ -552,6 +575,106 @@ async function main(): Promise<void> {
   assert.equal(malformedReferenceCriteria.verdict, "needs_human", "a malformed evidence-frame receipt must never pass visual QA");
   assert.equal(malformedReferenceCriteria.referenceCriteriaComplete, false);
 
+  const malformedDefectEvidence = await reviewRender(fixture, 18, {
+    title: "Malformed defect-evidence fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-malformed-defect-evidence",
+    reviewer: async () => JSON.stringify({
+      defects: [{
+        startSec: 1,
+        endSec: 2,
+        severity: "major",
+        category: "wrong_footage",
+        confidence: 0.95,
+        observed: "The wrong character appears.",
+        expected: "The established main character should appear.",
+        evidenceFrameIds: ["not-a-reviewed-frame"],
+        suggestedRepair: "Restore the established character.",
+      }],
+      summary: "Malformed defect evidence fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedDefectEvidence.verdict, "needs_human", "a defect with a fabricated frame ID must not complete visual QA");
+  assert.equal(malformedDefectEvidence.defects.length, 0, "an unbound defect must not be routed to an arbitrary frame");
+
+  const completeDefect = {
+    startSec: 1,
+    endSec: 2,
+    severity: "major",
+    category: "wrong_footage",
+    confidence: 0.95,
+    observed: "The wrong character appears.",
+    expected: "The established main character should appear.",
+    evidenceFrameIds: ["f001"],
+    suggestedRepair: "Restore the established character.",
+  };
+  const malformedRequiredDefects = await reviewRender(fixture, 18, {
+    title: "Malformed required defect-fields fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-malformed-required-defect-fields",
+    reviewer: async () => JSON.stringify({
+      defects: [
+        { ...completeDefect, startSec: undefined, tSec: 1 },
+        { ...completeDefect, endSec: 0 },
+        { ...completeDefect, severity: "urgent" },
+        { ...completeDefect, confidence: 1.1 },
+        { ...completeDefect, expected: "  " },
+        { ...completeDefect, suggestedRepair: undefined },
+      ],
+      summary: "Malformed required defect fields fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedRequiredDefects.verdict, "needs_human", "malformed required defect fields must fail visual QA closed");
+  assert.equal(malformedRequiredDefects.defects.length, 0, "a malformed defect must not receive invented timing or repair evidence");
+
+  const unknownDefectCategory = await reviewRender(fixture, 18, {
+    title: "Unknown defect-category fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-unknown-defect-category",
+    reviewer: async () => JSON.stringify({
+      defects: [{ ...completeDefect, category: "invented_category" }],
+      summary: "Unknown defect-category fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(unknownDefectCategory.verdict, "needs_human", "an unknown defect category must not be downgraded and marked complete");
+  assert.equal(unknownDefectCategory.defects.length, 0, "an untyped defect must not lose its module-routing category");
+
+  const temporallyUnboundDefect = await reviewRender(fixture, 18, {
+    title: "Defect time and evidence mismatch fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-defect-time-evidence-mismatch",
+    reviewer: async (input) => {
+      const citedFrame = input.frames[0]!;
+      return JSON.stringify({
+        defects: [{
+          ...completeDefect,
+          startSec: citedFrame.tSec + 10,
+          endSec: citedFrame.tSec + 11,
+          evidenceFrameIds: [citedFrame.id],
+        }],
+        summary: "Defect time and evidence mismatch fixture.",
+      });
+    },
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(temporallyUnboundDefect.verdict, "needs_human", "a valid frame ID from another time must not support a defect");
+  assert.equal(temporallyUnboundDefect.defects.length, 0, "a temporally unbound defect must not route a repair to the wrong interval");
+
   const planned = planVisualReviewEvidence({
     durationSec: 18,
     sceneTimes: [2, 6, 10, 15],
@@ -565,7 +688,7 @@ async function main(): Promise<void> {
   assert(planned.filter((frame) => frame.selectionReasons.includes("focus")).length >= 4, "repair windows must receive dense evidence");
 
   // Temporal anchors are reserved before high-priority scene/cue/focus frames,
-  // so a long master cannot silently lose its middle to priority truncation.
+  // so a long master cannot silently lose its middle to semantic sampling.
   const longDurationSec = 3_600;
   const longPlanned = planVisualReviewEvidence({
     durationSec: longDurationSec,
@@ -580,9 +703,45 @@ async function main(): Promise<void> {
   });
   assert.equal(longPlanned.length, 48, "broad evidence must stay within its configured cap");
   assert(longPlanned.filter((frame) => frame.selectionReasons.includes("uniform")).length >= 40, "long masters must retain their reserved temporal anchors");
+  const saturatedNarrationPlan = planVisualReviewEvidence({
+    durationSec: longDurationSec,
+    sceneTimes: Array.from({ length: 120 }, (_, index) => index * 20 + 1),
+    transcriptCues: Array.from({ length: 120 }, (_, index) => ({
+      text: `Cue ${index + 1}`,
+      startSec: index * 20 + 2,
+      endSec: index * 20 + 8,
+    })),
+    maxFrames: 48,
+  });
+  assert(
+    saturatedNarrationPlan.filter((frame) => frame.selectionReasons.includes("cue")).length >= 4,
+    "saturated scene evidence must not crowd every narration cue out of the fixed review budget",
+  );
   assert(
     plannedMaxGapSec(longPlanned, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
     "priority frames must not create an unreviewed long-duration middle",
+  );
+  const longLockedPlan = planVisualReviewEvidence({
+    durationSec: longDurationSec,
+    creativeLocks: Array.from({ length: 12 }, (_, index) => {
+      const midpoint = 200 + index * 280;
+      return {
+        shotId: `character-lock-${index + 1}`,
+        startSec: midpoint - 5,
+        endSec: midpoint + 5,
+        expected: `character appearance lock ${index + 1}`,
+        acceptanceCriteria: [`appearance remains consistent for lock ${index + 1}`],
+      };
+    }),
+    maxFrames: 48,
+  });
+  const selectedLockFrames = longLockedPlan.filter((frame) => frame.selectionReasons.includes("scene"));
+  assert.equal(selectedLockFrames.length, 8, "declared story locks must claim capped semantic samples before redundant endpoint frames");
+  assert(selectedLockFrames[0]!.tSec <= 200, "a constrained lock sample must include the early timeline");
+  assert(selectedLockFrames.at(-1)!.tSec >= 3_000, "constrained lock samples must span through the late timeline");
+  assert(
+    plannedMaxGapSec(longLockedPlan, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
+    "prioritizing story locks must preserve the independent temporal coverage gate",
   );
 
   // A real provider used this common phrase during the live comic proof. It
@@ -652,6 +811,23 @@ async function main(): Promise<void> {
       "coverage evidence must record the failed cap",
     );
     assert.match(coverageEscalated.summary, /evidence gap/i, "coverage escalation must be diagnosable in the QA report");
+
+    const advisoryCoverage = await reviewRender(sparseCoverage, 90, {
+      title: "Advisory coverage-gate fixture",
+      expectTitleCard: false,
+    }, {
+      runId: "visual-review-advisory-coverage-gate",
+      required: false,
+      reviewer,
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 6,
+    });
+    assert.equal(advisoryCoverage.verdict, "needs_human", "advisory QA must not call incompletely sampled media a pass");
+    assert(
+      advisoryCoverage.evidence.coverage.maxGapSec > advisoryCoverage.evidence.coverage.maxAllowedGapSec,
+      "advisory review must retain its honest sampled-coverage gap",
+    );
 
     const badComic = join(work, "comic-overlay-defects.mp4");
     makeBadComic(fixture, badComic);

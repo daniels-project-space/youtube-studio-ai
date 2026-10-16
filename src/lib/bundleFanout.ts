@@ -13,6 +13,7 @@ import {
   ThirdPartyStockEvidenceReferenceSchema,
   type ThirdPartyStockEvidenceReference,
 } from "@/lib/thirdPartyStockEvidence";
+import { MusicReuseReceiptSchema } from "@/lib/musicReuseReceipt";
 
 export {
   BUNDLE_FANOUT_DISPATCH_LEASE_MS,
@@ -42,6 +43,7 @@ export interface BundleFanoutDispatchPayload {
     readonly footageKeys: string[];
     readonly thirdPartyStockEvidence?: ThirdPartyStockEvidenceReference;
     readonly musicKey?: string;
+    readonly musicReuseReceipt?: BundleFanoutReuse["musicReuseReceipt"];
   };
 }
 
@@ -112,6 +114,9 @@ function normalizedReuse(value: BundleFanoutReuse): BundleFanoutReuse {
     ...(optionalString(source.musicKey, "bundle fanout musicKey", 2_000) !== undefined
       ? { musicKey: optionalString(source.musicKey, "bundle fanout musicKey", 2_000) }
       : {}),
+    ...(source.musicReuseReceipt !== undefined
+      ? { musicReuseReceipt: MusicReuseReceiptSchema.parse(source.musicReuseReceipt) }
+      : {}),
   });
 }
 
@@ -126,6 +131,19 @@ function envelopeWithoutFingerprint(input: {
   const baseRunId = requiredString(input.baseRunId, "bundle fanout baseRunId", 300);
   const baseChannelId = requiredString(input.baseChannelId, "bundle fanout baseChannelId", 300);
   const siblingChannelId = requiredString(input.siblingChannelId, "bundle fanout siblingChannelId", 300);
+  const reuse = normalizedReuse(input.reuse);
+  if ((reuse.musicKey !== undefined) !== (reuse.musicReuseReceipt !== undefined)) {
+    throw new Error("bundle fanout musicKey and its exact-byte reuse receipt must be supplied together");
+  }
+  if (reuse.musicReuseReceipt && (
+    reuse.musicReuseReceipt.ownerId !== ownerId ||
+    reuse.musicReuseReceipt.baseRunId !== baseRunId ||
+    reuse.musicReuseReceipt.baseChannelId !== baseChannelId ||
+    reuse.musicReuseReceipt.siblingChannelId !== siblingChannelId ||
+    reuse.musicReuseReceipt.musicKey !== reuse.musicKey
+  )) {
+    throw new Error("bundle fanout music reuse receipt identity does not match its envelope");
+  }
   return {
     version: BUNDLE_FANOUT_VERSION,
     ownerId,
@@ -133,7 +151,7 @@ function envelopeWithoutFingerprint(input: {
     baseChannelId,
     siblingChannelId,
     dispatchKey: bundleFanoutDispatchKey(baseRunId, siblingChannelId),
-    reuse: normalizedReuse(input.reuse),
+    reuse,
   };
 }
 
@@ -208,6 +226,9 @@ export function bundleFanoutDispatchSchedule(input: {
           ? { thirdPartyStockEvidence: envelope.reuse.thirdPartyStockEvidence }
           : {}),
         ...(envelope.reuse.musicKey !== undefined ? { musicKey: envelope.reuse.musicKey } : {}),
+        ...(envelope.reuse.musicReuseReceipt !== undefined
+          ? { musicReuseReceipt: envelope.reuse.musicReuseReceipt }
+          : {}),
       }),
     }),
     concurrencyKey: envelope.siblingChannelId,

@@ -20,6 +20,8 @@ export interface Knob {
   /** max characters (text knobs); omit for unbounded. */
   maxLength?: number;
   default: KnobValue;
+  /** Additional selected blocks that must receive the same resolved value. */
+  runtimeTargets?: readonly string[];
   /** Human- + LLM-readable description of what it controls. */
   describes: string;
   /** Channel styles/intents this knob serves — tells the Architect WHEN to reach for it. */
@@ -45,19 +47,69 @@ export function knobDefaults(surface: CustomizationSurface): KnobValues {
 /** Validate ONE knob value; returns an error string or null. */
 function checkKnob(k: Knob, v: KnobValue): string | null {
   if (k.type === "enum") {
-    if (typeof v !== "string" || !(k.values ?? []).includes(v)) {
+    const values = k.values ?? [];
+    if (values.length === 0 || new Set(values).size !== values.length) {
+      return `${k.id}: enum values must be non-empty and unique`;
+    }
+    if (typeof v !== "string" || !values.includes(v)) {
       return `${k.id}: '${String(v)}' not in [${(k.values ?? []).join("|")}]`;
     }
   } else if (k.type === "number") {
-    if (typeof v !== "number" || Number.isNaN(v)) return `${k.id}: not a number`;
+    if (typeof v !== "number" || !Number.isFinite(v)) return `${k.id}: not a finite number`;
+    if (k.range && (!Number.isFinite(k.range[0]) || !Number.isFinite(k.range[1]) || k.range[0] > k.range[1])) {
+      return `${k.id}: invalid numeric range`;
+    }
     if (k.range && (v < k.range[0] || v > k.range[1])) return `${k.id}: ${v} out of range [${k.range[0]},${k.range[1]}]`;
   } else if (k.type === "boolean") {
     if (typeof v !== "boolean") return `${k.id}: not a boolean`;
   } else if (k.type === "text") {
     if (typeof v !== "string") return `${k.id}: not a string`;
+    if (k.maxLength != null && (!Number.isSafeInteger(k.maxLength) || k.maxLength < 0)) {
+      return `${k.id}: invalid maximum length`;
+    }
     if (k.maxLength != null && v.length > k.maxLength) return `${k.id}: exceeds ${k.maxLength} chars`;
+  } else {
+    return `${k.id}: unsupported knob type`;
   }
   return null;
+}
+
+/** Validate the module-authored catalog itself before accepting channel data. */
+export function validateCustomizationSurface(surface: CustomizationSurface): string[] {
+  const errors: string[] = [];
+  if (!surface.capabilities.length || surface.capabilities.some((value) => !value.trim())) {
+    errors.push("capabilities must contain non-empty descriptions");
+  }
+  const byId = new Map<string, Knob>();
+  for (const knob of surface.knobs) {
+    if (!knob.id.trim()) errors.push("knob id must not be empty");
+    if (byId.has(knob.id)) errors.push(`duplicate knob '${knob.id}'`);
+    byId.set(knob.id, knob);
+    if (!knob.describes.trim()) errors.push(`${knob.id}: description must not be empty`);
+    if (knob.servesStyles.some((style) => !style.trim())) errors.push(`${knob.id}: styles must not be empty strings`);
+    if (knob.runtimeTargets !== undefined) {
+      if (!Array.isArray(knob.runtimeTargets) || knob.runtimeTargets.length === 0 ||
+        knob.runtimeTargets.some((target) => typeof target !== "string" || !target.trim())) {
+        errors.push(`${knob.id}: runtime targets must be non-empty block ids`);
+      } else if (new Set(knob.runtimeTargets).size !== knob.runtimeTargets.length) {
+        errors.push(`${knob.id}: runtime targets must be unique`);
+      }
+    }
+    const defaultError = checkKnob(knob, knob.default);
+    if (defaultError) errors.push(`${knob.id}: invalid default (${defaultError})`);
+  }
+  for (const [presetName, preset] of Object.entries(surface.presets)) {
+    if (!presetName.trim()) errors.push("preset name must not be empty");
+    for (const [id, value] of Object.entries(preset)) {
+      const knob = byId.get(id);
+      if (!knob) errors.push(`preset '${presetName}' uses unknown knob '${id}'`);
+      else {
+        const valueError = checkKnob(knob, value);
+        if (valueError) errors.push(`preset '${presetName}': ${valueError}`);
+      }
+    }
+  }
+  return errors;
 }
 
 /**
@@ -67,7 +119,7 @@ function checkKnob(k: Knob, v: KnobValue): string | null {
 export function validateKnobs(surface: CustomizationSurface, values: KnobValues): { ok: boolean; values: KnobValues; errors: string[] } {
   const byId = new Map(surface.knobs.map((k) => [k.id, k] as const));
   const out = knobDefaults(surface);
-  const errors: string[] = [];
+  const errors = validateCustomizationSurface(surface);
   for (const [id, v] of Object.entries(values)) {
     const k = byId.get(id);
     if (!k) { errors.push(`unknown knob '${id}'`); continue; }
@@ -88,10 +140,10 @@ export function resolveKnobs(
   presetName?: string,
   overrides: KnobValues = {},
 ): { ok: boolean; values: KnobValues; errors: string[]; preset?: string } {
-  if (presetName && !(presetName in surface.presets)) {
+  if (presetName !== undefined && !Object.hasOwn(surface.presets, presetName)) {
     return { ok: false, values: knobDefaults(surface), errors: [`unknown preset '${presetName}'`], preset: presetName };
   }
-  const preset = presetName ? surface.presets[presetName] : {};
+  const preset = presetName === undefined ? {} : surface.presets[presetName];
   const r = validateKnobs(surface, { ...preset, ...overrides });
   return { ...r, preset: presetName };
 }

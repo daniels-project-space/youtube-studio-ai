@@ -75,13 +75,19 @@ async function main() {
     for (const verdicts of [
       [{ score: 0.8, issues: [] }],
       [{ score: 0.7, issues: ["Missing sea"] }, { score: 0.9, issues: [] }],
+      [{ score: 0.96, issues: ["Remove the duplicate foreground lamp"] }, { score: 0.9, issues: [] }],
     ]) {
       const count = verdicts.length;
       reset(verdicts);
       const patch = await block.run(ctx);
       assert.equal(patch.f1Key, `still-${count}`);
+      assert.equal("f1Url" in patch, false, "only the durable key crosses the stage boundary");
       assert.equal(patch.__costUsd, count * 0.01);
       assert.equal(motions, 1); assert.equal(assets, 1); assert.equal(renders, count);
+      if (count === 2 && verdicts[0] && typeof verdicts[0] === "object" && "score" in verdicts[0] && verdicts[0].score === 0.96) {
+        assert.match(prompts[1], /Remove the duplicate foreground lamp/,
+          "a high-scoring review with a concrete defect must drive a repaired second attempt");
+      }
     }
     reset([{ score: 0.6, issues: ["Missing sea"] }, { score: 0.7, issues: ["Missing sea"] }]);
     assert.equal((await block.run({ ...ctx, params: { qaProfile: "draft" } })).f1Key, "still-2");

@@ -91,13 +91,15 @@ export async function critiqueStoryboardText(args: {
     const admission = validateCritiqueResponse(raw);
     if (!admission.pass || !admission.critique) return null;
     const verdict = admission.critique;
+    const issues = verdict.issues.slice(0, 8);
     return {
       // The shared admission boundary rejects out-of-range values; clamping a
       // malformed score would turn invalid provider evidence into a seemingly
       // valid approval.
       score: verdict.score,
-      pass: verdict.pass,
-      issues: verdict.issues.slice(0, 8),
+      // In this rubric, issues are concrete repairs, never non-blocking notes.
+      pass: verdict.pass && issues.length === 0,
+      issues,
     };
   } catch {
     return null;

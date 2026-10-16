@@ -30,7 +30,7 @@ const routeSeed = channelProgramRouteRunSeed({ route, programBrief });
 const finalMaster = { sha256: "a".repeat(64), durationSec: 72 };
 const reviewReceipt = createVisualReviewReleaseReceipt({
   reviewFingerprint: "b".repeat(64),
-  reviewReceiptVersion: "video-review/v5",
+  reviewReceiptVersion: "video-review/v6",
   reviewReceiptFingerprint: "c".repeat(64),
   verdict: "pass",
   summary: "The retained visual review passed.",

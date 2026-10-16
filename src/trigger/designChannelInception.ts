@@ -2656,7 +2656,7 @@ export async function executeDesignChannel(
           : "",
         `${positioningStage.params.family} format`,
       ].filter(Boolean).join(" — ");
-      const concept = await synthChannelConcept(seed, undefined, log);
+      const concept = await synthChannelConcept(seed, undefined, log, { requireChannelSpecificVoice: true });
       const name = positioningStage.params.name;
       const selfText = [
         positioningProgramText,

@@ -6,12 +6,16 @@ import type { z } from "zod";
 import type { ShowBible } from "@/engine/creative/types";
 import {
   AcceptedMusicArrangementSchema,
+  acceptedMusicArrangementForRun,
+  createMusicReviewContext,
   type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { arrangementComposerReservation } from "@/lib/arrangementComposerBudget";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { openRouterModel } from "@/lib/openRouter";
 import { createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
@@ -23,11 +27,34 @@ let providerError: Error | undefined;
 let fixtureChargeUsd: number | undefined;
 let networkCalls = 0;
 let routingProbe = false;
+let omitGrounding = false;
 const routedRequests: { tier?: string; system?: string }[] = [];
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in arrangement tests"); };
+function channelGroundingFor(draft: AcceptedMusicArrangementDraft) {
+  const sectionIds = draft.sections.map((section) => section.id);
+  const entry = (source: string, cue: string, dimensions: readonly [string, string][]) => ({ source, cue,
+    decisions: dimensions.map(([dimension, choice]) => ({ dimension, choice })), sectionIds });
+  return [
+    entry("channel_persona", seedStore.persona, [
+      ["space", "Keep the stereo image close and intimate, with no distant or arena-sized reverb."],
+      ["dynamics", "Keep level and density restrained so no gesture becomes theatrical or attention seeking."],
+    ]),
+    entry("episode_topic", seedStore.topic, [
+      ["texture", "Use a quiet, slowly changing upper haze that suggests a night horizon without literal sound effects."],
+      ["harmony", "Hold a suspended open interval so the episode feels unresolved but calm rather than dramatic."],
+    ]),
+  ];
+}
+function responseWithGrounding(value: unknown): unknown {
+  if (omitGrounding || !value || typeof value !== "object" || !("arrangement" in value) || "channelGrounding" in value) return structuredClone(value);
+  const arrangement = (value as { arrangement?: unknown }).arrangement;
+  if (!arrangement || typeof arrangement !== "object" || !("sections" in arrangement)) return structuredClone(value);
+  const draft = arrangement as AcceptedMusicArrangementDraft;
+  return { ...structuredClone(value as object), channelGrounding: channelGroundingFor(draft) };
+}
 loader._load = function (id, ...args) {
   if (id === "@/agents/mastra" && !routingProbe) return {
     agentJsonConfiguration: () => ({ model: openRouterModel("intelligence"), system: "Fixture composer system" }),
@@ -38,14 +65,14 @@ loader._load = function (id, ...args) {
       if (fixtureChargeUsd !== undefined) recordModelUsage({
         provider: "fixture", model: "fixture-composer", kind: "text", reportedCostUsd: fixtureChargeUsd,
       });
-      return structuredClone(response);
+      return responseWithGrounding(response);
     },
   };
   if (id === "@/lib/creativeText" && routingProbe) return {
     hasCreativeTextKey: () => true,
     creativeTextJson: async (request: { tier?: string; system?: string }) => {
       routedRequests.push(request);
-      return structuredClone(response);
+      return responseWithGrounding(response);
     },
   };
   return originalLoad.call(this, id, ...args);
@@ -60,6 +87,7 @@ const bible: ShowBible = {
 };
 const flat: AcceptedMusicArrangementDraft = {
   role: "primary_music", direction: "Flat nocturnal drone. No build, drop, climax, or new motif.",
+  tempoMode: "metered",
   requestedDurationSec: 180, form: "continuous", ending: "seamless_wrap", playback: "repeat",
   sections: Array.from({ length: 4 }, (_, index) => ({
     id: `interval-${index + 1}`, label: `Review interval ${index + 1}`,
@@ -68,12 +96,18 @@ const flat: AcceptedMusicArrangementDraft = {
   })),
 };
 const developing: AcceptedMusicArrangementDraft = {
-  role: "narration_bed", direction: "Quiet uncertainty, a restrained turn, then a natural resolution.",
+  role: "narration_bed", tempoMode: "metered", direction: "Quiet uncertainty, a restrained turn, then a natural resolution.",
   requestedDurationSec: 120, form: "through_composed", ending: "natural_cadence", playback: "once",
   sections: flat.sections.map((section, index) => ({
     ...section, energy: [0.2, 0.3, 0.4, 0.15][index],
     instruction: ["Enter sparsely.", "Introduce the authored tension.", "Change to the answering harmony.", "Resolve and end naturally."][index],
   })),
+};
+const unmeteredMeditation: AcceptedMusicArrangementDraft = {
+  ...flat,
+  role: "meditation_bed",
+  tempoMode: "unmetered",
+  direction: "An intentionally unmetered, pulse-free breath meditation drone.",
 };
 const seedStore = {
   topic: "Night horizon", showBible: bible, channelSlug: "arrangement-evaluation", channelName: "Arrangement evaluation",
@@ -128,8 +162,9 @@ async function main() {
   }
   assert.equal(calls.length, callsBeforeValidation, "legacy pairing is rejected during graph validation before any text purchase");
 
-  for (const arrangement of [flat, developing, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
-    const family = arrangement.role === "narration_bed" ? "narrated_stock" : "music_loop";
+  for (const arrangement of [flat, developing, unmeteredMeditation, { ...flat, ending: "natural_cadence" as const }, { ...developing, playback: "repeat" as const }]) {
+    const family = arrangement.role === "narration_bed" ? "narrated_stock"
+      : arrangement.role === "meditation_bed" ? "sleep" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const outputs: Parameters<NonNullable<RunStageSink["upsertArtifacts"]>>[0][] = [];
     const resolved = validatePipeline([
@@ -145,6 +180,20 @@ async function main() {
     assert.equal(calls.length, beforeCalls + 1, "only the composer calls the text boundary; planner is deterministic");
     const producedBrief = ComposerBriefWithArrangementSchema.parse(result.store.musicBrief);
     const accepted = AcceptedMusicArrangementSchema.parse(result.store.acceptedMusicArrangement);
+    const expectedBinding = {
+      ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "run-arrangement", topic: seedStore.topic,
+      sourceBrief: result.store.musicBrief,
+    };
+    assert.deepEqual(acceptedMusicArrangementForRun(accepted, expectedBinding), accepted);
+    assert.equal(acceptedMusicArrangementForRun(undefined, expectedBinding), undefined,
+      "legacy runs without a receipt remain compatible");
+    assert.throws(() => acceptedMusicArrangementForRun({ malformed: true }, expectedBinding), /receipt is malformed/);
+    assert.throws(() => acceptedMusicArrangementForRun(accepted, { ...expectedBinding, channelId: "other-channel" }),
+      /does not match the current owner, channel, run and topic/);
+    assert.throws(() => acceptedMusicArrangementForRun(accepted, {
+      ...expectedBinding,
+      sourceBrief: { ...result.store.musicBrief as object, musicPrompt: "A different brief" },
+    }), /does not match the current music brief/);
     assert.deepEqual(producedBrief.arrangement, arrangement);
     assert.equal(Object.hasOwn(producedBrief.audio, "voiceFx"), false);
     assert.equal(Object.hasOwn(producedBrief.directives as object, "voiceFx"), false);
@@ -154,7 +203,11 @@ async function main() {
     assert.equal(accepted.reviewContext?.topic, seedStore.topic);
     assert.equal(accepted.reviewContext?.channelName, seedStore.channelName);
     assert.equal(accepted.reviewContext?.family, family);
+    assert.equal(accepted.channelGrounding?.length, 2);
+    assert.ok(accepted.channelGrounding?.every((entry) => entry.sectionIds.length === arrangement.sections.length));
     assert.deepEqual(accepted.arrangement, arrangement, "no inferred sections, normalization, or duration clamp");
+    assert.equal(accepted.arrangement.tempoMode, arrangement.tempoMode,
+      "the accepted artifact preserves the Composer's explicit metering decision");
     assert.equal(accepted.sourceBriefFingerprint, sha256Hex(canonicalJson(result.store.musicBrief)));
     for (const key of ["ownerId", "channelId", "runId"] as const) assert.equal(accepted[key], stageContext()[key]);
     assert.equal(accepted.topic, seedStore.topic);
@@ -164,16 +217,30 @@ async function main() {
     assert.ok(outputs.flatMap((batch) => batch.artifacts).some((row) => row.artifact.key === "acceptedMusicArrangement"));
     const request = calls.at(-1)!;
     assert.equal(request.role, "composer_arrangement");
+    const missingTempoMode = { ...arrangement };
+    delete missingTempoMode.tempoMode;
+    assert.equal(request.schema.safeParse({ ...(response as object), arrangement: missingTempoMode }).success, false,
+      "new Composer responses cannot silently omit their metering decision");
+    assert.equal(request.schema.safeParse({ ...(response as object),
+      arrangement: { ...flat, role: "sleep_sound_bed", tempoMode: "metered" },
+    }).success, false, "new sleep arrangements cannot claim a contradictory metered mode");
     assert.equal(request.maxTokens, 6000);
     assert.equal(request.temperature, 0.8);
     assert.ok(request.prompt.includes(bible.composerDoctrine!));
     assert.ok(request.prompt.includes("ambient strings"));
     assert.ok(request.prompt.includes("30 min"));
+    assert.match(request.prompt, /Channel-grounding standard: turn each supplied persona/);
+    assert.match(request.prompt, /distinctive to this channel and episode, not a list of mood adjectives/);
+    assert.match(request.prompt, /do not invent identity traits or preferences/);
+    assert.match(request.prompt, /Every section must state what remains recognizable/);
     assert.ok(request.prompt.startsWith(producedBrief.reviewContext.promptContext + "\n\n"), "review retains the exact context actually dispatched");
     for (const value of [bible.positioning, bible.vibe, bible.iconicMotif, bible.avoidInSpace[0], bible.composerDoctrine!, seedStore.persona, seedStore.styleGrammar, "ambient strings", "Operator role directives:"]) {
       assert.ok(producedBrief.reviewContext.promptContext.includes(value), `missing review grounding: ${value}`);
     }
     assert.ok(request.prompt.includes(`Content family: ${producedBrief.reviewContext.family}.`));
+    const boundYuE = createYuE2AcceptedArrangementRequest({ arrangement: accepted, seed: 42, personalCreatorAcknowledged: true });
+    assert.match(boundYuE.job.style, /Grounded channel and episode decisions:/);
+    assert.match(boundYuE.job.style, /Observant, intimate, never theatrical/);
     assert.ok(!request.schema.safeParse({ ...response as object, inventedField: true }).success);
     assert.ok(!request.schema.safeParse({ ...response as object, reviewContext: producedBrief.reviewContext }).success,
       "the model cannot author its own channel-context evidence");
@@ -189,12 +256,35 @@ async function main() {
     assert.deepEqual(changed.arrangement, arrangement);
   }
 
-  for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
-    const musicIntent = { role, requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20 };
+  omitGrounding = true;
+  const beforeUngrounded = calls.length;
+  await assert.rejects(selected.execute(stageContext()), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+  assert.equal(calls.length, beforeUngrounded + 1, "a generic direction without traceable channel decisions is held after its single paid response");
+  omitGrounding = false;
+  response = { arrangement: flat, duckDb: -15, bedLufs: -20, channelGrounding: [
+    { source: "channel_persona", cue: "invented identity cue", decisions: [
+      { dimension: "space", choice: "Keep the stereo image close and intimate, with no distant or arena-sized reverb." },
+      { dimension: "dynamics", choice: "Keep level and density restrained so no gesture becomes theatrical or attention seeking." },
+    ], sectionIds: flat.sections.map(section => section.id) },
+    { source: "episode_topic", cue: seedStore.topic, decisions: [
+      { dimension: "texture", choice: "Use a quiet, slowly changing upper haze that suggests a night horizon without literal sound effects." },
+      { dimension: "harmony", choice: "Hold a suspended open interval so the episode feels unresolved but calm rather than dramatic." },
+    ], sectionIds: flat.sections.map(section => section.id) },
+  ] };
+  const beforeInvented = calls.length;
+  await assert.rejects(selected.execute(stageContext()), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+  assert.equal(calls.length, beforeInvented + 1, "an invented identity cue cannot be accepted as grounding evidence");
+
+  for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
+    const musicIntent = { role, tempoMode: role === "sleep_sound_bed" ? "unmetered" as const : "metered" as const,
+      requestedDurationSec: 90, playback: role === "meditation_bed" ? "repeat" as const : "once" as const,
+      ending: "seamless_wrap" as const };
     const arrangement = { ...flat, ...musicIntent };
+    const family = role === "meditation_bed" ? "sleep" : "music_loop";
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const result = await runPipeline(validatePipeline([
-      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent, family: "music_loop" } },
+      { block: "composer_brief", version: ARRANGEMENT_COMPOSER_VERSION, params: { musicIntent, family } },
       { block: "music_arrangement_plan" },
     ], Object.keys(seedStore)), { ...stageContext(), seedStore, defaultRetries: 0, sink: { upsert: async () => {} } });
     assert.equal(result.ok, true, result.error);
@@ -203,6 +293,49 @@ async function main() {
     assert.deepEqual(accepted.arrangement, arrangement, "family cannot overwrite explicit intent, including independent ending/playback");
     assert.ok(accepted.reviewContext!.promptContext.includes(JSON.stringify(accepted.musicIntent)));
     assert.ok(calls.at(-1)!.prompt.includes("required exact values, not suggestions"));
+    if (role === "meditation_bed") {
+      const brief = createChannelProgramBrief({
+        family: "sleep",
+        nicheKey: "history",
+        locale: "en-US",
+        concept: "Guided breathing sessions with an unmetered, supportive ambient bed.",
+        audience: "Listeners following calm spoken meditation.",
+        sampleTopics: [seedStore.topic],
+      });
+      const route = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(brief), programBrief: brief });
+      const musicLoopBrief = createChannelProgramBrief({
+        family: "music_loop", nicheKey: "lofi", locale: "en-US",
+        concept: "Original instrumental focus sessions with calm visual loops.",
+        sampleTopics: [seedStore.topic],
+      });
+      const mismatchedRoute = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(musicLoopBrief), programBrief: musicLoopBrief });
+      const sourceBrief = result.store.musicBrief as {
+        reviewContext: { topic: string; promptContext: string };
+      };
+      const staleNameContext = createMusicReviewContext({
+        topic: sourceBrief.reviewContext.topic,
+        family: "sleep",
+        channelName: "A different channel",
+        promptContext: sourceBrief.reviewContext.promptContext,
+      });
+      await assert.rejects(musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic,
+          musicBrief: { ...sourceBrief, reviewContext: staleNameContext },
+          channelProgramRoute: route }),
+      }), /review context does not match the current channel name/,
+      "a retained channel-personality review cannot be accepted for another channel name");
+      await assert.rejects(musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
+          channelProgramRoute: mismatchedRoute }),
+      }), /review context does not match the current channel route family/,
+      "a sleep composer receipt cannot be accepted under a Lo-Fi route");
+      const planned = await musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
+          channelProgramRoute: route }),
+      });
+      assert.equal((planned.acceptedMusicArrangement as { arrangement: { role: string } }).arrangement.role,
+        "meditation_bed", "sleep/ambient-guided routes preserve their explicit meditation role through the real acceptance block");
+    }
   }
   for (const musicIntent of [{ role: "invented" }, { requestedDurationSec: 301 }, { requestedDurationSec: "90" },
     { playback: "loop" }, { ending: "fade" }, { form: "verse" }, { voiceFx: "radio" }, { role: undefined }, null]) {
@@ -218,8 +351,11 @@ async function main() {
     await assert.rejects(selected.execute({ ...stageContext(), params: { musicIntent } }),
       /PAID_STAGE_RECONCILIATION_REQUIRED[\s\S]*conflicts with explicit music intent/);
     assert.equal(calls.length, before + 1, "a conflicting paid output must not trigger another purchase");
+    const reviewContext = createMusicReviewContext({ topic: seedStore.topic, family: "music_loop",
+      channelName: seedStore.channelName, promptContext: `Channel persona: ${seedStore.persona}. Video topic: "${seedStore.topic}".` });
     await assert.rejects(musicArrangementPlan.run(stageContext({ topic: seedStore.topic, musicBrief: {
       musicPrompt: flat.direction, audio: { duckDb: -15, bedLufs: -20 }, arrangement: flat, musicIntent,
+      reviewContext, channelGrounding: channelGroundingFor(flat),
     } })), /conflicts with explicit music intent/, "planner also checks restored briefs independently");
   }
   fixtureChargeUsd = 0.07;
@@ -356,7 +492,7 @@ async function main() {
   await agentJson({ ...legacyRequest, role: "composer" });
   assert.equal(routedRequests.length, 2, "both roles use the actual agentJson route with mocked text transport");
   assert.equal(routedRequests[0].tier, routedRequests[1].tier, "opt-in role preserves the legacy model tier");
-  assert.match(routedRequests[0].system ?? "", /unmetered drones are valid/);
+  assert.match(routedRequests[0].system ?? "", /Set tempoMode explicitly to metered or unmetered/);
   assert.doesNotMatch(routedRequests[0].system ?? "", /BPM band/);
   assert.match(routedRequests[1].system ?? "", /BPM band/, "legacy system instructions remain unchanged");
   assert.equal(networkCalls, 0);

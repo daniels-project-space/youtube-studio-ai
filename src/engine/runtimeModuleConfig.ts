@@ -3,6 +3,9 @@ import { moduleSurface, type ModuleConfigurationScope } from "./moduleRegistry";
 import type { PipelineEntry } from "./types";
 import { materializeRuntimePipelineParams } from "./pipelineCompiler";
 import { snapshotParamsByBlock } from "@/lib/pipelineInvocationSnapshot";
+import { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "./routeOwnedRuntimeParams";
+
+export { ROUTE_OWNED_RUNTIME_PARAM_KEYS } from "./routeOwnedRuntimeParams";
 
 export type RuntimeModuleConfig = Readonly<Record<string, unknown>>;
 
@@ -42,33 +45,6 @@ export interface ResolvedPipelineModuleConfig {
  */
 const VIRTUAL_RUNTIME_MODULE_IDS = new Set(["show-bible"]);
 
-/**
- * These values are set by the sealed Program Brief, selected route, and
- * family length contract. A module configuration can refine execution, but it
- * must never reopen the channel-format decision after pipeline design.
- *
- * Keep this list deliberately narrow: presentation and craft controls remain
- * configurable, while duration, serialized-program, and canonical panel
- * structure stay route owned.
- */
-export const ROUTE_OWNED_RUNTIME_PARAM_KEYS: Readonly<Record<string, readonly string[]>> = {
-  topic_select: ["targetSeconds", "seriesTitle", "seriesCount"],
-  director_brief: ["targetSeconds"],
-  dp_brief: ["targetSeconds"],
-  editor_brief: ["targetSeconds"],
-  composer_brief: ["targetSeconds"],
-  critic_spec: ["targetSeconds"],
-  script_gen: ["maxSeconds"],
-  length_check: ["minSeconds", "maxSeconds"],
-  assemble: ["durationSec"],
-  whiteboard_scribe: ["targetSeconds"],
-  lore_short: ["targetSeconds"],
-  motion_comic: ["targetSeconds", "panels"],
-  quiz_year: ["targetSeconds"],
-  short_strategy: ["targetSeconds"],
-  documotion_short: ["targetSeconds"],
-};
-
 function assertRouteOwnedRuntimeConfig(input: {
   readonly blockId: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -83,6 +59,45 @@ function assertRouteOwnedRuntimeConfig(input: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const LEGACY_LOFI_MUSIC_CONFIG_KEYS = [
+  "provider",
+  "model",
+  "prompt",
+  "trackCount",
+  "generationDurationSec",
+  "bodyMusicVol",
+  "preset",
+] as const;
+
+function migrateLegacyLoFiMusicConfig(
+  entries: readonly PipelineEntry[],
+  moduleConfig: unknown,
+): unknown {
+  if (!isRecord(moduleConfig) || !entries.some((entry) => entry.block === "music") || !("lofi" in moduleConfig)) {
+    return moduleConfig;
+  }
+
+  const legacy = moduleConfig.lofi;
+  if (!isRecord(legacy)) {
+    throw new Error("moduleConfig[lofi] must be an object");
+  }
+  const current = moduleConfig.music;
+  if (current !== undefined && !isRecord(current)) {
+    throw new Error("moduleConfig[music] must be an object");
+  }
+
+  const migrated: Record<string, unknown> = {};
+  for (const key of LEGACY_LOFI_MUSIC_CONFIG_KEYS) {
+    if (key in legacy) migrated[key] = legacy[key];
+  }
+  const remaining = { ...moduleConfig };
+  delete remaining.lofi;
+  return {
+    ...remaining,
+    music: { ...migrated, ...(current ?? {}) },
+  };
 }
 
 function cloneParams(value: Readonly<Record<string, Record<string, unknown>>>): Record<string, Record<string, unknown>> {
@@ -106,10 +121,11 @@ export function mergeRuntimeModuleConfig(input: {
   readonly moduleConfig?: unknown;
 }): RuntimeModuleConfigMerge {
   const paramsByBlock = cloneParams(input.paramsByBlock);
-  if (input.moduleConfig === undefined) {
+  const moduleConfig = migrateLegacyLoFiMusicConfig(input.entries, input.moduleConfig);
+  if (moduleConfig === undefined) {
     return { paramsByBlock, frozenModuleConfig: {}, skippedBlockIds: [], applied: [] };
   }
-  if (!isRecord(input.moduleConfig)) {
+  if (!isRecord(moduleConfig)) {
     throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
   }
 
@@ -117,7 +133,7 @@ export function mergeRuntimeModuleConfig(input: {
   const skippedBlockIds: string[] = [];
   const applied: RuntimeModuleConfigMerge["applied"][number][] = [];
   const frozenModuleConfig: Record<string, Record<string, unknown>> = {};
-  for (const [blockId, rawConfig] of Object.entries(input.moduleConfig)) {
+  for (const [blockId, rawConfig] of Object.entries(moduleConfig)) {
     const virtual = VIRTUAL_RUNTIME_MODULE_IDS.has(blockId);
     if (!selected.has(blockId) && !virtual) {
       skippedBlockIds.push(blockId);
@@ -173,6 +189,16 @@ export function mergeRuntimeModuleConfig(input: {
     if (!virtual) {
       paramsByBlock[blockId] = { ...(paramsByBlock[blockId] ?? {}), ...values };
     }
+    for (const knob of surface.knobs) {
+      if (!Object.hasOwn(values, knob.id)) continue;
+      for (const target of knob.runtimeTargets ?? []) {
+        if (!selected.has(target)) continue;
+        paramsByBlock[target] = {
+          ...(paramsByBlock[target] ?? {}),
+          [knob.id]: values[knob.id],
+        };
+      }
+    }
     applied.push({
       blockId,
       knobCount: Object.keys(values).length,
@@ -202,13 +228,14 @@ export function resolvePipelineModuleConfig(input: {
   readonly moduleConfig?: unknown;
   readonly scope?: ModuleConfigurationScope;
 }): ResolvedPipelineModuleConfig {
+  const moduleConfig = migrateLegacyLoFiMusicConfig(input.entries, input.moduleConfig);
   if (
-    input.moduleConfig !== undefined &&
-    (typeof input.moduleConfig !== "object" || input.moduleConfig === null || Array.isArray(input.moduleConfig))
+    moduleConfig !== undefined &&
+    (typeof moduleConfig !== "object" || moduleConfig === null || Array.isArray(moduleConfig))
   ) {
     throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
   }
-  for (const [blockId, rawConfig] of Object.entries((input.moduleConfig ?? {}) as Record<string, unknown>)) {
+  for (const [blockId, rawConfig] of Object.entries((moduleConfig ?? {}) as Record<string, unknown>)) {
     const scopedSurface = moduleSurface(blockId, input.scope);
     if (!scopedSurface) {
       throw new Error(`moduleConfig[${blockId}] targets an unknown or non-configurable module`);
@@ -230,7 +257,7 @@ export function resolvePipelineModuleConfig(input: {
   const merged = mergeRuntimeModuleConfig({
     entries: input.entries,
     paramsByBlock: snapshotParamsByBlock(input.entries),
-    moduleConfig: input.moduleConfig,
+    moduleConfig,
   });
   return Object.freeze({
     effectivePipeline: Object.freeze(materializeRuntimePipelineParams(

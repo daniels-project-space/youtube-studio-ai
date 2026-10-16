@@ -29,6 +29,7 @@ export interface PlanWeekPreparationManifest {
     title: string;
     description: string;
     sceneSeed: string;
+    topicPromise?: string;
     thumbnailKey: string;
     thumbnailSource: PlanWeekThumbnailSource;
   };
@@ -54,6 +55,14 @@ export interface PlanWeekPreparationPointer {
 function requiredText(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`plan-week preparation ${label} is invalid`);
+  }
+  return value.trim();
+}
+
+export function normalizePlanWeekTopicPromise(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim() || value.trim().length > 500) {
+    throw new Error("plan-week topicPromise must be a non-empty sentence under 500 characters");
   }
   return value.trim();
 }
@@ -113,6 +122,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
     throw new Error("plan-week preparation frozen timestamp is invalid");
   }
   const plan = requiredRecord(manifest.plan, "plan");
+  const topicPromise = normalizePlanWeekTopicPromise(plan.topicPromise);
   const execution = requiredRecord(manifest.execution, "execution");
   const prompts = requiredRecord(manifest.prompts, "prompts");
   if (!Array.isArray(execution.pipeline)) throw new Error("plan-week preparation pipeline is invalid");
@@ -136,6 +146,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
       title: requiredText(plan.title, "plan title"),
       description: requiredText(plan.description, "plan description"),
       sceneSeed: requiredText(plan.sceneSeed, "scene seed"),
+      ...(topicPromise ? { topicPromise } : {}),
       thumbnailKey: requiredText(plan.thumbnailKey, "thumbnail key"),
       thumbnailSource: assertPlanWeekThumbnailSource(plan.thumbnailSource ?? "planner_artwork"),
     },
@@ -187,6 +198,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
   title: string;
   thumbnailKey: string;
   thumbnailSource?: PlanWeekThumbnailSource;
+  topicPromise?: string;
 }): PlanWeekPreparationManifest {
   const manifest = normalizePlanWeekPreparationManifest(args.manifest);
   const pointer = assertPlanWeekPreparationPointer(args.pointer);
@@ -198,6 +210,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
     manifest.itemKey !== args.itemKey || manifest.requestKey !== args.requestKey ||
     manifest.channelSlug !== args.channelSlug || manifest.plan.topic !== args.topic ||
     manifest.plan.title !== args.title || manifest.plan.thumbnailKey !== args.thumbnailKey ||
+    manifest.plan.topicPromise !== args.topicPromise ||
     manifest.plan.thumbnailSource !== (args.thumbnailSource ?? "planner_artwork")
   ) throw new Error("plan-week preparation manifest binding mismatch");
   return manifest;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  assertEvidenceVisualManifestCollection,
   evidenceVisualManifestAllowsNumbers,
   evidenceVisualManifestFingerprint,
   evaluateEvidenceVisualManifest,
@@ -88,6 +89,64 @@ const inventedPoint = evaluateEvidenceVisualManifest({
 }, { sceneId: "scene-labour-trend", narrationSentenceIds: ["sentence-labour-trend"], now });
 assert.equal(inventedPoint.safe, false);
 assert.ok(inventedPoint.issues.some((issue) => issue.code === "value_not_spoken"));
+
+const displayGeometryMismatchBase = {
+  ...chartBase,
+  values: chartBase.values.map((value, index) => index === 0 ? { ...value, value: 4.1 } : value),
+};
+const displayGeometryMismatchManifest = {
+  ...displayGeometryMismatchBase,
+  review: {
+    ...chart.review,
+    reviewedManifestFingerprint: evidenceVisualManifestFingerprint(displayGeometryMismatchBase),
+  },
+};
+const displayGeometryMismatch = evaluateEvidenceVisualManifest(displayGeometryMismatchManifest, {
+  sceneId: "scene-labour-trend", narrationSentenceIds: ["sentence-labour-trend"], now,
+});
+assert.equal(displayGeometryMismatch.safe, false);
+assert.ok(displayGeometryMismatch.issues.some((issue) => issue.code === "display_value_mismatch"),
+  "a spoken label cannot conceal geometry computed from a different reviewed value");
+assert.throws(() => assertEvidenceVisualManifestCollection([displayGeometryMismatchManifest]), /display_value_mismatch/u,
+  "the insert module's semantic manifest admission must reject an internally inconsistent value before planning");
+
+const declaredUnitMismatchBase = {
+  ...chartBase,
+  values: chartBase.values.map((value) => ({ ...value, unit: "dollars" })),
+};
+const declaredUnitMismatchManifest = {
+  ...declaredUnitMismatchBase,
+  review: {
+    ...chart.review,
+    reviewedManifestFingerprint: evidenceVisualManifestFingerprint(declaredUnitMismatchBase),
+  },
+};
+const declaredUnitMismatch = evaluateEvidenceVisualManifest(declaredUnitMismatchManifest, {
+  sceneId: "scene-labour-trend", narrationSentenceIds: ["sentence-labour-trend"], now,
+});
+assert.equal(declaredUnitMismatch.safe, false);
+assert.ok(declaredUnitMismatch.issues.some((issue) => issue.code === "unit_mismatch"),
+  "a percentage chart cannot declare dollars as its axis unit when neither display nor narration supports it");
+
+const magnitudeDisplayBase = {
+  ...chartBase,
+  narrationAnchors: chartBase.narrationAnchors.map((anchor) => ({
+    ...anchor,
+    spokenText: "According to the National Statistics Office, revenue moved from 1.2 million to 2.4 million dollars.",
+  })),
+  values: [
+    { ...chartBase.values[0]!, value: 1_200_000, unit: "dollars", display: "$1.2 million" },
+    { ...chartBase.values[1]!, value: 2_400_000, unit: "dollars", display: "$2.4 million" },
+  ],
+};
+const magnitudeDisplay = evaluateEvidenceVisualManifest({
+  ...magnitudeDisplayBase,
+  review: {
+    ...chart.review,
+    reviewedManifestFingerprint: evidenceVisualManifestFingerprint(magnitudeDisplayBase),
+  },
+}, { sceneId: "scene-labour-trend", narrationSentenceIds: ["sentence-labour-trend"], now });
+assert.equal(magnitudeDisplay.safe, true, "a genuine magnitude abbreviation remains exactly bound to its plotted value");
 
 const geoBase = {
   ...chartBase,

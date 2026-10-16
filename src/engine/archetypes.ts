@@ -10,6 +10,7 @@
  * becomes runnable when Stage 3 registers those blocks — no rework needed.
  */
 import type { PipelineEntry } from "@/engine/types";
+import { MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION } from "./musicModuleVersions";
 
 export interface Archetype {
   key: string;
@@ -25,7 +26,7 @@ export interface Archetype {
 
 // Lofi (Template C) — 100% CLOUD engine (fal.ai stills + i2v, no local CLI):
 // scene → reviewed Novita still → two 15s LTX FLF2V segments → Topaz
-// upscale of the loop unit → Suno music → deblur-title assemble (stream_loop the
+// upscale of the loop unit → route-sealed music program → deblur-title assemble (stream_loop the
 // unit under looped music). No narration, no separate intro card (the deblur
 // title IS the intro). durationSec is the only knob to scale length.
 const LOFI: PipelineEntry[] = [
@@ -37,7 +38,7 @@ const LOFI: PipelineEntry[] = [
   // distilled LTX loop does not condition on it, but the ordering gives the
   // future open-weight audio-to-video benchmark the exact mastered source
   // without re-generating audio or creating a hidden dependency.
-  { block: "music", params: { provider: "suno" } },
+  { block: "music", version: MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   // Two independently attested 15s FLF2V segments share the exact reviewed
   // start/end anchor. Their internal join and wraparound seam are measured
@@ -46,6 +47,7 @@ const LOFI: PipelineEntry[] = [
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
@@ -91,6 +93,7 @@ const NARRATED: PipelineEntry[] = [
   { block: "length_check", params: { minSeconds: 900, maxSeconds: 2100 } }, // 15-35 min
   { block: "captions" },
   { block: "metadata" },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
@@ -124,6 +127,7 @@ const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 900 } },
   { block: "captions" },
   { block: "metadata" },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
@@ -168,6 +172,7 @@ const CHILDREN_LEARNING: PipelineEntry[] = [
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 360 } },
   { block: "captions" },
   { block: "metadata" },
+  { block: "package_to_opening_plan" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft", params: { publishMode: "draft", madeForKids: true } },
@@ -228,6 +233,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "topic_select", params: { policy: "no_repeat" } },
       { block: "script_gen", params: { style: "crime" } },
       { block: "hook_craft" },
+      { block: "qa_script" },
       ...NARRATED.slice(4),
     ],
   },
@@ -242,6 +248,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "topic_select" },
       { block: "script_gen", params: { style: "shorts", maxSeconds: 50 } },
       { block: "hook_craft" },
+      { block: "qa_script" },
       { block: "originality_gate" },
       { block: "compliance_check" },
       {
@@ -259,6 +266,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "length_check", params: { maxSeconds: 60 } },
       { block: "captions" },
       { block: "metadata" },
+      { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
@@ -288,6 +296,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "short_scene_qa" },
       { block: "length_check", params: { minSeconds: 20, maxSeconds: 60 } },
       { block: "metadata" },
+      { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
@@ -316,6 +325,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "originality_gate" },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 150 } },
       { block: "metadata" },
+      { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
@@ -330,30 +340,32 @@ export const ARCHETYPES: Record<string, Archetype> = {
       "Multiple-choice 'guess the year': a CC0 Wikidata fact, four year options, a depleting timer, then the correct option locks in.",
     template: "A",
     thumbnailTemplate: "banana",
-    // SELF-CONTAINED: `quiz_year` sources its own facts, writes its own
-    // questions and renders the finished video, so there is deliberately no
-    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    // The Quiz Year modules own the complete route: they plan and safety-check
+    // a curated topic, certify the QA bounds, source facts and render, then
+    // write the audience package from the completed episode. There is no
+    // script_gen / narration_tts / footage chain here.
     //
-    // topic_select IS kept, with a clear division of responsibility: it frames
-    // the EPISODE (the title, the thumbnail promise, the crew brief — all of
-    // which consume `topic`), while the ROUNDS are chosen by quiz_year from
-    // Wikidata by notability. An LLM never picks a fact and never picks a year.
+    // quiz_topic_plan owns the episode subject and the certified round plan;
+    // one curated choice drives both metadata and sourced questions. An LLM
+    // never picks a fact and never picks a year.
     //
     // originality_gate is omitted: the questions are deliberately templated
     // around third-party facts, which is what this format IS rather than a
-    // plagiarism signal. compliance_check still gates before the engine runs.
+    // plagiarism signal. quiz_topic_safety owns the curated deterministic gate.
     pipeline: [
       { block: "competitor_research" },
-      { block: "topic_select", params: { targetSeconds: 80 } },
-      { block: "compliance_check" },
+      { block: "quiz_topic_plan", params: { targetSeconds: 80 } },
+      { block: "quiz_topic_safety" },
       // No `categories` param → the block uses the full default mix, so a
       // channel created from this archetype gets a genuinely mixed trivia video
       // (years, capitals, currencies, symbols, general knowledge) rather than
-      // eight rounds of the same question type. `topic` still steers only the
-      // guess-the-year share of the mix.
-      { block: "quiz_year", params: { topic: "science_discovery", targetSeconds: 80 } },
+      // eight rounds of the same question type. The planner's curated topic
+      // steers fact sourcing without allowing a second selector to overwrite it.
+      { block: "quiz_year", params: { targetSeconds: 80 } },
+      { block: "quiz_critic_spec" },
+      { block: "quiz_metadata" },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
-      { block: "metadata" },
+      { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
@@ -371,14 +383,13 @@ export const ARCHETYPES: Record<string, Archetype> = {
     pipeline: [
       { block: "topic_select" },
       { block: "script_gen", params: { style: "meditation" } },
+      { block: "qa_script" },
       { block: "originality_gate" },
       { block: "compliance_check" },
       {
         block: "music",
         params: {
           provider: "mureka",
-          prompt:
-            "very calm ambient sleep music, soft pads, slow, peaceful, no drums, no vocals",
         },
       },
       { block: "narration_tts", params: { pace: "slow" } },
@@ -389,6 +400,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "length_check" },
       { block: "captions" },
       { block: "metadata" },
+      { block: "package_to_opening_plan" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },

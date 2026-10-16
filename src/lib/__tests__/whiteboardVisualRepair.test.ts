@@ -26,7 +26,7 @@ const reviewed: VisualReviewResult = {
   referenceCriteria: [],
   referenceCriteriaComplete: true,
   evidence: {
-    version: "video-review/v5",
+    version: "video-review/v6",
     source: { durationSec: 60 },
     frames: [],
     coverage: { maxGapSec: 2, maxAllowedGapSec: 3, focusedWindows: [] },

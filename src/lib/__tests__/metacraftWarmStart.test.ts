@@ -115,7 +115,8 @@ async function main(): Promise<void> {
   assert.equal(kept.title, GOOD_PLANNED, "a planned title that wins on merit must still ship");
   assert.equal(kept.frame, "planned", "and must be identifiable as the planned one");
   assert.equal(kept.judged, true, "it ships having been judged, not by precedence");
-  assert.equal(pinnedCalls, 1, "a successful metadata package may request its optional pinned comment");
+  assert.equal(kept.pinnedComment, "", "the unused pinned-comment ABI field stays empty");
+  assert.equal(pinnedCalls, 0, "successful metadata must not buy an unconsumed pinned comment");
   const keptReview = readTitleReview({ title: kept.title, titleDecision: kept.titleDecision });
   assert.ok(keptReview && keptReview.state === "recorded", "the selected title must carry a readable decision receipt");
 
@@ -159,7 +160,7 @@ async function main(): Promise<void> {
   const packageRecovered = await craft("");
   assert.equal(packageRecovered.title, CRAFTED);
   assert.equal(packageRecovered.packageFallback, true, "the package degradation must be explicit");
-  assert.equal(packageRecovered.pinnedComment, "", "package fallback must not spend an optional pinned-comment request");
+  assert.equal(packageRecovered.pinnedComment, "", "package fallback retains the empty compatibility field");
   assert.match(packageRecovered.description, /Hacksaw Ridge/, "fallback description must retain the selected title");
 
   // Known package failures may use the deterministic fallback, but an
@@ -172,7 +173,7 @@ async function main(): Promise<void> {
     (error: unknown) => error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown",
     "ambiguous package work must propagate instead of silently becoming a deterministic package",
   );
-  assert.equal(pinnedCalls, 0, "ambiguous package work must not leave an optional pinned-comment request in flight");
+  assert.equal(pinnedCalls, 0, "ambiguous package work must not trigger a pinned-comment request");
 
   // A provider/transport exception is also not a score. Both bounded attempts
   // must fail closed instead of returning the first lint survivor as judged.
@@ -184,11 +185,10 @@ async function main(): Promise<void> {
   install(CRAFTED, 99);
   await assert.rejects(() => craft(""), /both attempts failed the gate/);
 
-  // The pinned comment is optional and must be lazy: a title gate failure must
-  // not spend a provider call on an ancillary artifact that cannot ship.
+  // No pinned-comment call exists until the publishing ABI has a consumer.
   install(CRAFTED, 0, 0, 99);
   await assert.rejects(() => craft(""), /both attempts failed the gate/);
-  assert.equal(pinnedCalls, 0, "failed title admission must not buy an optional pinned comment");
+  assert.equal(pinnedCalls, 0, "failed title admission must not buy an unused pinned comment");
 
   console.log("METACRAFT WARM START PASS");
 }

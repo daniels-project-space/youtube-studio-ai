@@ -3,10 +3,11 @@
  * signals already gathered by auto-SEO to ground the works/avoid doctrine. Runs
  * through the pinned OpenRouter creative-text route via the `showrunner` agent,
  * with a
- * deterministic fallback so channel creation never hard-fails.
+ * fail-closed quality gate so incomplete identity is never persisted.
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
+import { produceAndCritique } from "@/engine/critiqueLoop";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { FAMILY_CREW as FAMILY_CREW_RAW, type FamilyKey } from "@/engine/families";
 import {
@@ -14,7 +15,6 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import { VIDEO_CREW_ROLES, type ShowBible, type VideoCrewRole } from "./types";
-import { fallbackChannelMotif, fallbackChannelVibe } from "@/lib/identitySpread";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -51,46 +51,153 @@ const bibleSchema = z.object({
   criticDoctrine: z.string().optional(),
 });
 
-function fallbackBible(input: ShowBibleInput): ShowBible {
-  const crew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
-  const programBriefText = input.programBrief
-    ? channelProgramBriefPositioningText(input.programBrief)
-    : "";
-  return {
-    positioning: programBriefText
-      ? `${input.name} — ${programBriefText}`
-      : `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
-    // Spread by channel name. A single fallback pair meant every channel that
-    // hit this path received identical creative doctrine — and the show bible
-    // drives crew, register and look, so it is the worst place in the system
-    // for a shared default.
-    vibe: input.persona ?? fallbackChannelVibe(input.name),
-    iconicMotif: input.motifHint ?? input.styleGrammar ?? fallbackChannelMotif(input.name),
-    worksInSpace: [],
-    avoidInSpace: [],
-    activeCrew: crew,
-    refreshedAt: input.now,
-  };
-}
+const bibleCritiqueSchema = z.object({
+  score: z.number().finite().min(0).max(1),
+  issues: z.array(z.string().trim().min(1).max(500)).max(8),
+});
 
-/** Keep only valid, family-appropriate crew roles; fall back to the family set. */
-function reconcileCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
-  const allowed = new Set<VideoCrewRole>(FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock);
+/** Keep family roles while retaining the family creator and critic when required. */
+export function reconcileShowBibleCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
+  const familyCrew = FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  const allowed = new Set<VideoCrewRole>(familyCrew);
   const valid = proposed.filter((r): r is VideoCrewRole =>
     (VIDEO_CREW_ROLES as readonly string[]).includes(r) && allowed.has(r as VideoCrewRole),
   );
-  // The critic is mandatory (validation) and the family's primary creator is too.
   const out = new Set<VideoCrewRole>(valid);
-  out.add("critic");
-  if (valid.length === 0) return FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  if (familyCrew.includes("critic")) out.add("critic");
+  const primaryCreator = familyCrew.find((role) => role !== "critic");
+  if (primaryCreator) out.add(primaryCreator);
+  if (valid.length === 0) return familyCrew;
   return [...out];
+}
+
+const DOCTRINE_BY_ROLE: Record<VideoCrewRole, keyof ShowBible> = {
+  director: "directorDoctrine",
+  cinematographer: "dpDoctrine",
+  editor: "editorDoctrine",
+  composer: "composerDoctrine",
+  critic: "criticDoctrine",
+};
+
+const LOW_INFORMATION_WORDS = new Set([
+  "a", "about", "after", "all", "an", "and", "are", "as", "at", "audience", "avoid",
+  "be", "because", "before", "best", "but", "by", "channel", "clear", "compelling",
+  "content", "create", "each", "engaging", "ensure", "every", "for", "from", "good",
+  "great", "high", "in", "interesting", "into", "is", "it", "keep", "make", "never",
+  "of", "on", "or", "our", "over", "provide", "quality", "strong", "that", "the",
+  "their", "them", "there", "these", "this", "through", "to", "use", "valuable", "video",
+  "videos", "viewer", "viewers", "with", "without",
+]);
+
+const GENERIC_IDENTITY_PHRASES = [
+  "calm consistent on brand",
+  "single bold recurring central subject",
+  "high quality engaging content",
+  "visually appealing",
+];
+
+function informativeWords(value: string): Set<string> {
+  return new Set(
+    (value.normalize("NFKC").toLocaleLowerCase("en-US").match(/[\p{L}\p{N}]{3,}/gu) ?? [])
+      .filter((word) => !LOW_INFORMATION_WORDS.has(word)),
+  );
+}
+
+function inspectGuidanceList(values: string[], label: string): string[] {
+  const issues: string[] = [];
+  const words = values.map(informativeWords);
+  values.forEach((value, index) => {
+    if (words[index]!.size < 3) issues.push(`${label} entry ${index + 1} lacks niche-specific substance`);
+    for (let prior = 0; prior < index; prior += 1) {
+      const left = words[index]!;
+      const right = words[prior]!;
+      if (left.size < 4 || right.size < 4) continue;
+      const overlap = [...left].filter((word) => right.has(word)).length;
+      const union = new Set([...left, ...right]).size;
+      if (union > 0 && overlap / union >= 0.85) {
+        issues.push(`${label} entries ${prior + 1} and ${index + 1} repeat the same guidance`);
+      }
+    }
+  });
+  return issues;
+}
+
+/** Deterministic admission checks for the channel-level creative contract. */
+export function inspectShowBibleQuality(bible: ShowBible, family: FamilyKey): string[] {
+  const issues: string[] = [];
+  for (const field of ["positioning", "vibe", "iconicMotif"] as const) {
+    if (!bible[field].trim()) issues.push(`${field} is empty`);
+  }
+  // These floors catch near-empty fields only; the independent critic judges
+  // whether the concise identity is actually specific to this channel.
+  const identityMinimums = { positioning: 3, vibe: 3, iconicMotif: 2 } as const;
+  for (const [field, minimum] of Object.entries(identityMinimums) as Array<
+    [keyof typeof identityMinimums, number]
+  >) {
+    const words = informativeWords(bible[field]);
+    if (words.size < minimum) {
+      issues.push(`${field} lacks channel-specific substance (${words.size} informative terms; needs ${minimum})`);
+    }
+    const normalized = bible[field].normalize("NFKC").toLocaleLowerCase("en-US")
+      .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    for (const phrase of GENERIC_IDENTITY_PHRASES) {
+      if (normalized.includes(phrase)) {
+        issues.push(`${field} contains generic identity boilerplate "${phrase}"`);
+      }
+    }
+  }
+  for (const field of ["worksInSpace", "avoidInSpace"] as const) {
+    const distinct = new Set(bible[field].map((item) => item.trim().toLowerCase()).filter(Boolean));
+    if (distinct.size < 5) issues.push(`${field} has fewer than five distinct entries`);
+    issues.push(...inspectGuidanceList(bible[field], field));
+  }
+
+  const familyCrew = FAMILY_CREW[family] ?? FAMILY_CREW.narrated_stock;
+  const requiredRoles: VideoCrewRole[] = [];
+  if (familyCrew.includes("critic")) requiredRoles.push("critic");
+  const primaryCreator = familyCrew.find((role) => role !== "critic");
+  if (primaryCreator) requiredRoles.push(primaryCreator);
+  for (const role of requiredRoles) {
+    if (!bible.activeCrew.includes(role)) issues.push(`activeCrew is missing required ${role}`);
+  }
+  for (const role of bible.activeCrew) {
+    const doctrine = bible[DOCTRINE_BY_ROLE[role]];
+    if (typeof doctrine !== "string" || !doctrine.trim()) {
+      issues.push(`${role} doctrine is empty`);
+    }
+  }
+  return issues;
+}
+
+export function resolveShowBibleReview(input: {
+  deterministicIssues: readonly string[];
+  criticScore: unknown;
+  criticIssues?: readonly string[];
+}): { score: number; pass: boolean; issues: string[] } {
+  const validScore = typeof input.criticScore === "number" &&
+    Number.isFinite(input.criticScore) && input.criticScore >= 0 && input.criticScore <= 1
+    ? input.criticScore
+    : undefined;
+  const issues = [...input.deterministicIssues, ...(input.criticIssues ?? [])];
+  if (validScore === undefined) issues.push("independent Show Bible critic unavailable or returned an invalid score");
+  else if (validScore < 0.8 && !(input.criticIssues?.length)) {
+    issues.push(`independent Show Bible critic score ${validScore.toFixed(2)} is below the 0.80 acceptance bar`);
+  }
+  if (validScore !== undefined && validScore >= 0.8 && input.criticIssues?.length) {
+    issues.push("independent Show Bible critic identified repair issues despite its passing score");
+  }
+  return {
+    score: input.deterministicIssues.length ? Math.min(validScore ?? 0.5, 0.6) : validScore ?? 0.5,
+    pass: input.deterministicIssues.length === 0 && validScore !== undefined && validScore >= 0.8 &&
+      !(input.criticIssues?.length),
+    issues,
+  };
 }
 
 export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> {
   const log = input.log ?? (() => {});
   if (!hasCreativeTextKey()) {
-    log("showBible: no non-Google creative-model key — deterministic fallback");
-    return fallbackBible(input);
+    throw new Error("showBible: no configured creative-text provider; refusing incomplete channel identity");
   }
 
   const familyCrew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
@@ -124,50 +231,93 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
     .join("\n");
 
   try {
-    const raw = await agentJson({
-      role: "showrunner",
-      schema: bibleSchema,
-      log: (m) => log(m),
-      // MEASURED, not chosen: scripts/measure-showbible-ceiling.ts runs the real
-      // synth over four channel identities. At 2000, 2 of 8 attempts fell back;
-      // at 4000, 0 of 8. Small sample, but the direction matches every other
-      // ceiling measured this session, and the cost of headroom is nothing — a
-      // ceiling is only billed for tokens actually used.
-      //
-      // This contract is much heavier than the list floor was measured on: TWO
-      // arrays of 5-8 specific items, an activeCrew array, three prose fields and
-      // up to five doctrine strings — about 12 list items in practice, plus eight
-      // prose fields, on a route where reasoning is billed from the same budget.
-      //
-      // Falling back here is not a bad video, it is a bad CHANNEL. fallbackBible
-      // returns worksInSpace: [] and avoidInSpace: [] with no doctrines, crew.ts's
-      // header() then omits both clauses entirely, and the bible is persisted at
-      // inception — so every crew brief for that channel, for its whole life, is
-      // written without the proven patterns and the anti-patterns the prompt
-      // itself calls critical.
-      maxTokens: 4000,
-      temperature: 0.8,
-      prompt,
+    const loop = await produceAndCritique<ShowBible>({
+      label: "showBible",
+      threshold: 0.8,
+      maxIters: 2,
+      log: (message) => log(message),
+      produce: async (priorIssues) => {
+        const repair = priorIssues.length
+          ? `\n\nPREVIOUS SHOW BIBLE FAILED REVIEW. Correct every issue without changing the declared channel program:\n- ${priorIssues.join("\n- ")}`
+          : "";
+        const raw = await agentJson({
+          role: "showrunner",
+          schema: bibleSchema,
+          log: (m) => log(m),
+          // MEASURED, not chosen: scripts/measure-showbible-ceiling.ts runs the real
+          // synth over four channel identities. At 2000, 2 of 8 attempts fell back;
+          // at 4000, 0 of 8. Small sample, but the direction matches every other
+          // ceiling measured this session, and the cost of headroom is nothing — a
+          // ceiling is only billed for tokens actually used.
+          //
+          // This contract is much heavier than the list floor was measured on: TWO
+          // arrays of 5-8 specific items, an activeCrew array, three prose fields and
+          // up to five doctrine strings — about 12 list items in practice, plus eight
+          // prose fields, on a route where reasoning is billed from the same budget.
+          maxTokens: 4000,
+          temperature: 0.8,
+          prompt: prompt + repair,
+        });
+        return {
+          positioning: raw.positioning.trim(),
+          vibe: raw.vibe.trim(),
+          iconicMotif: (input.motifHint || raw.iconicMotif).trim(),
+          worksInSpace: (raw.worksInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
+          avoidInSpace: (raw.avoidInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
+          activeCrew: reconcileShowBibleCrew(input.family, raw.activeCrew ?? []),
+          directorDoctrine: raw.directorDoctrine?.trim() || undefined,
+          dpDoctrine: raw.dpDoctrine?.trim() || undefined,
+          editorDoctrine: raw.editorDoctrine?.trim() || undefined,
+          composerDoctrine: raw.composerDoctrine?.trim() || undefined,
+          criticDoctrine: raw.criticDoctrine?.trim() || undefined,
+          refreshedAt: input.now,
+        };
+      },
+      critique: async (bible) => {
+        const deterministicIssues = inspectShowBibleQuality(bible, input.family);
+        if (deterministicIssues.length) {
+          return { score: 0.5, pass: false, issues: deterministicIssues };
+        }
+        const verdict = await agentJson({
+          role: "critic",
+          schema: bibleCritiqueSchema,
+          log: (m) => log(m),
+          maxTokens: 2000,
+          temperature: 0.2,
+          prompt: [
+            `Independently review this channel's Show Bible before it becomes durable guidance for every downstream module.`,
+            `CHANNEL IDENTITY IS CANON. Preserve the declared program, audience, sample topics, operator persona, and visual grammar; competitor evidence may sharpen execution but must not relocate or replace the channel.`,
+            `Check that positioning, vibe, and motif describe a distinctive, coherent identity for THIS channel rather than generic YouTube advice.`,
+            `Check every active doctrine stays within its role: director owns story and emotional structure; cinematographer owns visual language; editor owns timing and transitions; composer owns music and audio; critic owns evaluation, not generation.`,
+            `Check niche patterns are specific and plausible, and that claims presented as competitor-proven are supported by the supplied signals.`,
+            `Channel: ${input.name}\nFamily: ${input.family}`,
+            input.programBrief ? `Declared program:\n${programBriefText}` : "",
+            input.niche ? `Channel niche: ${input.niche}` : "",
+            input.persona ? `Operator persona: ${input.persona}` : "",
+            input.styleGrammar ? `Visual grammar: ${input.styleGrammar}` : "",
+            input.motifHint ? `Operator-preferred motif: ${input.motifHint}` : "",
+            input.competitorContext ? `Competitor evidence:\n${input.competitorContext}` : "No competitor evidence was supplied; do not reward invented research claims.",
+            `Show Bible:\n${JSON.stringify(bible)}`,
+            `Score 0..1. A score of 0.8 or higher means no material identity or role-boundary defect remains. Return up to 8 concrete repair issues when below 0.8. JSON: {"score":number,"issues":string[]}.`,
+          ].filter(Boolean).join("\n\n"),
+        });
+        const review = resolveShowBibleReview({
+          deterministicIssues,
+          criticScore: verdict.score,
+          criticIssues: verdict.issues.slice(0, 8),
+        });
+        return { score: review.score, pass: review.pass, issues: review.issues };
+      },
     });
-    const bible: ShowBible = {
-      positioning: raw.positioning.trim(),
-      vibe: raw.vibe.trim(),
-      iconicMotif: (input.motifHint || raw.iconicMotif).trim(),
-      worksInSpace: (raw.worksInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
-      avoidInSpace: (raw.avoidInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
-      activeCrew: reconcileCrew(input.family, raw.activeCrew ?? []),
-      directorDoctrine: raw.directorDoctrine?.trim() || undefined,
-      dpDoctrine: raw.dpDoctrine?.trim() || undefined,
-      editorDoctrine: raw.editorDoctrine?.trim() || undefined,
-      composerDoctrine: raw.composerDoctrine?.trim() || undefined,
-      criticDoctrine: raw.criticDoctrine?.trim() || undefined,
-      refreshedAt: input.now,
-    };
+    if (!loop.accepted) {
+      throw new Error(`Show Bible failed independent quality review after ${loop.iterations} attempts: ${loop.critique.issues.slice(0, 5).join("; ")}`);
+    }
+    const bible = loop.value;
     log("showBible: ready", { motif: bible.iconicMotif.slice(0, 50), crew: bible.activeCrew });
     return bible;
   } catch (e) {
-    log(`showBible: synth failed (${e instanceof Error ? e.message : e}) — fallback`);
-    return fallbackBible(input);
+    log(`showBible: synth failed (${e instanceof Error ? e.message : e}) — refusing persistence`);
+    throw e;
   }
 }
 

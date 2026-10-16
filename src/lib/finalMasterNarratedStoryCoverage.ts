@@ -17,6 +17,8 @@ import {
   type FinalMasterNarrationTranscriptAudit,
 } from "@/lib/narrationTranscriptProof";
 import {
+  NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO,
+  NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO,
   NarrationCueTimingEvidenceSchema,
   type NarrationCueTimingEvidence,
 } from "@/lib/narrationCueTiming";
@@ -371,6 +373,23 @@ export function assertFinalMasterNarratedStoryCoverageReceipt(
   return receipt;
 }
 
+/** Independent release policy: a high weighted average cannot hide a failed beat. */
+export function finalMasterNarratedStoryCoverageReleaseIssues(value: unknown): string[] {
+  const coverage = coverageSummarySchema.parse(value);
+  const issues: string[] = [];
+  if (coverage.failingBeatCount > 0) {
+    issues.push(
+      `final-master narrated Story Spine has ${coverage.failingBeatCount} beat(s) below per-beat token/timing coverage minimums`,
+    );
+  }
+  if (coverage.coverageRatio < FINAL_MASTER_NARRATED_STORY_MIN_COVERAGE_RATIO) {
+    issues.push(
+      `final-master narrated Story Spine coverage ${coverage.coverageRatio.toFixed(3)} is below required ${FINAL_MASTER_NARRATED_STORY_MIN_COVERAGE_RATIO.toFixed(3)}`,
+    );
+  }
+  return issues;
+}
+
 function validateNarrationContext(args: {
   finalMasterNarration: unknown;
   narrationAudit: unknown;
@@ -387,7 +406,8 @@ function validateNarrationContext(args: {
   if (cueTiming.sourceSha256 !== semantic.narration.sourceSha256) {
     throw new Error("final-master narrated-story coverage cue timing belongs to a different narration source");
   }
-  if (cueTiming.matchedTokenRatio < 0.68 || cueTiming.timingAlignedTokenRatio < 0.85) {
+  if (cueTiming.matchedTokenRatio < NARRATION_CUE_MIN_MATCHED_TOKEN_RATIO ||
+      cueTiming.timingAlignedTokenRatio < NARRATION_CUE_MIN_TIMING_ALIGNED_TOKEN_RATIO) {
     throw new Error("final-master narrated-story coverage requires passing source narration cue timing");
   }
   return { semantic, audit, cueTiming };

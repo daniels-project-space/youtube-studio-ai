@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { registerAllBlocks } from "@/engine/blocks";
 import { designPipeline } from "@/engine/designer";
 import { FAMILY_KEYS, familyDurationContract } from "@/engine/families";
-import { MODULE_REGISTRY, moduleCard, moduleSurface } from "@/engine/moduleRegistry";
+import { configurableModules, MODULE_REGISTRY, moduleCard, moduleSurface } from "@/engine/moduleRegistry";
+import { validateCustomizationSurface } from "@/engine/customization";
 import { allManifests } from "@/engine/registry";
 import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
 
@@ -41,6 +42,19 @@ for (const [blockId, card] of Object.entries(MODULE_REGISTRY)) {
   assert.ok(card.title.trim(), `${blockId} must have a human-readable title`);
   assert.ok(card.does?.trim(), `${blockId} must explain its bounded responsibility`);
 }
+
+for (const { blockId, surface } of configurableModules()) {
+  assert.deepEqual(
+    validateCustomizationSurface(surface),
+    [],
+    `${blockId} must publish valid defaults, knobs, styles, and presets`,
+  );
+}
+
+assert.match(moduleCard("cinematic_case_sequence_draft")?.does ?? "", /caller-supplied cinematicCaseDirection/u,
+  "the pipeline designer must know the case draft depends on an external direction artifact");
+assert.match(moduleCard("cinematic_case_sequence_finalize")?.does ?? "", /human-signed cinematicSequenceEditorialReview/u,
+  "the pipeline designer must preserve the human signature gate rather than inventing an approval producer");
 
 const sharedReleaseFoundation = ["package_to_opening_plan", "thumbnail_gen", "qa_visual", "upload_draft"];
 

@@ -100,14 +100,18 @@ function storeReads(
     if (ts.isIdentifier(expression)) return constants.get(expression.text) ?? null;
     return null;
   };
+  const isStoreReference = (expression: ts.Expression, allowShortAlias = false): boolean =>
+    (ts.isIdentifier(expression) && (expression.text === "store" || (allowShortAlias && expression.text === "s"))) ||
+    (ts.isPropertyAccessExpression(expression) && expression.name.text === "store" &&
+      ((ts.isIdentifier(expression.expression) && /^(ctx|context)$/.test(expression.expression.text)) ||
+        (ts.isPropertyAccessExpression(expression.expression) && /^(ctx|context)$/.test(expression.expression.name.text))));
   const visit = (current: ts.Node): void => {
     if (ts.isElementAccessExpression(current) && current.argumentExpression) {
-      const target = current.expression;
-      const isStore =
-        (ts.isPropertyAccessExpression(target) && target.name.text === "store") ||
-        (ts.isIdentifier(target) && /^(store|s)$/.test(target.text));
-      const key = isStore ? keyOf(current.argumentExpression) : null;
+      const key = isStoreReference(current.expression, true) ? keyOf(current.argumentExpression) : null;
       if (key) into.add(key);
+    }
+    if (ts.isPropertyAccessExpression(current) && isStoreReference(current.expression)) {
+      into.add(current.name.text);
     }
     if (
       ts.isCallExpression(current) && ts.isIdentifier(current.expression) &&

@@ -75,6 +75,16 @@ async function main() {
     cases++;
     return rendered[0];
   }
+  async function rejectManifest(name: string, inputManifest: EvidenceVisualManifest, inputTimings: typeof timings) {
+    plan = stat; rendered = []; stored = []; prompts = [];
+    const context = { ownerId: 'fixture-owner', runId: 'fixture-binding', channelId: 'fixture-channel', keyPrefix: 'fixture/evidence/',
+      params: { insertTypes: ['big_stat', 'bar_compare', 'line_chart', 'annotated_line'], maxInserts: 1, minGapSec: 0,
+        dataStoryContract: DATA_STORY_CONTRACT_VERSION, requireNamedSource: true, requireSpokenNumericAnchor: true },
+      store: { sentenceTimings: inputTimings, dataStorySourceLedger, evidenceVisualManifests: [inputManifest], palette: ['#13252d', '#58c9b0', '#eef5f4'] }, log: () => {} };
+    await assert.rejects(() => visualInserts.run(context as never), /unit_mismatch/);
+    assert.equal(prompts.length + rendered.length + stored.length, 0, `${name}: invalid source units must fail before planning/render/storage`);
+    cases++;
+  }
   acceptedRenderInputs.push(await run('ID-only line', line, true));
   assert.deepEqual(rendered[0].series, [2, 4]);
   assert.deepEqual(rendered[0].seriesDisplays, ['2%', '4%']);
@@ -88,6 +98,30 @@ async function main() {
   const capturedPilot = JSON.parse(readFileSync('test-fixtures/insert-evidence-binding/planner-after.json', 'utf8'));
   const capturedPlan = JSON.parse(capturedPilot.transport[0].response.choices[0].message.content).inserts[0];
   await run('unchanged successful live-planner response', capturedPlan, true);
+  const mismatchedGeometryBase = {
+    ...base,
+    values: base.values.map((value) => value.id === 'value-before' ? { ...value, value: 4 } : value),
+  };
+  const mismatchedGeometryManifest: EvidenceVisualManifest = {
+    ...mismatchedGeometryBase,
+    review: {
+      decision: 'approved', reviewerId: 'test-reviewer', reviewId: 'test-geometry-mismatch',
+      reviewedAt: new Date().toISOString(),
+      reviewedManifestFingerprint: evidenceVisualManifestFingerprint(mismatchedGeometryBase),
+    },
+  };
+  plan = line; rendered = []; stored = []; prompts = [];
+  await assert.rejects(visualInserts.run({
+    ownerId: 'fixture-owner', runId: 'fixture-binding', channelId: 'fixture-channel', keyPrefix: 'fixture/evidence/',
+    params: { insertTypes: ['big_stat', 'bar_compare', 'line_chart', 'annotated_line'], maxInserts: 1, minGapSec: 0,
+      dataStoryContract: DATA_STORY_CONTRACT_VERSION, requireNamedSource: true, requireSpokenNumericAnchor: true },
+    store: { sentenceTimings: timings, dataStorySourceLedger, evidenceVisualManifests: [mismatchedGeometryManifest] },
+    log: () => {},
+  } as never), /display_value_mismatch/u);
+  assert.equal(prompts.length, 0, 'inconsistent reviewed geometry is rejected before the planner call');
+  assert.equal(rendered.length, 0, 'inconsistent reviewed geometry never reaches the renderer');
+  assert.equal(stored.length, 0, 'inconsistent reviewed geometry never writes an asset');
+  cases++;
   for (const title of ['Output increased by 4 dollars', '4% growth and 4 dollars', 'Output increased by four dollars', '$4%', '4%%', '4% million']) await run('title quantity laundering', { ...stat, title }, false);
   for (const item of [null, 4, { ...stat, title: { claim: 'garbage' } }, { ...stat, title: 4 }]) await run('malformed top-level entry or title', item as unknown as InsertPlanItem, false);
   // The former membership oracle accepts all these numbers. Prove its blind
@@ -117,9 +151,30 @@ async function main() {
   await run('unbound x labels', { ...line, xLabels: ['2', '4'] }, false);
   await run('unreviewed annotation', { ...line, kind: 'annotated_line', events: [{ idx: 1, label: 'Policy caused growth' }] }, false);
   await run('reviewed annotation', { ...line, kind: 'annotated_line', events: [{ idx: 1, label: 'After' }] }, true);
-  const mixedBase = { ...base, values: base.values.map((value) => value.id === 'value-after' ? { ...value, unit: 'percentage points' } : value) };
+  const mixedSentence = 'According to the Example Statistics Office, output moved from 2% to 4 percentage points over 5 years.';
+  const mixedTimings = [{ ...timings[0], text: mixedSentence }, ...timings.slice(1)];
+  const mixedBase = {
+    ...base,
+    narrationAnchors: base.narrationAnchors.map((anchor) => anchor.id === 'anchor-output'
+      ? { ...anchor, spokenText: mixedSentence }
+      : anchor),
+    values: base.values.map((value) => value.id === 'value-after'
+      ? { ...value, unit: 'percentage points', display: '4 percentage points' }
+      : value),
+  };
   const mixed = { ...mixedBase, review: { ...manifest.review, reviewedManifestFingerprint: evidenceVisualManifestFingerprint(mixedBase) } };
-  await run('different reviewed units on one scale', line, false, mixed);
+  await run('different reviewed units on one scale', line, false, mixed, mixedTimings);
+  const separatedUnitSentence = 'According to the Example Statistics Office, output moved from 2% to 4 percentage points over 5 years.';
+  const separatedUnitTimings = [{ ...timings[0], text: separatedUnitSentence }, ...timings.slice(1)];
+  const separatedUnitBase = {
+    ...base,
+    narrationAnchors: base.narrationAnchors.map((anchor) => anchor.id === 'anchor-output'
+      ? { ...anchor, spokenText: separatedUnitSentence }
+      : anchor),
+  };
+  const separatedUnitManifest = { ...separatedUnitBase,
+    review: { ...manifest.review, reviewedManifestFingerprint: evidenceVisualManifestFingerprint(separatedUnitBase) } };
+  await rejectManifest('unit must bind to its own spoken quantity', separatedUnitManifest, separatedUnitTimings);
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 50, end: 60 }).ok, false, 'Identical sentence at a different time cannot borrow this anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: sentence, start: 8, end: 4 }).ok, false, 'Inverted overlapping timing is not a valid anchor');
   assert.equal(bindDataInsertEvidence(manifest, line, { text: 'output', start: 0, end: 12 }).ok, false, 'A short fragment must not match a longer approved sentence backwards');

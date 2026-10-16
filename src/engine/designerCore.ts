@@ -12,6 +12,7 @@ import {
   assertFamilyAutonomousPlanningPipeline,
   familyAutonomousPlanningCapability,
   familyDurationContract,
+  familyLengthCheckEnvelope,
   familyTimeScalingContract,
   resolveFamilyEpisodeLengthSeconds,
   familyProductionReadiness,
@@ -81,6 +82,12 @@ import {
 } from "./minimumVideoFoundation";
 import { routeNarrationProvider } from "@/lib/narrationProviderRouting";
 import { resolveVoiceDoctrine as voiceDoctrine } from "@/engine/golden";
+import { musicRoleForRoute } from "./channelMusicProgram";
+import {
+  CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+  MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+} from "./musicModuleVersions";
 import {
   compilePipeline,
   completePipelineForPolicy,
@@ -89,6 +96,8 @@ import {
 } from "./pipelineCompiler";
 import type { GenerationProfileId } from "./runtimeCapability";
 import { projectYuE2Pipeline, selectYuE2Pipeline, type YuE2PipelineSelection } from "./yue2PipelineSelection";
+import { selectChannelIdentityMusicProfile, selectComposerMixAssembly } from "./composerMixPipelineSelection";
+import { selectChannelAwareScriptQa } from "./channelAwareScriptQaSelection";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -236,31 +245,6 @@ const OPTIONAL_BLOCKS = new Set([
   "notify",
   "crosspost",
 ]);
-
-/**
- * A render may tolerate a little natural timing variance, but that variance
- * may never cross the family capability boundary advertised by the creator.
- * Keep this in one helper because the initial design and the post-architect
- * repair pass must enforce exactly the same duration law.
- */
-function lengthCheckEnvelope(
-  family: FamilyKey,
-  targetSeconds: number,
-): Readonly<{ minSeconds: number; maxSeconds: number }> {
-  if (family === "documentary_collage_short") {
-    // The renderer's native five-to-seven-beat QA envelope is deliberately a
-    // little wider than the channel's preferred 35–60s editorial target.
-    return { minSeconds: 20, maxSeconds: 60 };
-  }
-  const contract = familyDurationContract(family);
-  if (contract.inputUnit === "fixed") {
-    return { minSeconds: contract.defaultSeconds, maxSeconds: contract.defaultSeconds };
-  }
-  return {
-    minSeconds: Math.max(contract.minimumSeconds, Math.round(targetSeconds * 0.6)),
-    maxSeconds: Math.min(contract.maximumSeconds, Math.round(targetSeconds * 1.8)),
-  };
-}
 
 /** Build a validated pipeline for a channel from the wizard's choices. */
 export function designPipelineCore(
@@ -464,7 +448,7 @@ export function designPipelineCore(
       // Niche preset sets the script tone unless the archetype already pinned one.
       if (e.block === "script_gen" && preset?.scriptStyle && params.style === undefined) params.style = preset.scriptStyle;
       if (e.block === "length_check" && lenSec) {
-        const envelope = lengthCheckEnvelope(opts.family, lenSec);
+        const envelope = familyLengthCheckEnvelope(opts.family, lenSec);
         params.minSeconds = envelope.minSeconds;
         params.maxSeconds = envelope.maxSeconds;
       }
@@ -624,6 +608,12 @@ export function designPipelineCore(
       planner.mode === "registered_non_gemini" ? planner.forbiddenGeminiBlocks : [],
     );
     pipeline = pipeline.flatMap((entry): PipelineEntry[] => {
+      if (entry.block === "quiz_topic_plan" && effectiveQuizProfile) {
+        return [{
+          ...entry,
+          params: { ...(entry.params ?? {}), quizProfile: quizProfile.key },
+        }];
+      }
       if (entry.block === "topic_select") {
         return [{
           block: "quiz_topic_plan",
@@ -690,6 +680,13 @@ export function designPipelineCore(
       if (forbiddenPlannerBlocks.has(entry.block)) return [];
       return [entry];
     });
+    if (pipeline.some((entry) => entry.block === "quiz_year")) {
+      const postRenderBlocks = new Set(["quiz_critic_spec", "quiz_metadata"]);
+      const postRenderEntries = pipeline.filter((entry) => postRenderBlocks.has(entry.block));
+      pipeline = pipeline.filter((entry) => !postRenderBlocks.has(entry.block));
+      const rendererIndex = pipeline.findIndex((entry) => entry.block === "quiz_year");
+      pipeline.splice(rendererIndex + 1, 0, ...postRenderEntries);
+    }
     if (isSupervisedQuizShort) {
       const qaIndex = pipeline.findIndex((entry) => entry.block === "qa_visual");
       if (qaIndex < 0) throw new Error("quiz_short: shared final QA block is missing from the portrait route");
@@ -1264,11 +1261,28 @@ export function designPipelineCore(
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
   // manifests. Creative engine choices remain the designer's responsibility.
-  const completed = completePipelineForPolicy(pipeline, {
+  const previewMusicVersions = new Set([
+    MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+    LEGACY_MUSIC_PROGRAM_BOUND_PROVIDER_OUTPUTS_VERSION,
+    CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION,
+  ]);
+  const previewMusicVersion = options.validateRuntimeRegistry === false
+    ? pipeline.find((entry) => entry.block === "music" && previewMusicVersions.has(entry.version ?? ""))?.version
+    : undefined;
+  const policyPipeline = previewMusicVersion
+    ? pipeline.map((entry) => entry.block === "music" && entry.version === previewMusicVersion
+      ? { block: entry.block, params: entry.params }
+      : entry)
+    : pipeline;
+  const completed = completePipelineForPolicy(policyPipeline, {
     generationProfile: generationProfileId,
     manifestSource: options.validateRuntimeRegistry === false ? "structural" : "runtime",
   });
-  pipeline = completed.entries;
+  pipeline = completed.entries.map((entry) => previewMusicVersion
+    && entry.block === "music"
+    && entry.version === undefined
+    ? { ...entry, version: previewMusicVersion }
+    : entry);
   if (completed.inserted.length) {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
   }
@@ -1307,8 +1321,33 @@ export function designPipelineCore(
     if (opts.paramOverrides?.music && Object.keys(opts.paramOverrides.music).length) {
       throw new Error("YuE2 source params must be supplied in yue2Music, not legacy music overrides");
     }
+    const expectedRole = musicRoleForRoute(opts.family, manifest.contentLane.key);
+    const allowedRoles = opts.family === "music_loop"
+      ? new Set(["primary_music", "meditation_bed", "sleep_sound_bed"])
+      : opts.family === "sleep"
+        ? new Set(["sleep_sound_bed", "meditation_bed"])
+        : new Set([expectedRole]);
+    if (!allowedRoles.has(opts.yue2Music.musicIntent.role)) {
+      throw new Error(`YuE2 music route requires one of these roles: ${[...allowedRoles].join(", ")}`);
+    }
     pipeline = (options.validateRuntimeRegistry === false ? projectYuE2Pipeline : selectYuE2Pipeline)(pipeline, opts.yue2Music);
     warnings.push("YuE2 source selection requires explicit listening approval and route qualification; no automatic production promotion.");
+  } else {
+    pipeline = selectChannelIdentityMusicProfile(
+      pipeline,
+      musicRoleForRoute(opts.family, manifest.contentLane.key),
+    );
+    pipeline = selectComposerMixAssembly(pipeline);
+  }
+  pipeline = selectChannelAwareScriptQa(pipeline);
+  if (opts.family === "cinematic") {
+    const hookIndex = pipeline.findIndex((entry) => entry.block === "hook_craft");
+    const scriptQaIndex = pipeline.findIndex((entry) => entry.block === "qa_script");
+    if (hookIndex >= 0 && scriptQaIndex >= 0 && hookIndex < scriptQaIndex) {
+      const [hook] = pipeline.splice(hookIndex, 1);
+      const scriptQaAfterRemoval = pipeline.findIndex((entry) => entry.block === "qa_script");
+      pipeline.splice(scriptQaAfterRemoval + 1, 0, hook!);
+    }
   }
   if (enforcedLength.changed.length) {
     warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);
@@ -1447,7 +1486,7 @@ export function enforceLengthContract(
     ) pin("targetSeconds", lenSec);
     if (e.block === "script_gen") pin("maxSeconds", lenSec);
     if (e.block === "length_check") {
-      const envelope = overrideEnvelope ?? lengthCheckEnvelope(family, lenSec);
+      const envelope = overrideEnvelope ?? familyLengthCheckEnvelope(family, lenSec);
       pin("minSeconds", envelope.minSeconds);
       pin("maxSeconds", envelope.maxSeconds);
     }
@@ -1485,6 +1524,57 @@ export function enforceLengthContract(
     return { ...e, params: Object.keys(p).length ? p : undefined };
   });
   return { pipeline: out, changed };
+}
+
+export function pipelineEpisodeLengthSeconds(
+  pipeline: readonly PipelineEntry[],
+  family: FamilyKey,
+): number {
+  const fields: ReadonlyArray<readonly [string, string]> = family === "music_loop"
+    ? [["assemble", "durationSec"], ["topic_select", "targetSeconds"]]
+    : family === "quizyear"
+      ? [["quiz_year", "targetSeconds"]]
+      : [
+          ["topic_select", "targetSeconds"],
+          ["script_gen", "maxSeconds"],
+          ["documentary_source_plan", "targetSeconds"],
+          ["short_strategy", "targetSeconds"],
+          ["whiteboard_scribe", "targetSeconds"],
+          ["lore_short", "targetSeconds"],
+          ["motion_comic", "targetSeconds"],
+          ["documotion_short", "targetSeconds"],
+          ["assemble", "durationSec"],
+        ];
+  for (const [block, key] of fields) {
+    const value = pipeline.find((entry) => entry.block === block)?.params?.[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`cannot preserve ${family} episode duration: ${block}.${key} is invalid`);
+    }
+    return family === "quizyear" ? familyDurationContract(family).defaultSeconds : value;
+  }
+  return familyDurationContract(family).defaultSeconds;
+}
+
+export function restorePipelineDurationContract(
+  baseline: readonly PipelineEntry[],
+  candidate: PipelineEntry[],
+  family: FamilyKey,
+): { pipeline: PipelineEntry[]; changed: string[] } {
+  const targetSeconds = pipelineEpisodeLengthSeconds(baseline, family);
+  const baselineGate = baseline.find((entry) => entry.block === "length_check")?.params;
+  const minSeconds = baselineGate?.minSeconds;
+  const maxSeconds = baselineGate?.maxSeconds;
+  const lengthEnvelope = typeof minSeconds === "number" && Number.isFinite(minSeconds) && minSeconds > 0 &&
+      typeof maxSeconds === "number" && Number.isFinite(maxSeconds) && maxSeconds >= minSeconds
+    ? { minSeconds, maxSeconds }
+    : undefined;
+  return enforceLengthContract(
+    candidate,
+    targetSeconds,
+    family,
+    lengthEnvelope ? { lengthEnvelope } : undefined,
+  );
 }
 
 export { OPTIONAL_BLOCKS };

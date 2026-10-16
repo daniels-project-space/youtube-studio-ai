@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createEditorialEvidencePacket } from "@/engine/editorialEvidencePacket";
+import { assembleScriptNarration } from "@/engine/scriptNarration";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
@@ -37,9 +38,16 @@ async function main() {
         choices: [{ message: { content: JSON.stringify({ pass: true, issues: [] }) } }],
         usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cost: 0.003 } });
     };
+    await assert.rejects(qaScript.run({ ...context, store: {
+      ...context.store,
+      script: { hook: "A different narration", sections: [],
+        narrationText: assembleScriptNarration("A different narration", []) },
+    } }), /qa_script FAILED: narrationText differs from the script_gen output/);
+    assert.equal(criticCalls, 0, "a mismatched script handoff fails before buying a critic verdict");
+
     for (const narrationText of ["Seed Atlas recorded a strong second week.",
       claim.replace("35", "350"), "Seed Atlas recorded 20 sprouts in week one. And 35 in week two."]) {
-      const before = criticCalls;
+      const before: number = criticCalls;
       await assert.rejects(createModelUsageScope().run(() => qaScript.run({ ...context,
         store: { ...context.store, narrationText } })), /qa_script FAILED: editorial evidence/);
       assert.equal(criticCalls, before, "missing/changed/split reviewed claims fail before buying a critic verdict");

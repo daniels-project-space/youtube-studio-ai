@@ -5,6 +5,7 @@ import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
 import { routeSeedForTopicSelection } from "../blockContext";
 import { music } from "../musicBlocks";
+import { musicReuseTestReceipt, musicReuseTestStyleDNA } from "./musicReuseFixtures";
 
 async function main(): Promise<void> {
   const originalFetch = globalThis.fetch;
@@ -36,6 +37,12 @@ async function main(): Promise<void> {
           topic: "A complete geography quiz",
           channelProgramRoute: seed,
           reuseMusicKey: "owner/test/base/music.mp3",
+          styleDNA: musicReuseTestStyleDNA,
+          reuseMusicReceipt: musicReuseTestReceipt({
+            ownerId: "owner-shared-music", baseRunId: "base-run", baseChannelId: "base-channel",
+            siblingChannelId: "channel-shared-music", family: route.family, contentLaneKey: route.contentLaneKey,
+            provider: "mureka", musicKey: "owner/test/base/music.mp3",
+          }),
         },
         budgetUsd: 0,
         log: () => {},

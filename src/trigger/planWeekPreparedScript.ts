@@ -20,6 +20,14 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
+import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
+import {
+  assertSyntheticScenarioOpeningDisclosure,
+  syntheticScenarioContract,
+  syntheticScenarioWritingDirective,
+} from "@/engine/syntheticScenario";
+import { readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
@@ -28,8 +36,16 @@ import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { createModelUsageScope } from "@/lib/modelUsage";
-import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
+import {
+  assertScriptLanguagePolicy,
+  assertScriptVoiceInputForRoute,
+  synthScript,
+  type Script,
+  type ScriptRequest,
+} from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
+import { requireAuthoredShowBibleVoice } from "@/engine/showBibleVoice";
 
 export interface PlanWeekPreparedScriptArgs {
   ownerId: string;
@@ -107,6 +123,7 @@ async function readPreparationManifest(payload: PlanWeekPreparedScriptArgs): Pro
     title: manifest.plan.title,
     thumbnailKey: manifest.plan.thumbnailKey,
     thumbnailSource: manifest.plan.thumbnailSource,
+    topicPromise: manifest.plan.topicPromise,
   });
 }
 
@@ -128,7 +145,44 @@ function routeSeed(manifest: PlanWeekPreparationManifest): ChannelProgramRouteRu
   return value === undefined ? undefined : parseChannelProgramRouteRunSeed(value);
 }
 
-function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
+export function preparedScriptFromDocumentaryEpisodePlan(
+  manifest: PlanWeekPreparationManifest,
+): Script | undefined {
+  const seed = seedRecord(manifest);
+  const rawPlan = seed.documentaryEpisodePlan;
+  if (rawPlan === undefined) return undefined;
+  const route = routeSeed(manifest);
+  if (!route) throw new Error("weekly prepared script: documentary episode requires its frozen program route");
+  const plan = assertDocumentarySourceEpisodePlan(rawPlan, route);
+  if (plan.topic !== manifest.plan.topic) {
+    throw new Error("weekly prepared script: topic differs from the reviewed documentary episode plan");
+  }
+  return {
+    hook: plan.narrationSegments[0],
+    sections: plan.narrationSegments.slice(1).map((narration, index, rows) => ({
+      heading: index === rows.length - 1 ? "What the record changes" : `Source beat ${index + 2}`,
+      narration,
+      role: index === rows.length - 1 ? "outro" : "body",
+    })),
+    narrationText: plan.narrationText,
+    estDurationSec: plan.targetDurationSec,
+    programRouteFingerprint: route.routeFingerprint,
+  };
+}
+
+export function assertPreparedScriptRouteContracts(
+  manifest: PlanWeekPreparationManifest,
+  script: Script,
+): void {
+  const route = routeSeed(manifest);
+  if (!route?.syntheticScenarioProfile) return;
+  assertSyntheticScenarioOpeningDisclosure(
+    syntheticScenarioContract(route.syntheticScenarioProfile),
+    script.narrationText,
+  );
+}
+
+export function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
   const moduleConfig = manifest.execution.moduleConfig;
@@ -136,10 +190,18 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
   const narrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
     ? (seed.styleDNA as Record<string, unknown>).narrative
     : undefined;
-  return {
+  const syntheticScenario = route?.syntheticScenarioProfile
+    ? syntheticScenarioContract(route.syntheticScenarioProfile)
+    : undefined;
+  const channelVoice = requireAuthoredShowBibleVoice(seed.showBible, "weekly prepared script_gen");
+  const topicPromise = normalizePlanWeekTopicPromise(manifest.plan.topicPromise);
+  const request: ScriptRequest = {
     topic: manifest.plan.topic,
+    topicPromise,
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
+    channelVoice,
+    bannedWords: readChannelBannedWords(seed.bannedWords),
     niche: typeof seed.niche === "string" ? seed.niche : undefined,
     style: payload.style ?? (typeof scriptConfig.style === "string" ? scriptConfig.style : undefined),
     qualityProfile: "production",
@@ -152,6 +214,7 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     dataRich: scriptConfig.dataRich === true,
     sourceAttributionRequired: scriptConfig.sourceAttributionRequired === true,
     weeklyPreparationBrief: manifest.prompts.script,
+    sourceGrounding: syntheticScenario ? syntheticScenarioWritingDirective(syntheticScenario) : undefined,
     programRoute: route,
     narrative: narrative && typeof narrative === "object" && !Array.isArray(narrative)
       ? narrative as ScriptRequest["narrative"]
@@ -159,6 +222,8 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     playbook: seed.scriptPlaybook as ScriptRequest["playbook"],
     openingDeviceIdx: [...manifest.requestKey].reduce((sum, char) => sum + char.charCodeAt(0), 0),
   };
+  assertScriptVoiceInputForRoute(request);
+  return request;
 }
 
 async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): Promise<string> {
@@ -201,7 +266,7 @@ export const planWeekPreparedScriptTask = task({
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script");
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script", planWeekMusicRole(manifest));
     const sidecarKey = planWeekPreparedScriptKey({
       ownerId: payload.ownerId,
       channelSlug: payload.channelSlug,
@@ -210,25 +275,35 @@ export const planWeekPreparedScriptTask = task({
     });
     const prior = await readSidecar(sidecarKey, manifest);
     if (prior) {
+      assertPreparedScriptRouteContracts(manifest, prior.script);
       const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
       return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
     }
 
-    await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
-    const request = scriptRequest(manifest, payload);
-    await claimPreparedGeneration("script", manifest, { payload, request });
-    const usage = createModelUsageScope();
+    const documentaryScript = preparedScriptFromDocumentaryEpisodePlan(manifest);
     let script: Script;
-    await usage.run(async () => {
-      script = await synthScript(request);
-    });
-    const modelUsage = usage.snapshot();
-    if (modelUsage.unpricedCalls > 0) {
-      throw new Error("weekly prepared script usage is unpriced; refusing an automatic success");
+    let costUsd = 0;
+    if (documentaryScript) {
+      script = documentaryScript;
+    } else {
+      await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
+      const request = scriptRequest(manifest, payload);
+      await claimPreparedGeneration("script", manifest, { payload, request });
+      const usage = createModelUsageScope();
+      await usage.run(async () => {
+        script = await synthScript(request);
+      });
+      const modelUsage = usage.snapshot();
+      if (modelUsage.unpricedCalls > 0) {
+        throw new Error("weekly prepared script usage is unpriced; refusing an automatic success");
+      }
+      if (!Number.isFinite(modelUsage.costUsd) || modelUsage.costUsd > payload.maxCostUsd) {
+        throw new Error(`weekly prepared script cost ${modelUsage.costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
+      }
+      costUsd = modelUsage.costUsd;
     }
-    if (!Number.isFinite(modelUsage.costUsd) || modelUsage.costUsd > payload.maxCostUsd) {
-      throw new Error(`weekly prepared script cost ${modelUsage.costUsd} exceeds its ${payload.maxCostUsd} USD ceiling`);
-    }
+    assertScriptLanguagePolicy(script!, readChannelBannedWords(seedRecord(manifest).bannedWords), "weekly prepared script");
+    assertPreparedScriptRouteContracts(manifest, script!);
     const prepared: PlanWeekPreparedScript = {
       version: "plan-week-prepared-script/v1",
       manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -246,6 +321,6 @@ export const planWeekPreparedScriptTask = task({
     const body = new TextEncoder().encode(canonicalJson(prepared));
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-script": "v1" });
     const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
-    return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };
+    return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd, scriptSha256: prepared.scriptSha256 };
   },
 });

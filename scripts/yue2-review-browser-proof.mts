@@ -39,7 +39,16 @@ const review: YuE2CandidateReview = {
     sections: Array.from({ length: 4 }, (_, i) => ({ id: `section-${i}`, label: `Interval ${i + 1}`,
       startFraction: i / 4, endFraction: (i + 1) / 4, energy: 0.2, instruction: "Keep the same restrained texture; no new motif." })),
   },
-  brief: { topic, sourceBriefFingerprint: "b".repeat(64), contextRetained: true, channelPersonalityVerified: false,
+  brief: { topic, sourceBriefFingerprint: "b".repeat(64), channelGrounding: [
+    { source: "channel_persona", cue: "intimate, observant, never theatrical", decisions: [
+      { dimension: "space", choice: "Keep the stereo image close with no distant or arena-sized reverb." },
+      { dimension: "dynamics", choice: "Limit level movement so no gesture becomes theatrical or attention seeking." },
+    ], sectionIds: ["section-0", "section-1", "section-2", "section-3"] },
+    { source: "episode_topic", cue: topic, decisions: [
+      { dimension: "texture", choice: "Use a sparse high haze that suggests the horizon without literal sound effects." },
+      { dimension: "harmony", choice: "Hold suspended intervals without a triumphant or attention-catching arrival." },
+    ], sectionIds: ["section-0", "section-1", "section-2", "section-3"] },
+  ], contextRetained: true, channelPersonalityVerified: false,
     reviewContext: createMusicReviewContext({ topic, family: "music_loop", channelName: "Quiet Horizon",
       promptContext: "Channel persona: intimate, observant, never theatrical.\nStyle grammar: patient understatement.\nAvoid: sentimental uplift, abrupt changes, generic dramatic arcs.\nComposer doctrine: preserve a continuous, unmetered form." }) },
   allocation: { allocatedCostUsdMicros: 1201, providerBilledCostUsdMicros: null },
@@ -150,6 +159,7 @@ try {
   for (const [name, width, font] of [["desktop", 1440, 16], ["mobile", 390, 16], ["large-text", 320, 24]] as const) {
     mode = "ready";
     await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font);
     const before = requests;
     await page.goto(base);
     await page.getByText("YuE music evaluation", { exact: true }).waitFor();
@@ -157,6 +167,10 @@ try {
     assert.equal(requests, before, "closed review does not probe storage or sign audio");
     await page.getByText("YuE music evaluation", { exact: true }).click();
     await page.getByRole("heading", { name: topic }).waitFor();
+    await page.getByText("Composer's musical translations", { exact: true }).waitFor();
+    await page.getByText("Keep the stereo image close with no distant or arena-sized reverb.", { exact: false }).waitFor();
+    assert.equal(await page.getByText("Keep the stereo image close with no distant or arena-sized reverb.", { exact: false }).first().isVisible(), true,
+      `channel-grounded choices stay visible at ${name}`);
     await page.getByText("Native codec timing matches.", { exact: false }).waitFor();
     await page.waitForFunction(() => (document.querySelector("audio")?.readyState ?? 0) >= 2);
     await page.getByRole("button", { name: "Seek to planned time for Interval 3", exact: true }).click();

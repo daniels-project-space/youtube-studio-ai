@@ -1,19 +1,41 @@
 import type { PlanWeekPreparationManifest } from "./planWeekPreparationContract";
 import { DELIVERY_METADATA_VERSION, MetadataDeliverySchema } from "./metadataDelivery";
+import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
+import type { ChannelMusicRole } from "@/engine/channelMusicProgram";
+import {
+  CHANNEL_AWARE_SCRIPT_GEN_VERSION,
+  CHANNEL_AWARE_SCRIPT_QA_VERSION,
+} from "@/engine/channelAwareScriptQaSelection";
 
-/** Prepared producers remain unversioned; downstream metadata executes in the runner. */
+/** Prepared producers remain unversioned; only exact, preserved downstream pins are admitted. */
 export function assertWeeklyPreparationVersionsSupported(
   pipeline: PlanWeekPreparationManifest["execution"]["pipeline"],
   context: string,
+  musicRole?: ChannelMusicRole,
 ): void {
   const unsupported = pipeline.flatMap((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const candidate = entry as { block?: unknown; version?: unknown; params?: { targetDurationSec?: unknown } };
     if (candidate.version === undefined) return [];
+    if (candidate.block === "music" && candidate.version === CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION) {
+      if (musicRole === "short_form_bed") return [];
+      return [`music@${JSON.stringify(candidate.version)} requires short_form_bed (actual role: ${musicRole ?? "unresolved"}, entry ${index})`];
+    }
     // No weekly producer substitutes for this downstream block. Its exact pin
     // and params remain in the frozen pipeline and its manifest fingerprint.
     if (candidate.block === "metadata" && candidate.version === DELIVERY_METADATA_VERSION &&
         MetadataDeliverySchema.safeParse({ basis: "planned", durationSec: candidate.params?.targetDurationSec }).success) return [];
+    // Week-ahead preparation does not execute assembly, but the final run must
+    // retain the exact mix ABI that will consume the prepared media. The pin is
+    // preserved in the frozen manifest and covered by its content fingerprint.
+    if (candidate.block === "timeline_assemble" && candidate.version === COMPOSER_MIX_ASSEMBLY_VERSION) return [];
+    // Weekly narration preparation runs the exact frozen script reviewer before
+    // TTS, so this pin is admitted only when it names that executable contract.
+    if (candidate.block === "qa_script" && candidate.version === CHANNEL_AWARE_SCRIPT_QA_VERSION) return [];
+    // Prepared script generation shares the versioned module's authored
+    // Show Bible preflight and channelVoice prompt contract (see scriptRequest).
+    if (candidate.block === "script_gen" && candidate.version === CHANNEL_AWARE_SCRIPT_GEN_VERSION) return [];
     const block = typeof candidate.block === "string" ? candidate.block : "<unknown block>";
     return [`${block}@${JSON.stringify(candidate.version)} (entry ${index})`];
   });

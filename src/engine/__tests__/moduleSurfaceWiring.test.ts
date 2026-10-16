@@ -20,26 +20,23 @@
  * for free and cannot be fooled by a mocked context.
  */
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
-
+import { getManifest } from "@/engine/registry";
+import { registerAllBlocks } from "@/engine/blocks";
 import { CORE_MODULE_SURFACES } from "@/engine/moduleSurfaces";
 import { MODULE_REGISTRY } from "@/engine/moduleRegistry";
 import { NEW_CHANNEL_MODULE_CATALOG } from "@/engine/moduleCatalog";
 
-const ROOT = process.cwd();
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry === "__tests__" || entry === "node_modules") continue;
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else if (/\.tsx?$/.test(entry)) out.push(full);
-  }
-  return out;
+function readsParameter(source: string, id: string): boolean {
+  return [
+    `params["${id}"]`,
+    `params.${id}`,
+    `params?.["${id}"]`,
+    `params?.${id}`,
+  ].some((pattern) => source.includes(pattern));
 }
 
 function main(): void {
+  registerAllBlocks();
   const narration = CORE_MODULE_SURFACES.find((card) => card.key === "narration_tts");
   const providerKnob = narration?.customization?.knobs.find((knob) => knob.id === "ttsProvider");
   assert.match(
@@ -53,24 +50,23 @@ function main(): void {
     "the operator-facing narration surface must not imply a VPS-only Qwen route",
   );
 
-  // Blocks live under src/trigger/blocks; a few read their params through
-  // engine helpers, so the whole of src is the haystack.
-  const sources = [...walk(join(ROOT, "src", "trigger")), ...walk(join(ROOT, "src", "engine")), ...walk(join(ROOT, "src", "lib"))]
-    .map((file) => readFileSync(file, "utf8"))
-    .join("\n");
-
   const dead: string[] = [];
   for (const card of CORE_MODULE_SURFACES) {
+    const block = getManifest(card.key)?.block;
+    assert.ok(block, `${card.key} exposes controls but has no registered executable block`);
+    const source = block.run.toString();
     for (const knob of card.customization?.knobs ?? []) {
-      // Both indexing styles occur in this codebase.
-      const patterns = [
-        `params["${knob.id}"]`,
-        `params.${knob.id}`,
-        `params?.["${knob.id}"]`,
-        `params?.${knob.id}`,
-      ];
-      if (!patterns.some((pattern) => sources.includes(pattern))) {
+      // Inspect the owning executable block only: a different block reading a
+      // same-named parameter cannot make this control look connected.
+      if (!readsParameter(source, knob.id)) {
         dead.push(`${card.key}.${knob.id}`);
+      }
+      for (const targetId of knob.runtimeTargets ?? []) {
+        const target = getManifest(targetId)?.block;
+        assert.ok(target, `${card.key}.${knob.id} targets unregistered block ${targetId}`);
+        if (!readsParameter(target.run.toString(), knob.id)) {
+          dead.push(`${card.key}.${knob.id}->${targetId}`);
+        }
       }
     }
   }
@@ -87,6 +83,14 @@ function main(): void {
   for (const required of ["metadata", "script_gen", "narration_tts", "visual_matter"]) {
     assert.ok(keys.has(required), `${required} must expose a surface or its channel config cannot be persisted`);
   }
+  assert.ok(
+    CORE_MODULE_SURFACES.find((card) => card.key === "music")?.customization?.knobs.some((knob) => knob.id === "bodyMusicVol"),
+    "the shared Music module must expose its role-bounded music-bed gain",
+  );
+  assert.ok(
+    NEW_CHANNEL_MODULE_CATALOG.find((entry) => entry.block === "music")?.params.some((param) => param.key === "bodyMusicVol"),
+    "channel creation must offer the same music-bed control it persists and runtime consumes",
+  );
 
   // ONBOARDING AND VALIDATION MUST AGREE.
   //

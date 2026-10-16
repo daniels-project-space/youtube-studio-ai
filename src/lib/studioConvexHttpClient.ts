@@ -1,5 +1,6 @@
 import { ConvexHttpClient as BaseConvexHttpClient } from "convex/browser";
 import { issueStudioConvexToken } from "@/lib/studioConvexAuth";
+import { recordConvexHttpRequest } from "@/lib/convexUsage";
 
 let cachedServiceToken: { token: string; refreshAt: number } | null = null;
 
@@ -38,6 +39,7 @@ export class StudioConvexHttpClient extends BaseConvexHttpClient {
       const deadline = requestTimeoutMs === undefined ? undefined : AbortSignal.timeout(requestTimeoutMs);
       // Keep the fetch signal alive through body consumption, not just headers.
       // A timed-out mutation may still commit; callers retain their durable fences.
+      recordConvexHttpRequest(input);
       return transport(input, { ...init, headers,
         ...(deadline ? { signal: callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline } : {}),
       });

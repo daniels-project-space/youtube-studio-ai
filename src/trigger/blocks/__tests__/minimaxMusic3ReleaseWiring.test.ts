@@ -5,6 +5,7 @@ import { join } from "node:path";
 const root = process.cwd();
 const lofi = readFileSync(join(root, "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const music = readFileSync(join(root, "src/trigger/blocks/musicBlocks.ts"), "utf8");
+const releaseGate = readFileSync(join(root, "src/trigger/blocks/musicReleaseGate.ts"), "utf8");
 const panel = readFileSync(join(root, "src/components/ModuleConfigPanel.tsx"), "utf8");
 
 assert.match(
@@ -18,17 +19,24 @@ assert.match(
   "the derived Short must retain the same generated-audio disclosure",
 );
 assert.match(
-  lofi,
-  /getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)[\s\S]*assertPinnedMiniMaxMusic3Receipt\(receipt, program\)/u,
-  "disclosure authority must come from durable program and runtime receipts",
+  releaseGate,
+  /export async function appendMusicGenerationDisclosure[\s\S]*getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)/u,
+  "receipt-backed provider disclosure belongs to the shared music policy module",
 );
 assert.match(
-  lofi,
+  releaseGate,
+  /getObjectBytes\(programKey\)[\s\S]*getObjectBytes\(receiptKey\)[\s\S]*assertPinnedMiniMaxMusic3Receipt\(receipt, program\)/u,
+  "shared music policy must derive disclosure authority from durable program and runtime receipts",
+);
+assert.match(
+  releaseGate,
   /Music generated with MiniMax-Music3\. This video contains AI-generated audio\./u,
 );
+assert.doesNotMatch(lofi, /assertPinnedMiniMaxMusic3Receipt|MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE/u,
+  "the Lo-Fi renderer must call shared attribution policy without owning provider licensing rules");
 assert.match(
   music,
-  /musicNativeWavKey\s*=\s*`\$\{ctx\.keyPrefix\}runs\/\$\{ctx\.runId\}\/audio\/minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
+  /musicNativeWavKey\s*=\s*`\$\{musicRunAudioPrefix\(ctx\.ownerId, ctx\.runId\)\}minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
   "the retained owner-audition source must be content-addressed by the already verified native WAV digest",
 );
 assert.match(
@@ -47,10 +55,17 @@ assert.match(
   "the durable stage handoff must expose the native WAV locator to the later owner-review checkpoint",
 );
 assert.match(
-  lofi,
+  releaseGate,
   /expectedNativeWavKey[\s\S]*?assertMusicAuditionNativeBytes\([\s\S]*?getObjectBytes\(nativeWavKey\)/u,
   "upload must re-read the exact content-addressed retained WAV, not trust only a stored worker receipt",
 );
+assert.match(
+  releaseGate,
+  /isMusicReviewStatusCompatible\(provider, reviewStatus\)[\s\S]*?music provider review state is missing or invalid[\s\S]*?provider !== "minimax_music3"/u,
+  "the upload boundary must validate every provider's review-state handoff and fail closed on unknown or inconsistent routes",
+);
+assert.match(lofi, /await assertMusicQualityForPublish\(ctx\)/u,
+  "the shared release gate must remain connected to the upload boundary");
 assert.match(
   panel,
   /aria-label="MiniMax-Music3 attribution and generation disclosure"[\s\S]*Music generated with MiniMax-Music3/u,

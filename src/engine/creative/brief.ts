@@ -19,12 +19,14 @@ import type {
   AudioBrief,
   ValidationSpec,
 } from "./types";
+import type { MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 
 type Store = Record<string, unknown>;
 
 /** The Composer's raw store output (the "musicBrief" key): prompt + audio mix. */
 export interface MusicBrief {
   musicPrompt?: string;
+  musicIntent?: MusicArrangementIntent;
   audio?: AudioBrief;
 }
 

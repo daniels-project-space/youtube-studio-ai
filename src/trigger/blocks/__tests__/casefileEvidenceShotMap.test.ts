@@ -334,6 +334,25 @@ async function main(): Promise<void> {
   );
   assert.match(logs.join("\n"), /provider calls: 0/);
 
+  const autoDraftLogs: string[] = [];
+  const autoDraftPatch = await casefileEvidenceShotMapBlocks[0].run({
+    ...context,
+    store: {
+      casefileSourcePacket: sourcePacket,
+      casefileSourceAdmission: admittedSourcePacket.receipt,
+      sceneManifest,
+      shotList,
+    },
+    log: (message: string) => autoDraftLogs.push(message),
+  });
+  assert.equal(
+    (autoDraftPatch.casefileEvidenceShotMapAdmission as { requiresHumanEditorialReview: boolean })
+      .requiresHumanEditorialReview,
+    true,
+    "the no-input path must produce a private draft that still requires human editorial review",
+  );
+  assert.match(autoDraftLogs.join("\n"), /auto-drafted claim map/);
+
   const missingClaim = approvedMap();
   missingClaim.claimMappings.pop();
   missingClaim.editorialReview.reviewedShotMapFingerprint = casefileEvidenceShotMapContentFingerprint(missingClaim);

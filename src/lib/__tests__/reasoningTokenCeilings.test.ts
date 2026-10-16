@@ -6,11 +6,6 @@
  * the budget is gone before the JSON starts, the response fails its contract,
  * and the call throws. That failure is only as visible as its caller makes it:
  *
- *   metacraft pinnedComment   `.catch(() => "")` — silent. Measured at the
- *                             shipped ceiling of 300: 3 of 3 attempts failed,
- *                             and 600 failed too, while 1200 and 2000 passed.
- *                             Every video ever produced shipped with an empty
- *                             pinned comment, and nothing said so.
  *   capabilityAdvisor         reasoned fallback. At the shipped 500: 0 of 2
  *                             attempts succeeded, so the advisor never once
  *                             advised — a channel received a default that read
@@ -49,7 +44,6 @@ const code = (p: string): string =>
 
 /** Ceiling measured safe for the prompt at this call site. */
 const MEASURED: { file: string; site: string; min: number; evidence: string }[] = [
-  { file: "src/lib/metacraft.ts", site: "pinnedComment", min: 1200, evidence: "300 and 600 failed every attempt; 1200 and 2000 passed" },
   { file: "src/engine/creative/capabilityAdvisor.ts", site: "capability verdict", min: 1200, evidence: "500 failed 2/2; 1200 and 2000 passed 2/2" },
   { file: "src/engine/creative/formatAdvisor.ts", site: "format verdict", min: 1200, evidence: "700 passed only 1/2; 1200 and 2000 passed 2/2" },
 ];
@@ -71,21 +65,16 @@ function main(): void {
     );
   }
 
-  // The pinned comment must degrade QUIETLY IN BEHAVIOUR but never in the log.
-  // This is the property that would have caught the bug years earlier.
-  const metacraft = read("src/lib/metacraft.ts");
-  assert.ok(
-    !/\.catch\(\(\)\s*=>\s*""\)/.test(code("src/lib/metacraft.ts")),
-    "metacraft must not swallow a provider failure into an empty string with no log — " +
-      "that is exactly how the pinned comment stayed empty on every video ever made",
-  );
-  assert.match(
+  const metacraft = code("src/lib/metacraft.ts");
+  assert.doesNotMatch(
     metacraft,
-    /pinned comment failed, shipping without one/,
-    "the pinned-comment failure must name itself in the log",
+    /makePinnedComment|Write ONE pinned comment/u,
+    "metadata must not spend a provider call on a comment with no publishing consumer",
   );
+  assert.match(metacraft, /pinnedComment:\s*""/u,
+    "the legacy result field must remain explicit and empty until an approved consumer exists");
 
-  console.log("REASONING TOKEN CEILINGS PASS — measured ceilings held, soft failures stay loud");
+console.log("REASONING TOKEN CEILINGS PASS — measured active routes held; unconsumed comment spend removed");
 }
 
 main();

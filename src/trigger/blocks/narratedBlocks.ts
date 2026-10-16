@@ -22,6 +22,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { ExecutionError, classifyExecutionError } from "@/engine/executionErrors";
+import { assertFinalDurationMatchesTarget } from "@/lib/assembly/timeline";
 import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext } from "@/engine/types";
 import {
   assertVoiceGatePreconditions,
@@ -48,6 +49,7 @@ import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import {
   ChannelProgramRouteRunSeedSchema,
+  channelProgramContextPrompt,
   channelProgramRouteRunSeedFingerprint,
   parseChannelProgramRouteRunSeed,
   type ChannelProgramRouteRunSeed,
@@ -88,10 +90,13 @@ import {
   MINIMAX_H3_RUNTIME_ID,
 } from "@/lib/minimaxH3";
 import {
+  channelCreatorDirection,
   channelCritiqueBrief,
   produceAndCritique,
+  validateCritiqueResponse,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
+import { findChannelBannedWords, readChannelBannedWords } from "@/engine/channelLanguagePolicy";
 import type { HealClass } from "@/engine/healer";
 import {
   assessProductionEditorialAcceptance,
@@ -104,6 +109,7 @@ import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
   parseScriptCritique,
+  scriptCritiqueExcerpt,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
@@ -118,6 +124,7 @@ import {
   cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
+import { assertScriptNarrationConsistent } from "@/engine/scriptNarration";
 import { StorySpineSchema, storySpineVisualReviewLocks } from "@/engine/storySpine";
 import {
   assertCinematicAssemblyRoute,
@@ -153,7 +160,15 @@ import {
   createShortsOpeningEvidence,
   planShortsOpeningOnScreenTextEvidence,
 } from "@/engine/shortsOpeningEvidence";
-import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
+import {
+  assertScriptLanguagePolicy,
+  scriptClosingLineIssue,
+  scriptLanguagePolicyIssue,
+  synthScript,
+  translateScript,
+  type Script,
+} from "@/lib/scriptGen";
+import { parseShowBibleVoice, type ShowBibleVoice } from "@/engine/showBibleVoice";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -181,6 +196,7 @@ import {
   type QwenTtsReceipt,
   type QwenTtsSpeaker,
 } from "@/lib/qwenTts";
+import { narrationSpeedForStyleDNA } from "@/engine/golden";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationDeliveryRate,
@@ -203,6 +219,7 @@ import {
 } from "@/lib/narrationTranscriptProof";
 import {
   deriveFinalMasterNarratedStoryCoverage,
+  finalMasterNarratedStoryCoverageReleaseIssues,
   type DerivedFinalMasterNarratedStoryCoverage,
 } from "@/lib/finalMasterNarratedStoryCoverage";
 import {
@@ -290,6 +307,7 @@ import {
 import {
   channelVisualReviewProfile,
   finalMasterTranscriptCues,
+  resolveFinalMasterNarrationStartSec,
   reviewRender,
   visualRepairSignals,
   visualReviewFailureMessage,
@@ -659,19 +677,37 @@ function readDeclaredHealClasses(raw: unknown, blockId: string): HealClass[] {
  * this file reads it from here, so there is exactly one place to change what a
  * per-channel critic is told.
  */
-function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
+function channelCritiqueContext(
+  ctx: StageContext,
+  options: { includeVisualStyleGrammar?: boolean } = {},
+): ChannelCritiqueContext {
   const laneKey = (ctx.store["contentLane"] as { key?: unknown } | null | undefined)?.key;
+  const showBibleVoice = parseShowBibleVoice(ctx.store["showBible"]);
   return {
     ...(opt(ctx, "channelName") ? { channelName: opt(ctx, "channelName") } : {}),
     ...(opt(ctx, "persona") ? { persona: opt(ctx, "persona") } : {}),
-    ...(opt(ctx, "styleGrammar") ? { styleGrammar: opt(ctx, "styleGrammar") } : {}),
+    ...(showBibleVoice ?? {}),
+    ...(options.includeVisualStyleGrammar && opt(ctx, "styleGrammar")
+      ? { styleGrammar: opt(ctx, "styleGrammar") }
+      : {}),
     ...(opt(ctx, "criticDoctrine") ? { criticDoctrine: opt(ctx, "criticDoctrine") } : {}),
     ...(typeof laneKey === "string" && laneKey ? { contentLaneKey: laneKey } : {}),
     laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis,
   };
 }
 
-export const scriptGen: Block = {
+function assertReusableScriptLanguagePolicy(script: Script, ctx: StageContext, source: string): void {
+  assertScriptLanguagePolicy(script, ctx.store["bannedWords"], `script_gen: ${source}`);
+  if (script.closingLine !== undefined) {
+    const issue = scriptClosingLineIssue(script.closingLine);
+    if (issue) throw new Error(`script_gen: ${source} has an invalid closing line: ${issue}`);
+  }
+}
+
+export function createScriptGenBlock(
+  readChannelVoice?: (ctx: StageContext) => ShowBibleVoice | undefined,
+): Block {
+  return {
   id: "script_gen",
   consumes: ["topic"],
   produces: ["script", "narrationText"],
@@ -755,6 +791,7 @@ export const scriptGen: Block = {
       ) {
         throw new Error("script_gen: serialized-episode-bound prepared weekly script cannot run without its immutable context");
       }
+      assertReusableScriptLanguagePolicy(preparedScript, ctx, "prepared weekly script");
       ctx.log(`script_gen: consumed prepared weekly script (${preparedScript.sections.length} sections; no text-generation spend)`);
       return { script: preparedScript, narrationText: preparedScript.narrationText };
     }
@@ -788,6 +825,7 @@ export const scriptGen: Block = {
         programRoute,
         serializedEpisodeContext?.fingerprint,
       );
+      assertReusableScriptLanguagePolicy(translated, ctx, "reused script");
       ctx.log(`script_gen: reused + translated base script → ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
     }
@@ -795,6 +833,8 @@ export const scriptGen: Block = {
       topic,
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
+      ...(readChannelVoice ? { channelVoice: readChannelVoice(ctx) } : {}),
+      bannedWords: readChannelBannedWords(ctx.store["bannedWords"]),
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
@@ -814,6 +854,7 @@ export const scriptGen: Block = {
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
+      topicPromise: topicPromiseForSelectedTopic(ctx),
       sourceGrounding,
       weeklyPreparationBrief,
       serializedEpisodeContext: serializedEpisodeContext
@@ -839,7 +880,21 @@ export const scriptGen: Block = {
     // an unreviewed script.
     const critiqueEnabled = hasCreativeTextKey();
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
-    const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
+    const authoredChannel = channelCritiqueContext(ctx);
+    const scriptChannel: ChannelCritiqueContext = {
+      ...authoredChannel,
+      narrative: req.narrative ? {
+        scriptStyle: req.narrative.scriptStyle,
+        hookStyle: req.narrative.hookStyle,
+        pacing: req.narrative.pacing,
+        delivery: req.narrative.delivery,
+      } : undefined,
+      positioning: req.channelVoice?.positioning ?? authoredChannel.positioning,
+      vibe: req.channelVoice?.vibe ?? authoredChannel.vibe,
+      worksInSpace: req.channelVoice?.worksInSpace ?? authoredChannel.worksInSpace,
+      avoidInSpace: req.channelVoice?.avoidInSpace ?? authoredChannel.avoidInSpace,
+      bannedWords: req.bannedWords,
+    };
 
     let precraftedHook: Script["crafted"] | undefined;
     const loop = await produceAndCritique<Script>({
@@ -865,6 +920,26 @@ export const scriptGen: Block = {
         return draft;
       },
       critique: async (draft, iter) => {
+        const languageIssue = scriptLanguagePolicyIssue(draft, req.bannedWords);
+        if (languageIssue) {
+          return {
+            score: 0, pass: false, fatal: true,
+            issues: [languageIssue],
+          };
+        }
+        const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+        if (!Number.isFinite(draft.estDurationSec) || draft.estDurationSec > durationLimitSec) {
+          const issue =
+            `script duration ${Math.round(draft.estDurationSec)}s exceeds the ${Math.round(durationLimitSec)}s ceiling; ` +
+            "tighten narration while preserving its argument and definitive ending";
+          ctx.log("script_gen: duration gate rejected draft before paid narrative critique", {
+            durationSec: draft.estDurationSec,
+            durationLimitSec,
+          });
+          return { score: 0, pass: false, issues: [issue] };
+        }
+        const closingLineIssue = scriptClosingLineIssue(draft.closingLine);
+        if (closingLineIssue) return { score: 0, pass: false, issues: [closingLineIssue] };
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
           const crit = parseScriptCritique(await creativeTextJson<unknown>({
@@ -877,13 +952,13 @@ export const scriptGen: Block = {
                 ? ` CRITICAL: the cold open promised "${draft.hookLoop}" — flag it as an issue if the script ` +
                   `does not EXPLICITLY pay that promise off.`
                 : "") +
-              (programRouteCritique ? `\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.` : "") +
+              (programRouteCritique
+                ? `\n${channelProgramContextPrompt(programRoute!)}\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.`
+                : "") +
               channelCritiqueBrief(scriptChannel) +
               ` Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 ` +
               `issues, each under 140 characters.\n\n` +
-              (draft.narrationText.length <= 9000
-                ? draft.narrationText
-                : draft.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + draft.narrationText.slice(-3500)),
+              scriptCritiqueExcerpt(draft.narrationText),
             // Reasoning route: the ceiling covers the THINKING and the answer, and a
             // findings list is the expensive verdict — a clean pass is cheap to emit,
             // a rejection must enumerate why. At the old ceiling this gate was
@@ -915,6 +990,16 @@ export const scriptGen: Block = {
         }
       },
     });
+    if (loop.fatal) {
+      throw new Error(`script_gen FAILED: channel-banned wording remains after the informed retry — ${loop.critique.issues.join("; ")}`);
+    }
+    const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+    if (!Number.isFinite(loop.value.estDurationSec) || loop.value.estDurationSec > durationLimitSec) {
+      throw new Error(
+        `script_gen FAILED: duration remained above the ${Math.round(durationLimitSec)}s ceiling after ` +
+        `the informed retry (${Math.round(loop.value.estDurationSec)}s)`,
+      );
+    }
     if (critiqueEnabled) {
       assertScriptCritiqueAccepted({
         accepted: loop.accepted,
@@ -945,6 +1030,27 @@ export const scriptGen: Block = {
     return { script, narrationText: script.narrationText };
   },
 };
+}
+
+export const scriptGen: Block = createScriptGenBlock();
+
+function topicPromiseForSelectedTopic(ctx: StageContext): string | undefined {
+  const value = ctx.store["topicBet"];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("topic promise: topicBet must be a structured topic-selection receipt");
+  }
+  const bet = value as Record<string, unknown>;
+  const topic = ctx.store["topic"];
+  const normalize = (text: string) => text.trim().replace(/\s+/gu, " ");
+  if (typeof topic !== "string" || typeof bet.topic !== "string" || normalize(topic) !== normalize(bet.topic)) {
+    throw new Error("topic promise: topicBet does not belong to the selected topic");
+  }
+  if (typeof bet.hookPromise !== "string" || !bet.hookPromise.trim() || bet.hookPromise.trim().length > 500) {
+    throw new Error("topic promise: topicBet hookPromise must be a non-empty sentence under 500 characters");
+  }
+  return bet.hookPromise.trim();
+}
 
 export const hookCraft: Block = {
   id: "hook_craft",
@@ -955,6 +1061,7 @@ export const hookCraft: Block = {
     // spoken narration already opens with script_gen's hook; this does not
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
+    const plannedPromise = topicPromiseForSelectedTopic(ctx);
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
     if (!hasCreativeTextKey()) return { hook: firstLine() };
 
@@ -970,10 +1077,24 @@ export const hookCraft: Block = {
     //   - Deterministic defects (empty, too long, markdown, or just the
     //     narration's first line echoed back) are computed in code — they cost
     //     nothing and can drive a retry with no critic at all.
-    //   - A critic OUTAGE accepts the current draft instead of blind-spending
-    //     another draft that would be equally ungraded.
+    //   - A critic outage fails the stage closed instead of accepting an
+    //     unreviewed promise or blind-spending another draft.
     //   - Cap 2 (one informed retry), the established convention here.
-    const hookChannel = channelCritiqueContext(ctx);
+    const channelDna = ctx.store["styleDNA"] as {
+      narrative?: ChannelCritiqueContext["narrative"];
+    } | null | undefined;
+    const dnaNarrative = channelDna?.narrative;
+    const hookChannel: ChannelCritiqueContext = {
+      ...channelCritiqueContext(ctx),
+      ...(dnaNarrative ? {
+        narrative: {
+          ...(typeof dnaNarrative.scriptStyle === "string" ? { scriptStyle: dnaNarrative.scriptStyle } : {}),
+          ...(typeof dnaNarrative.hookStyle === "string" ? { hookStyle: dnaNarrative.hookStyle } : {}),
+          ...(typeof dnaNarrative.pacing === "string" ? { pacing: dnaNarrative.pacing } : {}),
+          ...(typeof dnaNarrative.delivery === "string" ? { delivery: dnaNarrative.delivery } : {}),
+        },
+      } : {}),
+    };
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/hook-checkpoints`;
@@ -1010,14 +1131,19 @@ export const hookCraft: Block = {
           const out = await creativeTextJson<{ hook?: string }>({
             prompt:
               "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
+              "Make it compelling in the authored channel register; do not mistake attention for higher arousal or more suspense. " +
               "It must be concrete and must promise ONLY something this narration actually " +
               "delivers — a hook the video does not pay off is a failure, not a win. " +
               (priorIssues.length
                 ? `A previous attempt was REJECTED for: ${priorIssues.join("; ")}. Fix all of it. `
                 : "") +
-              channelCritiqueBrief(hookChannel) +
+              (plannedPromise
+                ? `Topicraft's planned viewer promise is intent only, not evidence: "${plannedPromise}". ` +
+                  "Preserve its intended payoff when the narration supports it; otherwise discard or narrow the promise. "
+                : "") +
+              channelCreatorDirection(hookChannel) +
               'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
-              narration.slice(0, 2000),
+              scriptCritiqueExcerpt(narration),
             // MEASURED, not chosen: scripts/measure-single-field-ceiling.ts runs
             // this exact prompt at a ladder of ceilings. At 200 and 400 it threw
             // on every trial; at 700 it succeeded on every trial. So at the old
@@ -1073,14 +1199,19 @@ export const hookCraft: Block = {
         try {
           const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
             prompt:
-              `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
+              `Judge ONE hook line written for a YouTube title/thumbnail in the authored channel register. ` +
+              `Do not reward urgency or suspense that conflicts with that voice. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
               `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
-              `about what the video delivers.` +
+              `about what the video delivers. A planned topic promise is not evidence; when supported, ` +
+              `the hook should preserve its payoff, and when unsupported the hook must narrow to the narration. ` +
+              `Reject unsupported extensions. If any actionable defect remains, pass must be false and ` +
+              `issues must name each defect; if pass is true, issues must be empty.` +
+              (plannedPromise ? `\nPLANNED VIEWER PROMISE (intent only): ${plannedPromise}` : "") +
               channelCritiqueBrief(hookChannel) +
               ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
               `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
-              narration.slice(0, 2500),
+              scriptCritiqueExcerpt(narration),
             // Reasoning route: the ceiling covers the THINKING and the answer, and a
             // findings list is the expensive verdict — a clean pass is cheap to emit,
             // a rejection must enumerate why. At the old ceiling this gate was
@@ -1092,14 +1223,20 @@ export const hookCraft: Block = {
             temperature: 0.3,
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
-          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          const rejected = verdict.pass === false;
+          const admission = validateCritiqueResponse(verdict);
+          if (!admission.pass || !admission.critique) {
+            throw new Error(`malformed hook critique — ${admission.issues.join("; ")}`);
+          }
+          const critique = admission.critique;
+          if (critique.issues.length > 4 || critique.issues.some((issue) => issue.length > 140)) {
+            throw new Error("malformed hook critique — issues must contain at most 4 strings under 140 characters");
+          }
+          const issues = critique.issues.slice(0, 4);
+          const rejected = !critique.pass || issues.length > 0;
           const rejectionIssues = issues.length
             ? issues
             : ["independent hook critic rejected the line without usable remediation"];
-          const score = Number.isFinite(verdict.score)
-            ? Math.max(0, Math.min(1, Number(verdict.score)))
-            : rejected ? 0.4 : 1;
+          const score = critique.score;
           if (rejected) {
             ctx.log(
               `hook_craft: candidate ${iter} rejected by the critic` +
@@ -1110,7 +1247,7 @@ export const hookCraft: Block = {
           // The +0.01*iter tiebreak keeps the INFORMED retry when it merely ties
           // the first draft (produceAndCritique picks the best by strict >).
           return rejected
-            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
+            ? { score: Math.min(1, Math.min(0.99, score) + 0.01 * iter), pass: false, issues: rejectionIssues }
             : { score, pass: true, issues: [] };
         } catch (e) {
           // Preserve the exact ambiguous provider boundary for the retry
@@ -1151,13 +1288,26 @@ export function createQaScriptBlock(
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const script = ctx.store["script"];
+    if (script !== undefined) assertScriptNarrationConsistent(script, "qa_script");
+    const bannedMatches = findChannelBannedWords(
+      narration,
+      readChannelBannedWords(ctx.store["bannedWords"]),
+    );
+    if (bannedMatches.length) {
+      throw new Error(`qa_script FAILED: narration contains channel-banned wording (${bannedMatches.slice(0, 8).join(", ")})`);
+    }
     const programRoute = programRouteForNarratedBlock(ctx, "qa_script");
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");
     const scriptForRoute = ctx.store["script"] as {
+      narrationText?: unknown;
       programRouteFingerprint?: unknown;
       serializedProgramEpisodeContextFingerprint?: unknown;
     } | undefined;
+    if (scriptForRoute !== undefined && scriptForRoute.narrationText !== narration) {
+      throw new Error("qa_script FAILED: narrationText differs from the script_gen output");
+    }
     if (ctx.store["documentaryEpisodePlan"] !== undefined) {
       if (!programRoute) {
         throw new Error("qa_script FAILED: documentary source episode requires its frozen program route");
@@ -1222,11 +1372,12 @@ export function createQaScriptBlock(
       const persona = opt(ctx, "persona") ?? "";
       const channel = readChannelContext?.(ctx);
       if (channelAware && (!channel?.channelName?.trim() ||
-        ![channel.persona, channel.criticDoctrine, ...Object.values(channel.narrative ?? {})].some(value => value?.trim()))) {
-        throw new Error("qa_script FAILED: channel-aware review requires frozen channel name and authored personality or style guidance");
+        ![channel.positioning, channel.vibe, ...(channel.worksInSpace ?? []), ...(channel.avoidInSpace ?? [])]
+          .some(value => value?.trim()))) {
+        throw new Error("qa_script FAILED: channel-aware review requires a frozen channel name and authored Show Bible");
       }
-      // The hookcraft contract: the cold open's promise + the midpoint re-hook
-      // are CRAFT_RULES law — verify them here instead of hoping.
+      // The cold-open promise is always binding; re-engagement follows the
+      // accepted channel and route rather than one universal retention pattern.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
       const critiqueRequest = {
         prompt:
@@ -1261,13 +1412,7 @@ export function createQaScriptBlock(
           `each under 140 characters (a truncated reply is unusable).\n\n` +
           // Head + middle + tail sample: a head-only slice HID the midpoint and
           // the payoff from the critic on anything longer than ~2 minutes.
-          (narration.length <= 9000
-            ? narration
-            : narration.slice(0, 3500) +
-              `\n\n[... OMITTED ...]\n\n` +
-              narration.slice(Math.floor(narration.length / 2) - 1500, Math.floor(narration.length / 2) + 1500) +
-              `\n\n[... OMITTED ...]\n\n` +
-              narration.slice(-2500)),
+          scriptCritiqueExcerpt(narration),
         // Reasoning route: the ceiling covers the THINKING and the answer, and a
         // findings list is the expensive verdict — a clean pass is cheap to emit,
         // a rejection must enumerate why. At the old ceiling this gate was
@@ -1322,6 +1467,13 @@ export const narrationTts: Block = {
   ],
   paid: true,
   run: async (ctx) => {
+    const script = ctx.store["script"];
+    if (script !== undefined) {
+      assertScriptNarrationConsistent(script, "narration_tts");
+      if ((script as { narrationText: string }).narrationText !== str(ctx, "narrationText")) {
+        throw new Error("narration_tts: flat narrationText differs from the bound script");
+      }
+    }
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // Unknown providers must fail before spend; they must never inherit the
@@ -1350,26 +1502,20 @@ export const narrationTts: Block = {
     const baseGap = Number(ctx.params["sentenceGapSec"] ?? physics.sentenceGap ?? 0.85);
     const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
     // SPEAKING RATE — param > Style-DNA pacing > archetype physics > native.
-    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
+    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { voiceProfile?: string; pacing?: string; delivery?: string } } | null)
       ?.narrative;
-    const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
-    const dnaSpeed =
-      /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
-        : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
-        : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
-        : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05
-        : 0;
+    const dnaSpeed = narrationSpeedForStyleDNA(dnaPacing);
     const explicitSpeed = ctx.params["ttsSpeed"];
     if (explicitSpeed !== undefined && (typeof explicitSpeed !== "number" || !Number.isFinite(explicitSpeed))) {
       throw new Error("narration_tts: ttsSpeed must be a finite number");
     }
     const speed = assertNarrationSpeed(
-      explicitSpeed === undefined ? (dnaSpeed || physics.speed) : explicitSpeed,
+      explicitSpeed === undefined ? (dnaSpeed ?? physics.speed) : explicitSpeed,
       "narration_tts: ttsSpeed",
     );
     if (speed !== 1)
       ctx.log(
-        `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
+        `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed !== undefined ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
       );
     // ElevenLabs render settings from the physics (v3 stability/style/seed).
     const elevenSeed = 4242;
@@ -1395,6 +1541,7 @@ export const narrationTts: Block = {
       ? composeQwenNarrationInstruction({
           explicit: ctx.params["qwenInstruction"],
           editorialBrief: weeklyNarrationBrief,
+          voiceProfile: dnaPacing?.voiceProfile,
           delivery: dnaPacing?.delivery,
           pacing: dnaPacing?.pacing,
           archetype: physics.archetype,
@@ -1446,6 +1593,7 @@ export const narrationTts: Block = {
       text: value,
       voiceId: selectedVoiceId,
       niche,
+      voiceIdentitySeed: ctx.channelId,
       speed,
       provider: ttsProvider,
       elevenVoiceId: selectedVoiceId,
@@ -2562,7 +2710,7 @@ export const entityImagery: Block = {
     //     retried: paying again to be told the same true thing is pure waste.
     //   - A critic outage accepts the current set rather than blind-spending.
     //   - Cap 2 (one informed retry).
-    const entityChannel = channelCritiqueContext(ctx);
+    const entityChannel = channelCritiqueContext(ctx, { includeVisualStyleGrammar: true });
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/entity-checkpoints`;
@@ -4047,6 +4195,13 @@ async function finishFromComposed(
     const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
     if (capTimings && capTimings.length > 0) {
       try {
+        const narrationStartSec = resolveFinalMasterNarrationStartSec({
+          narrationStartSec: ctx.store["narrationStartSec"],
+          introApplied: ctx.store["introApplied"],
+          introSec: ctx.store["introSec"] ?? introSec,
+          finalMasterDurationSec: videoSec,
+          productionQa: ctx.params["qaProfile"] !== "draft",
+        }).startSec;
         const pad = 0.2;
         const qWindows = quotes.map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
         // Captions must hide under EVERY overlay that draws in their region —
@@ -4065,7 +4220,7 @@ async function finishFromComposed(
           .map((w) => [w.start + preGap - 0.3, Math.max(w.start + preGap, w.end - postGap) + 0.3] as [number, number])
           .filter(([a, b]) => b > a);
         const blocked = [...qWindows, ...iWindows, ...cWindows];
-        const cues = captionCuesFromTimings(capTimings, introSec).filter(
+        const cues = captionCuesFromTimings(capTimings, narrationStartSec).filter(
           (c) => !blocked.some(([a, b]) => c.endSec > a && c.startSec < b),
         );
         cueCount = cues.length;
@@ -4137,6 +4292,9 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
+  const finalDurationSec = (await probe(finalVideo)).durationSec;
+  assertFinalDurationMatchesTarget(finalDurationSec, videoSec, 30, "timeline_assemble final master");
+
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
   await persistRenderedFile(videoKey, finalVideo, { contentType: "video/mp4" }, {
     beforeAttempt: o.assertOutputAuthority,
@@ -4160,18 +4318,18 @@ async function finishFromComposed(
     }
   }
   await recordAsset(ctx, "video", videoKey, {
-    durationSec: videoSec,
+    durationSec: finalDurationSec,
     narrationSec,
     introSec,
     quoteOverlays: quotes.length,
     source: "stock_footage",
     clips: footage.length,
   });
-  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
+  ctx.log(`timeline_assemble ok: video ${finalDurationSec.toFixed(3)}s/${videoSec}s target (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
   return {
     videoKey,
     videoLocalPath: finalVideo,
-    videoDurationSec: videoSec,
+    videoDurationSec: finalDurationSec,
     quotesApplied,
     insertsApplied,
     captionsApplied,
@@ -4301,38 +4459,47 @@ export function captionCuesWithinMaster(
   };
 }
 
-export const captions: Block = {
-  id: "captions",
-  consumes: ["narrationDurationSec", "videoDurationSec"],
-  produces: ["captionsKey", "chaptersText"],
-  run: async (ctx) => {
-    const introSec = Number(ctx.store["introSec"] ?? 0);
-    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
-    const script = ctx.store["script"] as
-      | { sections?: { heading?: string; text?: string; narration?: string }[] }
-      | undefined;
-    const sections = script?.sections ?? [];
+export function createCaptionsBlock(writeObject: typeof putObject = putObject): Block {
+  return {
+    id: "captions",
+    consumes: ["narrationDurationSec", "videoDurationSec"],
+    produces: ["captionsKey", "chaptersText"],
+    run: async (ctx) => {
+      const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
+      const masterDurationSec = Number(ctx.store["videoDurationSec"] ?? 0);
+      const script = ctx.store["script"] as
+        | { sections?: { heading?: string; text?: string; narration?: string }[] }
+        | undefined;
+      const sections = script?.sections ?? [];
+      const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
+      const hasNarration = narrationSec > 0 || Boolean(capTimings?.length);
+      const narrationStartSec = hasNarration
+        ? resolveFinalMasterNarrationStartSec({
+            narrationStartSec: ctx.store["narrationStartSec"],
+            introApplied: ctx.store["introApplied"],
+            introSec: ctx.store["introSec"],
+            finalMasterDurationSec: masterDurationSec,
+            productionQa: ctx.params["qaProfile"] !== "draft",
+          }).startSec
+        : 0;
 
-    // Chapters: derived from script sections + narration timing + intro offset.
-    // No external dependency — works today (lands in the video description).
-    const chaptersText = buildChapters(sections, narrationSec, introSec);
-    if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
+      // Chapters use the same resolved narration-to-master clock as final QA.
+      // No external dependency — works today (lands in the video description).
+      const chaptersText = buildChapters(sections, narrationSec, narrationStartSec);
+      if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
 
-    // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
-    // we already produced in narration_tts (chunked to short cues, shifted by the
-    // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
-    // external poll-until-done service that could time out) — we already know the
-    // exact words and their timing. No external dependency, instant, never flaky.
-    let captionsKey = "";
-    const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
-    if (!capTimings?.length) {
-      ctx.log("captions: no sentenceTimings — chapters only");
-      return { captionsKey, chaptersText };
-    }
-    try {
+      // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
+      // produced in narration_tts, shifted onto the released master's resolved clock.
+      // No more re-transcribing our OWN TTS audio via AssemblyAI (an
+      // external poll-until-done service that could time out) — we already know the
+      // exact words and their timing. No external dependency, instant, never flaky.
+      if (!capTimings?.length) {
+        ctx.log("captions: no sentenceTimings — chapters only");
+        return { chaptersText };
+      }
       const fitted = captionCuesWithinMaster(
-        captionCuesFromTimings(capTimings, introSec),
-        Number(ctx.store["videoDurationSec"] ?? 0),
+        captionCuesFromTimings(capTimings, narrationStartSec),
+        masterDurationSec,
       );
       const cues = fitted.cues;
       if (fitted.overrunSec > 0) {
@@ -4347,16 +4514,16 @@ export const captions: Block = {
         return `${p(Math.floor(ms / 3600000))}:${p(Math.floor((ms % 3600000) / 60000))}:${p(Math.floor((ms % 60000) / 1000))},${p(ms % 1000, 3)}`;
       };
       const srt = cues.map((c, i) => `${i + 1}\n${toTs(c.startSec)} --> ${toTs(c.endSec)}\n${c.text}`).join("\n\n") + "\n";
-      captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
-      await putObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
+      const captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
+      await writeObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
       await recordAsset(ctx, "captions", captionsKey, { cues: cues.length });
       ctx.log(`captions: SRT ${cues.length} cues from ground-truth timings → ${captionsKey}`);
-    } catch (e) {
-      ctx.log(`captions: SRT build failed (continuing, chapters only): ${e instanceof Error ? e.message : e}`);
-    }
-    return { captionsKey, chaptersText };
-  },
-};
+      return { captionsKey, chaptersText };
+    },
+  };
+}
+
+export const captions: Block = createCaptionsBlock();
 
 const QA_VISUAL_STAGE_DEFECT_LIMIT = 128;
 const QA_VISUAL_STAGE_SUMMARY_MAX_CHARS = 4_000;
@@ -4680,27 +4847,21 @@ export const qaVisual: Block = {
     // the two clocks before constructing any cue or Story Spine visual lock.
     // Without this offset, an intro/preroll pairs spoken evidence with an
     // earlier, unrelated frame and can both invent and miss sync defects.
-    const rawNarrationStartSec = ctx.store["narrationStartSec"];
-    const declaredNarrationStartSec = rawNarrationStartSec === undefined
-      ? undefined
-      : Number(rawNarrationStartSec);
-    if (
-      rawNarrationStartSec !== undefined &&
-      (!Number.isFinite(declaredNarrationStartSec) || declaredNarrationStartSec! < 0 || declaredNarrationStartSec! > p.durationSec)
-    ) {
-      if (productionQa) {
-        throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
-      }
-      ctx.log("qa_visual: malformed draft narration start ignored; using the declared intro offset");
+    const narrationStartResolution = resolveFinalMasterNarrationStartSec({
+      narrationStartSec: ctx.store["narrationStartSec"],
+      introApplied: ctx.store["introApplied"],
+      introSec: ctx.store["introSec"],
+      finalMasterDurationSec: p.durationSec,
+      productionQa,
+    });
+    if (narrationStartResolution.rejectedDeclaredStart) {
+      const fallbackClock = narrationStartResolution.source === "intro" ? "declared intro offset" : "master start";
+      ctx.log(`qa_visual: malformed draft narration start ignored; using the ${fallbackClock}`);
     }
-    const narrationStartSec = declaredNarrationStartSec !== undefined &&
-      Number.isFinite(declaredNarrationStartSec) &&
-      declaredNarrationStartSec >= 0 &&
-      declaredNarrationStartSec <= p.durationSec
-      ? declaredNarrationStartSec
-      : ctx.store["introApplied"] === true
-        ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
-        : 0;
+    if (narrationStartResolution.rejectedIntroOffset) {
+      ctx.log("qa_visual: malformed draft intro offset ignored; using the master start");
+    }
+    const narrationStartSec = narrationStartResolution.startSec;
 
     // Detect the cinematic route before final visual review. A partial
     // cinematic handoff must not be able to hide behind qaProfile=draft and
@@ -4921,7 +5082,7 @@ export const qaVisual: Block = {
           topic,
           contentLaneKey: contentLane.key,
           sentenceTimings: ctx.store["sentenceTimings"],
-          narrationStartSec: Number(ctx.store["narrationStartSec"]),
+          narrationStartSec,
           whiteboardRenderSchedule: ctx.store["whiteboardRenderSchedule"],
         });
       } catch (error) {
@@ -6215,14 +6376,9 @@ export const qaVisual: Block = {
           keyPrefix: ctx.keyPrefix,
           runId: ctx.runId,
         });
-        if (
-          finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio < 0.95
-        ) {
-          critical.push(
-            "final-master narrated Story Spine coverage " +
-              `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} is below required 0.950`,
-          );
-        }
+        critical.push(...finalMasterNarratedStoryCoverageReleaseIssues(
+          finalMasterNarratedStoryCoverage.receipt.coverage,
+        ));
         ctx.log(
           "qa_visual: final-master narrated Story Spine coverage " +
             `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} ` +

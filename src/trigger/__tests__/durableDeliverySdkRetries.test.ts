@@ -6,6 +6,7 @@ import ts from "typescript";
 import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
 import { apiClientManager, type ApiRequestOptions } from "@trigger.dev/core/v3";
 import { bundleFanoutEnvelope, bundleFanoutDispatchSchedule } from "@/lib/bundleFanout";
+import { createMusicReuseReceipt } from "@/lib/musicReuseReceipt";
 import { serializedProgramEpisodeBusyRetrySchedule } from "@/lib/serializedProgramEpisode";
 
 function actualRequestOptions(file: string): ApiRequestOptions {
@@ -55,7 +56,18 @@ test("installed SDK makes one durable delivery attempt, preserving identity afte
       await assert.rejects(tasks.trigger("run-pipeline", { fixture: "control" }));
       assert.equal(received.length, 5, "control confirms inherited retry amplification in the installed SDK");
       const envelope = bundleFanoutEnvelope({ ownerId: "owner-fixture", baseRunId: "base", baseChannelId: "base-channel",
-        siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music" } });
+        siblingChannelId: "sibling", reuse: { language: "fr", footageKeys: [], musicKey: "retained-music",
+          musicReuseReceipt: createMusicReuseReceipt({ ownerId: "owner-fixture", baseRunId: "base",
+            baseChannelId: "base-channel", siblingChannelId: "sibling", musicKey: "retained-music",
+            family: "narrated_stock", contentLaneKey: "narrated_stock", provider: "mureka",
+            audioSha256: "a".repeat(64), audioByteLength: 1_000, soundProfileFingerprint: "b".repeat(64),
+            baseMusicKey: "owner/owner-fixture/runs/base/audio/music.mp3",
+            providerEvidence: {
+              program: { key: "program.json", sha256: "c".repeat(64) },
+              source: { key: "source.json", sha256: "d".repeat(64) },
+              quality: { key: "quality.json", sha256: "e".repeat(64) },
+              auditionWav: { key: "audition.wav", sha256: "f".repeat(64) },
+            } }) } });
       const schedules = [
         { file: "bundleFanoutDispatcher", request: bundleFanoutDispatchSchedule({ runId: "child", envelope }) },
         { file: "serializedProgramEpisodeRetryDispatcher", request: serializedProgramEpisodeBusyRetrySchedule({

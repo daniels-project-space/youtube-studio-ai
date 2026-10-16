@@ -31,7 +31,7 @@ import assert from "node:assert/strict";
 
 import { registerAllBlocks } from "@/engine/blocks";
 import { getManifest } from "@/engine/registry";
-import { declaredArtifactStore } from "@/engine/runner";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 
 registerAllBlocks();
 
@@ -101,6 +101,11 @@ const OTHERS: [string, string][] = [
   ["studio_ltx_adapter_resolve", "narrativeSeriesRunSelector"],
   ["topic_select", "narrativeSeriesRunSelector"],
   ["upload_draft", "finalMasterReleaseCertificate"],
+  ["upload_draft", "channelMusicProgramFingerprint"],
+  ["upload_draft", "musicAuditionSourceKey"],
+  ["upload_draft", "musicAuditionWavKey"],
+  ["upload_draft", "musicKey"],
+  ["timeline_assemble", "narrationStartSec"],
   ["cleanup", "finalMasterReleaseCertificate"],
   ["whiteboard_scribe", "contentLane"],
   ["signature_clips", "cinematicGeneratedScenePlan"],

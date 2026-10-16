@@ -188,6 +188,36 @@ async function leakySynthCannotWidenPatch(): Promise<void> {
   assert.ok(!("name" in h.writes[0].patch), "a leaked name must not reach the patch root");
 }
 
+async function unestablishedStyleDNANeverWrites(): Promise<void> {
+  const weakDrafts: StyleDNA[] = [
+    { ...FAKE_DNA, confidence: 0.69 },
+    { ...FAKE_DNA, groundingGaps: ["independent identity critic unavailable"] },
+  ];
+
+  for (const weakDraft of weakDrafts) {
+    const h = harness(legacyChannel());
+    let qualityBarBuilt = false;
+    h.deps.synth = async () => weakDraft;
+    h.deps.buildBar = () => {
+      qualityBarBuilt = true;
+      return FAKE_BAR;
+    };
+
+    const result = await regroundChannelCore(
+      { channelId: "fake_channel_not_real", family: "music_loop" },
+      h.deps,
+    );
+    assert.equal(result.ok, false, "unestablished DNA must not be persisted");
+    if (result.ok) throw new Error("unestablished Style DNA unexpectedly passed");
+    assert.equal(result.reason, "style-dna-not-established");
+    assert.equal(result.wrote, false);
+    assert.equal(result.confidence, weakDraft.confidence);
+    assert.deepEqual(result.groundingGaps, weakDraft.groundingGaps);
+    assert.equal(qualityBarBuilt, false, "a quality rubric must not be built from rejected DNA");
+    assert.equal(h.writes.length, 0, "the channel patch must never run for rejected DNA");
+  }
+}
+
 /* --------------------- 2. family must be explicit ----------------------- */
 
 function familyMustBeExplicit(): void {
@@ -433,6 +463,7 @@ async function main(): Promise<void> {
   await writesOnlyStyleDnaAndRubric();
   patchGuardRejectsWidening();
   await leakySynthCannotWidenPatch();
+  await unestablishedStyleDNANeverWrites();
   familyMustBeExplicit();
   await familyIsNeverInferredFromTemplate();
   await storedFamilyWins();

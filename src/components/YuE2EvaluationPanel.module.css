@@ -26,6 +26,11 @@
 .sections button { display: flex; align-items: center; justify-content: center; align-self: start; gap: 0.2rem; font-variant-numeric: tabular-nums; padding-inline: 0.2rem; }
 .sections svg { flex: 0 0 auto; }
 .sections p { margin: 0.3rem 0 0; }
+.groundingList { list-style: none; padding: 0; margin: 0; }
+.groundingEntry { min-width: 0; padding: 0.7rem 0; border-top: 1px solid var(--color-border, #ddd); overflow-wrap: anywhere; }
+.groundingEntry strong { display: block; }
+.groundingEntry ul { min-width: 0; margin: 0.35rem 0; padding-inline-start: 1.25rem; }
+.groundingEntry li { min-width: 0; overflow-wrap: anywhere; }
 .notice { padding-bottom: 1rem; }
 .panel code { word-break: break-all; font-size: 0.75rem; }
 @media (max-width: 420px) { .sections li { grid-template-columns: minmax(0, 1fr); gap: 0.4rem; } .sections button { width: 5rem; } }

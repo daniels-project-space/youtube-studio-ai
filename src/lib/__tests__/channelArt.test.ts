@@ -445,6 +445,29 @@ async function assertOutOfRangeScoreFailsClosed(): Promise<void> {
   assert(![...state.persisted.keys()].some((key) => key.endsWith("art/banner/bad-score-v1/approved.jpg")));
 }
 
+async function assertActionableIssuesFailClosed(): Promise<void> {
+  for (const kind of ["avatar", "banner"] as const) {
+    const verdict = { ...accepted(kind, 0.99), issues: ["visible composition defect"] };
+    const { runtime, state } = fakeRuntime({ verdicts: { [kind]: [verdict] } });
+    await assert.rejects(
+      generateChannelArt("owner-test", `issue-${kind}`, IDENTITY, () => {}, {
+        runtime,
+        avatar: kind === "avatar",
+        banner: kind === "banner",
+        maxAttempts: 1,
+        version: { [kind]: `issue-${kind}-v1` },
+        existing: kind === "avatar"
+          ? { bannerKey: "owners/owner-test/channels/issue-avatar/art/banner/good.png" }
+          : { imageKey: "owners/owner-test/channels/issue-banner/art/avatar/good.png" },
+      }),
+      new RegExp(`${kind} rejected after 1 attempts`, "i"),
+    );
+    assert.equal(state[`${kind}Renders`].length, 1);
+    assert([...state.persisted.keys()].some((key) => key.endsWith(`art/${kind}/issue-${kind}-v1/rejection.json`)));
+    assert(![...state.persisted.keys()].some((key) => key.endsWith(`art/${kind}/issue-${kind}-v1/approved.jpg`)));
+  }
+}
+
 async function assertExistingAvatarsArePreserved(): Promise<void> {
   for (const channel of ["quiet-stoic", "stoic-truths"]) {
     const { runtime, state } = fakeRuntime({ hasJudge: false });
@@ -606,6 +629,7 @@ async function main(): Promise<void> {
   await assertRejectedCandidateNeverReturns();
   await assertLetterboxedBannerFailsClosed();
   await assertOutOfRangeScoreFailsClosed();
+  await assertActionableIssuesFailClosed();
   await assertExistingAvatarsArePreserved();
   await assertPerAssetPreservation();
   await assertIndependentlyLeasedAssetGeneration();

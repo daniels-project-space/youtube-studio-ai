@@ -10,15 +10,20 @@ import { arrangementComposerReservation } from "@/lib/arrangementComposerBudget"
 type Request = { role: string; prompt: string; schema: z.ZodType; beforeDispatch?: () => Promise<void> };
 const calls: Request[] = [];
 const arrangement = {
-  role: "primary_music", direction: "Quiet original instrumental music.", requestedDurationSec: 30,
+  role: "primary_music", tempoMode: "metered", direction: "Quiet original instrumental music.", requestedDurationSec: 30,
   form: "continuous", ending: "natural_cadence", playback: "repeat",
   sections: Array.from({ length: 4 }, (_, index) => ({ id: `section-${index}`, label: `Section ${index}`,
     startFraction: index / 4, endFraction: (index + 1) / 4, energy: 0.2, instruction: "Keep the texture steady." })),
 };
 const responses: Record<string, unknown> = {
   crew_director: { hook: "A quiet opening", beats: [{ name: "Opening", intentSec: 30, note: "Observe." }] },
-  cinematographer: { footageQueries: ["quiet forest morning"], promptStyle: "Natural light" },
-  editor: { sections: [{ name: "Opening", cutsPerMin: 3 }], transitions: "crossfade" },
+  cinematographer: {
+    footageQueries: ["quiet forest morning", "mist between trees", "sunlight through leaves", "dew on fern",
+      "woodland path dawn", "river under canopy", "branches in breeze", "forest floor detail"],
+    promptStyle: "Natural light", palette: ["#29483A"], motion: "Slow observational drift", avoid: ["fast cuts"],
+  },
+  editor: { sections: [{ name: "Opening", cutsPerMin: 3 }], transitions: "crossfade",
+    captionStyle: "Small restrained lower-third", overlayRule: "Keep text clear of the subject" },
   composer: { musicPrompt: "Quiet original instrumental music.", duckDb: -12, bedLufs: -22 },
   critic: { assertions: [{ id: "duration", description: "Positive duration", check: "deterministic",
     metric: "durationSec", op: ">", threshold: 0, severity: "block" }] },
@@ -35,7 +40,24 @@ loader._load = function (id, ...args) {
     agentJson: async (request: Request) => {
       await request.beforeDispatch?.();
       calls.push(request);
-      return request.schema.parse(structuredClone(responses[request.role]));
+      const response = structuredClone(responses[request.role]) as Record<string, unknown>;
+      if (request.role === "composer_arrangement") {
+        const persona = /Channel persona: ([^\n]+)/u.exec(request.prompt)?.[1];
+        const topic = /Video topic: "([^"]+)"/u.exec(request.prompt)?.[1];
+        const sections = (response.arrangement as { sections: Array<{ id: string }> }).sections;
+        const sectionIds = sections.map((section) => section.id);
+        response.channelGrounding = [
+          { source: "channel_persona", cue: persona, decisions: [
+            { dimension: "space", choice: "Keep the stereo image close and intimate, avoiding distant or arena-sized reverb." },
+            { dimension: "dynamics", choice: "Limit dynamic growth so no gesture becomes theatrical or attention seeking." },
+          ], sectionIds },
+          { source: "episode_topic", cue: topic, decisions: [
+            { dimension: "texture", choice: "Use a restrained upper haze that evokes the named episode without literal effects." },
+            { dimension: "harmony", choice: "Hold open intervals without a triumphant cadence or sentimental arrival." },
+          ], sectionIds },
+        ];
+      }
+      return request.schema.parse(response);
     },
   };
   return originalLoad.call(this, id, ...args);
@@ -52,7 +74,7 @@ async function main() {
   const bible: ShowBible = { positioning: "Careful observation", vibe: "Patient", iconicMotif: "A horizon",
     worksInSpace: ["Understatement"], avoidInSpace: ["Hype"], refreshedAt: 1,
     activeCrew: ["director", "cinematographer", "editor", "composer", "critic"] };
-  const blocks = [...CREW_BLOCKS, getManifest("composer_brief", "3.0.0-yue2-score")!.block];
+  const blocks = [...CREW_BLOCKS, getManifest("composer_brief", "3.1.0-yue2-score-grounding")!.block];
   assert.equal(CREW_BLOCKS.length, 5);
   const stale = { channelName: "STALE HYPE BRAND", niche: "STALE CELEBRITY NICHE", persona: "STALE PERSONA",
     styleGrammar: "STALE GRAMMAR", channelSlug: "stale-slug", showBible: { ...bible, positioning: "STALE BIBLE" } };

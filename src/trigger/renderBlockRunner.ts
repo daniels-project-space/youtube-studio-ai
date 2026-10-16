@@ -19,12 +19,18 @@ import { assertFrozenPipelineWorkerDeployment } from "./pipelineWorkerRuntime";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
+import { declaredArtifactStore } from "@/engine/declaredArtifactStore";
 import { makeConvexSink } from "@/engine/convexSink";
 import { artifactContract, validateArtifact } from "@/engine/artifactSchemas";
 import { rehydrateOutputs, selectRehydrationSubset } from "@/lib/rehydrate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
-import type { ArtifactRef, RunStageSink, StageContext } from "@/engine/types";
+import type {
+  ArtifactRef,
+  CostModelUsageKind,
+  RunStageSink,
+  StageContext,
+} from "@/engine/types";
 import {
   assertRenderBlockAdmission,
   assertRenderBlockInvocation,
@@ -42,6 +48,10 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 import { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS } from "@/lib/renderChildLease";
 import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTransport";
+import { createConvexUsageScope, type ConvexUsageCounts } from "@/lib/convexUsage";
+import { createImageUsageScope } from "@/lib/imageUsage";
+import { createModelUsageScope, trackedCostForKinds, trackedUsageForKinds } from "@/lib/modelUsage";
+import { createModuleCritiqueScope, type ModuleCritiqueReceipt } from "@/lib/moduleCritiqueEvidence";
 import {
   assertRestoredStageOutputs,
   assertStageReuseReceipt,
@@ -171,7 +181,16 @@ function makeVisualArtifactAttemptCheckpoint(args: {
 export async function executeRenderBlock(
   payload: RenderBlockInput,
   options: RenderBlockRunnerOptions,
-): Promise<{ patch: Record<string, unknown> }> {
+): Promise<{
+  patch: Record<string, unknown>;
+  convexUsage: ConvexUsageCounts | null;
+  moduleUsage: {
+    providerCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    critiqueEvidence: ModuleCritiqueReceipt[];
+  } | null;
+}> {
   const { taskLabel, machineClass } = options;
 
   registerAllBlocks();
@@ -446,6 +465,16 @@ export async function executeRenderBlock(
     store, inputRefs: artifactRefs, inputIdentities: artifactIdentities,
   };
   const executionInputHash = stageInvocationHash(executionIdentity);
+  const moduleStore = declaredArtifactStore(
+    manifest,
+    store,
+    new Set<string>(),
+    (message) => logger.info(`[${taskLabel}] ${message}`),
+  );
+  const modelUsageScope = createModelUsageScope();
+  const imageUsageScope = createImageUsageScope();
+  const convexUsageScope = createConvexUsageScope();
+  const critiqueScope = createModuleCritiqueScope();
   const ctx: StageContext = {
     ownerId: payload.ownerId,
     runId: payload.runId,
@@ -453,7 +482,7 @@ export async function executeRenderBlock(
     executionLease,
     keyPrefix: frozenInvocation.keyPrefix,
     params: frozenEntry.params ?? {},
-    store,
+    store: moduleStore,
     artifactRefs: await loadInputArtifactRefs(),
     budgetUsd: frozenInvocation.budgetUsd,
     ...(budgetAdmission.stageBudgetUsd === undefined
@@ -475,6 +504,18 @@ export async function executeRenderBlock(
       moduleVersion: manifest.version,
       loadInputArtifactRefs,
     }),
+    modelUsageCostUsd: (kinds) => {
+      const summary = modelUsageScope.snapshot();
+      return kinds === undefined
+        ? summary.costUsd
+        : trackedCostForKinds(summary, new Set<CostModelUsageKind>(kinds));
+    },
+    modelUsageAccounting: (kinds) =>
+      trackedUsageForKinds(
+        modelUsageScope.snapshot(),
+        kinds === undefined ? undefined : new Set<CostModelUsageKind>(kinds),
+      ),
+    imageUsageAccounting: () => imageUsageScope.snapshot(),
     log: (msg: string, extra?: Record<string, unknown>) => logger.info(`[${taskLabel}] ${msg}`, extra),
   };
 
@@ -502,14 +543,27 @@ export async function executeRenderBlock(
       paid: manifest.costAndLatency.paid,
       priorCostUsd: persistedStages.find((row) => row.block === payload.blockId)?.cost ?? 0,
       checkpointCostReceipts: persistedStages.find((row) => row.block === payload.blockId)?.checkpointCostReceipts ?? [],
-      execute: () => block.run(ctx),
+      execute: () => convexUsageScope.run(() => modelUsageScope.run(() => imageUsageScope.run(() => critiqueScope.run(() => block.run(ctx))))),
       transport: {
         begin: () => convex.mutation(api.remoteChildCosts.begin, costIdentity),
         finish: (result) => convex.mutation(api.remoteChildCosts.finish, { ...costIdentity, ...result }),
       },
     });
     assertStageInvocationUnchanged(executionIdentity, executionInputHash);
-    return { patch };
+    return {
+      patch,
+      moduleUsage: options.attemptNumber === 1
+        ? {
+            providerCalls: modelUsageScope.snapshot().calls + imageUsageScope.snapshot().calls,
+            inputTokens: modelUsageScope.snapshot().inputTokens,
+            outputTokens: modelUsageScope.snapshot().outputTokens,
+            critiqueEvidence: critiqueScope.snapshot(),
+          }
+        : null,
+      // Trigger retries can follow a failed attempt that already made module
+      // requests; this successful attempt alone is not a complete total.
+      convexUsage: options.attemptNumber === 1 ? convexUsageScope.snapshot() : null,
+    };
   } catch (error) {
     const taskError = taskErrorForRetryPolicy(error);
     const { classification } = taskError;

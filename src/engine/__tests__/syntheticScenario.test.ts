@@ -5,6 +5,7 @@ import { designPipeline } from "@/engine/designer";
 import {
   SYNTHETIC_SCENARIO_DISCLOSURE,
   SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
+  assertSyntheticScenarioOpeningDisclosure,
   assertSyntheticScenarioContract,
   syntheticScenarioContract,
   syntheticScenarioVisualKindFor,
@@ -17,6 +18,37 @@ for (const profile of ["ai_town", "ai_decision", "ai_pov"] as const) {
   assert.equal(contract.fictional, true);
   assert.equal(contract.visibleDisclosure, SYNTHETIC_SCENARIO_DISCLOSURE);
   assert.match(syntheticScenarioWritingDirective(contract), /not a real simulation or real-world result/);
+  assert.deepEqual(
+    assertSyntheticScenarioOpeningDisclosure(
+      contract,
+      `[warm] ${contract.visibleDisclosure}. These illustrative assumptions are not a real simulation.`,
+    ),
+    {
+      version: SYNTHETIC_SCENARIO_DISCLOSURE_VERSION,
+      profile,
+      visibleDisclosure: SYNTHETIC_SCENARIO_DISCLOSURE,
+      openingVerified: true,
+    },
+  );
+  assert.throws(
+    () => assertSyntheticScenarioOpeningDisclosure(contract, "A long opening without a disclosure."),
+    /must say "FICTIONAL AI SCENARIO"/,
+  );
+  assert.throws(
+    () => assertSyntheticScenarioOpeningDisclosure(
+      contract,
+      "FICTIONAL AI SCENARIO. These illustrative assumptions describe a real simulation and measured outcomes.",
+    ),
+    /not a real simulation or real-world result/u,
+    "the exact disclosure phrase must not make the real-world disclaimer check tautological",
+  );
+  assert.throws(
+    () => assertSyntheticScenarioOpeningDisclosure(
+      contract,
+      "This is not a FICTIONAL AI SCENARIO. These illustrative assumptions are not a real simulation.",
+    ),
+    /must affirm, not negate/u,
+  );
 }
 
 const scenarioArtifact = artifactContract("syntheticScenario");

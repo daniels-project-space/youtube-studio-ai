@@ -367,7 +367,7 @@ function parseCritique(kind: ArtKind, raw: unknown): {
   }
   const issues = verdict.issues.map((issue) => issue.trim()).slice(0, 6);
   for (const check of failedChecks) issues.push(`${check} check failed or was omitted`);
-  const pass = failedChecks.length === 0 && score >= SCORE_THRESHOLD[kind];
+  const pass = failedChecks.length === 0 && issues.length === 0 && score >= SCORE_THRESHOLD[kind];
   return { score, pass, issues };
 }
 

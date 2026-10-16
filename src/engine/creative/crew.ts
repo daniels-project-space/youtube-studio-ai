@@ -18,7 +18,8 @@ import {
 } from "@/lib/arrangementComposerBudget";
 import { ExecutionError } from "@/engine/executionErrors";
 import { AcceptedMusicArrangementDraftSchema, createMusicReviewContext, MusicReviewContextSchema, MusicSymbolicScoreSchema,
-  MusicArrangementIntentSchema, MusicSymbolicScorePolicySchema, refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
+  MusicArrangementIntentSchema, MusicChannelGroundingSchema, MusicSymbolicScorePolicySchema,
+  refineMusicArrangementIntent, type MusicArrangementIntent } from "@/engine/acceptedMusicArrangement";
 import type {
   ShowBible,
   StyleDNA,
@@ -100,11 +101,27 @@ export async function briefDirector(bible: ShowBible, ctx: CrewContext): Promise
         `sums to roughly the target length and serves the channel's vibe. Return STRICT JSON ` +
         `{"hook":string,"beats":[{"name":string,"intentSec":number,"note":string}]}.`,
     });
-    const beats = (raw.beats ?? []).filter((b) => b && b.name).map((b) => ({
-      name: b.name.trim(), intentSec: Math.max(1, Math.round(b.intentSec || 0)), note: (b.note ?? "").trim(),
+    const hook = raw.hook.trim();
+    const proposedBeats = raw.beats ?? [];
+    if (!hook) {
+      log("crew/director: BRIEF REJECTED — the structure has no hook");
+      return undefined;
+    }
+    if (proposedBeats.length === 0) {
+      log("crew/director: BRIEF REJECTED — the structure has no beats");
+      return undefined;
+    }
+    const invalidBeatIndex = proposedBeats.findIndex((beat) =>
+      !beat.name.trim() || !beat.note.trim() || !Number.isFinite(beat.intentSec) || beat.intentSec <= 0,
+    );
+    if (invalidBeatIndex >= 0) {
+      log(`crew/director: BRIEF REJECTED — beat ${invalidBeatIndex + 1} is missing a name, intent, or positive duration`);
+      return undefined;
+    }
+    const beats = proposedBeats.map((beat) => ({
+      name: beat.name.trim(), intentSec: Math.max(1, Math.round(beat.intentSec)), note: beat.note.trim(),
     }));
-    if (!raw.hook && beats.length === 0) return undefined;
-    return { hook: (raw.hook ?? "").trim(), beats };
+    return { hook, beats };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a director
     // brief still renders. But the log has to say the brief is GONE, not just
@@ -150,8 +167,15 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
         `Stay consistent with the iconic motif. Return STRICT JSON ` +
         `{"footageQueries":string[],"promptStyle":string,"palette":string[],"motion":string,"avoid":string[]}.`,
     });
-    const queries = (raw.footageQueries ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 16);
-    if (queries.length === 0 && !raw.promptStyle) return undefined;
+    const queries = [...new Map((raw.footageQueries ?? [])
+      .map((query) => query.trim())
+      .filter((query) => {
+        const words = query.split(/\s+/u);
+        return words.length >= 2 && words.length <= 5;
+      })
+      .map((query) => [query.toLocaleLowerCase("en-US"), query] as const))]
+      .slice(0, 14)
+      .map(([, query]) => query);
     // OUTPUT SANITY: a degenerate LLM loop once emitted a 307,000-char
     // promptStyle ("gigantic" x420) that was blended into every downstream
     // i2v prompt and 422'd the provider. Clause fields are CLAUSES: hard-cap
@@ -166,12 +190,27 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
       }
       return v.length > cap ? v.slice(0, cap).replace(/\s+\S*$/, "") : v;
     };
+    const promptStyle = clause(raw.promptStyle, 500);
+    const palette = [...new Set((raw.palette ?? []).filter((color) => /^#[0-9a-fA-F]{6}$/u.test(color)))]
+      .slice(0, 5);
+    const motion = clause(raw.motion, 300);
+    const avoid = [...new Set((raw.avoid ?? []).map((item) => item.trim()).filter(Boolean))].slice(0, 8);
+    const missing: string[] = [];
+    if (queries.length < 8) missing.push(`only ${queries.length} valid distinct stock queries (needs 8)`);
+    if (!promptStyle) missing.push("prompt style");
+    if (palette.length === 0) missing.push("valid color palette");
+    if (!motion) missing.push("motion direction");
+    if (avoid.length === 0) missing.push("visual avoid guidance");
+    if (missing.length) {
+      log(`crew/dp: BRIEF REJECTED — incomplete visual brief: ${missing.join(", ")}`);
+      return undefined;
+    }
     return {
       footageQueries: queries,
-      promptStyle: clause(raw.promptStyle, 500),
-      palette: (raw.palette ?? []).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c)).slice(0, 5),
-      motion: clause(raw.motion, 300),
-      avoid: (raw.avoid ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 8),
+      promptStyle,
+      palette,
+      motion,
+      avoid,
     };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a dp
@@ -215,15 +254,34 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
         `essay 4-7, energetic explainer 8-12 (a "deliberate, breathing" edit is NOT 8+ cuts/min). Return STRICT JSON ` +
         `{"sections":[{"name":string,"cutsPerMin":number}],"transitions":string,"captionStyle":string,"overlayRule":string}.`,
     });
-    const sections = (raw.sections ?? []).filter((s) => s && s.name).map((s) => ({
-      name: s.name.trim(), cutsPerMin: Math.max(0, s.cutsPerMin || 0),
+    const proposedSections = raw.sections ?? [];
+    const sections = proposedSections.map((section) => ({
+      name: section.name.trim(),
+      cutsPerMin: section.cutsPerMin,
     }));
-    if (sections.length === 0 && !raw.transitions && !raw.captionStyle) return undefined;
+    const invalidSection = sections.some((section) =>
+      !section.name || !Number.isFinite(section.cutsPerMin) || section.cutsPerMin < 2 || section.cutsPerMin > 12,
+    );
+    const uniqueSectionNames = new Set(sections.map((section) => section.name.toLocaleLowerCase("en-US")));
+    const transitions = raw.transitions?.trim() ?? "";
+    const captionStyle = raw.captionStyle?.trim() ?? "";
+    const overlayRule = raw.overlayRule?.trim() ?? "";
+    const missing: string[] = [];
+    if (sections.length === 0) missing.push("section cadence");
+    if (invalidSection) missing.push("valid named cadence between 2 and 12 cuts per minute");
+    if (uniqueSectionNames.size !== sections.length) missing.push("distinct section names");
+    if (!transitions) missing.push("transition language");
+    if (!captionStyle) missing.push("caption styling");
+    if (!overlayRule) missing.push("overlay placement rule");
+    if (missing.length) {
+      log(`crew/editor: BRIEF REJECTED — incomplete cut sheet: ${missing.join(", ")}`);
+      return undefined;
+    }
     return {
       sections,
-      transitions: (raw.transitions ?? "").trim(),
-      captionStyle: (raw.captionStyle ?? "").trim(),
-      overlayRule: (raw.overlayRule ?? "").trim(),
+      transitions,
+      captionStyle,
+      overlayRule,
     };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a editor
@@ -238,10 +296,10 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
 /* ------------------------------ Composer ------------------------------- */
 
 const composerSchema = z.object({
-  musicPrompt: z.string().default(""),
-  duckDb: z.number().default(-12),
-  bedLufs: z.number().default(-22),
-  voiceFx: z.string().optional(),
+  musicPrompt: z.string().trim().min(1),
+  duckDb: z.number().finite().default(-12),
+  bedLufs: z.number().finite().default(-22),
+  voiceFx: z.enum(["radio"]).optional(),
 });
 
 export async function briefComposer(
@@ -294,15 +352,33 @@ export async function briefComposer(
 
 const arrangementComposerResponseSchema = z.object({
   arrangement: AcceptedMusicArrangementDraftSchema,
+  channelGrounding: MusicChannelGroundingSchema,
   duckDb: z.number().finite(),
   bedLufs: z.number().finite(),
   voiceFx: z.literal("radio").optional(),
 }).strict();
 
+function requireExplicitArrangementTempo<T extends z.infer<typeof arrangementComposerResponseSchema>>(
+  schema: z.ZodType<T>,
+) {
+  return schema.superRefine((response, issue) => {
+    if (response.arrangement.tempoMode === undefined) {
+      issue.addIssue({ code: z.ZodIssueCode.custom, path: ["arrangement", "tempoMode"],
+        message: "new Composer responses must explicitly choose metered or unmetered tempoMode" });
+    }
+  });
+}
+
+const arrangementComposerResponseWithTempoSchema = requireExplicitArrangementTempo(arrangementComposerResponseSchema);
+const scoredArrangementComposerResponseSchema = requireExplicitArrangementTempo(
+  arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema }),
+);
+
 export const ComposerBriefWithArrangementSchema = z.object({
   musicPrompt: z.string().min(1),
   musicIntent: MusicArrangementIntentSchema.optional(),
   reviewContext: MusicReviewContextSchema.optional(),
+  channelGrounding: MusicChannelGroundingSchema,
   symbolicScore: MusicSymbolicScoreSchema.optional(),
   symbolicScorePolicy: MusicSymbolicScorePolicySchema.optional(),
   audio: z.object({
@@ -320,6 +396,16 @@ export const ComposerBriefWithArrangementSchema = z.object({
       path: ["musicPrompt"],
     });
   }
+  const sectionIds = new Set(brief.arrangement.sections.map((section) => section.id));
+  const groundingCoverage = new Set(brief.channelGrounding.flatMap((entry) => entry.sectionIds));
+  if (!brief.reviewContext || !brief.channelGrounding.some((entry) => entry.source === "episode_topic" && entry.cue === brief.reviewContext!.topic) ||
+      !brief.channelGrounding.some((entry) => entry.source !== "episode_topic") ||
+      brief.channelGrounding.some((entry) => !brief.reviewContext!.promptContext.toLocaleLowerCase().includes(entry.cue.toLocaleLowerCase()) ||
+        entry.sectionIds.some((id) => !sectionIds.has(id))) ||
+      [...sectionIds].some((id) => !groundingCoverage.has(id))) {
+    refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["channelGrounding"],
+      message: "channel grounding must quote frozen identity and episode cues and bind concrete decisions to every section" });
+  }
 });
 
 /** Opt-in producer: the composer authors the form; downstream modules only seal and execute it. */
@@ -333,8 +419,8 @@ export async function briefComposerWithArrangement(
   const config = agentJsonConfiguration("composer_arrangement");
   assertArrangementComposerAdmission(config.model, admission, includeSymbolicScore);
   const responseSchema = includeSymbolicScore
-    ? arrangementComposerResponseSchema.extend({ symbolicScore: MusicSymbolicScoreSchema })
-    : arrangementComposerResponseSchema;
+    ? scoredArrangementComposerResponseSchema
+    : arrangementComposerResponseWithTempoSchema;
   const promptContext = [
     header(bible, ctx), `Content family: ${ctx.family}.`,
     musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",
@@ -351,9 +437,21 @@ export async function briefComposerWithArrangement(
       `a build, drop, climax, motif, or section progression for you. A continuous flat arrangement is valid ` +
       `when requested: its sections are review intervals, not mandatory musical changes, and may have ` +
       `identical energy and instructions with stable texture and no development. ` +
-      `Choose role primary_music, narration_bed, meditation_bed, or short_form_bed from the supplied intent. ` +
-      `Provide full direction including genre, instrumentation, mood, and exclusions; specify tempo only when ` +
-      `applicable. Explicitly unmetered drones are valid. No vocals or lyrics. ` +
+      `Channel-grounding standard: turn each supplied persona, style-grammar, doctrine, and authored audio-identity ` +
+      `cue into concrete audible choices in the direction and section instructions (for example register, ` +
+      `instrumentation, density, harmonic motion, articulation, space, or development). Make the combination ` +
+      `distinctive to this channel and episode, not a list of mood adjectives or a generic genre preset. ` +
+      `Preserve constraints and exclusions explicitly; do not invent identity traits or preferences for fields that ` +
+      `were not supplied. Every section must state what remains recognizable and what, if anything, is allowed to change. ` +
+      `Return channelGrounding with one episode_topic cue that exactly quotes the supplied video topic and at least one ` +
+      `channel identity cue (persona, style grammar, Show Bible, or authored audio identity) quoted exactly from the context. ` +
+      `For each cue provide at least two distinct dimensions from instrumentation, register, texture, harmony, rhythm, ` +
+      `dynamics, articulation, space, or development, with concrete audible choices and the section ids they govern. ` +
+      `Choose role primary_music, narration_bed, meditation_bed, sleep_sound_bed, or short_form_bed from the supplied intent. ` +
+      `sleep_sound_bed is for unattended sleep: stable low arousal, no pulse, melodic arrival, crescendo, or attention-catching event. ` +
+      `Set tempoMode explicitly to metered or unmetered. sleep_sound_bed must be unmetered; meditation_bed ` +
+      `may use either mode. Unmetered arrangements must not supply a pulse or BPM direction. Provide full direction including ` +
+      `genre, instrumentation, mood, and exclusions. No vocals or lyrics. ` +
       `requestedDurationSec requests one native source piece, an integer from 10 to 300 seconds; it is ` +
       `neither total video duration nor a promise of exact provider output length. Do not clamp an explicit ` +
       `out-of-range source-piece request into this range. Choose form continuous, through_composed, or sectional. ` +
@@ -365,6 +463,9 @@ export async function briefComposerWithArrangement(
       `Return STRICT JSON {"arrangement":{"role":string,"direction":string,"requestedDurationSec":number,` +
       `"form":string,"ending":string,"playback":string,"sections":[{"id":string,"label":string,` +
       `"startFraction":number,"endFraction":number,"energy":number,"instruction":string}]},` +
+      `"channelGrounding":[{"source":"channel_persona|style_grammar|show_bible|audio_identity|episode_topic",` +
+      `"cue":string,"decisions":[{"dimension":"instrumentation|register|texture|harmony|rhythm|dynamics|articulation|space|development",` +
+      `"choice":string}],"sectionIds":[string]}],` +
       `"duckDb":number,"bedLufs":number,"voiceFx":string?${includeSymbolicScore ? ',"symbolicScore":string' : ""}}.` +
       (includeSymbolicScore ? `\n\nAuthor symbolicScore as a complete original YuE2 native ABC composition, not prose or Markdown. ` +
         `Bind every musical choice to this channel, topic, and the arrangement you just authored. The score is the ` +
@@ -440,6 +541,7 @@ export async function briefComposerWithArrangement(
       ...("symbolicScore" in raw ? { symbolicScore: MusicSymbolicScoreSchema.parse(raw.symbolicScore),
         symbolicScorePolicy: "instrumental" as const } : {}),
       musicPrompt: raw.arrangement.direction,
+      channelGrounding: raw.channelGrounding,
       audio: {
         duckDb: raw.duckDb,
         bedLufs: raw.bedLufs,
@@ -461,14 +563,14 @@ export async function briefComposerWithArrangement(
 
 const specSchema = z.object({
   assertions: z.array(z.object({
-    id: z.string(),
-    description: z.string(),
+    id: z.string().trim().min(1),
+    description: z.string().trim().min(1),
     check: z.enum(["deterministic", "vision"]),
     metric: z.string().optional(),
     op: z.enum(["<", "<=", ">", ">=", "=="]).optional(),
     threshold: z.number().optional(),
     severity: z.enum(["block", "warn"]),
-  })).default([]),
+  }).strict()).max(12).default([]),
 });
 
 /**
@@ -574,11 +676,20 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
         `JSON {"assertions":[{"id","description","check","metric"?,"op"?,"threshold"?,"severity"}]}.`,
     });
     const assertions = filterCriticAssertionsForQa(
-      (raw.assertions ?? []).filter((a) => a && a.id && a.description),
+      raw.assertions ?? [],
       ctx.family,
       log,
     );
     if (assertions.length === 0) return undefined;
+    const assertionIds = assertions.map((assertion) => assertion.id.toLowerCase());
+    if (new Set(assertionIds).size !== assertionIds.length) {
+      log("crew/critic: BRIEF REJECTED — assertion ids must be unique for verdict attribution");
+      return undefined;
+    }
+    if (!assertions.some((assertion) => assertion.severity === "block")) {
+      log("crew/critic: BRIEF REJECTED — the review spec contains no blocking dealbreaker");
+      return undefined;
+    }
     return { assertions };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a critic

@@ -578,23 +578,39 @@ export function qwenTtsInstruction(instruction: string | undefined, speed: numbe
 export function composeQwenNarrationInstruction(args: {
   explicit?: unknown;
   editorialBrief?: unknown;
+  voiceProfile?: unknown;
   delivery?: unknown;
   pacing?: unknown;
   archetype?: unknown;
 }): string {
   const text = (value: unknown): string => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-  const directions = [args.explicit, args.editorialBrief, args.delivery, args.pacing, args.archetype]
-    .map(text)
-    .filter(Boolean);
+  const directions = [
+    { value: args.explicit, limit: 145 },
+    { value: args.editorialBrief, limit: 115 },
+    { value: args.voiceProfile, limit: 75 },
+    { value: args.delivery, limit: 60 },
+    { value: args.pacing, limit: 50 },
+    { value: args.archetype, limit: 35 },
+  ]
+    .map(({ value, limit }) => ({ direction: text(value), limit }))
+    .filter(({ direction }) => direction.length > 0);
   const seen = new Set<string>();
   return directions
-    .filter((direction) => {
+    .filter(({ direction }) => {
       const identity = direction.toLocaleLowerCase();
       if (seen.has(identity)) return false;
       seen.add(identity);
       return true;
     })
-    .map((direction) => /[.!?]$/.test(direction) ? direction : `${direction}.`)
+    .map(({ direction, limit }) => {
+      if (direction.length > limit) {
+        const clipped = direction.slice(0, limit - 3);
+        const boundary = clipped.lastIndexOf(" ");
+        const body = (boundary > limit * 0.6 ? clipped.slice(0, boundary) : clipped).trimEnd();
+        return `${body}...`;
+      }
+      return /[.!?]$/.test(direction) ? direction : `${direction}.`;
+    })
     .join(" ")
     .slice(0, 520);
 }

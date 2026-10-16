@@ -31,7 +31,7 @@ async function main() {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
     }));
     for (const [family, playback, role] of [["music_loop", "repeat", "primary_music"],
-      ["sleep", "repeat", "meditation_bed"], ["sleep", "once", "meditation_bed"],
+      ["sleep", "repeat", "sleep_sound_bed"], ["sleep", "once", "sleep_sound_bed"],
       ["narrated_stock", "once", "narration_bed"], ["shorts", "once", "short_form_bed"]] as const) {
       const programBrief = createChannelProgramBrief({ family, nicheKey: "educational", locale: "en",
         concept: `Original ${family} programming for adults.` });
