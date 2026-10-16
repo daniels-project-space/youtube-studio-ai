@@ -116,6 +116,13 @@ async function retainProviderMusicAuditionSource(input: {
 }
 
 /** Seals one episode's audio identity and the visual intent used by loop consumers. */
+function boundedMusicDirection(value: string, maximum: number): string {
+  if (value.length <= maximum) return value;
+  const contentLimit = Math.max(0, maximum - 3);
+  const boundary = value.lastIndexOf(" ", contentLimit);
+  return `${value.slice(0, boundary > 0 ? boundary : contentLimit).trimEnd()}...`;
+}
+
 export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
   dna: import("@/engine/creative/types").StyleDNA | null;
   niche?: string;
@@ -146,20 +153,33 @@ export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentit
         .map(value => value?.toString().trim()).find(Boolean);
       const channelAudioDirection = [
         `Original instrumental program for “${topic}”.`,
-        dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
+        dna?.audio?.genre ? `Preserve the channel sound: ${boundedMusicDirection(dna.audio.genre, 120)}.` : "",
         dna?.audio?.bpmRange?.length === 2
           ? `Keep the channel tempo within ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM.`
           : "",
-        dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
-        dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
-        dna?.audio?.moodArc ? `Preserve the channel's emotional arc: ${dna.audio.moodArc}.` : "",
+        dna?.audio?.instrumentation?.length
+          ? `Instrumentation: ${boundedMusicDirection(dna.audio.instrumentation.join(", "), 180)}.`
+          : "",
+        dna?.audio?.textures?.length
+          ? `Texture: ${boundedMusicDirection(dna.audio.textures.join(", "), 120)}.`
+          : "",
+        dna?.audio?.moodArc
+          ? `Preserve the channel's emotional arc: ${boundedMusicDirection(dna.audio.moodArc, 160)}.`
+          : "",
       ].filter(Boolean).join(" ");
       const episodePrefix = "Episode mood movement: ";
       const audioRequirements = "No vocals, no lyrics, and a musically resolved seamless loop.";
-      const episodeDirectionBudget = Math.max(0, 900 - channelAudioDirection.length - episodePrefix.length - audioRequirements.length - 3);
+      const boundedChannelDirection = boundedMusicDirection(
+        channelAudioDirection,
+        900 - audioRequirements.length - 2,
+      );
+      const episodeDirectionBudget = Math.max(
+        0,
+        900 - boundedChannelDirection.length - episodePrefix.length - audioRequirements.length - 3,
+      );
       const episodeDirection = audio?.musicPrompt?.trim().slice(0, Math.min(520, episodeDirectionBudget));
       const audioDirection = [
-        channelAudioDirection,
+        boundedChannelDirection,
         episodeDirection ? `${episodePrefix}${episodeDirection}.` : "",
         audioRequirements,
       ].filter(Boolean).join(" ");

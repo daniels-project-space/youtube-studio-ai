@@ -281,6 +281,25 @@ async function main(): Promise<void> {
         assert.match(observatoryPlan.audio.direction, /spacious ambient piano/u);
         assert.match(observatoryPlan.audio.direction, /prepared piano, glass harmonics/u);
 
+        const detailedIdentityPlan = await makeChannelPlan(
+          "A richly specified listening room under winter rain.",
+          {
+            audio: {
+              genre: `channel-specific ambient ${"warm harmonic color ".repeat(30)}`,
+              instrumentation: [`felt piano ${"with soft close-miked resonance ".repeat(12)}`, "upright bass"],
+              textures: [`tape warmth ${"and gentle room tone ".repeat(10)}`],
+              bpmRange: [60, 72],
+              moodArc: `settle into quiet reassurance ${"without losing intimacy ".repeat(24)}`,
+            },
+          },
+        );
+        assert.ok(detailedIdentityPlan.audio.direction.length <= 900,
+          "channel identity must fit inside the versioned plan's prompt budget");
+        assert.match(detailedIdentityPlan.audio.direction, /channel-specific ambient/u,
+          "bounded music prompts retain the channel's distinctive sound");
+        assert.match(detailedIdentityPlan.audio.direction, /No vocals, no lyrics, and a musically resolved seamless loop\.$/u,
+          "mandatory generation constraints must survive even oversized channel identity input");
+
         await assert.rejects(
           require_("music").run({ ...ctx, params: { provider: "suno" } }),
           /does not match sealed music program provider/,
