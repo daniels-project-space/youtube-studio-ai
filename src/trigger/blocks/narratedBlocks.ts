@@ -1542,6 +1542,7 @@ export const narrationTts: Block = {
       text: value,
       voiceId: selectedVoiceId,
       niche,
+      voiceIdentitySeed: ctx.channelId,
       speed,
       provider: ttsProvider,
       elevenVoiceId: selectedVoiceId,
