@@ -1118,12 +1118,22 @@ export async function synthScript(
         prompt: [
           `You are CONTINUING a YouTube narration script about "${req.topic}".`,
           programRouteClause(req),
+          seriesClause(req.series),
+          hookMandate(crafted),
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
+          playbookFull(req),
           voiceTagClause(req),
+          structureClause,
+          req.priorIssues?.length
+            ? `The previous draft was rejected for these issues; the new material MUST avoid them:\n${req.priorIssues.map((issue) => `- ${issue}`).join("\n")}`
+            : "",
           CRAFT_RULES,
-          `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
-          `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) ` +
-            `that fit BEFORE the final summary/outro section, each developing a distinct new idea in depth.`,
+          `Already-written narration (including the fixed cold open; do NOT repeat or contradict it):\n` +
+            [`Cold open: ${hook}`, ...sections.map((section) => `${section.heading}: ${section.narration}`)].join("\n"),
+          `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total), ` +
+            `${req.endWithSummary === false
+              ? "appending them after the existing sections; no summary section is required"
+              : "placing them before the final summary/outro section"}. Develop distinct new ideas in depth.`,
           `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
             `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
         ].filter(Boolean).join("\n\n"),
@@ -1134,8 +1144,9 @@ export async function synthScript(
           narration: spoken(req, typeof s.narration === "string" ? s.narration : ""),
         }))
         .filter((s) => s.narration.length > 0);
-      // Splice the continuation in BEFORE the final (summary/outro-shaped) section.
-      sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
+      // Keep a requested summary last; otherwise the continuation follows all existing sections.
+      const insertionIndex = req.endWithSummary === false ? sections.length : Math.max(1, sections.length - 1);
+      sections.splice(insertionIndex, 0, ...extra);
       wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
     } catch (e) {
       log(`scriptGen short: top-up failed (${e instanceof Error ? e.message : e})`);
