@@ -21,7 +21,10 @@ try {
     ["sleep", "once", "sleep_sound_bed"], ["shorts", "once", "short_form_bed"],
     ["narrated_stock", "once", "narration_bed"],
   ] as const) {
-    const opts = { family, nicheKey: family === "music_loop" ? "lofi" : "motivation" };
+    const nicheKey = family === "music_loop" ? "lofi"
+      : family === "sleep" ? (role === "meditation_bed" ? "meditation" : "sleep")
+      : family === "narrated_stock" ? "history" : "motivation";
+    const opts = { family, nicheKey };
     const baseline = designPipeline(opts), before = structuredClone(baseline.pipeline);
     const chosen = { ...selection, musicIntent: { ...selection.musicIntent, playback, role } };
     const invalidRole = role === "short_form_bed" || role === "narration_bed" ? "sleep_sound_bed" as const : "short_form_bed" as const;
