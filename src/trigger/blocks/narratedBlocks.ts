@@ -1019,6 +1019,24 @@ export function createScriptGenBlock(
 
 export const scriptGen: Block = createScriptGenBlock();
 
+function topicPromiseForHook(ctx: StageContext): string | undefined {
+  const value = ctx.store["topicBet"];
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("hook_craft: topicBet must be a structured topic-selection receipt");
+  }
+  const bet = value as Record<string, unknown>;
+  const topic = ctx.store["topic"];
+  const normalize = (text: string) => text.trim().replace(/\s+/gu, " ");
+  if (typeof topic !== "string" || typeof bet.topic !== "string" || normalize(topic) !== normalize(bet.topic)) {
+    throw new Error("hook_craft: topicBet does not belong to the selected topic");
+  }
+  if (typeof bet.hookPromise !== "string" || !bet.hookPromise.trim() || bet.hookPromise.trim().length > 500) {
+    throw new Error("hook_craft: topicBet hookPromise must be a non-empty sentence under 500 characters");
+  }
+  return bet.hookPromise.trim();
+}
+
 export const hookCraft: Block = {
   id: "hook_craft",
   consumes: ["narrationText"],
@@ -1028,6 +1046,7 @@ export const hookCraft: Block = {
     // spoken narration already opens with script_gen's hook; this does not
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
+    const plannedPromise = topicPromiseForHook(ctx);
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
     if (!hasCreativeTextKey()) return { hook: firstLine() };
 
@@ -1087,6 +1106,10 @@ export const hookCraft: Block = {
               "delivers — a hook the video does not pay off is a failure, not a win. " +
               (priorIssues.length
                 ? `A previous attempt was REJECTED for: ${priorIssues.join("; ")}. Fix all of it. `
+                : "") +
+              (plannedPromise
+                ? `Topicraft's planned viewer promise is intent only, not evidence: "${plannedPromise}". ` +
+                  "Preserve its intended payoff when the narration supports it; otherwise discard or narrow the promise. "
                 : "") +
               channelCritiqueBrief(hookChannel) +
               'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
@@ -1149,8 +1172,11 @@ export const hookCraft: Block = {
               `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
               `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
-              `about what the video delivers. If any actionable defect remains, pass must be false and ` +
+              `about what the video delivers. A planned topic promise is not evidence; when supported, ` +
+              `the hook should preserve its payoff, and when unsupported the hook must narrow to the narration. ` +
+              `Reject unsupported extensions. If any actionable defect remains, pass must be false and ` +
               `issues must name each defect; if pass is true, issues must be empty.` +
+              (plannedPromise ? `\nPLANNED VIEWER PROMISE (intent only): ${plannedPromise}` : "") +
               channelCritiqueBrief(hookChannel) +
               ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
               `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +

@@ -98,6 +98,11 @@ async function main(): Promise<void> {
         budgetUsd: 1,
         defaultRetries: 2,
         seedStore: {
+          topic: "A cracked valve warning",
+          topicBet: {
+            topic: "A cracked valve warning",
+            hookPromise: "A cracked valve warning prevented a dangerous pressure failure",
+          },
           narrationText: "A factory inspection found a cracked valve before pressure reached its limit. The crew stopped the line before anyone was hurt.",
         },
         sink: { async upsert() {} },
@@ -109,11 +114,39 @@ async function main(): Promise<void> {
       producerPrompts[1]?.includes(repairIssue),
       "the contradictory verdict's defect must inform the repaired draft",
     );
+    assert.ok(
+      producerPrompts[0]?.includes("A cracked valve warning prevented a dangerous pressure failure") &&
+        producerPrompts[0]?.includes("intent only, not evidence") &&
+        producerPrompts[0]?.includes("Preserve its intended payoff when the narration supports it"),
+      "the topic promise reaches Hookcraft as a non-authoritative intent bounded by narration",
+    );
     assert.equal(
       repaired.store.hook,
       "A cracked valve warning stopped the factory before pressure became dangerous",
       "the clean retry, not the higher-scoring defective hook, becomes the stage output",
     );
+
+    producerCalls = 0;
+    const staleBet = await runPipeline(
+      validatePipeline([{ block: "hook_craft", params: {} }], ["narrationText"]),
+      {
+        ownerId: "owner-hook-critique-contract-test",
+        channelId: "channel-hook-critique-contract-test",
+        runId: "run-hook-critique-stale-topic-bet",
+        keyPrefix: "owners/owner-hook-critique-contract-test/",
+        budgetUsd: 1,
+        defaultRetries: 2,
+        seedStore: {
+          topic: "A cracked valve warning",
+          topicBet: { topic: "A different topic", hookPromise: "A promise from a stale topic bet" },
+          narrationText: "A factory inspection found a cracked valve before pressure reached its limit.",
+        },
+        sink: { async upsert() {} },
+      },
+    );
+    assert.equal(staleBet.ok, false, "a topic promise bound to another topic fails before Hookcraft runs");
+    assert.match(staleBet.error ?? "", /topicBet does not belong to the selected topic/u);
+    assert.equal(producerCalls, 0, "a stale cross-module handoff causes no provider request");
 
     console.log("HOOK_CRAFT CRITIQUE CONTRACT PASS: malformed verdicts rejected and contradictory passing defects repaired");
   } finally {

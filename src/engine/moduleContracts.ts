@@ -620,6 +620,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
             // Per-channel grounding for the hook produce→critique loop (P1-4).
       "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+      // Topicraft's promise is only a strategy hint; Hookcraft verifies it against narration.
+      "topic", "topicBet",
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
