@@ -37,6 +37,9 @@ assert.deepEqual(inspectShowBibleQuality(bible, "narrated_stock"), []);
 
 const cases: Array<{ candidate: ShowBible; issue: string }> = [
   { candidate: { ...bible, positioning: " " }, issue: "positioning is empty" },
+  { candidate: { ...bible, positioning: "A channel for people who enjoy interesting things." }, issue: "positioning lacks channel-specific substance" },
+  { candidate: { ...bible, vibe: "calm, consistent, on-brand" }, issue: "vibe contains generic identity boilerplate" },
+  { candidate: { ...bible, iconicMotif: "a single bold, recurring central subject" }, issue: "iconicMotif contains generic identity boilerplate" },
   { candidate: { ...bible, worksInSpace: ["same", "same", "same", "same", "same"] }, issue: "worksInSpace has fewer than five distinct entries" },
   { candidate: { ...bible, avoidInSpace: [" ", "bad", "bad", "worse", "worse"] }, issue: "avoidInSpace has fewer than five distinct entries" },
   { candidate: { ...bible, activeCrew: ["critic"] }, issue: "activeCrew is missing required director" },
@@ -65,7 +68,7 @@ const cases: Array<{ candidate: ShowBible; issue: string }> = [
 ];
 
 for (const { candidate, issue } of cases) {
-  assert.ok(inspectShowBibleQuality(candidate, "narrated_stock").includes(issue), issue);
+  assert.ok(inspectShowBibleQuality(candidate, "narrated_stock").some((actual) => actual.includes(issue)), issue);
 }
 
 const lofiBible: ShowBible = {

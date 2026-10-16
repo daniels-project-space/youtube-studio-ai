@@ -83,6 +83,13 @@ const LOW_INFORMATION_WORDS = new Set([
   "videos", "viewer", "viewers", "with", "without",
 ]);
 
+const GENERIC_IDENTITY_PHRASES = [
+  "calm consistent on brand",
+  "single bold recurring central subject",
+  "high quality engaging content",
+  "visually appealing",
+];
+
 function informativeWords(value: string): Set<string> {
   return new Set(
     (value.normalize("NFKC").toLocaleLowerCase("en-US").match(/[\p{L}\p{N}]{3,}/gu) ?? [])
@@ -114,6 +121,22 @@ export function inspectShowBibleQuality(bible: ShowBible, family: FamilyKey): st
   const issues: string[] = [];
   for (const field of ["positioning", "vibe", "iconicMotif"] as const) {
     if (!bible[field].trim()) issues.push(`${field} is empty`);
+  }
+  const identityMinimums = { positioning: 6, vibe: 4, iconicMotif: 4 } as const;
+  for (const [field, minimum] of Object.entries(identityMinimums) as Array<
+    [keyof typeof identityMinimums, number]
+  >) {
+    const words = informativeWords(bible[field]);
+    if (words.size < minimum) {
+      issues.push(`${field} lacks channel-specific substance (${words.size} informative terms; needs ${minimum})`);
+    }
+    const normalized = bible[field].normalize("NFKC").toLocaleLowerCase("en-US")
+      .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    for (const phrase of GENERIC_IDENTITY_PHRASES) {
+      if (normalized.includes(phrase)) {
+        issues.push(`${field} contains generic identity boilerplate "${phrase}"`);
+      }
+    }
   }
   for (const field of ["worksInSpace", "avoidInSpace"] as const) {
     const distinct = new Set(bible[field].map((item) => item.trim().toLowerCase()).filter(Boolean));
