@@ -88,18 +88,20 @@ export function musicTrackVariationDirection(role: ChannelMusicRole): string {
   }
 }
 
-export async function generateMurekaTrackSet(input: {
+export async function generateMusicTrackSet(input: {
   prompt: string;
   trackCount: number;
   variationDirection: string;
-  model?: string;
-  generate?: typeof generateMureka;
+  generate: (request: {
+    prompt: string;
+    remainingTrackCount: number;
+    generationIndex: number;
+  }) => Promise<{ jobId: string; tracks: MusicTrack[] }>;
   onCompletedGeneration?: () => void;
 }): Promise<{ tracks: MusicTrack[]; jobIds: string[]; generationCount: number }> {
   if (!Number.isSafeInteger(input.trackCount) || input.trackCount < 1 || input.trackCount > 8) {
-    throw new Error("music: Mureka track count must be an integer between 1 and 8");
+    throw new Error("music: track count must be an integer between 1 and 8");
   }
-  const generate = input.generate ?? generateMureka;
   const tracks: MusicTrack[] = [];
   const jobIds: string[] = [];
   while (tracks.length < input.trackCount) {
@@ -107,9 +109,13 @@ export async function generateMurekaTrackSet(input: {
     const prompt = generationIndex === 0
       ? input.prompt
       : `${input.prompt}\nPart ${generationIndex + 1}: ${input.variationDirection}.`;
-    const result = await generate({ prompt, model: input.model, timeoutMs: 600_000 });
+    const result = await input.generate({
+      prompt,
+      remainingTrackCount: input.trackCount - tracks.length,
+      generationIndex,
+    });
     input.onCompletedGeneration?.();
-    if (!result.tracks.length) throw new Error("music: Mureka generation returned no tracks");
+    if (!result.tracks.length) throw new Error("music: provider generation returned no tracks");
     jobIds.push(result.jobId);
     tracks.push(...result.tracks.slice(0, input.trackCount - tracks.length));
   }
@@ -853,36 +859,43 @@ export const music: Block = {
           durationSec: result.receipt.durationSec,
         }];
       } else if (prov === "suno") {
-        const gens = Math.ceil(trackCount / 2);
-        for (let g = 0; g < gens && tracks.length < trackCount; g++) {
-          const varied =
-            g === 0
-              ? providerPrompt
-              : `${providerPrompt} Part ${g + 1} of a continuous mix: ${musicTrackVariationDirection(channelMusicProgram.role)}.`;
-          ctx.log(`music: suno ${sunoModel} generation ${g + 1}/${gens} (custom mode, WAV upgrade)…`);
-          const res = await generateSuno({
-            prompt: varied,
-            model: prov === provider ? sunoModel : "V5",
-            title: mixTitle,
-            // WAV upgrade only when EXPLICITLY requested (lofi sets it): a
-            // narrated bed sits ducked -22dB under voice — inaudible benefit,
-            // and a failed WAV poll burned up to 3 min/clip of pure waiting.
-            wantClips: Math.min(2, trackCount - tracks.length),
-            preferWav: ctx.params.preferWav === true,
-            timeoutMs: 600_000,
-          });
-          generations++;
-          billedGenerations++;
-          jobIds.push(res.jobId);
-          tracks.push(...res.tracks.slice(0, trackCount - tracks.length));
-        }
-      } else {
-        ctx.log(`music: generating ${trackCount} requested Mureka tracks…`);
-        const result = await generateMurekaTrackSet({
+        const result = await generateMusicTrackSet({
           prompt: providerPrompt,
           trackCount,
           variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
-          model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
+          generate: ({ prompt, remainingTrackCount, generationIndex }) => {
+            ctx.log(`music: suno ${sunoModel} generation ${generationIndex + 1} (custom mode, WAV upgrade)…`);
+            return generateSuno({
+              prompt,
+              model: prov === provider ? sunoModel : "V5",
+              title: mixTitle,
+              // WAV upgrade only when EXPLICITLY requested (lofi sets it): a
+              // narrated bed sits ducked -22dB under voice — inaudible benefit,
+              // and a failed WAV poll burned up to 3 min/clip of pure waiting.
+              wantClips: Math.min(2, remainingTrackCount),
+              preferWav: ctx.params.preferWav === true,
+              timeoutMs: 600_000,
+            });
+          },
+          onCompletedGeneration: () => {
+            generations += 1;
+            billedGenerations += 1;
+          },
+        });
+        jobIds = result.jobIds;
+        tracks = result.tracks;
+        usedProvider = "suno";
+      } else {
+        ctx.log(`music: generating ${trackCount} requested Mureka tracks…`);
+        const result = await generateMusicTrackSet({
+          prompt: providerPrompt,
+          trackCount,
+          variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
+          generate: ({ prompt }) => generateMureka({
+            prompt,
+            model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
+            timeoutMs: 600_000,
+          }),
           onCompletedGeneration: () => {
             generations += 1;
             billedGenerations += 1;
