@@ -662,7 +662,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE</span>
             : isRegistered
               ? <span className={styles.moduleStatus} data-tone="registered">REGISTERED</span>
-              : <span className={styles.moduleStatus} data-tone="active">ACTIVE</span>}
+              : <span className={styles.moduleStatus} data-tone="active">CATALOG ACTIVE</span>}
           <small>{moduleEvidenceLabel(m.key)}</small>
         </span>
         <span className={styles.moduleToggle} aria-hidden="true">+</span>
