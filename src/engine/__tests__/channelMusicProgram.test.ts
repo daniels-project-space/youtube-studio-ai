@@ -845,6 +845,31 @@ for (const rejection of independentQualityRejections) {
   }
 }
 
+// Archived Lo-Fi delivery measured from R2 on 2026-10-16, decoded with FFmpeg.
+// SHA-256 pins the real adverse output without checking a multi-megabyte file into tests.
+// Its measured true peak (-0.5 dBFS) fails the current primary-music -1 dBTP ceiling.
+const archivedLofiMeasurements = {
+  ...receiptInput.measurements,
+  truePeakDbtp: -0.5,
+};
+const archivedLofiFailures = musicProgramTechnicalQualityFailures({
+  program: lofi,
+  measurements: archivedLofiMeasurements,
+});
+assert.deepEqual(archivedLofiFailures, [
+  "true peak exceeds the sealed ceiling",
+], "the current release oracle must reject the archived legacy Lo-Fi delivery on its measured true-peak defect");
+assert.throws(
+  () => createMusicProgramQualityReceipt({
+    program: lofi,
+    ...receiptInput,
+    measurements: archivedLofiMeasurements,
+  }),
+  /true peak exceeds the sealed ceiling/u,
+  "a technically deficient archived output cannot acquire a passing release receipt",
+);
+// Source object SHA-256: 5dd617ca33474ec891c40df5f39387279aa73125bea1c41e5faf4394e3d72a6a.
+
 const tampered = structuredClone(history);
 tampered.identity.genre = "generic cinematic";
 assert.throws(
