@@ -1,7 +1,7 @@
 import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
-import { musicRoleForRoute } from "@/engine/channelMusicProgram";
+import { isGuidedMeditationMusicRoleOverride, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { ExecutionError } from "@/engine/executionErrors";
 import { manifestFromBlock } from "@/engine/moduleManifest";
@@ -33,7 +33,11 @@ const block: Block & { version: string } = {
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
-      if (arrangement.arrangement.role !== expectedRole) {
+      if (arrangement.arrangement.role !== expectedRole && !isGuidedMeditationMusicRoleOverride(
+        route.family,
+        route.contentLaneKey,
+        arrangement.arrangement.role,
+      )) {
         throw new Error(`YuE2 music route requires a ${expectedRole} arrangement, received ${arrangement.arrangement.role}`);
       }
     }

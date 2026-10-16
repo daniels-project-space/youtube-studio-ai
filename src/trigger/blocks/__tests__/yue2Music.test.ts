@@ -128,6 +128,18 @@ async function main() {
     channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: wrongSleepArrangement } }), /requires a sleep_sound_bed arrangement/);
   assert.equal(calls.length + reads + bootstraps, 0, "a sleep route must not pass a primary-music arrangement to YuE2");
 
+  const guidedMeditationArrangement = changedArrangement({
+    arrangement: { ...arrangement.arrangement, role: "meditation_bed" },
+    musicIntent: { ...arrangement.musicIntent, role: "meditation_bed" },
+  });
+  reset();
+  await assert.rejects(selected.execute({ ...context, store: { ...context.store,
+    channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: guidedMeditationArrangement } }),
+  /candidate, request or allocation mismatch/);
+  assert.equal(calls.length, 1,
+    "the explicit guided-meditation role must reach durable source reconciliation instead of failing sleep-role admission");
+  assert.equal(reads, 1);
+
   for (const patch of [
     { ownerId: "another-owner" }, { channelId: "another-channel" }, { runId: "another-run" },
     { budgetUsd: 0 }, { budgetUsd: Infinity }, { stageBudgetUsd: undefined }, { stageBudgetUsd: 0.03 },
