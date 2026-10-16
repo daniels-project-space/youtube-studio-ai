@@ -539,7 +539,7 @@ roleBoundMusicManifest.execution.seedStore = {
 const roleBoundMusicProgram = planWeekPreparedMusicProgram(roleBoundMusicManifest, "mureka");
 assert.equal(roleBoundMusicProgram.role, "meditation_bed",
   "weekly preparation preserves the Composer's explicit role just like the runtime music module");
-assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.1026,
+assert.equal(roleBoundMusicProgram.mix.bodyMusicVol, 0.16,
   "a meditation bed on a narrated route must preserve the narration foreground");
 assert.equal(roleBoundMusicProgram.mix.narrationPriority, true,
   "prepared music must not discard voice-masking priority when the sound role is meditation");

@@ -84,6 +84,15 @@ const quiz = admittedChannel({
 });
 assert.throws(
   () => assertPlanWeekChannelRouteAdmission(quiz),
+  /unsupported explicit weekly preparation implementation versions: music@/,
+  "week-ahead preparation must fail closed on the unqualified music implementation pin",
+);
+const quizWithoutMusicPin = {
+  ...quiz,
+  pipeline: quiz.pipeline.map((entry) => entry.block === "music" ? { ...entry, version: undefined } : entry),
+};
+assert.throws(
+  () => assertPlanWeekChannelRouteAdmission(quizWithoutMusicPin),
   /certified QuizYear routes require their dedicated sealed planner/,
   "generic week-ahead Topicraft cannot create raw quiz plans",
 );

@@ -388,12 +388,13 @@ async function main() {
     }
     directory = join(root, "legacy"); await mkdir(directory); resetEvidence();
     const legacy = await execute({ topic: story.title, channelName: seed.channelName }, { block: "motion_comic", params: { panels: 4 } });
-    assert.equal(legacy.result.ok, false, "retain the existing legacy manifest's undeclared-read refusal");
-    assert.match(legacy.result.error ?? "", /undeclared artifact read "persona"/);
-    assert.equal(artCalls + voiceCalls + musicCalls, 0);
-    // Direct legacy behavior remains testable without pretending its existing
-    // incomplete read contract passed the real runner above.
+    assert.equal(legacy.result.ok, true, legacy.result.error);
+    assert.ok(artCalls > 0 && voiceCalls > 0 && musicCalls > 0,
+      "the declared legacy motion-comic module completes its own art, narration, and music stages");
+    // The current shared-score manifest explicitly declares persona optional.
+    // Give direct legacy execution a fresh fixture directory to avoid warm-artifact reuse.
     resetEvidence();
+    directory = join(root, "legacy-direct"); await mkdir(directory);
     await motionComicBlock.run({
       ownerId, channelId, runId: "legacy-direct", keyPrefix: prefix,
       params: { panels: 4 }, store: { topic: story.title, channelName: seed.channelName },
@@ -407,7 +408,7 @@ async function main() {
     assert.equal(normalization[normalization.indexOf("-ar") + 1], "48000");
     assert.equal(normalization[normalization.indexOf("-t") + 1], "1.7");
     assert.equal(normalization[normalization.indexOf("-c:v") + 1], "copy");
-    console.log("SHARED SCORE MOTION COMIC PASS: real cold Mureka producer/registry/compiler/runner/block/cast, once/repeat, raw reuse refusal, same-key replacement refusal, cache identity; legacy persona contract failure retained and direct legacy behavior verified; paid I/O explicitly fake");
+    console.log("SHARED SCORE MOTION COMIC PASS: real cold Mureka producer/registry/compiler/runner/block/cast, once/repeat, raw reuse refusal, same-key replacement refusal, cache identity; optional persona contract and direct legacy behavior verified; paid I/O explicitly fake");
   } finally {
     reset?.(); loader._load = originalLoad; globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(savedEnvironment)) {
