@@ -2,6 +2,7 @@ import type { PlanWeekPreparationManifest } from "./planWeekPreparationContract"
 import { DELIVERY_METADATA_VERSION, MetadataDeliverySchema } from "./metadataDelivery";
 import { COMPOSER_MIX_ASSEMBLY_VERSION } from "@/engine/composerMixPipelineSelection";
 import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
+import type { ChannelMusicRole } from "@/engine/channelMusicProgram";
 import {
   CHANNEL_AWARE_SCRIPT_GEN_VERSION,
   CHANNEL_AWARE_SCRIPT_QA_VERSION,
@@ -11,15 +12,16 @@ import {
 export function assertWeeklyPreparationVersionsSupported(
   pipeline: PlanWeekPreparationManifest["execution"]["pipeline"],
   context: string,
+  musicRole?: ChannelMusicRole,
 ): void {
   const unsupported = pipeline.flatMap((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const candidate = entry as { block?: unknown; version?: unknown; params?: { targetDurationSec?: unknown } };
     if (candidate.version === undefined) return [];
-    // Prepared music uses the same frozen channel identity and role-specific
-    // fallback profile as this exact short-form runtime module. Its producer
-    // revalidates the route role before any provider call.
-    if (candidate.block === "music" && candidate.version === CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION) return [];
+    if (candidate.block === "music" && candidate.version === CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION) {
+      if (musicRole === "short_form_bed") return [];
+      return [`music@${JSON.stringify(candidate.version)} requires short_form_bed (actual role: ${musicRole ?? "unresolved"}, entry ${index})`];
+    }
     // No weekly producer substitutes for this downstream block. Its exact pin
     // and params remain in the frozen pipeline and its manifest fingerprint.
     if (candidate.block === "metadata" && candidate.version === DELIVERY_METADATA_VERSION &&

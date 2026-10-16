@@ -43,6 +43,7 @@ import {
   type ScriptRequest,
 } from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
 import { requireAuthoredShowBibleVoice } from "@/engine/showBibleVoice";
 
 export interface PlanWeekPreparedScriptArgs {
@@ -261,7 +262,7 @@ export const planWeekPreparedScriptTask = task({
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script");
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-script", planWeekMusicRole(manifest));
     const sidecarKey = planWeekPreparedScriptKey({
       ownerId: payload.ownerId,
       channelSlug: payload.channelSlug,

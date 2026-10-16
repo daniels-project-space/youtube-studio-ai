@@ -9,6 +9,7 @@
  */
 import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -289,7 +290,7 @@ export const planWeekPreparedNarrationTask = task({
     const payload = assertPlanWeekPreparedNarrationArgs(rawPayload);
     await bootstrapSecrets(() => undefined, { services: ["cloudflare"] });
     const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-narration");
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-narration", planWeekMusicRole(manifest));
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     const sidecarKey = planWeekPreparedNarrationKey(scope);
     const audioKey = planWeekPreparedNarrationAudioKey(scope);

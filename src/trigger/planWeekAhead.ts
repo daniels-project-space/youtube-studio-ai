@@ -52,6 +52,7 @@ import {
 } from "@/engine/documentarySourceEpisodePlan";
 import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { musicRoleForRoute } from "@/engine/channelMusicProgram";
 import type { PipelineEntry } from "@/engine/types";
 import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -236,9 +237,6 @@ export function assertPlanWeekChannelRouteAdmission(channel: {
   programRoute: ChannelProgramRoute;
   programDirective: string;
 } {
-  if (Array.isArray(channel.pipeline)) {
-    assertWeeklyPreparationVersionsSupported(channel.pipeline, "plan-week-ahead");
-  }
   const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
     context: "plan-week-ahead channel identity",
     requireProgramBrief: true,
@@ -263,6 +261,11 @@ export function assertPlanWeekChannelRouteAdmission(channel: {
     route: rawProgramRoute,
     programBrief,
   });
+  assertWeeklyPreparationVersionsSupported(
+    pipeline,
+    "plan-week-ahead",
+    musicRoleForRoute(programRoute.family, programRoute.contentLaneKey),
+  );
   assertChannelProgramRoutePipelineCompatibility({
     route: programRoute,
     programBrief,

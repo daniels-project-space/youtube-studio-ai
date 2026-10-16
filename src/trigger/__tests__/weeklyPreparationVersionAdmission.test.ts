@@ -17,6 +17,10 @@ import {
   CHANNEL_AWARE_SCRIPT_GEN_VERSION,
   CHANNEL_AWARE_SCRIPT_QA_VERSION,
 } from "@/engine/channelAwareScriptQaSelection";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
+import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import { designPipeline } from "@/engine/designer";
 
 const scope = { ownerId: "owner-test", channelId: "channel-test", channelSlug: "history", batchId: "batch-test", itemId: "item-test" };
 const manifestKey = planWeekPreparationKey(scope);
@@ -45,6 +49,23 @@ let sidecarMode: "existing" | "missing" | "stop" | "error" | "bytes" = "existing
 let sidecarError: unknown;
 let sidecarBytes = Buffer.from("{}");
 let channelPipeline: unknown[] = [];
+function weekAheadTestChannel() {
+  const programBrief = createChannelProgramBrief({
+    family: "narrated_stock", nicheKey: "psychology", locale: "en",
+    concept: "A clear, recurring channel program with a bounded viewer promise.",
+  });
+  const programRoute = resolveChannelProgramRoute(programBrief);
+  const designed = designPipeline({ family: programBrief.family, nicheKey: programBrief.nicheKey,
+    locale: programBrief.locale, programBrief, programRoute });
+  const pipeline = designed.pipeline.map((entry) => {
+    const override = channelPipeline.find((candidate) => candidate && typeof candidate === "object" &&
+      (candidate as { block?: unknown }).block === entry.block) as { version?: unknown } | undefined;
+    return override ? { ...entry, version: override.version } : entry;
+  });
+  const showProfile = createChannelShowProfile({ programBrief, programRoute, pipeline });
+  return { ...scope, name: "Test channel", identity: { nicheKey: programBrief.nicheKey,
+    programBrief, programRoute, showProfile }, pipeline };
+}
 const sidecarBoundary = new Error("unversioned task reached the existing sidecar boundary");
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -69,7 +90,7 @@ async function main(): Promise<void> {
     if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
     if (id === "@/lib/studioConvexHttpClient") return {
       StudioConvexHttpClient: class {
-        async query() { return { ...scope, pipeline: channelPipeline }; }
+        async query() { return weekAheadTestChannel(); }
         async mutation() { mutations++; throw new Error("mutation forbidden"); }
       },
     };
@@ -117,7 +138,13 @@ async function main(): Promise<void> {
     ], "test"));
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
-    ], "test"), "weekly preparation admits only the short-form music ABI implemented by its shared composer");
+    ], "test", "short_form_bed"), "weekly preparation admits the short-form ABI only for its matching module role");
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test", "narration_bed"), /requires short_form_bed/);
+    assert.throws(() => assertWeeklyPreparationVersionsSupported([
+      { block: "music", version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION },
+    ], "test"), /actual role: unresolved/);
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "qa_script", version: CHANNEL_AWARE_SCRIPT_QA_VERSION },
     ], "test"), "weekly preparation executes the exact frozen channel-aware reviewer before TTS");

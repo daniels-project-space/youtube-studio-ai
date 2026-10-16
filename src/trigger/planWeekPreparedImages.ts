@@ -9,6 +9,7 @@ import { stageH3SceneBatchInRenderEngine } from "@/lib/renderEngineH3SceneBatchC
  */
 import { task } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
 import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
 import {
@@ -537,7 +538,7 @@ export const planWeekPreparedImagesTask = task({
       required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
     });
     const manifest = await readPreparationManifest(payload);
-    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-images");
+    assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-images", planWeekMusicRole(manifest));
     const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
     const prior = await verifyStoredSidecar(sidecarKey, manifest);
     if (prior) {

@@ -1,5 +1,5 @@
 import type { PlanWeekPreparationManifest } from "@/lib/planWeekPreparation";
-import { ChannelMusicProgramSchema, createChannelMusicProgram, musicRoleForRoute, type ChannelMusicProgram, type ChannelMusicProvider as MusicProvider } from "@/engine/channelMusicProgram";
+import { ChannelMusicProgramSchema, createChannelMusicProgram, musicRoleForRoute, type ChannelMusicProgram, type ChannelMusicProvider as MusicProvider, type ChannelMusicRole } from "@/engine/channelMusicProgram";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { getMusicBrief } from "@/engine/creative/brief";
 import { assertOriginalMusicProgramPlanBinding } from "@/engine/originalMusicProgram";
@@ -38,6 +38,16 @@ function styleAudio(manifest: PlanWeekPreparationManifest): Record<string, unkno
   if (!style || typeof style !== "object" || Array.isArray(style)) return {};
   const audio = (style as Record<string, unknown>).audio;
   return audio && typeof audio === "object" && !Array.isArray(audio) ? audio as Record<string, unknown> : {};
+}
+
+export function planWeekMusicRole(manifest: PlanWeekPreparationManifest): ChannelMusicRole {
+  const seed = seedRecord(manifest);
+  const route = routeSeed(manifest);
+  const family = route?.family ?? (typeof seed.family === "string" ? seed.family : "narrated_stock");
+  const contentLaneKey = route?.contentLaneKey ?? (typeof seed.contentLane === "object" && seed.contentLane && !Array.isArray(seed.contentLane)
+    ? String((seed.contentLane as Record<string, unknown>).key ?? "narrated_stock")
+    : "narrated_stock");
+  return getMusicBrief(seed)?.musicIntent?.role ?? musicRoleForRoute(family, contentLaneKey);
 }
 
 /** Re-derive the exact frozen preparation recipe before trusting a saved result. */
@@ -82,7 +92,7 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
   const contentLaneKey = route?.contentLaneKey ?? (typeof seed.contentLane === "object" && seed.contentLane && !Array.isArray(seed.contentLane)
     ? String((seed.contentLane as Record<string, unknown>).key ?? "narrated_stock")
     : "narrated_stock");
-  const role = musicBrief?.musicIntent?.role ?? musicRoleForRoute(family, contentLaneKey);
+  const role = planWeekMusicRole(manifest);
   if (usesShortFormIdentityProfile && role !== "short_form_bed") {
     throw new Error("weekly prepared short-form music version requires the short_form_bed role");
   }

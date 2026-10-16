@@ -5,6 +5,7 @@ import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { createChannelShowProfile } from "@/engine/channelShowProfile";
 import { designPipeline } from "@/engine/designer";
+import { CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION } from "@/engine/musicModuleVersions";
 import { assertPlanWeekChannelRouteAdmission } from "@/trigger/planWeekAhead";
 
 function admittedChannel(input: {
@@ -59,6 +60,16 @@ assert.match(
   admission.programDirective,
   /FROZEN CHANNEL PROGRAM ROUTE: narrated-stock\/foundation\/v1/,
   "Topicraft must receive a directive derived from the admitted route, never a raw selector",
+);
+assert.throws(
+  () => assertPlanWeekChannelRouteAdmission({
+    ...narrated,
+    pipeline: narrated.pipeline.map((entry) => entry.block === "music"
+      ? { ...entry, version: CHANNEL_IDENTITY_SHORT_FORM_MUSIC_VERSION }
+      : entry),
+  }),
+  /requires short_form_bed/,
+  "a short-form music implementation pin on a narrated channel is rejected at route admission",
 );
 
 const documentary = admittedChannel({ family: "documentary_collage_short" });

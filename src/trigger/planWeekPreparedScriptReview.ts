@@ -9,6 +9,7 @@ import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { decodePreparedMetadata, PREPARED_METADATA_READ, preparedObjectAbsent } from "@/lib/preparedMediaStorage";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { planWeekMusicRole } from "@/lib/planWeekPreparedMusicProgram";
 import { CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
 import { assertPlanWeekPreparedScriptBinding, planWeekPreparedScriptKey, planWeekPreparationManifestSha256,
   type PlanWeekPreparationManifest, type PlanWeekPreparedScript } from "@/lib/planWeekPreparation";
@@ -28,7 +29,7 @@ const receiptSchema = z.object({
 export async function prepareWeeklyScriptReview(
   manifest: PlanWeekPreparationManifest, rawScript: PlanWeekPreparedScript, maxCostUsd: number,
 ): Promise<{ costUsd: number; chargedCostUsd: number; reused: boolean; fingerprint: string; receiptKey: string }> {
-  assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "weekly script review");
+  assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "weekly script review", planWeekMusicRole(manifest));
   const script = assertPlanWeekPreparedScriptBinding({ prepared: rawScript, manifest });
   const entries = manifest.execution.pipeline as Array<{ block?: string; version?: string; params?: Record<string, unknown> }>;
   const reviews = entries.filter(entry => entry.block === "qa_script");
