@@ -6,6 +6,7 @@ import {
   assertPlanWeekThumbnailSource,
   type PlanWeekThumbnailSource,
 } from "@/lib/planWeekThumbnailSource";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
 import type { CraftedHook } from "@/lib/hookcraft";
 import {
   assertNarrationPerformanceEvidence,
@@ -63,6 +64,8 @@ export interface PlanWeekPreparationManifest {
     title: string;
     description: string;
     sceneSeed: string;
+    /** Optional Topicraft promise, preserved for the prepared Script/Hookcraft handoff. */
+    topicPromise?: string;
     thumbnailKey: string;
     /**
      * `rendered_video_frame` deliberately reserves the eventual artifact path
@@ -1247,6 +1250,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
     throw new Error("plan-week preparation frozen timestamp is invalid");
   }
   const plan = requiredRecord(manifest.plan, "plan");
+  const topicPromise = normalizePlanWeekTopicPromise(plan.topicPromise);
   const execution = requiredRecord(manifest.execution, "execution");
   const prompts = requiredRecord(manifest.prompts, "prompts");
   if (!Array.isArray(execution.pipeline)) {
@@ -1272,6 +1276,7 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
       title: requiredText(plan.title, "plan title"),
       description: requiredText(plan.description, "plan description"),
       sceneSeed: requiredText(plan.sceneSeed, "scene seed"),
+      ...(topicPromise ? { topicPromise } : {}),
       thumbnailKey: requiredText(plan.thumbnailKey, "thumbnail key"),
       // v1 manifests written before this field existed were all paid planner
       // artwork. Keep them executable while every new manifest is explicit.
@@ -1325,6 +1330,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
   title: string;
   thumbnailKey: string;
   thumbnailSource?: PlanWeekThumbnailSource;
+  topicPromise?: string;
 }): PlanWeekPreparationManifest {
   const manifest = normalizePlanWeekPreparationManifest(args.manifest);
   const pointer = assertPlanWeekPreparationPointer(args.pointer);
@@ -1342,6 +1348,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
     manifest.plan.topic !== args.topic ||
     manifest.plan.title !== args.title ||
     manifest.plan.thumbnailKey !== args.thumbnailKey ||
+    manifest.plan.topicPromise !== args.topicPromise ||
     manifest.plan.thumbnailSource !== (args.thumbnailSource ?? "planner_artwork")
   ) {
     throw new Error("plan-week preparation manifest binding mismatch");

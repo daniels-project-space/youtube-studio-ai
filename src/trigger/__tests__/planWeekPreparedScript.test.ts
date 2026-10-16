@@ -71,6 +71,10 @@ const authoredShowBible = {
 };
 const identityManifest = {
   ...documentaryManifest,
+  plan: {
+    ...documentaryManifest.plan,
+    topicPromise: "See how the archival record changes the apparent motive.",
+  },
   execution: { ...documentaryManifest.execution, seedStore: {
     ...documentaryManifest.execution.seedStore,
     channelName: "Inked Histories",
@@ -81,6 +85,13 @@ const identityManifest = {
 const identityRequest = scriptRequest(identityManifest, parsed);
 assert.deepEqual(identityRequest.channelVoice, authoredShowBible,
   "the prepared writer must receive the same authored voice contract required by the versioned script_gen module");
+assert.equal(identityRequest.topicPromise, identityManifest.plan.topicPromise,
+  "weekly preparation must carry Topicraft's frozen promise into the shared Hookcraft writer contract");
+assert.throws(() => scriptRequest({
+  ...identityManifest,
+  plan: { ...identityManifest.plan, topicPromise: " " },
+}, parsed), /topicPromise must be a non-empty sentence/u,
+"malformed frozen promises must fail before prepared script generation");
 assert.throws(() => scriptRequest({
   ...identityManifest,
   execution: { ...identityManifest.execution, seedStore: { channelName: "Inked Histories" } },

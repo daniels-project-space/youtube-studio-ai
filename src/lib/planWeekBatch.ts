@@ -13,6 +13,7 @@ import {
   type PlanWeekContractVersion,
 } from "@/lib/planWeekContract";
 import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
 
 export {
   LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION,
@@ -50,6 +51,29 @@ export interface PlanWeekTopicItem {
   title: string;
   description: string;
   sceneSeed?: string;
+  /** Topicraft's cold-open promise, bound to this exact selected topic. */
+  hookPromise?: string;
+}
+
+export function planWeekTopicItemFromCandidate(candidate: {
+  topic: string;
+  title: string;
+  description: string;
+  sceneSeed?: string;
+  hookPromise?: unknown;
+}): PlanWeekTopicItem {
+  const topic = candidate.topic.trim();
+  const title = candidate.title.trim();
+  const description = candidate.description.trim();
+  if (!topic || !title || !description) throw new Error("plan topic candidate has an empty required field");
+  const hookPromise = normalizePlanWeekTopicPromise(candidate.hookPromise);
+  return {
+    topic,
+    title,
+    description,
+    ...(candidate.sceneSeed?.trim() ? { sceneSeed: candidate.sceneSeed.trim() } : {}),
+    ...(hookPromise ? { hookPromise } : {}),
+  };
 }
 
 export interface PlanWeekTopicCheckpoint {
@@ -172,12 +196,13 @@ export function buildPlanWeekTopicCheckpoint(args: {
   items: PlanWeekTopicItem[];
   usage: PlanWeekUsageCheckpoint;
 }): PlanWeekTopicCheckpoint {
+  const items = args.items.map(planWeekTopicItemFromCandidate);
   const payload = {
     contractVersion: PLAN_WEEK_CONTRACT_VERSION as typeof PLAN_WEEK_CONTRACT_VERSION,
     batchId: args.batchId,
     attempt: args.attempt,
     usageCheckpointKey: args.usageCheckpointKey,
-    items: args.items,
+    items,
     usage: args.usage,
   };
   return {

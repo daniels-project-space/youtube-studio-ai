@@ -64,11 +64,13 @@ import {
   planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
+import { planWeekTopicItemFromCandidate } from "@/lib/planWeekBatch";
 import {
   isDeferredRenderedFrameSource,
   planWeekThumbnailSourceForChannel,
   type PlanWeekThumbnailSource,
 } from "@/lib/planWeekThumbnailSource";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -621,13 +623,14 @@ async function runPlanWeekAhead(
             return candidates.map((candidate) => {
               const topic = candidate.topic.trim();
               const title = String(candidate.title || topic).trim().slice(0, 100);
-              return {
+              return planWeekTopicItemFromCandidate({
                 topic,
                 title,
                 description: deterministicPlanDescription(topic, niche),
                 sceneSeed: candidate.thumbnailMoment?.trim() ||
                   `A physical cause-and-effect scene that communicates ${topic} through people, objects, and action.`,
-              };
+                ...("hookPromise" in candidate ? { hookPromise: candidate.hookPromise } : {}),
+              });
             });
           }));
           const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -681,6 +684,7 @@ async function runPlanWeekAhead(
       title?: string;
       description?: string;
       sceneSeed?: string;
+      hookPromise?: string;
     }>;
     if (!itemIds?.length || !batchItems.length) abortTask("plan-week-ahead: admitted batch has no persisted items");
     if (payload.recovery) {
@@ -715,6 +719,7 @@ async function runPlanWeekAhead(
           title: item.title,
           description: item.description,
           sceneSeed: item.sceneSeed,
+          hookPromise: item.hookPromise,
           createdAt: item.createdAt,
         },
       });
@@ -1111,6 +1116,7 @@ function buildPlanWeekPreparationManifest(args: {
     title?: string;
     description?: string;
     sceneSeed?: string;
+    hookPromise?: string;
     createdAt: number;
   };
 }): PlanWeekPreparationManifest {
@@ -1120,6 +1126,7 @@ function buildPlanWeekPreparationManifest(args: {
   const description = args.item.description?.trim() || "Editorial description unavailable";
   const sceneSeed = args.item.sceneSeed?.trim() ||
     `A physical cause-and-effect scene that communicates ${args.item.topic.trim()} through people, objects, and action.`;
+  const topicPromise = normalizePlanWeekTopicPromise(args.item.hookPromise);
   const thumbnailKey = planWeekThumbnailKey({
     ownerId: args.ownerId,
     channelSlug: channel.slug,
@@ -1208,6 +1215,7 @@ function buildPlanWeekPreparationManifest(args: {
       title,
       description,
       sceneSeed,
+      ...(topicPromise ? { topicPromise } : {}),
       thumbnailKey,
       thumbnailSource,
     },

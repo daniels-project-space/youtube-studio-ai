@@ -2154,6 +2154,7 @@ export default defineSchema({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     sceneSeed: v.optional(v.string()),
+    hookPromise: v.optional(v.string()),
     thumbnailKey: v.optional(v.string()),
     // `rendered_video_frame` reserves a future Lo-Fi cover without claiming a
     // generic planner image exists. It is immutable once inputs are frozen.

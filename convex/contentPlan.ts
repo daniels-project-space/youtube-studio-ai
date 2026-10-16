@@ -18,6 +18,7 @@ import {
 import {
   assertPlanWeekPreparationManifestBinding,
   assertPlanWeekPreparationPointer,
+  normalizePlanWeekTopicPromise,
   PLAN_WEEK_PREPARATION_VERSION,
   planWeekThumbnailKey,
 } from "../src/lib/planWeekPreparationContract";
@@ -1244,6 +1245,7 @@ export const savePlanTopics = mutation({
       title: v.string(),
       description: v.string(),
       sceneSeed: v.optional(v.string()),
+      hookPromise: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -1266,6 +1268,7 @@ export const savePlanTopics = mutation({
     if (args.items.some((item) => !item.topic.trim() || !item.title.trim() || !item.description.trim())) {
       throw new Error("plan topic output contains an empty required field");
     }
+    args.items.forEach((item) => normalizePlanWeekTopicPromise(item.hookPromise));
     const normalized = args.items.map((item) => item.topic.trim().toLowerCase().replace(/\s+/g, " "));
     if (new Set(normalized).size !== normalized.length) throw new Error("plan topic output contains duplicates");
     const {
@@ -1362,6 +1365,7 @@ export const savePlanTopics = mutation({
         title: item.title.trim(),
         description: item.description.trim(),
         sceneSeed: item.sceneSeed?.trim() || undefined,
+        hookPromise: item.hookPromise?.trim() || undefined,
         status: "generating",
         generationState: "pending",
         generationAttempt: 0,
@@ -1484,6 +1488,7 @@ export const recordPlanItemPreparation = mutation({
       title: item.title,
       thumbnailKey,
       thumbnailSource: args.thumbnailSource,
+      topicPromise: item.hookPromise,
     });
     if (manifest.frozenAt > Date.now() + 60_000) {
       throw new Error("plan preparation frozen timestamp is in the future");

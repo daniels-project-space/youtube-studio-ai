@@ -27,6 +27,7 @@ import {
   buildPlanWeekUsageCheckpoint,
   dedupePlanCandidates,
   planWeekReservation,
+  planWeekTopicItemFromCandidate,
   parsePlanWeekTopicCheckpoint,
   topicsNearEquivalent,
 } from "@/lib/planWeekBatch";
@@ -194,6 +195,23 @@ async function invoke<Result = InvokeResult>(definition: unknown, ctx: unknown, 
 }
 
 async function main() {
+  assert.deepEqual(planWeekTopicItemFromCandidate({
+    topic: "  Why Bond Duration Changes When Rates Rise  ",
+    title: "  Why Bond Duration Changes When Rates Rise  ",
+    description: "  A deterministic description.  ",
+    sceneSeed: "  A bond certificate bends as a rate dial rises.  ",
+    hookPromise: "  See why the same yield move changes long-bond prices more sharply.  ",
+  }), {
+    topic: "Why Bond Duration Changes When Rates Rise",
+    title: "Why Bond Duration Changes When Rates Rise",
+    description: "A deterministic description.",
+    sceneSeed: "A bond certificate bends as a rate dial rises.",
+    hookPromise: "See why the same yield move changes long-bond prices more sharply.",
+  }, "weekly candidate shaping preserves and normalizes Topicraft's hook promise");
+  assert.throws(() => planWeekTopicItemFromCandidate({
+    topic: "A topic", title: "A title", description: "A description", hookPromise: " ",
+  }), /topicPromise must be a non-empty sentence/u);
+
   const ownerId = "owner-test";
   const channelId = "channels:test";
   const db = new MemoryDb();
@@ -524,6 +542,7 @@ async function main() {
       title: "Why Bond Duration Changes When Rates Rise",
       description: "A deterministic description.",
       sceneSeed: "A bond certificate bends as a rate dial rises.",
+      hookPromise: "See why the same yield move changes long-bond prices more sharply.",
     }],
   });
   assert.equal(saved.state, "saved");
@@ -550,10 +569,21 @@ async function main() {
       topic: "Why Bond Duration Changes When Rates Rise",
       title: "Why Bond Duration Changes When Rates Rise",
       description: "A deterministic description.",
+      hookPromise: "See why the same yield move changes long-bond prices more sharply.",
     }],
     usage: topicUsage,
   });
   assert.equal(parsePlanWeekTopicCheckpoint(durableTopics)?.artifactFingerprint, durableTopics.artifactFingerprint);
+  assert.equal(durableTopics.items[0]?.hookPromise,
+    "See why the same yield move changes long-bond prices more sharply.",
+    "the immutable topic checkpoint retains Topicraft's exact cold-open promise");
+  assert.throws(() => buildPlanWeekTopicCheckpoint({
+    batchId: admitted.batchId,
+    attempt: topicClaim.attempt,
+    usageCheckpointKey: "topics:bad-promise",
+    items: [{ topic: "A topic", title: "A title", description: "A description", hookPromise: " " }],
+    usage: topicUsage,
+  }), /topicPromise must be a non-empty sentence/u);
   assert.equal(parsePlanWeekTopicCheckpoint({ ...durableTopics, items: [{ ...durableTopics.items[0], topic: "tampered" }] }), null);
   const lostResponseResult = await invoke(failPlanTopics, ctx, {
     ownerId, channelId, batchId: admitted.batchId, attempt: topicClaim.attempt,
@@ -568,6 +598,9 @@ async function main() {
   const itemId = saved.itemIds[0];
   const storedItem = await db.get(itemId);
   assert.ok(storedItem?.itemKey, "saved plan item has its stable batch item key");
+  assert.equal(storedItem?.hookPromise,
+    "See why the same yield move changes long-bond prices more sharply.",
+    "the Convex plan row retains the Topicraft promise for the frozen preparation packet");
   const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
   const preparation: PlanWeekPreparationManifest = {
     version: PLAN_WEEK_PREPARATION_VERSION,
@@ -584,6 +617,7 @@ async function main() {
       title: String(storedItem!.title),
       description: String(storedItem!.description),
       sceneSeed: String(storedItem!.sceneSeed),
+      topicPromise: String(storedItem!.hookPromise),
       thumbnailKey,
       thumbnailSource: "planner_artwork",
     },

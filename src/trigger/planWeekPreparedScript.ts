@@ -20,6 +20,7 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { parseChannelProgramRouteRunSeed, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { normalizePlanWeekTopicPromise } from "@/lib/planWeekPreparationContract";
 import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
 import {
   assertSyntheticScenarioOpeningDisclosure,
@@ -122,6 +123,7 @@ async function readPreparationManifest(payload: PlanWeekPreparedScriptArgs): Pro
     title: manifest.plan.title,
     thumbnailKey: manifest.plan.thumbnailKey,
     thumbnailSource: manifest.plan.thumbnailSource,
+    topicPromise: manifest.plan.topicPromise,
   });
 }
 
@@ -192,8 +194,10 @@ export function scriptRequest(manifest: PlanWeekPreparationManifest, payload: Pl
     ? syntheticScenarioContract(route.syntheticScenarioProfile)
     : undefined;
   const channelVoice = requireAuthoredShowBibleVoice(seed.showBible, "weekly prepared script_gen");
+  const topicPromise = normalizePlanWeekTopicPromise(manifest.plan.topicPromise);
   const request: ScriptRequest = {
     topic: manifest.plan.topic,
+    topicPromise,
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
     channelVoice,

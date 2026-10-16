@@ -779,6 +779,43 @@ assert.equal(
   manifest.prompts.script,
   "an exact content-addressed preparation packet is admissible",
 );
+const promisedManifest = {
+  ...manifest,
+  plan: { ...manifest.plan, topicPromise: "See why this evidence changes the original explanation." },
+};
+assert.equal(assertPlanWeekPreparationManifestBinding({
+  manifest: promisedManifest,
+  pointer: { ...pointer, manifestSha256: planWeekPreparationManifestSha256(promisedManifest) },
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  itemKey,
+  requestKey,
+  channelSlug,
+  topic: promisedManifest.plan.topic,
+  title: promisedManifest.plan.title,
+  thumbnailKey,
+  thumbnailSource: "planner_artwork",
+  topicPromise: promisedManifest.plan.topicPromise,
+}).plan.topicPromise, promisedManifest.plan.topicPromise,
+"the Topicraft promise is an immutable, row-bound preparation input");
+assert.throws(() => assertPlanWeekPreparationManifestBinding({
+  manifest: promisedManifest,
+  pointer: { ...pointer, manifestSha256: planWeekPreparationManifestSha256(promisedManifest) },
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  itemKey,
+  requestKey,
+  channelSlug,
+  topic: promisedManifest.plan.topic,
+  title: promisedManifest.plan.title,
+  thumbnailKey,
+  thumbnailSource: "planner_artwork",
+}), /binding mismatch/u,
+"a prepared-script reader cannot omit or substitute the frozen Topicraft promise");
 assert.throws(
   () => assertPlanWeekPreparationManifestBinding({
     manifest: { ...manifest, plan: { ...manifest.plan, title: "Changed after freezing" } },
