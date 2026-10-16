@@ -668,6 +668,12 @@ export interface TitleJudgeAdmission {
   issues: string[];
 }
 
+/** A title must pass every audience, clarity, channel-fit and grounding bar. */
+export function titleJudgeRankingPassesQualityBar(ranking: TitleJudgeRanking): boolean {
+  return [ranking.clickScore, ranking.direct, ranking.identityFit, ranking.viewerMotivation]
+    .every((score) => Number.isFinite(score) && score >= 7) && ranking.grounding === "supported";
+}
+
 /**
  * Validate the model's complete ranking before it can influence selection.
  * A missing score is not a generous score: it is incomplete evidence. Keeping
@@ -1215,9 +1221,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           a.log?.(`metacraft: judge response rejected (${admission.issues.join("; ")}) -> ${attempt === 0 ? "retrying" : "FAILING LOUD"}`);
           continue;
         }
-        const ranked = admission.rankings.filter(
-          (r) => r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.viewerMotivation >= 7 && r.grounding === "supported",
-        );
+        const ranked = admission.rankings.filter(titleJudgeRankingPassesQualityBar);
         ranked.sort((x, y) => {
           const judgeDelta =
             (y.clickScore ?? 0) + (y.direct ?? 0) + (y.identityFit ?? 0) + (y.viewerMotivation ?? 0) -

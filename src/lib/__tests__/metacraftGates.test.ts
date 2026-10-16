@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintTitle, validateTitleJudgeResponse } from "@/lib/metacraft";
+import {
+  lintTitle,
+  titleJudgeRankingPassesQualityBar,
+  validateTitleJudgeResponse,
+} from "@/lib/metacraft";
 
-// P2-1 (GOLDEN_MODULE_AUDIT_2026-08.md): "metadata gate internals unverified
-// (clickScore >=7, payoff-in-50-chars, claims-grounding lint) and no dedicated
-// test exists." This file exercises the two gates that are deterministic and
-// callable in isolation (lintTitle's payoff-window + claims-grounding checks),
-// then pins the clickScore/direct/identity/viewer-motivation >=7 + supported-grounding judge gate — which lives inside
-// craftMetadata's live permitted-model/YouTube-Data round trip and cannot run without
-// network + ANTHROPIC_API_KEY — via a source-anchored assertion so a silent
-// weakening of the threshold breaks this test instead of shipping quietly.
+// P2-1 (GOLDEN_MODULE_AUDIT_2026-08.md) identified untested metadata gates.
+// This file exercises deterministic payoff/grounding lint and the exact pure
+// judge-acceptance predicate used by craftMetadata, without a provider call.
 
 /* ------------------------ payoff-in-50-chars gate ------------------------ */
 
@@ -250,22 +249,35 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
 
 console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct judge responses fail closed");
 
-/* ------- craftMetadata judge gate (clickScore & direct >=7) -- pinned ------ */
-//
-// craftMetadata() ranks title candidates through a live permitted-model judge call and
-// only accepts a winner when BOTH clickScore and direct clear 7 (metacraft.ts).
-// That round trip needs ANTHROPIC_API_KEY plus network and cannot run as a plain
-// unit test, so this pins the literal threshold expression: if a future edit
-// silently loosens the gate (e.g. drops the `direct` half, or lowers either
-// number), this assertion breaks loudly instead of the regression shipping
-// unnoticed, per P2-1's own effort note ("Read + add one unit test").
+/* ------- executable title-quality acceptance gate ------------------------ */
 {
+  const accepted = {
+    idx: 0,
+    clickScore: 7,
+    direct: 7,
+    identityFit: 7,
+    viewerMotivation: 7,
+    grounding: "supported" as const,
+    reason: "The source supports the promise and it fits the channel.",
+  };
+  assert.equal(titleJudgeRankingPassesQualityBar(accepted), true,
+    "the exact threshold is inclusive when every independent quality dimension passes");
+
+  for (const field of ["clickScore", "direct", "identityFit", "viewerMotivation"] as const) {
+    assert.equal(titleJudgeRankingPassesQualityBar({ ...accepted, [field]: 6 }), false,
+      `${field} below seven must reject the title`);
+    assert.equal(titleJudgeRankingPassesQualityBar({ ...accepted, [field]: Number.POSITIVE_INFINITY }), false,
+      `${field} must be finite even when the helper is called outside validated model output`);
+  }
+  for (const grounding of ["contradicted", "insufficient"] as const) {
+    assert.equal(titleJudgeRankingPassesQualityBar({ ...accepted, grounding }), false,
+      `${grounding} factual support must reject the title regardless of its scores`);
+  }
+
   const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
-  const gateExpr = "r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.viewerMotivation >= 7";
   assert.ok(
-    source.includes(gateExpr),
-    "metacraft.ts: craftMetadata's judge gate must require click, directness, identity fit and viewer motivation >=7 " +
-      "— literal expression not found, gate may have moved or weakened",
+    source.includes("admission.rankings.filter(titleJudgeRankingPassesQualityBar)"),
+    "craftMetadata must rank only candidates that pass the executable quality-bar helper",
   );
   assert.ok(
     source.includes("validateTitleJudgeResponse(j, survivors.length)"),
@@ -288,8 +300,8 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
     "metacraft.ts: judge transport failures must be named and fail closed after the bounded retry",
   );
   assert.ok(
-    source.includes("r.identityFit >= 7") && source.includes('r.grounding === "supported"'),
-    "metacraft.ts: a title must clear identity fit and source grounding as well as click/direct scores",
+    source.includes("ranking.identityFit, ranking.viewerMotivation") && source.includes('ranking.grounding === "supported"'),
+    "the shared quality-bar helper must include channel fit, viewer motivation and factual grounding",
   );
   // The gate's own rejection message, surfaced in the retry-fix-loop, is the
   // second half of the wiring proof: a rejected slate must say so and retry.
@@ -299,4 +311,4 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
   );
 }
 
-console.log("metacraftGates.test.ts: craftMetadata title-quality judge gate pinned against live source");
+console.log("metacraftGates.test.ts: executable craftMetadata quality gate and production wiring verified");
