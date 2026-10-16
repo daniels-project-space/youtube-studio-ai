@@ -162,6 +162,13 @@ function validateChannelMusicProgramBody(
     });
   }
   const sections = program.generation.sections;
+  if (new Set(sections.map((section) => section.id)).size !== sections.length) {
+    issue.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["generation", "sections"],
+      message: "music sections must have unique ids",
+    });
+  }
   if (program.role === "sleep_sound_bed") {
     if (sections.some((section) => section.energy > 0.12) ||
         sections.some((section) => section.energy !== sections[0]?.energy)) {

@@ -431,6 +431,22 @@ assert.throws(() => ChannelMusicProgramSchema.parse({
   fingerprint: sha256Hex(canonicalJson(forgedLofiBody)),
 }), /route-owned role primary_music/u,
 "persisted Lo-Fi programs must retain route-role ownership even with a recomputed fingerprint");
+const duplicateSectionBody = {
+  ...lofiBody,
+  generation: {
+    ...lofiBody.generation,
+    sections: lofiBody.generation.sections.map((section, index) => index === 1
+      ? { ...section, id: lofiBody.generation.sections[0]!.id }
+      : section),
+  },
+};
+const duplicateSections = ChannelMusicProgramSchema.safeParse({
+  ...duplicateSectionBody,
+  fingerprint: sha256Hex(canonicalJson(duplicateSectionBody)),
+});
+assert.equal(duplicateSections.success, false,
+  "a recomputed program fingerprint cannot collapse distinct arrangement sections onto one review identity");
+assert.match(JSON.stringify(duplicateSections.error?.issues), /music sections must have unique ids/u);
 assert.equal(lofi.generation.sections.length, 8, "a long Music3 form must map every extended passage to a reviewable arrangement job");
 assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
