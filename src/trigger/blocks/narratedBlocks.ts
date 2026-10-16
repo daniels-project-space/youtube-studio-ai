@@ -108,6 +108,7 @@ import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
   parseScriptCritique,
+  scriptCritiqueExcerpt,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
@@ -942,9 +943,7 @@ export function createScriptGenBlock(
               channelCritiqueBrief(scriptChannel) +
               ` Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 ` +
               `issues, each under 140 characters.\n\n` +
-              (draft.narrationText.length <= 9000
-                ? draft.narrationText
-                : draft.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + draft.narrationText.slice(-3500)),
+              scriptCritiqueExcerpt(draft.narrationText),
             // Reasoning route: the ceiling covers the THINKING and the answer, and a
             // findings list is the expensive verdict — a clean pass is cheap to emit,
             // a rejection must enumerate why. At the old ceiling this gate was
@@ -1382,13 +1381,7 @@ export function createQaScriptBlock(
           `each under 140 characters (a truncated reply is unusable).\n\n` +
           // Head + middle + tail sample: a head-only slice HID the midpoint and
           // the payoff from the critic on anything longer than ~2 minutes.
-          (narration.length <= 9000
-            ? narration
-            : narration.slice(0, 3500) +
-              `\n\n[... OMITTED ...]\n\n` +
-              narration.slice(Math.floor(narration.length / 2) - 1500, Math.floor(narration.length / 2) + 1500) +
-              `\n\n[... OMITTED ...]\n\n` +
-              narration.slice(-2500)),
+          scriptCritiqueExcerpt(narration),
         // Reasoning route: the ceiling covers the THINKING and the answer, and a
         // findings list is the expensive verdict — a clean pass is cheap to emit,
         // a rejection must enumerate why. At the old ceiling this gate was

@@ -5,6 +5,7 @@ import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
   parseScriptCritique,
+  scriptCritiqueExcerpt,
 } from "@/engine/scriptQualityGate";
 
 assert.deepEqual(parseScriptCritique({ pass: true, issues: [] }), { pass: true, issues: [] });
@@ -30,6 +31,20 @@ for (const unapproved of [false, undefined, null, "true"]) {
   );
 }
 
+const boundedNarration = "opening sentinel" + "h".repeat(11_000) + "middle sentinel" +
+  "m".repeat(11_000) + "ending sentinel" + "t".repeat(1_000);
+const excerpt = scriptCritiqueExcerpt(boundedNarration);
+assert.ok(excerpt.includes("opening sentinel"));
+assert.ok(excerpt.includes("middle sentinel"), "long-script review must sample the central narrative");
+assert.ok(excerpt.includes("ending sentinel"));
+assert.deepEqual(
+  excerpt.split("\n\n[... OMITTED ...]\n\n").map((part) => part.length),
+  [3_500, 3_000, 2_500],
+  "long-script review stays bounded to three non-overlapping source regions",
+);
+const shortNarration = "short script stays intact";
+assert.equal(scriptCritiqueExcerpt(shortNarration), shortNarration);
+
 const narratedBlocks = readFileSync(
   new URL("../../trigger/blocks/narratedBlocks.ts", import.meta.url),
   "utf8",
@@ -38,6 +53,8 @@ assert.match(narratedBlocks, /consumes: \["narrationText", "scriptApproved"\]/);
 assert.match(narratedBlocks, /assertScriptApprovedForNarration\(ctx\.store\["scriptApproved"\]\)/);
 assert.match(narratedBlocks, /assertScriptCritiqueAccepted\(\{/);
 assert.match(narratedBlocks, /script_gen FAILED: independent narrative critic unavailable/);
+assert.match(narratedBlocks, /scriptCritiqueExcerpt\(draft\.narrationText\)/);
+assert.match(narratedBlocks, /scriptCritiqueExcerpt\(narration\)/);
 assert.match(narratedBlocks, /qa_script FAILED: independent narrative critic unavailable/);
 assert.match(narratedBlocks, /hook_craft FAILED: independent hook critic unavailable/);
 assert.match(narratedBlocks, /stage: "hook_craft"/);
