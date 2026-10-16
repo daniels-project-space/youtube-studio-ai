@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { ARCHETYPES } from "../archetypes";
 import { registerAllBlocks } from "../blocks";
+import { CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY } from "../childrenShowBible";
+import { CURRICULUM_EPISODE_SEED_INPUT_SEED_KEY } from "../curriculumEpisodeSeed";
 import { validatePipeline } from "../validate";
 
 registerAllBlocks();
@@ -16,12 +18,17 @@ for (const archetype of Object.values(ARCHETYPES)) {
     approvalIndex > scriptIndex,
     `${archetype.key} must approve generated narration before TTS`,
   );
-  if (!stages.includes("curriculum_episode_seed")) {
-    assert.doesNotThrow(
-      () => validatePipeline(archetype.pipeline.slice(0, narrationIndex + 1)),
-      `${archetype.key} must compile through the approved narration handoff`,
-    );
-  }
+  const seeds = stages.includes("curriculum_episode_seed")
+    ? [
+        "contentLane",
+        CURRICULUM_EPISODE_SEED_INPUT_SEED_KEY,
+        CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY,
+      ]
+    : [];
+  assert.doesNotThrow(
+    () => validatePipeline(archetype.pipeline.slice(0, narrationIndex + 1), seeds),
+    `${archetype.key} must compile through the approved narration handoff`,
+  );
 
   const hookIndex = stages.lastIndexOf("hook_craft", narrationIndex);
   if (hookIndex > scriptIndex) {
