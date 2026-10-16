@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
-import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { createChannelMusicProgram, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
 
@@ -42,9 +42,18 @@ loader._load = function (id, ...args) {
 };
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { music } = require("../musicBlocks") as typeof import("../musicBlocks");
+const { music, musicIdentityFromContext } = require("../musicBlocks") as typeof import("../musicBlocks");
 
 async function main() {
+  const legacyIdentity = musicIdentityFromContext(ctx);
+  assert.deepEqual(legacyIdentity, { family: "legacy_unknown", contentLaneKey: "legacy_unknown" });
+  assert.equal(musicRoleForRoute(legacyIdentity.family, legacyIdentity.contentLaneKey), "narration_bed");
+  const lofiIdentity = musicIdentityFromContext({ ...ctx, store: { ...ctx.store, family: "lofi" } });
+  assert.deepEqual(lofiIdentity, { family: "lofi", contentLaneKey: "lofi" });
+  assert.equal(musicRoleForRoute(lofiIdentity.family, lofiIdentity.contentLaneKey), "primary_music");
+  const laneIdentity = musicIdentityFromContext({ ...ctx, store: { ...ctx.store, contentLane: { key: "meditation", family: "ambient" } } });
+  assert.deepEqual(laneIdentity, { family: "ambient", contentLaneKey: "meditation" });
+  assert.equal(musicRoleForRoute(laneIdentity.family, laneIdentity.contentLaneKey), "meditation_bed");
   for (const provider of ["yue2", "yue_2", "SUNO", " mureka", "", null, false, 3, {}, ["suno"]]) {
     for (const store of [ctx.store, { ...ctx.store, reuseMusicKey: "retained.mp3" }]) {
       await assert.rejects(music.run({ ...ctx, params: { provider }, store }), /unsupported explicit provider/);

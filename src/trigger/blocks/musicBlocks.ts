@@ -6,6 +6,7 @@ import { fallbackMusicPrompt } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { getMusicBrief } from "@/engine/creative/brief";
+import { getFamily } from "@/engine/families";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE } from "@/engine/pricing";
 import {
@@ -48,6 +49,22 @@ import {
   channelProgramRouteFromContext,
   musicProgramForCurrentRoute,
 } from "./blockContext";
+
+export function musicIdentityFromContext(ctx: Parameters<NonNullable<Block["run"]>>[0]): {
+  family: string;
+  contentLaneKey: string;
+} {
+  const route = channelProgramRouteFromContext(ctx);
+  const lane = ctx.store["contentLane"];
+  const laneRecord = lane && typeof lane === "object" ? lane as Record<string, unknown> : undefined;
+  const storedFamily = typeof ctx.store["family"] === "string" ? ctx.store["family"] : undefined;
+  const family = route?.family ?? storedFamily ??
+    (typeof laneRecord?.family === "string" ? laneRecord.family : undefined) ??
+    (typeof laneRecord?.key === "string" ? laneRecord.key : undefined) ?? "legacy_unknown";
+  const contentLaneKey = route?.contentLaneKey ??
+    (typeof laneRecord?.key === "string" ? laneRecord.key : undefined) ?? storedFamily ?? family;
+  return { family, contentLaneKey };
+}
 
 // Accepted Mureka/Suno jobs do not expose a durable replay receipt yet. Keep
 // their output transfer bounded so a stalled provider body reaches this block's
@@ -180,8 +197,10 @@ export const music: Block = {
     // The lofi family still gets its own brief; everything else draws from a
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
-    const musicRoute = channelProgramRouteFromContext(ctx);
-    const lastResort = fallbackMusicPrompt(ctx.store["channelName"], ctx.channelId, topic, musicRoute?.family);
+    const musicIdentity = musicIdentityFromContext(ctx);
+    const lastResort = fallbackMusicPrompt(
+      ctx.store["channelName"], ctx.channelId, topic, getFamily(musicIdentity.family)?.key,
+    );
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||
@@ -206,8 +225,7 @@ export const music: Block = {
     const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
-      family: route?.family ?? "music_loop",
-      contentLaneKey: route?.contentLaneKey ?? "music_loop",
+      ...musicIdentity,
       topic,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
