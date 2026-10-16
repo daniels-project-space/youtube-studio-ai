@@ -168,7 +168,8 @@ async function main() {
     },
   };
   const programBrief = createChannelProgramBrief({
-    nicheKey: "educational", locale: "en", concept: "An original evidence-led channel.", family: "narrated_stock",
+    nicheKey: "health", subcategory: "sleep-recovery", locale: "en",
+    concept: "Sleep recovery science with calm guided meditation.", family: "sleep",
   });
   const route = resolveChannelProgramRoute(programBrief);
   const channelProgramRoute = channelProgramRouteRunSeed({ route, programBrief });
