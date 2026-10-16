@@ -38,6 +38,25 @@ assert.deepEqual(
   [[2, 8], [8, 14]],
   "narration-local cue times must be shifted onto the final-master clock",
 );
+assert.throws(
+  () => finalMasterTranscriptCues({
+    sentenceTimings: [],
+    narrationStartSec,
+    finalMasterDurationSec,
+    requireTranscript: true,
+  }),
+  /requires a non-empty narration timing map/i,
+  "a narrated final master must not silently omit sentence-to-frame timing evidence",
+);
+assert.deepEqual(
+  finalMasterTranscriptCues({
+    sentenceTimings: undefined,
+    narrationStartSec,
+    finalMasterDurationSec,
+  }),
+  [],
+  "music-first or other non-narrated masters may legitimately omit narration cues",
+);
 
 const locks = storySpineVisualReviewLocks({
   storySpine,

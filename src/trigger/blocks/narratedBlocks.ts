@@ -4756,12 +4756,18 @@ export const qaVisual: Block = {
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
       | null;
+    const visualReviewNarrationKey = ctx.store["narrationKey"];
+    const visualReviewNarrationDurationSec = Number(ctx.store["narrationDurationSec"]);
+    const narrationTimingRequired =
+      (typeof visualReviewNarrationKey === "string" && visualReviewNarrationKey.trim().length > 0) ||
+      (Number.isFinite(visualReviewNarrationDurationSec) && visualReviewNarrationDurationSec > 0);
     let transcriptCues: readonly ReturnType<typeof finalMasterTranscriptCues>[number][] = [];
     try {
       transcriptCues = finalMasterTranscriptCues({
         sentenceTimings: ctx.store["sentenceTimings"],
         narrationStartSec,
         finalMasterDurationSec: p.durationSec,
+        requireTranscript: narrationTimingRequired,
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);

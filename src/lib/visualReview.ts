@@ -83,10 +83,19 @@ export function finalMasterTranscriptCues(input: {
   readonly sentenceTimings: unknown;
   readonly narrationStartSec: number;
   readonly finalMasterDurationSec: number;
+  readonly requireTranscript?: boolean;
 }): readonly VisualReviewTranscriptCue[] {
-  if (input.sentenceTimings === undefined) return Object.freeze([]);
+  if (input.sentenceTimings === undefined) {
+    if (input.requireTranscript) {
+      throw new Error("final-master visual review requires a non-empty narration timing map");
+    }
+    return Object.freeze([]);
+  }
   if (!Array.isArray(input.sentenceTimings) || input.sentenceTimings.length > 16_000) {
     throw new Error("final-master visual review requires a bounded narration timing map");
+  }
+  if (input.requireTranscript && input.sentenceTimings.length === 0) {
+    throw new Error("final-master visual review requires a non-empty narration timing map");
   }
   if (!Number.isFinite(input.narrationStartSec) || input.narrationStartSec < 0) {
     throw new Error("final-master visual review requires a valid narration start");
