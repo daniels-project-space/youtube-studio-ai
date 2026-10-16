@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { assessMusicAuditionApprovalReadiness } from "@/engine/musicAuditionReview";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  assessMusicAuditionApprovalReadiness,
+  musicAuditionDraftForCheckpoint,
+  type MusicAuditionDraft,
+} from "@/engine/musicAuditionReview";
 
 type Section = { id: string; label: string; instruction: string };
 type NativeQuality = {
@@ -31,6 +35,7 @@ const measurementKeys = [
   "maximumConsecutiveCeilingSamples", "dcOffsetAbsolute", "silenceFraction", "mechanicalArtifactScore", "openingHighBandDropDb",
 ] as const;
 type MeasurementKey = typeof measurementKeys[number];
+const EMPTY_SECTION_REVIEWS: MusicAuditionDraft["sectionReviews"] = Object.freeze({});
 
 const measurementLabels: Record<MeasurementKey, string> = {
   integratedLufs: "integrated LUFS",
@@ -50,12 +55,22 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
   const [data, setData] = useState<Desk | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [approving, setApproving] = useState(false);
-  const [sectionReviews, setSectionReviews] = useState<Record<string, { score: string; evidence: string }>>({});
-  const [emotionalDepthScore, setEmotionalDepthScore] = useState("");
-  const [arrangementDepthScore, setArrangementDepthScore] = useState("");
-  const [hollowOrGeneric, setHollowOrGeneric] = useState(false);
-  const [notes, setNotes] = useState("");
+  const [savedDraft, setSavedDraft] = useState<MusicAuditionDraft | null>(null);
   const sections = data?.review?.sections;
+  const checkpointId = data?.checkpoint?.id;
+  const draft = useMemo(
+    () => checkpointId ? musicAuditionDraftForCheckpoint(savedDraft, checkpointId, sections ?? []) : null,
+    [checkpointId, savedDraft, sections],
+  );
+  const sectionReviews = draft?.sectionReviews ?? EMPTY_SECTION_REVIEWS;
+  const emotionalDepthScore = draft?.emotionalDepthScore ?? "";
+  const arrangementDepthScore = draft?.arrangementDepthScore ?? "";
+  const hollowOrGeneric = draft?.hollowOrGeneric ?? false;
+  const notes = draft?.notes ?? "";
+  const updateDraft = (update: (current: MusicAuditionDraft) => MusicAuditionDraft) => {
+    if (!checkpointId) return;
+    setSavedDraft((current) => update(musicAuditionDraftForCheckpoint(current, checkpointId, sections ?? [])));
+  };
   const approvalReadiness = assessMusicAuditionApprovalReadiness({
     sections: sections ?? [], sectionReviews, emotionalDepthScore, arrangementDepthScore,
     hollowOrGeneric, notes, thresholds: data?.review?.approvalThresholds,
@@ -67,9 +82,6 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       const response = await fetch(`/api/music-audition-checkpoints?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
       const next = await response.json() as Desk;
       setData(next);
-      if (next.review?.sections) {
-        setSectionReviews((current) => Object.fromEntries(next.review!.sections!.map((section) => [section.id, current[section.id] ?? { score: "", evidence: "" }])));
-      }
     } catch (error) {
       setData({ ok: false, error: error instanceof Error ? error.message : "Could not load music audition" });
     }
@@ -147,16 +159,16 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
               <strong style={{ fontSize: "0.8rem" }}>{section.label}</strong>
               <p style={{ color: "var(--color-muted)", fontSize: "0.76rem", lineHeight: 1.45, margin: "0.18rem 0 0" }}>{section.instruction}</p>
             </div>
-            <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>score<input aria-label={`${section.id} score`} type="number" min="0" max="1" step="0.01" value={sectionReviews[section.id]?.score ?? ""} onChange={(event) => setSectionReviews((current) => ({ ...current, [section.id]: { ...current[section.id], score: event.target.value } }))} style={inputStyle} /></label>
-            <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>evidence<input aria-label={`${section.id} evidence`} value={sectionReviews[section.id]?.evidence ?? ""} onChange={(event) => setSectionReviews((current) => ({ ...current, [section.id]: { ...current[section.id], evidence: event.target.value } }))} style={inputStyle} /></label>
+            <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>score<input aria-label={`${section.id} score`} type="number" min="0" max="1" step="0.01" value={sectionReviews[section.id]?.score ?? ""} onChange={(event) => updateDraft((current) => ({ ...current, sectionReviews: { ...current.sectionReviews, [section.id]: { ...(current.sectionReviews[section.id] ?? { score: "", evidence: "" }), score: event.target.value } } }))} style={inputStyle} /></label>
+            <label style={{ fontSize: "0.7rem", color: "var(--color-muted)" }}>evidence<input aria-label={`${section.id} evidence`} value={sectionReviews[section.id]?.evidence ?? ""} onChange={(event) => updateDraft((current) => ({ ...current, sectionReviews: { ...current.sectionReviews, [section.id]: { ...(current.sectionReviews[section.id] ?? { score: "", evidence: "" }), evidence: event.target.value } } }))} style={inputStyle} /></label>
           </div>)}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(140px, 1fr))", gap: "0.5rem", marginTop: "0.8rem" }}>
-          <label style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>emotional depth<input aria-label="emotional depth" type="number" min="0" max="1" step="0.01" value={emotionalDepthScore} onChange={(event) => setEmotionalDepthScore(event.target.value)} style={inputStyle} /></label>
-          <label style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>arrangement depth<input aria-label="arrangement depth" type="number" min="0" max="1" step="0.01" value={arrangementDepthScore} onChange={(event) => setArrangementDepthScore(event.target.value)} style={inputStyle} /></label>
+          <label style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>emotional depth<input aria-label="emotional depth" type="number" min="0" max="1" step="0.01" value={emotionalDepthScore} onChange={(event) => updateDraft((current) => ({ ...current, emotionalDepthScore: event.target.value }))} style={inputStyle} /></label>
+          <label style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>arrangement depth<input aria-label="arrangement depth" type="number" min="0" max="1" step="0.01" value={arrangementDepthScore} onChange={(event) => updateDraft((current) => ({ ...current, arrangementDepthScore: event.target.value }))} style={inputStyle} /></label>
         </div>
-        <label style={{ display: "block", fontSize: "0.76rem", color: "var(--color-muted)", marginTop: "0.5rem" }}>review notes<textarea aria-label="review notes" value={notes} onChange={(event) => setNotes(event.target.value)} style={{ ...inputStyle, minHeight: "3.25rem", resize: "vertical" }} /></label>
-        <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.8rem", marginTop: "0.5rem" }}><input type="checkbox" checked={hollowOrGeneric} onChange={(event) => setHollowOrGeneric(event.target.checked)} /> sounds hollow or generic (fails approval)</label>
+        <label style={{ display: "block", fontSize: "0.76rem", color: "var(--color-muted)", marginTop: "0.5rem" }}>review notes<textarea aria-label="review notes" value={notes} onChange={(event) => updateDraft((current) => ({ ...current, notes: event.target.value }))} style={{ ...inputStyle, minHeight: "3.25rem", resize: "vertical" }} /></label>
+        <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.8rem", marginTop: "0.5rem" }}><input type="checkbox" checked={hollowOrGeneric} onChange={(event) => updateDraft((current) => ({ ...current, hollowOrGeneric: event.target.checked }))} /> sounds hollow or generic (fails approval)</label>
       </details>
       <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.75rem" }}>
         <button type="button" disabled={approving || !approvalReady} onClick={() => void approve()}>{approving ? "Recording QC…" : "Approve QC"}</button>

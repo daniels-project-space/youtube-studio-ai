@@ -22,6 +22,31 @@ export interface MusicAuditionApprovalReadinessInput {
   readonly technicalQualityPass?: boolean;
 }
 
+export interface MusicAuditionDraft {
+  readonly checkpointId: string;
+  readonly sectionReviews: Readonly<Record<string, { readonly score: string; readonly evidence: string }>>;
+  readonly emotionalDepthScore: string;
+  readonly arrangementDepthScore: string;
+  readonly hollowOrGeneric: boolean;
+  readonly notes: string;
+}
+
+export function musicAuditionDraftForCheckpoint(
+  draft: MusicAuditionDraft | null,
+  checkpointId: string,
+  sections: readonly { readonly id: string }[],
+): MusicAuditionDraft {
+  if (draft?.checkpointId === checkpointId) return draft;
+  return {
+    checkpointId,
+    sectionReviews: Object.fromEntries(sections.map(({ id }) => [id, { score: "", evidence: "" }])),
+    emotionalDepthScore: "",
+    arrangementDepthScore: "",
+    hollowOrGeneric: false,
+    notes: "",
+  };
+}
+
 export function assessMusicAuditionApprovalReadiness(input: MusicAuditionApprovalReadinessInput) {
   const reviewComplete = input.sections.length >= 4 && input.sections.every((section) => {
     const review = input.sectionReviews[section.id];
