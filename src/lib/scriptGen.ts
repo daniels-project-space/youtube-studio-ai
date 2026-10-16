@@ -8,7 +8,7 @@ import { creativeTextJson, hasCreativeTextKey, scriptCreativeTextModel } from "@
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
-import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
 import { assembleScriptNarration } from "@/engine/scriptNarration";
@@ -246,6 +246,7 @@ function programRouteClause(req: Pick<ScriptRequest, "programRoute">): string {
   if (!route) return "";
   return [
     `SEALED CHANNEL PROGRAM ROUTE: ${route.routeKey} (${route.routeFingerprint}).`,
+    channelProgramContextPrompt(route),
     `VIEWER JOB: ${route.directives.viewerJob}`,
     `CLAIM MODE: ${route.directives.claimMode}.`,
     "SCRIPT RULES (non-negotiable):",

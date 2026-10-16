@@ -48,6 +48,7 @@ import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import {
   ChannelProgramRouteRunSeedSchema,
+  channelProgramContextPrompt,
   channelProgramRouteRunSeedFingerprint,
   parseChannelProgramRouteRunSeed,
   type ChannelProgramRouteRunSeed,
@@ -933,7 +934,9 @@ export function createScriptGenBlock(
                 ? ` CRITICAL: the cold open promised "${draft.hookLoop}" — flag it as an issue if the script ` +
                   `does not EXPLICITLY pay that promise off.`
                 : "") +
-              (programRouteCritique ? `\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.` : "") +
+              (programRouteCritique
+                ? `\n${channelProgramContextPrompt(programRoute!)}\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.`
+                : "") +
               channelCritiqueBrief(scriptChannel) +
               ` Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 ` +
               `issues, each under 140 characters.\n\n` +

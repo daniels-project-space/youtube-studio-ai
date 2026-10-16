@@ -50,6 +50,8 @@ async function main(): Promise<void> {
       nicheKey: "history",
       locale: "en",
       concept: "Evidence-led short documentaries that show how historic decisions changed ordinary lives.",
+      audience: "Curious adults who want clear evidence without academic jargon.",
+      sampleTopics: ["How a bridge changed the town", "What a court record reveals about daily life"],
     });
     const route = channelProgramRouteRunSeed({
       route: resolveChannelProgramRoute(brief),
@@ -64,7 +66,9 @@ async function main(): Promise<void> {
 
     const script = await synthScript({
       topic: "The bridge's warm final stone",
+      persona: "Patient, evidence-led historical storytelling for curious adults.",
       maxSeconds: 421,
+      programRoute: route,
       sentenceGapSec: 0.85,
       ttsSpeed: 0.94,
       precraftedHook: crafted,
@@ -78,6 +82,8 @@ async function main(): Promise<void> {
     });
     assert.equal(calls, 1, "a sufficient one-shot must not buy continuation or chunked calls");
     assert.match(prompt, /WRITE IN THIS CHANNEL'S LOCKED NARRATIVE REGISTER/);
+    assert.match(prompt, /Intended audience: Curious adults who want clear evidence without academic jargon\./);
+    assert.match(prompt, /Creator-declared topic priorities \(in order\): 1\. How a bridge changed the town; 2\. What a court record reveals about daily life/);
     assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,
       "a pacing-only identity must shape generation just as it shapes the channel critic");
     for (const guidance of [

@@ -124,6 +124,21 @@ export interface ChannelProgramRouteRunSeed {
   };
 }
 
+/** Compact creator-declared context for script writing and independent review. */
+export function channelProgramContextPrompt(seed: Pick<ChannelProgramRouteRunSeed, "context">): string {
+  const context = seed.context;
+  return [
+    "CANONICAL CHANNEL PROGRAM CONTEXT (honor this identity; examples do not limit valid episode topics):",
+    `Niche: ${context.nicheKey}`,
+    context.subcategory ? `Subcategory: ${context.subcategory}` : "",
+    context.audience ? `Intended audience: ${context.audience}` : "",
+    context.sampleTopics?.length
+      ? `Creator-declared topic priorities (in order): ${context.sampleTopics.map((topic, index) => `${index + 1}. ${topic}`).join("; ")}`
+      : "",
+    `Language/locale: ${context.locale}`,
+  ].filter(Boolean).join("\n");
+}
+
 interface ChannelProgramRouteDefinition {
   readonly key: ChannelProgramRouteKey;
   readonly family: FamilyKey;
