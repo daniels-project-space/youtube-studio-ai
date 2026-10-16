@@ -664,6 +664,10 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
       log,
     );
     if (assertions.length === 0) return undefined;
+    if (!assertions.some((assertion) => assertion.severity === "block")) {
+      log("crew/critic: BRIEF REJECTED — the review spec contains no blocking dealbreaker");
+      return undefined;
+    }
     return { assertions };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a critic
