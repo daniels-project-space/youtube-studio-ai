@@ -179,6 +179,7 @@ async function main() {
     const accepted = AcceptedMusicArrangementSchema.parse(result.store.acceptedMusicArrangement);
     const expectedBinding = {
       ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "run-arrangement", topic: seedStore.topic,
+      sourceBrief: result.store.musicBrief,
     };
     assert.deepEqual(acceptedMusicArrangementForRun(accepted, expectedBinding), accepted);
     assert.equal(acceptedMusicArrangementForRun(undefined, expectedBinding), undefined,
@@ -186,6 +187,10 @@ async function main() {
     assert.throws(() => acceptedMusicArrangementForRun({ malformed: true }, expectedBinding), /receipt is malformed/);
     assert.throws(() => acceptedMusicArrangementForRun(accepted, { ...expectedBinding, channelId: "other-channel" }),
       /does not match the current owner, channel, run and topic/);
+    assert.throws(() => acceptedMusicArrangementForRun(accepted, {
+      ...expectedBinding,
+      sourceBrief: { ...result.store.musicBrief as object, musicPrompt: "A different brief" },
+    }), /does not match the current music brief/);
     assert.deepEqual(producedBrief.arrangement, arrangement);
     assert.equal(Object.hasOwn(producedBrief.audio, "voiceFx"), false);
     assert.equal(Object.hasOwn(producedBrief.directives as object, "voiceFx"), false);

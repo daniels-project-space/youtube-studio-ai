@@ -197,7 +197,9 @@ export type AcceptedMusicArrangement = z.infer<typeof AcceptedMusicArrangementSc
 
 export function acceptedMusicArrangementForRun(
   value: unknown,
-  expected: Pick<AcceptedMusicArrangement, "ownerId" | "channelId" | "runId" | "topic">,
+  expected: Pick<AcceptedMusicArrangement, "ownerId" | "channelId" | "runId" | "topic"> & {
+    sourceBrief: unknown;
+  },
 ): AcceptedMusicArrangement | undefined {
   if (value === undefined || value === null) return undefined;
   const parsed = AcceptedMusicArrangementSchema.safeParse(value);
@@ -206,6 +208,9 @@ export function acceptedMusicArrangementForRun(
   if (receipt.ownerId !== expected.ownerId || receipt.channelId !== expected.channelId ||
     receipt.runId !== expected.runId || receipt.topic !== expected.topic) {
     throw new Error("accepted music arrangement receipt does not match the current owner, channel, run and topic");
+  }
+  if (receipt.sourceBriefFingerprint !== sourceBriefFingerprint(expected.sourceBrief)) {
+    throw new Error("accepted music arrangement receipt does not match the current music brief");
   }
   return receipt;
 }

@@ -311,6 +311,7 @@ export const music: Block = {
       channelId: String(ctx.channelId),
       runId: ctx.runId,
       topic,
+      sourceBrief: ctx.store["musicBrief"],
     });
     const acceptedTempoMode = acceptedArrangement?.arrangement.tempoMode;
     const composerPrompt = composerBrief?.musicPrompt;
