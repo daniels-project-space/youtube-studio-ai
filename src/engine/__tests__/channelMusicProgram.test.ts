@@ -9,6 +9,8 @@ import {
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS,
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
   music3StructuredCaptionWordCount,
+  musicFallbackProfileForRole,
+  musicProviderPromptForProgram,
   musicRoleForRoute,
   musicSoundProfileFingerprint,
   primaryMusicFallbackProfile,
@@ -80,6 +82,26 @@ assert.equal(musicSoundProfileFingerprint(lofiFallbackPrograms[0]!), musicSoundP
   "episode topic changes must not reshuffle a channel's fallback sound identity");
 
 const soundscapeChannels = ["Investory", "Chalk & Compound", "Stoic Truths", "Seaside Ghibli", "Drawn Past"];
+const narrationFallbackPrograms = soundscapeChannels.map((channelName) => createChannelMusicProgram({
+  channelId: channelName,
+  channelIdentityFingerprint: sha256Hex(channelName),
+  family: "narrated",
+  contentLaneKey: "documentary",
+  topic: "A measured account of the expedition",
+  providerPreference: "suno",
+}));
+assert.ok(new Set(narrationFallbackPrograms.map((program) => program.identity.genre)).size >= 3,
+  "unconfigured narration channels should seal distinct fallback identities");
+const narrationProgram = narrationFallbackPrograms[0]!;
+const narrationProviderPrompt = musicProviderPromptForProgram(
+  narrationProgram,
+  "Keep the episode direction subordinate to the channel identity.",
+);
+assert.ok(narrationProviderPrompt.length <= 900);
+assert.ok(narrationProviderPrompt.includes(narrationProgram.identity.genre));
+assert.ok(narrationProgram.identity.instrumentation.some((instrument) => narrationProviderPrompt.includes(instrument)));
+assert.ok(narrationProviderPrompt.includes(narrationProgram.topic));
+assert.ok(narrationProviderPrompt.includes("Episode direction:"));
 const meditationFallbackPrograms = soundscapeChannels.map((channelName) => createChannelMusicProgram({
   channelId: channelName,
   channelIdentityFingerprint: sha256Hex(channelName),
@@ -115,6 +137,9 @@ assert.ok(sleepFallbackPrograms.every((program) =>
   program.role === "sleep_sound_bed" && program.identity.bpmRange === null &&
   program.mix.targetLufs === -20 && program.mix.bodyMusicVol === 0.1026 && program.mix.narrationPriority,
 ), "personalized sleep soundscapes must remain beatless and retain the narrated-sleep mix contract");
+const sleepProviderPrompt = musicProviderPromptForProgram(sleepFallbackPrograms[0]!);
+assert.match(sleepProviderPrompt, /Beatless, no pulse or tempo/u);
+assert.doesNotMatch(sleepProviderPrompt, /\btempo\s+\d|\bBPM\b/iu);
 const sleepFallbackSibling = createChannelMusicProgram({
   channelId: "Investory",
   channelIdentityFingerprint: sha256Hex("Investory"),
@@ -597,9 +622,11 @@ assert.deepEqual(
   ["cold-open", "exposition", "complication", "reveal", "recovery", "resolution", "tail"],
   "long narration beds must preserve speech space through a distinct reveal-and-recovery passage",
 );
-assert.equal(longNarration.identity.genre, "restrained documentary underscore");
+assert.equal(longNarration.identity.genre, musicFallbackProfileForRole({
+  role: "narration_bed", channelIdentitySeed: sha("f"),
+}).genre);
 assert.equal(longNarration.mix.targetLufs, -18, "narration beds retain their role-aware loudness target");
-assert.match(longNarration.identity.moodArc, /without competing with speech/u);
+assert.match(longNarration.identity.moodArc, /unobtrusive beneath narration/u);
 
 const shortForm = createChannelMusicProgram({
   channelId: "channel-quick-lessons",

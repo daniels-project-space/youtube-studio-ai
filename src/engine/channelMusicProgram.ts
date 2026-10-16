@@ -322,24 +322,28 @@ const MEDITATION_MUSIC_FALLBACKS = Object.freeze([
     instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
     textures: ["wide calm stereo space", "gentle natural air"],
     moodArc: "settle into a steady spacious calm, support slow breathing with subtle timbral change, and return without a strong melodic arrival",
+    prompt: "slow spacious ambient meditation with warm sustained pads, sparse felt piano and soft breathy flute; wide calm stereo space, gentle natural air, no percussion or dramatic build-ups, purely instrumental",
   }),
   Object.freeze({
     genre: "organic ambient meditation",
     instrumentation: ["soft bowed strings", "low warm drone", "distant wooden flute"],
     textures: ["open wood-room resonance", "quiet breath-like air"],
     moodArc: "begin with spacious warmth, allow a slow harmonic opening, then return gently to the same grounded stillness",
+    prompt: "organic ambient meditation with soft bowed strings, low warm drone and distant wooden flute; open wood-room resonance, quiet breath-like air, no percussion or dramatic build-ups, purely instrumental",
   }),
   Object.freeze({
     genre: "minimal piano meditation",
     instrumentation: ["felt piano", "soft sustained cello", "subtle airy synth"],
     textures: ["close felt detail", "long natural room decay"],
     moodArc: "let sparse piano tones breathe over a calm sustained bed, widen briefly, and settle without a strong melodic arrival",
+    prompt: "minimal piano meditation with felt piano, soft sustained cello and subtle airy synth; close felt detail, long natural room decay, no percussion or dramatic build-ups, purely instrumental",
   }),
   Object.freeze({
     genre: "soft tonal meditation ambient",
     instrumentation: ["warm harmonium", "rounded low strings", "breathy reed tone"],
     textures: ["soft harmonic air", "wide unhurried space"],
     moodArc: "hold a gentle center while one warm harmony slowly opens and returns, keeping each change unhurried and predictable",
+    prompt: "soft tonal meditation ambient with warm harmonium, rounded low strings and breathy reed tone; soft harmonic air, wide unhurried space, no percussion or dramatic build-ups, purely instrumental",
   }),
 ]);
 
@@ -349,26 +353,76 @@ const SLEEP_SOUND_FALLBACKS = Object.freeze([
     instrumentation: ["soft sustained synth pad", "distant piano harmonics"],
     textures: ["steady filtered noise bed", "quiet natural room air"],
     moodArc: "remain stable and unobtrusive for unattended sleep; no pulse, melodic phrase, cadence, crescendo, or attention-catching event",
+    prompt: "continuous low-arousal ambient sleep soundscape with soft sustained synth pad and distant piano harmonics; steady filtered noise, quiet room air, beatless and event-free, no melody, pulse, swell or vocals",
   }),
   Object.freeze({
     genre: "soft rain-texture sleep soundscape",
     instrumentation: ["low diffuse drone", "soft sustained air tone"],
     textures: ["even filtered rainfall", "deep quiet room tone"],
     moodArc: "maintain a smooth, even field of sound through the night with no event, swell, pulse, or tonal arrival",
+    prompt: "soft rain-texture sleep soundscape with low diffuse drone and sustained air tone; even filtered rainfall, deep quiet room tone, beatless and event-free, no melody, pulse, swell or vocals",
   }),
   Object.freeze({
     genre: "deep ambient sleep soundscape",
     instrumentation: ["rounded sub-audible drone", "soft sustained upper air"],
     textures: ["steady brown-noise bed", "diffuse distant atmosphere"],
     moodArc: "stay low, continuous, and tonally unobtrusive; changes remain nearly imperceptible with no new event or cadence",
+    prompt: "deep ambient sleep soundscape with rounded low drone and soft sustained upper air; steady brown-noise bed, diffuse distant atmosphere, beatless and event-free, no melody, pulse, swell or vocals",
   }),
   Object.freeze({
     genre: "quiet ocean-air sleep soundscape",
     instrumentation: ["soft low synth bed", "distant smooth resonance"],
     textures: ["level ocean-air wash", "muted spacious room tone"],
     moodArc: "preserve a calm unchanging horizon of sound without wave-like swells, pulse, melody, or attention-catching shifts",
+    prompt: "quiet ocean-air sleep soundscape with soft low synth bed and distant smooth resonance; level ocean-air wash, muted spacious room tone, beatless and event-free, no melody, pulse, swell or vocals",
   }),
 ]);
+
+const NARRATION_MUSIC_FALLBACKS: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
+  Object.freeze({
+    genre: "sparse solo piano underscore",
+    instrumentation: ["soft felt piano"],
+    textures: ["wide phrase spacing", "warm room tone"],
+    moodArc: "contemplative and unhurried, very low in dynamics and unobtrusive beneath narration",
+    prompt: "sparse solo piano underscore, wide spacing between phrases, soft felt hammers, warm room tone, contemplative and unhurried, very low dynamics, no percussion, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "sustained string underscore",
+    instrumentation: ["gentle cello", "soft bowed strings"],
+    textures: ["slow bowed swells", "warm resonance"],
+    moodArc: "warm and reflective with minimal movement, staying unobtrusive beneath narration",
+    prompt: "sustained string underscore, slow bowed swells, gentle cello underneath, warm and reflective, minimal movement, no percussion, no drums, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "soft ambient underscore",
+    instrumentation: ["analogue pads"],
+    textures: ["faint tape hiss", "slow harmonic drift"],
+    moodArc: "calm and spacious without rhythm, staying unobtrusive beneath narration",
+    prompt: "soft ambient underscore, layered analogue pads and faint tape hiss, slow harmonic drift, calm and spacious, no rhythm section, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+  Object.freeze({
+    genre: "quiet acoustic guitar underscore",
+    instrumentation: ["fingerpicked acoustic guitar", "low sustained notes"],
+    textures: ["close microphone detail", "warm natural room"],
+    moodArc: "warm, grounded and unobtrusive beneath narration, with no build-up",
+    prompt: "quiet acoustic guitar underscore, fingerpicked and close-mic'd, occasional low sustained note, warm and grounded, unobtrusive, no percussion, no build-ups, purely instrumental beneath narration",
+  }),
+  Object.freeze({
+    genre: "muted brass and low woodwind underscore",
+    instrumentation: ["muted brass", "low woodwinds"],
+    textures: ["long held notes", "distant documentary space"],
+    moodArc: "restrained and serious, remaining low and unobtrusive beneath narration",
+    prompt: "muted brass and low woodwind underscore, long held notes, distant and documentary, restrained and serious, no percussion, no build-ups, purely instrumental and unobtrusive beneath narration",
+  }),
+]);
+
+const SHORT_FORM_MUSIC_FALLBACK: PrimaryMusicFallbackProfile = Object.freeze({
+  genre: "concise modern instrumental underscore",
+  instrumentation: ["muted bass", "soft compact percussion", "single restrained pluck"],
+  textures: ["tight clean low end", "controlled stereo width"],
+  moodArc: "establish one clear rhythmic idea quickly, add a small lift, and resolve cleanly before the cut",
+  prompt: "concise modern instrumental underscore with muted bass, soft compact percussion and one restrained pluck; tight low end, controlled width, a small quick lift and clean resolution, no vocals",
+});
 
 const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
   Object.freeze({
@@ -412,6 +466,62 @@ export function primaryMusicFallbackProfile(input: {
     return spreadDefault(input.channelIdentitySeed, LOFI_PRIMARY_MUSIC_PROFILES);
   }
   return spreadDefault(input.channelIdentitySeed, PRIMARY_MUSIC_FALLBACK_PROFILES);
+}
+
+export function musicFallbackProfileForRole(input: {
+  readonly role: ChannelMusicRole;
+  readonly family?: string;
+  readonly contentLaneKey?: string;
+  readonly channelIdentitySeed: string;
+}): PrimaryMusicFallbackProfile {
+  if (input.role === "primary_music") {
+    return primaryMusicFallbackProfile(input);
+  }
+  if (input.role === "meditation_bed") return spreadDefault(input.channelIdentitySeed, MEDITATION_MUSIC_FALLBACKS);
+  if (input.role === "sleep_sound_bed") return spreadDefault(input.channelIdentitySeed, SLEEP_SOUND_FALLBACKS);
+  if (input.role === "short_form_bed") return SHORT_FORM_MUSIC_FALLBACK;
+  return spreadDefault(input.channelIdentitySeed, NARRATION_MUSIC_FALLBACKS);
+}
+
+/** Compact provider-facing caption derived from the same sealed identity we retain for review. */
+export function musicProviderPromptForProgram(
+  program: ChannelMusicProgram,
+  episodeDirection = "",
+  requiredDirection = "",
+  maximumCharacters = 900,
+): string {
+  if (!Number.isInteger(maximumCharacters) || maximumCharacters < 160) {
+    throw new Error("music provider prompt limit must be an integer of at least 160 characters");
+  }
+  const identity = program.identity;
+  const core = [
+    identity.genre.slice(0, 100),
+    identity.instrumentation.slice(0, 3).map((item) => item.slice(0, 30)).join(", "),
+    identity.textures.slice(0, 2).map((item) => item.slice(0, 26)).join(", "),
+    `Topic: ${program.topic.slice(0, 90)}`,
+    `Mood: ${identity.moodArc.slice(0, 100)}`,
+    identity.bpmRange ? `Tempo ${identity.bpmRange[0]}-${identity.bpmRange[1]} BPM` : "Beatless, no pulse or tempo",
+    "Instrumental, no vocals or lyrics",
+  ].filter(Boolean).join("; ");
+  if (core.length > maximumCharacters) {
+    throw new Error("sealed music identity exceeds the provider prompt limit");
+  }
+  const required = requiredDirection.replace(/\s+/gu, " ").trim();
+  const direction = episodeDirection.replace(/\s+/gu, " ").trim();
+  const sections = program.generation.sections
+    .map((section) => `${section.label}: ${section.instruction}`)
+    .join("; ");
+  let result = core;
+  for (const addition of [
+    required ? `Required Studio direction: ${required}` : "",
+    direction ? `Episode direction: ${direction}` : "",
+    sections ? `Arrangement: ${sections}` : "",
+  ]) {
+    if (!addition || result.length >= maximumCharacters) continue;
+    const available = maximumCharacters - result.length - 2;
+    if (available > 0) result += `; ${addition.slice(0, available)}`;
+  }
+  return result;
 }
 
 function cleanText(value: string | undefined, fallback: string, maximum: number): string {
@@ -733,31 +843,12 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
   }
   const role = input.role ?? routeRole;
   assertRoleCompatibleIdentity(role, input.instrumentation, input.genre);
-  const roleDefaults = {
-    narration_bed: {
-      genre: "restrained documentary underscore",
-      instrumentation: ["low strings", "soft piano", "muted low pulse"],
-      textures: ["dry centered dialogue space", "subtle room depth"],
-      moodArc: "quiet uncertainty gathers into restrained tension, then resolves without competing with speech",
-    },
-    short_form_bed: {
-      genre: "concise modern instrumental underscore",
-      instrumentation: ["muted bass", "soft compact percussion", "single restrained pluck"],
-      textures: ["tight clean low end", "controlled stereo width"],
-      moodArc: "establish one clear rhythmic idea quickly, add a small lift, and resolve cleanly before the cut",
-    },
-  };
-  const defaults = role === "primary_music"
-    ? primaryMusicFallbackProfile({
-        family,
-        contentLaneKey,
-        channelIdentitySeed: input.channelIdentityFingerprint,
-      })
-    : role === "meditation_bed"
-      ? spreadDefault(input.channelIdentityFingerprint, MEDITATION_MUSIC_FALLBACKS)
-      : role === "sleep_sound_bed"
-        ? spreadDefault(input.channelIdentityFingerprint, SLEEP_SOUND_FALLBACKS)
-        : roleDefaults[role];
+  const defaults = musicFallbackProfileForRole({
+    role,
+    family,
+    contentLaneKey,
+    channelIdentitySeed: input.channelIdentityFingerprint,
+  });
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);

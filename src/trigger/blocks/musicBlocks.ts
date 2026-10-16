@@ -2,7 +2,6 @@
  * Shared music generation and prepared-track reuse for every channel family.
  * Provider admission, receipt verification, mastering and spend stay together.
  */
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getMusicBrief, getVisualBrief } from "@/engine/creative/brief";
@@ -13,10 +12,11 @@ import {
   assertMusicProgramQualityReceipt,
   createChannelMusicProgram,
   music3StructuredCaptionWordCount,
+  musicFallbackProfileForRole,
+  musicProviderPromptForProgram,
   ChannelMusicProgramSchema,
   ChannelMusicProviderSchema,
   musicRoleForRoute,
-  primaryMusicFallbackProfile,
   type ChannelMusicRole,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
@@ -195,16 +195,14 @@ export function musicFallbackPromptForRoute(input: {
   const family = input.family?.toLowerCase() ?? "";
   const contentLaneKey = input.contentLaneKey?.toLowerCase() ?? "";
   const role = input.role ?? musicRoleForRoute(family, contentLaneKey);
-  if (role === "primary_music") {
-    const profile = primaryMusicFallbackProfile({
-      family,
-      contentLaneKey,
-      channelIdentitySeed: input.channelIdentitySeed,
-    });
-    return `${profile.prompt}, evoking "${input.topic}"; no lyrics`;
-  }
-  return `${spreadDefault(input.channelIdentitySeed, FALLBACK_UNDERSCORE_BRIEFS)}, ` +
-    `evoking "${input.topic}", no vocals, no lyrics`;
+  const profile = musicFallbackProfileForRole({
+    role,
+    family,
+    contentLaneKey,
+    channelIdentitySeed: input.channelIdentitySeed,
+  });
+  const lyricRule = role === "sleep_sound_bed" ? "no vocals or lyrics" : "no vocals, no lyrics";
+  return `${profile.prompt}, evoking "${input.topic}"; ${lyricRule}`;
 }
 
 export const music: Block = {
@@ -616,12 +614,13 @@ export const music: Block = {
     }
     const providerPrompt = provider === "minimax_music3" || channelMusicProgram.role === "sleep_sound_bed"
       ? channelMusicProgram.generation.structuredCaption
-      : [
-          prompt,
-          `Arrangement map: ${channelMusicProgram.generation.sections.map((section) =>
-            `${section.label} ${Math.round(section.startFraction * 100)}-${Math.round(section.endFraction * 100)}%: ${section.instruction}`,
-          ).join(" ")}`,
-        ].join(" ");
+      : musicProviderPromptForProgram(channelMusicProgram, basePrompt, [
+          studioAudioDirection,
+          modulePromptDirection,
+          dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+          composerPrompt,
+          musicProgram?.audio.direction,
+        ].filter(Boolean).join(" "));
 
     // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
     // longer than a few minutes. trackCount asks for N distinct clips that get

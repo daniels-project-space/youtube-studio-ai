@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { musicFallbackProfileForRole } from "@/engine/channelMusicProgram";
 import { musicFallbackPromptForRoute } from "../musicBlocks";
 
 const ARCHETYPES = readFileSync(join(process.cwd(), "src/engine/archetypes.ts"), "utf8")
@@ -35,7 +35,9 @@ function main(): void {
     "Investory", "Chalk & Compound", "Stoic Truths", "The Quiet Stoic",
     "Stoic Truths (ES)", "Stoic Truths (DE)",
   ];
-  const briefs = new Set(channels.map((c) => spreadDefault(c, FALLBACK_UNDERSCORE_BRIEFS)));
+  const briefs = new Set(channels.map((channelIdentitySeed) => musicFallbackProfileForRole({
+    role: "narration_bed", channelIdentitySeed,
+  }).prompt));
   assert.ok(
     briefs.size >= 3,
     `six channels resolved to ${briefs.size} distinct brief(s) — a last resort that returns one ` +
@@ -43,14 +45,15 @@ function main(): void {
   );
   // Stable, or a channel's score changes between episodes.
   assert.equal(
-    spreadDefault("Investory", FALLBACK_UNDERSCORE_BRIEFS),
-    spreadDefault("Investory", FALLBACK_UNDERSCORE_BRIEFS),
+    musicFallbackProfileForRole({ role: "narration_bed", channelIdentitySeed: "Investory" }).prompt,
+    musicFallbackProfileForRole({ role: "narration_bed", channelIdentitySeed: "Investory" }).prompt,
     "the same channel must always resolve to the same brief",
   );
 
   // ---- every brief must be usable UNDER narration -------------------------
   // A bed that competes with speech is worse than a shared one.
-  for (const brief of FALLBACK_UNDERSCORE_BRIEFS) {
+  for (const channelIdentitySeed of channels) {
+    const brief = musicFallbackProfileForRole({ role: "narration_bed", channelIdentitySeed }).prompt;
     assert.match(brief, /purely instrumental/, `"${brief.slice(0, 30)}" must declare it is instrumental`);
     assert.match(brief, /no build-ups/, `"${brief.slice(0, 30)}" must forbid build-ups under narration`);
     assert.ok(
@@ -63,13 +66,17 @@ function main(): void {
   const lofiPrompt = musicFallbackPromptForRoute({
     family: "music_loop", contentLaneKey: "music_loop", topic: "quiet harbor", channelIdentitySeed: "Seaside Ghibli",
   });
-  assert.match(lofiPrompt, /warm cozy lofi hip-hop/,
+  assert.match(lofiPrompt, /lo-fi instrumental/,
     "the exact loop route must retain its own sound — that sound is the product");
   const narratedPrompts = channels.map((channelIdentitySeed) => musicFallbackPromptForRoute({
     family: "narrated", contentLaneKey: "narrated_longform", topic: "a measured story", channelIdentitySeed,
   }));
   assert.ok(new Set(narratedPrompts).size >= 3,
     "narrated channels must draw distinct identity-bound prompts rather than inherit Lo-Fi or one generic bed");
+  for (const [index, channelIdentitySeed] of channels.entries()) {
+    const profile = musicFallbackProfileForRole({ role: "narration_bed", channelIdentitySeed });
+    assert.equal(narratedPrompts[index], `${profile.prompt}, evoking "a measured story"; no vocals, no lyrics`);
+  }
 
   // ---- the archetype must not hard-code one identity ----------------------
   assert.ok(
