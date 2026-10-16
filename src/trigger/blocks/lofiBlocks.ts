@@ -35,7 +35,7 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
-import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
+import { getVisualBrief } from "@/engine/creative/brief";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
@@ -50,10 +50,6 @@ import {
   parseChannelProgramRouteRunSeed,
   type ChannelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
-import {
-  createOriginalMusicProgramPlan,
-  selectOriginalMusicProvider,
-} from "@/engine/originalMusicProgram";
 import {
   assertMusicProgramQualityReceipt,
 } from "@/engine/channelMusicProgram";
@@ -107,7 +103,6 @@ import { renderNovitaImage } from "@/lib/novitaMedia";
 import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
 import {
   assertPinnedMiniMaxMusic3Receipt,
-  hasQualifiedMiniMaxMusic3,
 } from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
@@ -1119,88 +1114,6 @@ export const topicSelect: Block = {
 };
 
 /* -------------------------- 1b. scene_planner --------------------------- */
-
-/**
- * Creates the immutable episode-level audio/visual brief consumed by both the
- * looping-scene planner and the paid music generation block.  The plan is
- * deterministic from the already-selected topic and frozen channel route; it
- * never calls a provider or grants render/publication authority.
- */
-export function createMusicProgramPlanBlock(sourceProvider?: "yue2", readIdentity?: (ctx: StageContext) => {
-  dna: import("@/engine/creative/types").StyleDNA | null;
-  niche?: string;
-}): Block {
-  return {
-  id: "music_program_plan",
-  consumes: ["topic"],
-  produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
-  run: async (ctx) => {
-    const topic = str(ctx, "topic");
-    const route = routeSeedForTopicSelection(ctx);
-    if (!route) {
-      throw new Error("music_program_plan: requires a sealed music-loop channel program route");
-    }
-    const requestedProvider = ctx.params["provider"];
-    if (sourceProvider && requestedProvider !== undefined && requestedProvider !== sourceProvider) {
-      throw new Error("music_program_plan: explicit provider conflicts with YuE2 source ownership");
-    }
-    if (
-      requestedProvider !== undefined &&
-      requestedProvider !== "minimax_music3" &&
-      requestedProvider !== "suno" &&
-      requestedProvider !== "mureka" &&
-      !(sourceProvider === "yue2" && requestedProvider === "yue2")
-    ) {
-      throw new Error("music_program_plan: provider must be minimax_music3, suno, or mureka");
-    }
-    const identity = readIdentity?.(ctx);
-    const dna = identity ? identity.dna
-      : (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
-    const visual = getVisualBrief(ctx.store);
-    const audio = getMusicBrief(ctx.store);
-    const setting = [
-      visual?.setting,
-      visual?.world,
-      visual?.footageQueries?.[0],
-      ctx.params["setting"] as string | undefined,
-      dna?.setting,
-      identity ? identity.niche : ctx.store["niche"] as string | undefined,
-    ].map((value) => value?.toString().trim()).find(Boolean);
-    const audioDirection = [
-      `Original instrumental program for “${topic}”.`,
-      dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
-      dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
-      dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
-      audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
-      "No vocals, no lyrics, and a musically resolved seamless loop.",
-    ].filter(Boolean).join(" ");
-    const plan = createOriginalMusicProgramPlan({
-      route,
-      topic,
-      setting,
-      visualStyle: visualStyle(ctx),
-      motionIntent: sourceProvider === "yue2"
-        ? `Camera completely static. ${(dna?.motionVocabulary ?? []).join("; ") || "Only subtle ambient motion"}. No abrupt cuts, flashes, or subject drift.`
-        : "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
-      audioDirection,
-      // Select a provider once, before either paid branch is allowed to run.
-      // Automatic programs use MiniMax only when its independently qualified
-      // worker is ready; an explicit route selection always remains immutable.
-      providerPreference: sourceProvider ?? selectOriginalMusicProvider({
-        requestedProvider: requestedProvider === "yue2" ? undefined : requestedProvider,
-        minimaxQualified: hasQualifiedMiniMaxMusic3(),
-      }),
-    });
-    ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
-    return {
-      musicProgramPlan: plan,
-      musicProgramPlanFingerprint: plan.fingerprint,
-    };
-  },
-  };
-}
-
-export const musicProgramPlan = createMusicProgramPlanBlock();
 
 export function createScenePlannerBlock(planner: typeof planScenes = planScenes): Block {
   return {
@@ -3516,7 +3429,6 @@ export const shortsSpinoff: Block = {
 
 export const lofiBlocks: Block[] = [
   topicSelect,
-  musicProgramPlan,
   scenePlanner,
   keyframes,
   loopClips,

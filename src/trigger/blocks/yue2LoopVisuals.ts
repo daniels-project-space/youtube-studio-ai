@@ -5,7 +5,8 @@ import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
 import { verifyApprovedYuE2Source } from "@/lib/approvedYuE2AssemblySource";
 import { musicProgramForCurrentRoute } from "./blockContext";
-import { createLoopClipsBlock, createMusicProgramPlanBlock } from "./lofiBlocks";
+import { createLoopClipsBlock } from "./lofiBlocks";
+import { createMusicProgramPlanBlock } from "./musicProgramPlan";
 import { createBoundKeyframesManifest } from "./boundLoopVisuals";
 
 export const YUE2_PROGRAM_VERSION = "2.0.0-yue2-intent";

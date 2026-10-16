@@ -13,6 +13,7 @@ import { createYuE2ProgramManifest, createYuE2LoopVisualManifest, createYuE2Keyf
 import { createReviewedMotionKeyframesManifest, createReviewedMotionClipsManifest } from "@/trigger/blocks/reviewedLoopMotion";
 import { createDeliveryAwareMetadataManifest } from "@/trigger/blocks/deliveryAwareMetadata";
 import { music } from "@/trigger/blocks/musicBlocks";
+import { musicProgramPlan } from "@/trigger/blocks/musicProgramPlan";
 import { createProviderAwareMusicManifest } from "@/trigger/blocks/providerAwareMusic";
 import { createYuE2MusicManifest } from "@/trigger/blocks/yue2Music";
 import { createYuE2AssemblyManifest } from "@/trigger/blocks/yue2Assembly";
@@ -64,6 +65,7 @@ export function registerAllBlocks(): void {
   // Template C (Lofi) blocks. metadata + thumbnail_gen come from the
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
+  register(musicProgramPlan);
   registerManifestVersion(createGroundedScenePlannerManifest(getManifest("scene_planner")!));
   const boundScenePlanner = createBoundScenePlannerManifest(getManifest("scene_planner")!);
   registerManifestVersion(boundScenePlanner);
