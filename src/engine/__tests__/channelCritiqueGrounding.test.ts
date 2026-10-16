@@ -74,6 +74,8 @@ for (const value of [
   "warm low register",
   "patient wonder without dramatization",
 ]) assert.ok(fieldBrief.includes(value), `field-notes grounding must retain ${value}`);
+for (const value of ["Narrative scriptStyle: observational", "Narrative voiceProfile: warm low register, close-mic, never announcer-like"])
+  assert.ok(fieldBrief.includes(value), `critic prompt must preserve authored narrative identity: ${value}`);
 for (const value of [
   "Motion Lab",
   "Explain hidden mechanisms with bold, legible motion",
