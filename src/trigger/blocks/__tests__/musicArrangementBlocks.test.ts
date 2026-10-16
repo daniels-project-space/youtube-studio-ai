@@ -6,6 +6,7 @@ import type { z } from "zod";
 import type { ShowBible } from "@/engine/creative/types";
 import {
   AcceptedMusicArrangementSchema,
+  acceptedMusicArrangementForRun,
   createMusicReviewContext,
   type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
@@ -176,6 +177,15 @@ async function main() {
     assert.equal(calls.length, beforeCalls + 1, "only the composer calls the text boundary; planner is deterministic");
     const producedBrief = ComposerBriefWithArrangementSchema.parse(result.store.musicBrief);
     const accepted = AcceptedMusicArrangementSchema.parse(result.store.acceptedMusicArrangement);
+    const expectedBinding = {
+      ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "run-arrangement", topic: seedStore.topic,
+    };
+    assert.deepEqual(acceptedMusicArrangementForRun(accepted, expectedBinding), accepted);
+    assert.equal(acceptedMusicArrangementForRun(undefined, expectedBinding), undefined,
+      "legacy runs without a receipt remain compatible");
+    assert.throws(() => acceptedMusicArrangementForRun({ malformed: true }, expectedBinding), /receipt is malformed/);
+    assert.throws(() => acceptedMusicArrangementForRun(accepted, { ...expectedBinding, channelId: "other-channel" }),
+      /does not match the current owner, channel, run and topic/);
     assert.deepEqual(producedBrief.arrangement, arrangement);
     assert.equal(Object.hasOwn(producedBrief.audio, "voiceFx"), false);
     assert.equal(Object.hasOwn(producedBrief.directives as object, "voiceFx"), false);

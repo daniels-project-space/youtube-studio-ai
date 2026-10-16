@@ -195,6 +195,21 @@ export const AcceptedMusicArrangementSchema = AcceptedMusicArrangementBodySchema
 });
 export type AcceptedMusicArrangement = z.infer<typeof AcceptedMusicArrangementSchema>;
 
+export function acceptedMusicArrangementForRun(
+  value: unknown,
+  expected: Pick<AcceptedMusicArrangement, "ownerId" | "channelId" | "runId" | "topic">,
+): AcceptedMusicArrangement | undefined {
+  if (value === undefined || value === null) return undefined;
+  const parsed = AcceptedMusicArrangementSchema.safeParse(value);
+  if (!parsed.success) throw new Error("accepted music arrangement receipt is malformed");
+  const receipt = parsed.data;
+  if (receipt.ownerId !== expected.ownerId || receipt.channelId !== expected.channelId ||
+    receipt.runId !== expected.runId || receipt.topic !== expected.topic) {
+    throw new Error("accepted music arrangement receipt does not match the current owner, channel, run and topic");
+  }
+  return receipt;
+}
+
 function sourceBriefFingerprint(value: unknown): string {
   const ancestors = new Set<object>();
   // canonicalJson can omit or coerce non-JSON values. Refuse those before

@@ -5,7 +5,7 @@
 import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getMusicBrief, getVisualBrief } from "@/engine/creative/brief";
-import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
+import { acceptedMusicArrangementForRun } from "@/engine/acceptedMusicArrangement";
 import { createOriginalMusicProgramPlan, selectOriginalMusicProvider } from "@/engine/originalMusicProgram";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE } from "@/engine/pricing";
@@ -306,14 +306,13 @@ export const music: Block = {
     // channel's locked SOUND. Composer and module directions add episode nuance;
     // neither may replace that identity or a specialized sleep-bed contract.
     const composerBrief = getMusicBrief(ctx.store);
-    const acceptedArrangement = AcceptedMusicArrangementSchema.safeParse(ctx.store["acceptedMusicArrangement"]);
-    const acceptedTempoMode = acceptedArrangement.success &&
-      acceptedArrangement.data.ownerId === ctx.ownerId &&
-      acceptedArrangement.data.channelId === String(ctx.channelId) &&
-      acceptedArrangement.data.runId === ctx.runId &&
-      acceptedArrangement.data.topic === topic
-      ? acceptedArrangement.data.arrangement.tempoMode
-      : undefined;
+    const acceptedArrangement = acceptedMusicArrangementForRun(ctx.store["acceptedMusicArrangement"], {
+      ownerId: ctx.ownerId,
+      channelId: String(ctx.channelId),
+      runId: ctx.runId,
+      topic,
+    });
+    const acceptedTempoMode = acceptedArrangement?.arrangement.tempoMode;
     const composerPrompt = composerBrief?.musicPrompt;
     const configuredPrompt = typeof ctx.params.prompt === "string"
       ? ctx.params.prompt.trim().replace(/\s+/gu, " ").slice(0, 300)
