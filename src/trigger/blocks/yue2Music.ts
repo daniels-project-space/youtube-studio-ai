@@ -32,6 +32,9 @@ const block: Block & { version: string } = {
     const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
+      if (arrangement.reviewContext?.family !== route.family) {
+        throw new Error("YuE2 music arrangement review context does not match the current channel route family");
+      }
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
       if (!isMusicRoleAllowedForRoute(
         route.family,

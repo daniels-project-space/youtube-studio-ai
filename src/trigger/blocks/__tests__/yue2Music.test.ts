@@ -88,6 +88,7 @@ async function main() {
   const { rehydrateOutputs } = load("@/lib/rehydrate") as typeof import("@/lib/rehydrate");
   const { YUE2_MUSIC_CANDIDATE_VERSION } = load("../yue2Music") as typeof import("../yue2Music");
   const { createChannelProgramBrief } = load("@/engine/channelProgramBrief") as typeof import("@/engine/channelProgramBrief");
+  const { createMusicReviewContext } = load("@/engine/acceptedMusicArrangement") as typeof import("@/engine/acceptedMusicArrangement");
   const { channelProgramRouteRunSeed, resolveChannelProgramRoute } = load("@/engine/channelProgramRoute") as typeof import("@/engine/channelProgramRoute");
   const { createOriginalMusicProgramPlan } = load("@/engine/originalMusicProgram") as typeof import("@/engine/originalMusicProgram");
   _resetBlocks(); registerAllBlocks();
@@ -122,6 +123,12 @@ async function main() {
   const wrongSleepArrangement = changedArrangement({
     arrangement: { ...arrangement.arrangement, role: "primary_music" },
     musicIntent: { ...arrangement.musicIntent, role: "primary_music" },
+    reviewContext: createMusicReviewContext({
+      topic: arrangement.reviewContext.topic,
+      family: "sleep",
+      channelName: arrangement.reviewContext.channelName,
+      promptContext: arrangement.reviewContext.promptContext,
+    }),
   });
   reset();
   await assert.rejects(selected.execute({ ...context, store: { ...context.store,
@@ -135,10 +142,9 @@ async function main() {
   reset();
   await assert.rejects(selected.execute({ ...context, store: { ...context.store,
     channelProgramRoute: sleepRouteSeed, acceptedMusicArrangement: guidedMeditationArrangement } }),
-  /candidate, request or allocation mismatch/);
-  assert.equal(calls.length, 1,
-    "the explicit guided-meditation role must reach durable source reconciliation instead of failing sleep-role admission");
-  assert.equal(reads, 1);
+  /review context does not match the current channel route family/);
+  assert.equal(calls.length + reads + bootstraps, 0,
+    "a cross-family arrangement must refuse before paid or storage I/O");
 
   for (const patch of [
     { ownerId: "another-owner" }, { channelId: "another-channel" }, { runId: "another-run" },
