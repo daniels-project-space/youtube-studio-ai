@@ -26,6 +26,7 @@ import {
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { channelBannedWordsDirective } from "@/engine/channelLanguagePolicy";
 import { channelProgramContextPrompt, type ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { unmatchedTitleNumbers } from "@/lib/numericClaims";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 import type { ShowBibleVoice } from "@/engine/showBibleVoice";
 import { showBibleVoicePromptLines } from "@/engine/showBibleVoice";
@@ -495,23 +496,24 @@ function isFictionRegister(niche?: string, style?: string): boolean {
 }
 
 /**
- * Grounded fact-check of a cold open's checkable claims. Specificity pressure
- * invites confident invention — one
- * wrong number in the first sentence costs the channel its credibility, so a
- * "false" verdict on any claim rejects the candidate. "unverifiable" passes
- * with a log (soft claims and paraphrases often won't ground cleanly); a dead
- * fact-checker passes on the judge gates alone, loudly.
+ * Exact numeric-presence floor only. It is not semantic fact verification:
+ * names, units, and causal entailment still belong to source-review modules.
  */
 async function factCheckColdOpen(
   c: { hook: string; opening: string },
   a: HookCraftArgs,
 ): Promise<{ ok: boolean; problems: string[]; status: "verified" | "unchecked" }> {
-  void c;
-  void a;
-  // Google search grounding is not an allowed fallback. A factual channel must
-  // bind its hook to an admitted source packet before publication; absent that
-  // artifact this creative-only module marks the claim status honestly.
-  return { ok: true, problems: [], status: "unchecked" };
+  if (!a.sourceGrounding?.trim()) {
+    // Google search grounding is not an allowed fallback. Without an admitted
+    // source packet this creative-only module cannot verify factual claims.
+    return { ok: true, problems: [], status: "unchecked" };
+  }
+  const unsupported = unmatchedTitleNumbers(`${c.hook}\n${c.opening}`, a.sourceGrounding);
+  return {
+    ok: unsupported.length === 0,
+    problems: unsupported.map((number) => `numeric claim ${number} is absent from admitted source grounding`),
+    status: "unchecked",
+  };
 }
 
 /**
@@ -594,10 +596,6 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
 
   let fixNote = "";
   let lastIssues: string[] = [];
-  // Grounded fact-checks bill per REQUEST (~$35/1k) on top of tokens — cap them
-  // per craft: the judge's ordered picks get at most 2 grounded verdicts; after
-  // that a candidate passes on the judge gates alone (logged, never silent).
-  let groundedCalls = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
     // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
@@ -605,8 +603,10 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     const gen = await creativeTextJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
-        `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
-          `viewer's pain or fascination, and the emotional stakes. Write every candidate FROM that analysis.`,
+        `FIRST, silently analyze the topic: its core tension, the viewer's pain or fascination, and the ` +
+          `emotional stakes. When admitted source grounding is present, choose a surprising fact it supports; ` +
+          `without source grounding, do not present an invented detail as verified. Write every candidate from ` +
+          `that analysis.`,
         `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +
           `and register; for search-intent topics favor problem_agitation/wrong_way/result_first, for ` +
           `browse/suggested-style topics favor curiosity, contrarian and scene devices):`,
@@ -621,8 +621,9 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `specific (a name, number, date, place, object of THIS topic) and close on an open loop the video ` +
           `promises to pay off. No meta ("in this video", "today we"), no greeting, no channel name, no ` +
           `restating the title verbatim.`,
-        `HARD RULES: concrete over abstract — name the person/place/number/year of THIS topic within the first ` +
-          `3 sentences${skipConcreteness ? " (soft for meditative register)" : ""}. Short spoken sentences, average ` +
+        `HARD RULES: concrete over abstract — name a person/place/number/year of THIS topic within the first ` +
+          `3 sentences only when it is supplied by the topic or admitted source grounding; never invent a ` +
+          `specific to satisfy this rule${skipConcreteness ? " (soft for meditative register)" : ""}. Short spoken sentences, average ` +
           `under 15 words. The promise must be honest — never claim what the topic can't deliver, and NEVER invent ` +
           `first-person research the channel hasn't done ("we analyzed", "I reviewed the filings") — cite real ` +
           `public facts instead. No disclaimers, no apologies, no subscribe asks. NEVER use these openers: ` +
@@ -769,9 +770,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         );
       }
 
-      // Prefer the judge's pick if it gates; else any gating candidate. The
-      // judge-gated pick must then survive the grounded fact-check — a false
-      // claim rejects the candidate and the next gating one gets its turn.
+      // Prefer the judge's pick if it gates; each factual candidate then gets
+      // the same local numeric/source check before it can be selected.
       const fiction = isFictionRegister(a.niche, a.style);
       const selectedBest = best ?? 0;
       const order = [selectedBest, ...survivors.map((_, i) => i).filter((i) => i !== selectedBest)];
@@ -781,18 +781,14 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         if (!passes(v)) continue;
         const c = survivors[i];
         let factCheck: "verified" | "skipped" | "unchecked" = "skipped";
-        if (!fiction && groundedCalls < 2) {
-          groundedCalls++;
+        if (!fiction) {
           const fc = await factCheckColdOpen(c, a);
           if (!fc.ok) {
             factProblems.push(...fc.problems);
-            a.log?.(`hookcraft: "${c.device}" rejected by fact-check (${fc.problems[0] ?? ""})`);
+            a.log?.(`hookcraft: "${c.device}" rejected by numeric source check (${fc.problems[0] ?? ""})`);
             continue;
           }
           factCheck = fc.status;
-        } else if (!fiction) {
-          a.log?.(`hookcraft: grounded fact-check budget (2) spent — "${c.device}" passes on judge gates alone`);
-          factCheck = "unchecked";
         }
         a.log?.(
           `hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, ` +
