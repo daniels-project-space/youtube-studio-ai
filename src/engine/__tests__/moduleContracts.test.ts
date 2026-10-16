@@ -156,18 +156,37 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
           node.argumentExpression &&
           ts.isStringLiteral(node.argumentExpression)
         ) {
-          const key = node.argumentExpression.text;
-          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file})`);
+          if (ts.isStringLiteral(node.argumentExpression)) {
+            const key = node.argumentExpression.text;
+            if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file})`);
+          } else {
+            ambientReads.push(`${id}.[computed store key] (${file})`);
+          }
+        }
+        if (
+          ts.isPropertyAccessExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "ctx" &&
+          node.expression.name.text === "store"
+        ) {
+          const key = node.name.text;
+          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, property access)`);
         }
         if (
           ts.isCallExpression(node) &&
           ts.isIdentifier(node.expression) &&
           ["str", "opt"].includes(node.expression.text) &&
           node.arguments.length >= 2 &&
-          ts.isStringLiteral(node.arguments[1])
+          ts.isIdentifier(node.arguments[0]) &&
+          node.arguments[0].text === "ctx"
         ) {
-          const key = node.arguments[1].text;
-          if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, helper)`);
+          if (ts.isStringLiteral(node.arguments[1])) {
+            const key = node.arguments[1].text;
+            if (!allowedInputs.has(key)) ambientReads.push(`${id}.${key} (${file}, helper)`);
+          } else {
+            ambientReads.push(`${id}.[computed helper key] (${file}, helper)`);
+          }
         }
         ts.forEachChild(node, visit);
       };
@@ -180,7 +199,7 @@ function directContractAudit(additionalSources: Record<string, string> = {}): vo
     walk(source);
   }
   assert.deepEqual([...new Set(extras)].sort(), [], "module returned undeclared artifacts");
-  assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared literal store reads");
+  assert.deepEqual([...new Set(ambientReads)].sort(), [], "module performed undeclared or unprovable store reads");
 }
 
 function calibratedDirectContractAudit(): void {
@@ -188,7 +207,14 @@ function calibratedDirectContractAudit(): void {
   assert.throws(() => directContractAudit({ "version-negative-fixture.ts": `
     const block = { id: "music", version: "3.0.0-yue2-candidate", produces: [],
       run: ctx => { const illegal = ctx.store["undeclared_fixture_input"]; } };
-  ` }), /undeclared literal store reads/);
+  ` }), /undeclared or unprovable store reads/);
+  assert.throws(() => directContractAudit({ "computed-read-fixture.ts": `
+    const block = { id: "music", produces: [], run: ctx => {
+      const one = ctx.store[dynamicInput];
+      const two = ctx.store.undeclared_fixture_input;
+      const three = str(ctx, dynamicInput);
+    } };
+  ` }), /undeclared or unprovable store reads/);
 }
 
 function contractInputDeclarationsAreUnambiguous(): void {
