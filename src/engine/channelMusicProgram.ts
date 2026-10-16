@@ -636,6 +636,8 @@ function isGuidedMeditationOverride(
     role === "meditation_bed";
 }
 
+export const isGuidedMeditationMusicRoleOverride = isGuidedMeditationOverride;
+
 function routeHasNarrationCue(family: string, contentLaneKey: string): boolean {
   const routeWords = `${family} ${contentLaneKey}`.toLowerCase().replace(/[_-]+/gu, " ");
   return /\b(?:guided|breathwork|spoken|narrated)\b/u.test(routeWords);

@@ -14,6 +14,8 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { arrangementComposerReservation } from "@/lib/arrangementComposerBudget";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { channelProgramRouteRunSeed, resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { openRouterModel } from "@/lib/openRouter";
 import { createYuE2AcceptedArrangementRequest, validateYuE2EvaluationRequest } from "@/lib/yue2Evaluation";
 import type { RunStageSink, StageContext } from "@/engine/types";
@@ -275,7 +277,8 @@ async function main() {
 
   for (const role of ["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"] as const) {
     const musicIntent = { role, tempoMode: role === "sleep_sound_bed" ? "unmetered" as const : "metered" as const,
-      requestedDurationSec: 90, playback: "once" as const, ending: "seamless_wrap" as const };
+      requestedDurationSec: 90, playback: role === "meditation_bed" ? "repeat" as const : "once" as const,
+      ending: "seamless_wrap" as const };
     const arrangement = { ...flat, ...musicIntent };
     response = { arrangement, duckDb: -15, bedLufs: -20 };
     const result = await runPipeline(validatePipeline([
@@ -288,6 +291,23 @@ async function main() {
     assert.deepEqual(accepted.arrangement, arrangement, "family cannot overwrite explicit intent, including independent ending/playback");
     assert.ok(accepted.reviewContext!.promptContext.includes(JSON.stringify(accepted.musicIntent)));
     assert.ok(calls.at(-1)!.prompt.includes("required exact values, not suggestions"));
+    if (role === "meditation_bed") {
+      const brief = createChannelProgramBrief({
+        family: "sleep",
+        nicheKey: "history",
+        locale: "en-US",
+        concept: "Guided breathing sessions with an unmetered, supportive ambient bed.",
+        audience: "Listeners following calm spoken meditation.",
+        sampleTopics: [seedStore.topic],
+      });
+      const route = channelProgramRouteRunSeed({ route: resolveChannelProgramRoute(brief), programBrief: brief });
+      const planned = await musicArrangementPlan.run({
+        ...stageContext({ ...seedStore, topic: seedStore.topic, musicBrief: result.store.musicBrief,
+          channelProgramRoute: route }),
+      });
+      assert.equal((planned.acceptedMusicArrangement as { arrangement: { role: string } }).arrangement.role,
+        "meditation_bed", "sleep/ambient-guided routes preserve their explicit meditation role through the real acceptance block");
+    }
   }
   for (const musicIntent of [{ role: "invented" }, { requestedDurationSec: 301 }, { requestedDurationSec: "90" },
     { playback: "loop" }, { ending: "fade" }, { form: "verse" }, { voiceFx: "radio" }, { role: undefined }, null]) {

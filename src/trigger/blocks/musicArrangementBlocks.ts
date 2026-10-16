@@ -14,7 +14,7 @@ import type { ComposerDirectives } from "@/lib/crew/composer";
 import { agentJsonConfiguration } from "@/agents/mastra";
 import { arrangementComposerReservation, assertArrangementComposerAdmission } from "@/lib/arrangementComposerBudget";
 import { createComposerBriefBlock } from "./crewBlocks";
-import { musicRoleForRoute } from "@/engine/channelMusicProgram";
+import { isGuidedMeditationMusicRoleOverride, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { channelProgramRouteFromContext } from "./blockContext";
 
 export const ARRANGEMENT_COMPOSER_VERSION = "2.1.0-channel-grounding";
@@ -104,7 +104,11 @@ export const musicArrangementPlan: Block = {
     const route = channelProgramRouteFromContext(ctx);
     if (route) {
       const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
-      if (brief.arrangement.role !== expectedRole) {
+      if (brief.arrangement.role !== expectedRole && !isGuidedMeditationMusicRoleOverride(
+        route.family,
+        route.contentLaneKey,
+        brief.arrangement.role,
+      )) {
         throw new Error(`music_arrangement_plan requires a ${expectedRole} arrangement for route ${route.routeKey}`);
       }
       if (route.requiredBlocks.includes("music_program_plan") && brief.arrangement.playback !== "repeat") {
