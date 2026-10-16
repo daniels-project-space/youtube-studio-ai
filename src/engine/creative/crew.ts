@@ -167,8 +167,15 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
         `Stay consistent with the iconic motif. Return STRICT JSON ` +
         `{"footageQueries":string[],"promptStyle":string,"palette":string[],"motion":string,"avoid":string[]}.`,
     });
-    const queries = (raw.footageQueries ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 16);
-    if (queries.length === 0 && !raw.promptStyle) return undefined;
+    const queries = [...new Map((raw.footageQueries ?? [])
+      .map((query) => query.trim())
+      .filter((query) => {
+        const words = query.split(/\s+/u);
+        return words.length >= 2 && words.length <= 5;
+      })
+      .map((query) => [query.toLocaleLowerCase("en-US"), query] as const))]
+      .slice(0, 14)
+      .map(([, query]) => query);
     // OUTPUT SANITY: a degenerate LLM loop once emitted a 307,000-char
     // promptStyle ("gigantic" x420) that was blended into every downstream
     // i2v prompt and 422'd the provider. Clause fields are CLAUSES: hard-cap
@@ -183,12 +190,27 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
       }
       return v.length > cap ? v.slice(0, cap).replace(/\s+\S*$/, "") : v;
     };
+    const promptStyle = clause(raw.promptStyle, 500);
+    const palette = [...new Set((raw.palette ?? []).filter((color) => /^#[0-9a-fA-F]{6}$/u.test(color)))]
+      .slice(0, 5);
+    const motion = clause(raw.motion, 300);
+    const avoid = [...new Set((raw.avoid ?? []).map((item) => item.trim()).filter(Boolean))].slice(0, 8);
+    const missing: string[] = [];
+    if (queries.length < 8) missing.push(`only ${queries.length} valid distinct stock queries (needs 8)`);
+    if (!promptStyle) missing.push("prompt style");
+    if (palette.length === 0) missing.push("valid color palette");
+    if (!motion) missing.push("motion direction");
+    if (avoid.length === 0) missing.push("visual avoid guidance");
+    if (missing.length) {
+      log(`crew/dp: BRIEF REJECTED — incomplete visual brief: ${missing.join(", ")}`);
+      return undefined;
+    }
     return {
       footageQueries: queries,
-      promptStyle: clause(raw.promptStyle, 500),
-      palette: (raw.palette ?? []).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c)).slice(0, 5),
-      motion: clause(raw.motion, 300),
-      avoid: (raw.avoid ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 8),
+      promptStyle,
+      palette,
+      motion,
+      avoid,
     };
   } catch (e) {
     // Returning undefined is the right degradation — a video without a dp
