@@ -227,6 +227,30 @@ function compileRepresentativeFamilies(): void {
   }
 }
 
+function channelAwareScriptQaIsNewChannelOnlyByDefault(): void {
+  const legacy = designPipeline({ family: "narrated_stock", nicheKey: "motivation" });
+  assert.equal(legacy.pipeline.find((entry) => entry.block === "qa_script")?.version, undefined);
+
+  const nonNarrated = designPipeline({ family: "music_loop", nicheKey: "lofi", channelAwareScriptQa: true });
+  assert.equal(nonNarrated.pipeline.some((entry) => entry.block === "qa_script"), false);
+
+  const selected = designPipeline({
+    family: "narrated_stock",
+    nicheKey: "motivation",
+    channelAwareScriptQa: true,
+  });
+  assert.equal(selected.pipeline.find((entry) => entry.block === "qa_script")?.version, "2.0.0-channel-aware");
+  assert.equal(
+    selected.compilation?.modules.find((manifest) => manifest.id === "qa_script")?.version,
+    "2.0.0-channel-aware",
+  );
+  assert.ok(channelPipelineValidationSeedKeys(selected.contentLane, undefined, selected.pipeline).includes("channelName"));
+  assert.ok(
+    getManifest("qa_script", "2.0.0-channel-aware")?.consumes.channelName,
+    "the selected critic must require the new channel's frozen name",
+  );
+}
+
 function defaultBudgetsCoverCompilerReservations(): void {
   for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
     const design = designPipeline({ family, publishMode: "draft" });
@@ -429,9 +453,9 @@ function pairwiseRequiredArtifactEdgesFailClosed(): void {
 
 /**
  * Exercise whole-graph mutations in addition to individual edge mutations.
- * The automatic composer must reject an unknown module and duplicate producer,
- * and a real family graph must reject removal of one required producer. These
- * are structural checks only; no provider or paid stage is executed.
+ * The automatic composer must reject an unknown module, duplicate producer,
+ * malformed module params, and removal of one required producer. These are
+ * structural checks only; no provider or paid stage is executed.
  */
 function wholePipelineMutationGuards(): void {
   let coveredFamilies = 0;
@@ -446,6 +470,19 @@ function wholePipelineMutationGuards(): void {
     coveredFamilies++;
     const seeds = channelPipelineValidationSeedKeys(design.contentLane);
     const valid = validatePipeline(design.pipeline, seeds);
+
+    const configIndex = valid.manifests.findIndex((manifest) =>
+      !manifest.configSchema.safeParse([]).success,
+    );
+    assert.ok(configIndex >= 0, `${family}: mutation fixture needs an object-shaped module config`);
+    const malformedParams = design.pipeline.map((entry, index) => index === configIndex
+      ? { ...entry, params: [] as unknown as Record<string, unknown> }
+      : entry);
+    assert.throws(
+      () => compilePipeline(validatePipeline(malformedParams, seeds)),
+      /expected record|expected object|received array|invalid_type/i,
+      `${family}: malformed module params must be rejected before execution`,
+    );
 
     assert.throws(
       () => validatePipeline([...design.pipeline, { block: "__missing_module__" }], seeds),
@@ -497,7 +534,7 @@ function wholePipelineMutationGuards(): void {
     );
   }
   assert.ok(coveredFamilies >= 8, `whole-pipeline corpus unexpectedly small: ${coveredFamilies} families`);
-  console.log(`whole-pipeline mutation corpus passed: ${coveredFamilies} families`);
+  console.log(`whole-pipeline mutation corpus passed: ${coveredFamilies} families × malformed config`);
 }
 
 function producerIndexBefore(
@@ -762,6 +799,22 @@ function configurationSpecificCostEnvelopes(): void {
     "thumbnail reservation must cover concept, one text-free scene, and one publishing alarm",
   );
 
+  const qaResolver = MODULE_CONTRACTS.qa_visual.maxCostUsdFor;
+  assert.ok(qaResolver, "qa_visual must declare its exact frame-dependent cost envelope");
+  const storyQaCost = qaResolver({}, {
+    entries: [{ block: "qa_visual", params: {} }],
+    index: 0,
+    store: {
+      storySpineFingerprint: "sealed-story-spine",
+      shotList: [{ t0: 0, t1: 3 }, { t0: 3, t1: 6 }],
+    },
+  });
+  assert.equal(
+    storyQaCost,
+    qaVisualCost({}, 0, 2),
+    "pre-dispatch qa_visual reservation must include one complete-focus frame per sealed Story Spine shot",
+  );
+
   const narrationCharacters =
     180 * 20 +
     2 * NARRATION_COLD_OPEN_MAX_CHARS +
@@ -933,6 +986,7 @@ function main(): void {
   calibratedDirectContractAudit();
   contractInputDeclarationsAreUnambiguous();
   compileRepresentativeFamilies();
+  channelAwareScriptQaIsNewChannelOnlyByDefault();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
   runtimeConfigurationIsCompiledBeforeSpendReservation();

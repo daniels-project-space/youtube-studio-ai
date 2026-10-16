@@ -19,11 +19,18 @@ async function main(): Promise<void> {
   assert.ok(!lofiBlocks.some((block) => block.id === "music"),
     "LoFi must not own or register the shared music block");
   assert.deepEqual(lockableModule("music")?.paths, [
+    "src/engine/__tests__/moduleContracts.test.ts",
+    "src/lib/__tests__/deliveryIndexBounds.test.ts",
+    "src/lib/__tests__/pipelineWorkerDeploymentTransport.test.ts",
+    "src/lib/__tests__/yue2Continuation.test.ts",
     "src/trigger/blocks/blockContext.ts",
-    // Golden also binds music_program_plan, which remains in LoFi.
-    "src/trigger/blocks/lofiBlocks.ts",
+    "src/trigger/blocks/musicArrangementBlocks.ts",
     "src/trigger/blocks/musicBlocks.ts",
+    "src/trigger/blocks/musicProgramPlan.ts",
+    "src/trigger/blocks/yue2Music.ts",
   ], "the generated Music owner lock must protect the implementation and its shared guards");
+  assert.ok(!lofiBlocks.some((block) => block.id === "music_program_plan"),
+    "LoFi must not own or register the shared music-program planner");
   for (const owner of ["lofi", "topic-intel", "ship", "shorts"]) {
     assert.ok(lockableModule(owner)?.paths.includes("src/trigger/blocks/blockContext.ts"),
       `${owner} must retain protection of helpers extracted from LoFi`);

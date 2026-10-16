@@ -12,6 +12,25 @@ function finiteNumber(value: unknown, fallback: number, minimum: number, maximum
   return Math.max(minimum, Math.min(maximum, result));
 }
 
+function musicSourceDuration(config: Record<string, unknown>): number {
+  let configured = config.generationDurationSec;
+  if (configured === undefined) {
+    const legacyDuration = config.durationSec;
+    // Older Lo-Fi pipelines put the final 1–8 hour video duration on `music`.
+    // Keep those manifests usable, but never turn that final clock into a long
+    // source-track request; the music module's bounded default remains 300s.
+    if (typeof legacyDuration === "number" && Number.isSafeInteger(legacyDuration) && legacyDuration > 300 && legacyDuration <= 28_800) {
+      return 300;
+    }
+    configured = legacyDuration;
+  }
+  if (configured === undefined) return 300;
+  if (typeof configured !== "number" || !Number.isSafeInteger(configured) || configured < 10 || configured > 300) {
+    throw new Error("weekly music source duration must be an integer from 10 to 300 seconds; final video duration belongs to assembly");
+  }
+  return configured;
+}
+
 function seedRecord(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
   const value = manifest.execution.seedStore;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly prepared music seed store is invalid");
@@ -84,7 +103,7 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
     contentLaneKey,
     topic: manifest.plan.topic,
     providerPreference: provider,
-    durationSec: finiteNumber(config.generationDurationSec ?? config.durationSec, 300, 10, 300),
+    durationSec: musicSourceDuration(config),
     genre: typeof audio.genre === "string" ? audio.genre : undefined,
     instrumentation: Array.isArray(audio.instrumentation) ? audio.instrumentation.filter((value): value is string => typeof value === "string") : undefined,
     textures: Array.isArray(audio.textures) ? audio.textures.filter((value): value is string => typeof value === "string") : undefined,
@@ -96,7 +115,6 @@ export function planWeekPreparedMusicProgram(manifest: PlanWeekPreparationManife
       composerDirection || (!hasDna ? explicitDirection : ""),
       studioDirection,
     ].filter(Boolean).join(" ") || undefined,
-    targetLufs: finiteNumber(audio.loudnessLufs, -16, -23, -12),
-    bodyMusicVol: 1,
+    targetLufs: audio.loudnessLufs === undefined ? undefined : finiteNumber(audio.loudnessLufs, -16, -23, -12),
   }));
 }

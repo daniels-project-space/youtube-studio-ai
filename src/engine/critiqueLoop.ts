@@ -56,6 +56,7 @@ export interface CritiqueAdmission {
 
 const MAX_CRITIQUE_ISSUES = 32;
 const MAX_CRITIQUE_ISSUE_LENGTH = 500;
+const MAX_CRITIQUE_ITERATIONS = 5;
 
 /**
  * Validate the shared producer/director boundary before a verdict can affect
@@ -92,6 +93,9 @@ export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
   }
   if (row.fatal !== undefined && typeof row.fatal !== "boolean") {
     issues.push("critic fatal must be boolean when present");
+  }
+  if (row.fatal === true && row.pass === true) {
+    issues.push("critic cannot pass with a fatal defect");
   }
   if (issues.length) return { pass: false, critique: null, issues };
   return {
@@ -209,7 +213,15 @@ export async function produceAndCritique<T>(
   o: LoopOptions<T>,
 ): Promise<LoopResult<T>> {
   const threshold = o.threshold ?? 0.8;
-  const maxIters = Math.max(1, o.maxIters ?? 3);
+  const maxIters = o.maxIters ?? 3;
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(`${o.label ?? "loop"}: critique threshold must be a finite number from 0 to 1`);
+  }
+  if (!Number.isInteger(maxIters) || maxIters < 1 || maxIters > MAX_CRITIQUE_ITERATIONS) {
+    throw new Error(
+      `${o.label ?? "loop"}: maxIters must be an integer from 1 to ${MAX_CRITIQUE_ITERATIONS}`,
+    );
+  }
   const log = o.log ?? (() => {});
   const label = o.label ?? "loop";
 
@@ -249,7 +261,7 @@ export async function produceAndCritique<T>(
       log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
     }
 
-    const accepted = critique.pass && critique.score >= threshold;
+    const accepted = !critique.fatal && critique.pass && critique.score >= threshold;
     if (accepted) {
       return { value, critique, iterations: iter, accepted: true, history };
     }

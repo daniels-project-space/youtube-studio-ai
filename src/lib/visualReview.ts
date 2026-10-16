@@ -12,8 +12,8 @@ import type {
   VisualRepairSignal,
 } from "@/engine/healer";
 import {
-  COMPLETE_VISUAL_REVIEW_MAX_FRAMES,
   completeVisualReviewFocusTimes,
+  completeVisualReviewEvidenceTimes,
   FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
 } from "@/engine/visualReviewBudget";
 import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
@@ -83,10 +83,19 @@ export function finalMasterTranscriptCues(input: {
   readonly sentenceTimings: unknown;
   readonly narrationStartSec: number;
   readonly finalMasterDurationSec: number;
+  readonly requireTranscript?: boolean;
 }): readonly VisualReviewTranscriptCue[] {
-  if (input.sentenceTimings === undefined) return Object.freeze([]);
+  if (input.sentenceTimings === undefined) {
+    if (input.requireTranscript) {
+      throw new Error("final-master visual review requires a non-empty narration timing map");
+    }
+    return Object.freeze([]);
+  }
   if (!Array.isArray(input.sentenceTimings) || input.sentenceTimings.length > 16_000) {
     throw new Error("final-master visual review requires a bounded narration timing map");
+  }
+  if (input.requireTranscript && input.sentenceTimings.length === 0) {
+    throw new Error("final-master visual review requires a non-empty narration timing map");
   }
   if (!Number.isFinite(input.narrationStartSec) || input.narrationStartSec < 0) {
     throw new Error("final-master visual review requires a valid narration start");
@@ -947,33 +956,6 @@ export function planCompleteFocusEvidence(durationSec: number, windows: readonly
     }));
 }
 
-function normalizeCompleteFocusFrames(
-  durationSec: number,
-  frames: readonly Pick<VisualReviewFrame, "tSec">[],
-): VisualReviewFrame[] {
-  const byTimestamp = new Map<string, number>();
-  for (const [index, frame] of frames.entries()) {
-    const raw = Number(frame.tSec);
-    if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) {
-      throw new Error(`visualReview complete-focus frame ${index} falls outside the final master`);
-    }
-    const tSec = roundTime(raw);
-    byTimestamp.set(tSec.toFixed(1), tSec);
-    if (byTimestamp.size > COMPLETE_VISUAL_REVIEW_MAX_FRAMES) {
-      throw new Error(
-        `visualReview complete-focus frame plan exceeds its ${COMPLETE_VISUAL_REVIEW_MAX_FRAMES}-frame safety limit`,
-      );
-    }
-  }
-  return [...byTimestamp.values()]
-    .sort((left, right) => left - right)
-    .map((tSec, index) => ({
-      id: `c${String(index + 1).padStart(3, "0")}`,
-      tSec,
-      selectionReasons: ["focus"],
-    }));
-}
-
 function focusOnlyEvidence(
   durationSec: number,
   windows: readonly VisualReviewWindow[],
@@ -1761,17 +1743,18 @@ export async function reviewRender(
     ? opts.completeFocusWindows ?? intent.focusWindows ?? []
     : [];
   const requiredFocusFrames = requireCompleteFocusCoverage
-    ? (() => {
-        const byTimestamp = new Map<string, VisualReviewFrame>();
-        for (const frame of [
-          ...planCompleteFocusEvidence(durationSec, sealedCompleteFocusWindows),
-          ...normalizeCompleteFocusFrames(durationSec, opts.completeFocusFrames ?? []),
-          ...(loopReview ? normalizeCompleteFocusFrames(durationSec, MUSIC_LOOP_REVIEW_JOIN_TIMES.map(tSec => ({ tSec }))) : []),
-        ]) {
-          byTimestamp.set(frame.tSec.toFixed(1), frame);
-        }
-        return [...byTimestamp.values()].sort((left, right) => left.tSec - right.tSec);
-      })()
+    ? completeVisualReviewEvidenceTimes(
+        sampledDurationSec,
+        sealedCompleteFocusWindows,
+        [
+          ...(opts.completeFocusFrames ?? []).map((frame) => frame.tSec),
+          ...(loopReview ? MUSIC_LOOP_REVIEW_JOIN_TIMES : []),
+        ],
+      ).map((tSec, index) => ({
+        id: `c${String(index + 1).padStart(3, "0")}`,
+        tSec,
+        selectionReasons: ["focus"] as EvidenceReason[],
+      }))
     : [];
   if (opts.expectedCompleteFocusFrameCount !== undefined) {
     const expected = Number(opts.expectedCompleteFocusFrameCount);

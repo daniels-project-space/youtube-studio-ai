@@ -60,6 +60,35 @@ async function main(): Promise<void> {
     );
   }
 
+  const storyShotMidpoints = Array.from({ length: 12 }, (_, index) => 1.2 + index * 1.1);
+  const reviewedStoryTimes = new Set<number>();
+  const storyShotReview = await reviewRender(fixture, 18, {
+    title: "Every Story Spine shot has required visual evidence",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-every-story-shot",
+    required: true,
+    reviewer: async (input) => {
+      for (const frame of input.frames) reviewedStoryTimes.add(frame.tSec);
+      return JSON.stringify({ defects: [], summary: "All sealed shot samples reviewed." });
+    },
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+    requireCompleteFocusCoverage: true,
+    completeFocusFrames: storyShotMidpoints.map((tSec) => ({ tSec })),
+    expectedCompleteFocusFrameCount: storyShotMidpoints.length,
+    sourceSha256: sourceSha256A,
+  });
+  assert.equal(storyShotReview.evidence.coverage.requiredFocusFrameCount, storyShotMidpoints.length);
+  assert.equal(storyShotReview.evidence.coverage.missingFocusFrameCount, 0);
+  for (const tSec of storyShotMidpoints) {
+    assert.ok(
+      reviewedStoryTimes.has(Number(tSec.toFixed(1))),
+      `Story Spine shot midpoint ${tSec}s must reach a reviewer batch`,
+    );
+  }
+
   // Every retained evidence frame must have reached the reviewer. The full
   // sealed schedule intentionally exceeds a single provider request, so this
   // proves chunking rather than representative-frame sampling.

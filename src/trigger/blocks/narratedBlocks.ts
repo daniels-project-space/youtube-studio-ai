@@ -103,11 +103,15 @@ import {
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseHookCritique,
   parseScriptCritique,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
-import { qaVisualReviewFrameLimits } from "@/engine/visualReviewBudget";
+import {
+  completeVisualReviewEvidenceTimes,
+  qaVisualReviewFrameLimits,
+} from "@/engine/visualReviewBudget";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { visualTreatmentReferenceCriteria } from "@/engine/visualTreatmentCatalog";
 import {
@@ -956,7 +960,11 @@ export const hookCraft: Block = {
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
-    if (!hasCreativeTextKey()) return { hook: firstLine() };
+    if (!hasCreativeTextKey()) {
+      throw new Error(
+        "hook_craft FAILED: independent hook critic unavailable — refusing an unreviewed fallback hook",
+      );
+    }
 
     // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
     // The hook is the title/thumbnail line — the single highest-leverage string
@@ -1071,7 +1079,7 @@ export const hookCraft: Block = {
         }
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+          const verdict = parseHookCritique(await creativeTextJson<unknown>({
             prompt:
               `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
@@ -1090,16 +1098,14 @@ export const hookCraft: Block = {
             // trailing delimiter after the JSON block.
             maxTokens: 2500,
             temperature: 0.3,
-          });
+          }));
           observedCostUsd += PRICE.boundedTextPassUsd;
-          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          const rejected = verdict.pass === false;
+          const issues = verdict.issues;
+          const rejected = !verdict.pass;
           const rejectionIssues = issues.length
             ? issues
             : ["independent hook critic rejected the line without usable remediation"];
-          const score = Number.isFinite(verdict.score)
-            ? Math.max(0, Math.min(1, Number(verdict.score)))
-            : rejected ? 0.4 : 1;
+          const score = verdict.score;
           if (rejected) {
             ctx.log(
               `hook_craft: candidate ${iter} rejected by the critic` +
@@ -4137,6 +4143,9 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
+  // The length gate consumes this value after assembly. Bind it to the exact
+  // post-overlay/post-normalization file, never to the projected timeline.
+  const measuredVideoSec = assertMeasuredMasterDuration((await probe(finalVideo)).durationSec);
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
   await persistRenderedFile(videoKey, finalVideo, { contentType: "video/mp4" }, {
     beforeAttempt: o.assertOutputAuthority,
@@ -4160,18 +4169,19 @@ async function finishFromComposed(
     }
   }
   await recordAsset(ctx, "video", videoKey, {
-    durationSec: videoSec,
+    durationSec: measuredVideoSec,
+    plannedDurationSec: videoSec,
     narrationSec,
     introSec,
     quoteOverlays: quotes.length,
     source: "stock_footage",
     clips: footage.length,
   });
-  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
+  ctx.log(`timeline_assemble ok: video ${measuredVideoSec}s measured (planned ${videoSec}s; narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
   return {
     videoKey,
     videoLocalPath: finalVideo,
-    videoDurationSec: videoSec,
+    videoDurationSec: measuredVideoSec,
     quotesApplied,
     insertsApplied,
     captionsApplied,
@@ -4229,6 +4239,13 @@ export function resolveLengthBounds(
   // error rather than a rejected video, and saying which one it is matters.
   if (min > max) return { ok: false, reason: `bounds are inverted: minSeconds ${min} exceeds maxSeconds ${max}` };
   return { ok: true, dur, min, max };
+}
+
+export function assertMeasuredMasterDuration(durationSec: unknown): number {
+  if (typeof durationSec !== "number" || !Number.isFinite(durationSec) || durationSec <= 0) {
+    throw new Error(`timeline_assemble: final master duration is invalid (${String(durationSec)})`);
+  }
+  return durationSec;
 }
 
 export const lengthCheck: Block = {
@@ -4756,12 +4773,18 @@ export const qaVisual: Block = {
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
       | null;
+    const visualReviewNarrationKey = ctx.store["narrationKey"];
+    const visualReviewNarrationDurationSec = Number(ctx.store["narrationDurationSec"]);
+    const narrationTimingRequired =
+      (typeof visualReviewNarrationKey === "string" && visualReviewNarrationKey.trim().length > 0) ||
+      (Number.isFinite(visualReviewNarrationDurationSec) && visualReviewNarrationDurationSec > 0);
     let transcriptCues: readonly ReturnType<typeof finalMasterTranscriptCues>[number][] = [];
     try {
       transcriptCues = finalMasterTranscriptCues({
         sentenceTimings: ctx.store["sentenceTimings"],
         narrationStartSec,
         finalMasterDurationSec: p.durationSec,
+        requireTranscript: narrationTimingRequired,
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -4932,6 +4955,13 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: self-contained visual plan review locks skipped in draft: ${detail}`);
       }
     }
+    const completeStorySpineFrames = productionQa
+      ? storySpineVisualLocks.map((lock) => ({ tSec: (lock.startSec + lock.endSec) / 2 }))
+      : [];
+    const requiredVisualReviewFrames = [
+      ...selfContainedStoryVisualPlan.requiredEvidenceFrames,
+      ...completeStorySpineFrames,
+    ];
     // A selected treatment has to be explicitly assessed against every
     // canonical treatment benchmark. Prompt/creative locks alone are not
     // evidence that the final master retained clay, brick, anime, or drawn
@@ -5015,15 +5045,6 @@ export const qaVisual: Block = {
         })
       : undefined;
     const cinematicFinalMasterQaAdmission = cinematicFinalMasterQaReviewPlan?.admission;
-    // The exact lock/cut count was admitted before Novita rendered. Charge the
-    // same sealed complete-focus envelope here so the runner's stage ceiling,
-    // recorded QA spend, and actual provider batch authority cannot diverge.
-    qaCost = qaVisualCost(
-      ctx.params,
-      cinematicFinalMasterQaAdmission?.reviewCostUsd,
-      (cinematicFinalMasterQaReviewPlan?.completeFocusFrameCount ?? 0) +
-        selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
-    );
     const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
       ? Number(ctx.store["introSec"])
       : 0;
@@ -5036,6 +5057,17 @@ export const qaVisual: Block = {
       : { creativeLocks: [], focusWindows: [] };
     const cinematicReviewLocks = cinematicQaEvidence.creativeLocks;
     const cinematicFocus = cinematicQaEvidence.focusWindows;
+    const requiredCompleteFocusFrameCount = completeVisualReviewEvidenceTimes(
+      p.durationSec,
+      cinematicFocus,
+      requiredVisualReviewFrames.map((frame) => frame.tSec),
+    ).length;
+    // Reserve and charge the exact deduplicated frame plan sent to review.
+    qaCost = qaVisualCost(
+      ctx.params,
+      cinematicFinalMasterQaAdmission?.reviewCostUsd,
+      requiredCompleteFocusFrameCount,
+    );
     // A Casefile cinematic sequence is stronger evidence than a family label:
     // it has source-admission and claim→shot-map receipts. Apply the existing
     // Fern-calibrated documentary mechanics to that final review only in this
@@ -5446,18 +5478,19 @@ export const qaVisual: Block = {
       // planned join. Its final review must inspect every one at 2fps; the
       // ordinary cap still applies to untrusted reactive defect windows.
       requireCompleteFocusCoverage:
-        cinematicSequencePresent || selfContainedStoryVisualPlan.requiredEvidenceFrames.length > 0,
+        cinematicSequencePresent || requiredVisualReviewFrames.length > 0,
       ...(cinematicFinalMasterQaReviewPlan
         ? {
             completeFocusWindows: cinematicFocus,
-            expectedCompleteFocusFrameCount: cinematicFinalMasterQaReviewPlan.completeFocusFrameCount,
           }
         : {}),
-      ...(selfContainedStoryVisualPlan.requiredEvidenceFrames.length
+      ...(requiredVisualReviewFrames.length
         ? {
-            completeFocusFrames: selfContainedStoryVisualPlan.requiredEvidenceFrames,
-            expectedCompleteFocusFrameCount: selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
+            completeFocusFrames: requiredVisualReviewFrames,
           }
+        : {}),
+      ...(cinematicFinalMasterQaReviewPlan || requiredVisualReviewFrames.length
+        ? { expectedCompleteFocusFrameCount: requiredCompleteFocusFrameCount }
         : {}),
       log: (message) => ctx.log(message),
     });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   COMPLETE_VISUAL_REVIEW_MAX_FRAMES,
+  completeVisualReviewEvidenceTimes,
   FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
   NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST,
   completeVisualReviewFocusTimes,
@@ -23,6 +24,21 @@ assert.deepEqual(
   completeVisualReviewFocusTimes(18, [{ startSec: 7, endSec: 8 }]),
   [7, 7.5, 8],
   "sealed focus timestamps are deterministic and complete at 2fps",
+);
+assert.deepEqual(
+  completeVisualReviewEvidenceTimes(18, [{ startSec: 7, endSec: 8 }], [7.02, 9]),
+  [7, 7.5, 8, 9],
+  "window and exact-event frames must share tenth-second deduplication with execution",
+);
+assert.throws(
+  () => completeVisualReviewEvidenceTimes(18, [], [18.1]),
+  /falls outside the final master/,
+  "exact event evidence must not silently clamp onto the final frame",
+);
+assert.equal(
+  qaVisualReviewProviderCallCount({ broadFrames: 48, focusFrames: 24, completeFocusFrames: 26 }),
+  49,
+  "every required story-shot frame must be included in the admitted review batches",
 );
 assert.throws(
   () => completeVisualReviewFocusTimes(1_000, [{ startSec: 0, endSec: 1_000 }]),

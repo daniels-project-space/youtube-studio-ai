@@ -26,6 +26,7 @@ for (const invalid of [
   { score: 0.5, pass: false, issues: ["  "] },
   { score: 0.5, pass: false, issues: ["x".repeat(501)] },
   { score: 0.5, pass: false, issues: [], fatal: "no" },
+  { score: 0.99, pass: true, issues: ["fatal defect"], fatal: true },
   { score: 0.5, pass: false, issues: Array.from({ length: 33 }, () => "too many") },
   null,
 ]) {
@@ -37,6 +38,30 @@ for (const invalid of [
 
 async function main(): Promise<void> {
   let produced = 0;
+  for (const maxIters of [Number.NaN, Number.POSITIVE_INFINITY, 0, 1.5, 6]) {
+    await assert.rejects(
+      () => produceAndCritique({
+        label: "iteration-cap-test",
+        maxIters,
+        produce: async () => ({ id: ++produced }),
+        critique: async () => ({ score: 1, pass: true, issues: [] }),
+      }),
+      /iteration-cap-test: maxIters must be an integer from 1 to 5/,
+    );
+  }
+  for (const threshold of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, 1.1]) {
+    await assert.rejects(
+      () => produceAndCritique({
+        label: "threshold-test",
+        threshold,
+        produce: async () => ({ id: ++produced }),
+        critique: async () => ({ score: 1, pass: true, issues: [] }),
+      }),
+      /threshold-test: critique threshold must be a finite number from 0 to 1/,
+    );
+  }
+  assert.equal(produced, 0, "invalid loop settings must stop before any producer attempt");
+
   await assert.rejects(
     () => produceAndCritique({
       label: "admission-test",
@@ -49,6 +74,29 @@ async function main(): Promise<void> {
     /admission-test: malformed critique response.*finite number from 0 to 1/,
   );
   assert.equal(produced, 1, "a malformed first verdict must stop before a second paid-capable attempt");
+
+await assert.rejects(
+  () => produceAndCritique({
+    label: "fatal-verdict-test",
+    maxIters: 2,
+    produce: async () => ({ id: ++produced }),
+    critique: async () => ({ score: 0.99, pass: true, issues: ["fatal defect"], fatal: true }),
+  }),
+  /fatal-verdict-test: malformed critique response.*cannot pass with a fatal defect/,
+);
+assert.equal(produced, 2, "a contradictory fatal verdict must not admit the candidate or spend on a retry");
+
+let recoveryIteration = 0;
+const recovered = await produceAndCritique({
+  label: "fatal-candidate-recovery-test",
+  maxIters: 2,
+  produce: async () => ({ id: ++recoveryIteration }),
+  critique: async (_candidate, iteration) => iteration === 1
+    ? { score: 0.99, pass: false, issues: ["fatal defect"], fatal: true }
+    : { score: 0.85, pass: true, issues: [] },
+});
+assert.equal(recovered.accepted, true);
+assert.equal(recovered.value.id, 2, "a fatal candidate must never be returned when a safe retry passes");
 
   console.log("CRITIQUE LOOP ADMISSION PASS — malformed shared verdicts fail closed");
 }

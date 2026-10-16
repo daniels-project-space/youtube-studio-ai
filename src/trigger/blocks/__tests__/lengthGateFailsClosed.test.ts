@@ -18,7 +18,7 @@
  */
 import assert from "node:assert/strict";
 
-import { resolveLengthBounds } from "@/trigger/blocks/narratedBlocks";
+import { assertMeasuredMasterDuration, resolveLengthBounds } from "@/trigger/blocks/narratedBlocks";
 
 /* ------------------------- the three NaN doorways ------------------------- */
 
@@ -74,6 +74,11 @@ if (defaults.ok) {
 const stringy = resolveLengthBounds("300", "60", "900");
 assert.equal(stringy.ok, true, "numeric strings must still be accepted");
 if (stringy.ok) assert.deepEqual([stringy.dur, stringy.min, stringy.max], [300, 60, 900]);
+
+assert.equal(assertMeasuredMasterDuration(200.551), 200.551, "keep the final probe's fractional seconds");
+for (const invalid of [undefined, 0, -1, NaN, Infinity, "200"]) {
+  assert.throws(() => assertMeasuredMasterDuration(invalid), /final master duration is invalid/);
+}
 
 // In-window and out-of-window both resolve; the caller compares.
 const inWindow = resolveLengthBounds(300, 60, 900);

@@ -196,6 +196,7 @@ export function compileChannelPipelinePreview(value: unknown): ChannelPipelinePr
     : undefined;
   const design = designPipelineCore({
     family: programBrief.family,
+    channelAwareScriptQa: true,
     nicheKey: programBrief.nicheKey,
     subcategory: programBrief.subcategory,
     programBrief,

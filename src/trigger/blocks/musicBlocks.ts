@@ -2,10 +2,11 @@
  * Shared music generation and prepared-track reuse for every channel family.
  * Provider admission, receipt verification, mastering and spend stay together.
  */
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { fallbackMusicPrompt } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { getMusicBrief } from "@/engine/creative/brief";
+import { getFamily } from "@/engine/families";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE } from "@/engine/pricing";
 import {
@@ -48,6 +49,22 @@ import {
   channelProgramRouteFromContext,
   musicProgramForCurrentRoute,
 } from "./blockContext";
+
+export function musicIdentityFromContext(ctx: Parameters<NonNullable<Block["run"]>>[0]): {
+  family: string;
+  contentLaneKey: string;
+} {
+  const route = channelProgramRouteFromContext(ctx);
+  const lane = ctx.store["contentLane"];
+  const laneRecord = lane && typeof lane === "object" ? lane as Record<string, unknown> : undefined;
+  const storedFamily = typeof ctx.store["family"] === "string" ? ctx.store["family"] : undefined;
+  const family = route?.family ?? storedFamily ??
+    (typeof laneRecord?.family === "string" ? laneRecord.family : undefined) ??
+    (typeof laneRecord?.key === "string" ? laneRecord.key : undefined) ?? "legacy_unknown";
+  const contentLaneKey = route?.contentLaneKey ??
+    (typeof laneRecord?.key === "string" ? laneRecord.key : undefined) ?? storedFamily ?? family;
+  return { family, contentLaneKey };
+}
 
 // Accepted Mureka/Suno jobs do not expose a durable replay receipt yet. Keep
 // their output transfer bounded so a stalled provider body reaches this block's
@@ -180,14 +197,10 @@ export const music: Block = {
     // The lofi family still gets its own brief; everything else draws from a
     // range by stable channel identity, so two narrated channels that both
     // declare nothing no longer sound identical.
-    const musicRoute = channelProgramRouteFromContext(ctx);
-    const isLoopFamily = musicRoute?.family === "music_loop";
-    const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
-    const lastResort = isLoopFamily
-      ? `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
-        `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
-        `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`
-      : `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
+    const musicIdentity = musicIdentityFromContext(ctx);
+    const lastResort = fallbackMusicPrompt(
+      ctx.store["channelName"], ctx.channelId, topic, getFamily(musicIdentity.family)?.key,
+    );
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||
@@ -209,11 +222,13 @@ export const music: Block = {
       styleDNA: dna,
       musicBrief: getMusicBrief(ctx.store) ?? null,
     }));
+    // This is a source-composition target, not the final video duration. Some
+    // providers return a naturally shorter performance; assembly measures and
+    // loops/crossfades the accepted source to its own exact delivery clock.
     const channelMusicProgram: ChannelMusicProgram = preparedProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
-      family: route?.family ?? "music_loop",
-      contentLaneKey: route?.contentLaneKey ?? "music_loop",
+      ...musicIdentity,
       topic,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
@@ -230,8 +245,7 @@ export const music: Block = {
         dnaPrompt ? arcNote : basePrompt,
         studioAudioDirection,
       ].filter(Boolean).join(" ") || undefined,
-      targetLufs: Number(a?.loudnessLufs ?? -16),
-      bodyMusicVol: 1,
+      targetLufs: a?.loudnessLufs,
     });
     const channelMusicProgramKey =
       `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${channelMusicProgram.fingerprint}.json`;

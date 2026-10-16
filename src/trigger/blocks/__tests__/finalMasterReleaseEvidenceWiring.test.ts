@@ -92,6 +92,11 @@ assert(!("finalMasterReleaseCertificate" in compactQaStage), "the full certifica
 assert.ok(JSON.stringify(compactQaStage).length < 10_000, "dense review evidence must remain Convex-safe in the QA stage row");
 
 const narrated = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
+assert.match(
+  narrated,
+  /const visualReviewNarrationKey = ctx\.store\["narrationKey"\];[\s\S]*?const visualReviewNarrationDurationSec = Number\(ctx\.store\["narrationDurationSec"\]\);[\s\S]*?const narrationTimingRequired =\s*\(typeof visualReviewNarrationKey === "string" && visualReviewNarrationKey\.trim\(\)\.length > 0\) \|\|\s*\(Number\.isFinite\(visualReviewNarrationDurationSec\) && visualReviewNarrationDurationSec > 0\);[\s\S]*?requireTranscript: narrationTimingRequired/u,
+  "final-master QA must require cue evidence when the run carries retained narration",
+);
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const dispatcher = readFileSync(join(process.cwd(), "src/lib/publishDispatcher.ts"), "utf8");
 const publishIntents = readFileSync(join(process.cwd(), "convex/publishIntents.ts"), "utf8");
@@ -122,8 +127,23 @@ assert.match(
 );
 assert.match(
   narrated,
-  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]*?whiteboardRenderSchedule: ctx\.store\["whiteboardRenderSchedule"\][\s\S]*?completeFocusFrames: selfContainedStoryVisualPlan\.requiredEvidenceFrames/,
-  "whiteboard final QA must bind the renderer schedule and preserve every exact layer/panel evidence frame",
+  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]*?whiteboardRenderSchedule: ctx\.store\["whiteboardRenderSchedule"\][\s\S]*?requiredVisualReviewFrames = \[[\s\S]*?selfContainedStoryVisualPlan\.requiredEvidenceFrames[\s\S]*?completeFocusFrames: requiredVisualReviewFrames/,
+  "final QA must bind the whiteboard schedule and preserve every exact layer/panel frame in the shared required-evidence plan",
+);
+assert.match(
+  narrated,
+  /completeStorySpineFrames = productionQa[\s\S]*?storySpineVisualLocks\.map\(\(lock\) => \(\{ tSec: \(lock\.startSec \+ lock\.endSec\) \/ 2 \}\)\)[\s\S]*?requiredVisualReviewFrames = \[[\s\S]*?completeStorySpineFrames/,
+  "production QA must reserve one exact visual sample for every retained Story Spine shot",
+);
+assert.match(
+  narrated,
+  /completeVisualReviewEvidenceTimes\(\s*p\.durationSec,\s*cinematicFocus,\s*requiredVisualReviewFrames\.map\(\(frame\) => frame\.tSec\),\s*\)[\s\S]*?qaVisualCost\([\s\S]*?requiredCompleteFocusFrameCount/,
+  "the cost envelope must price the same deduplicated complete-focus frame plan that runtime executes",
+);
+assert.match(
+  narrated,
+  /completeFocusFrames: requiredVisualReviewFrames[\s\S]*?expectedCompleteFocusFrameCount: requiredCompleteFocusFrameCount/,
+  "every required Story Spine frame must reach the final reviewer under the exact sealed count",
 );
 assert.match(
   narrated,

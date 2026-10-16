@@ -21,6 +21,7 @@ import {
   serializedProgramEpisodeMemoryKey,
 } from "@/lib/serializedProgramEpisode";
 import { lofiBlocks, persistTopicAfterRouteValidation } from "../lofiBlocks";
+import { musicProgramPlan } from "../musicProgramPlan";
 import { music as sharedMusic } from "../musicBlocks";
 import { narratedBlocks } from "../narratedBlocks";
 import { quizPlanningBlocks } from "../quizPlanningBlocks";
@@ -104,7 +105,7 @@ const serializedNarratedContext = createSerializedProgramEpisodeContext({
 });
 
 const topicSelect = runnable(lofiBlocks, "topic_select");
-const musicProgramPlan = runnable(lofiBlocks, "music_program_plan");
+const musicProgramPlanRun = runnable([musicProgramPlan], "music_program_plan");
 const scenePlanner = runnable(lofiBlocks, "scene_planner");
 const music = sharedMusic.run;
 const loopClips = runnable(lofiBlocks, "loop_clips");
@@ -123,7 +124,7 @@ async function musicLoopProgramMustBindBothPaidBranches(): Promise<void> {
   const musicRoute = resolveChannelProgramRoute(musicBrief);
   const musicSeed = channelProgramRouteRunSeed({ route: musicRoute, programBrief: musicBrief });
   const topic = "Rainy city focus after midnight";
-  const planned = await musicProgramPlan(stageContext({
+  const planned = await musicProgramPlanRun(stageContext({
     params: { visualStyle: "lofi", provider: "minimax_music3" },
     store: {
       channelProgramRoute: musicSeed,

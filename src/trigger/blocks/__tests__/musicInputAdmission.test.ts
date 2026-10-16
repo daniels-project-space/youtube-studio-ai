@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
-import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
+import { createChannelMusicProgram, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import type { StageContext } from "@/engine/types";
 import { sha256BytesHex } from "@/lib/sha256";
 
@@ -22,9 +22,14 @@ const originalLoad = loader._load, originalFetch = globalThis.fetch;
 let storageCalls = 0, networkCalls = 0;
 let transferMode = false;
 const reads: { key: string; options: unknown }[] = [];
+const sealedPrograms: unknown[] = [];
 loader._load = function (id, ...args) {
   if (id === "@/lib/storage") return {
-    putObject: async () => { storageCalls++; if (!transferMode) throw new Error("admitted-first-storage-write"); },
+    putObject: async (key: string, body: Uint8Array) => {
+      storageCalls++;
+      if (key.includes("channel-music-program-")) sealedPrograms.push(JSON.parse(Buffer.from(body).toString("utf8")));
+      if (!transferMode) throw new Error("admitted-first-storage-write");
+    },
     getObjectBytes: async (key: string, bucket: unknown, options: unknown) => {
       storageCalls++; assert.equal(bucket, undefined); reads.push({ key, options });
       if (!transferMode) throw new Error("unexpected-storage-read");
@@ -42,9 +47,18 @@ loader._load = function (id, ...args) {
 };
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden"); };
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { music } = require("../musicBlocks") as typeof import("../musicBlocks");
+const { music, musicIdentityFromContext } = require("../musicBlocks") as typeof import("../musicBlocks");
 
 async function main() {
+  const legacyIdentity = musicIdentityFromContext(ctx);
+  assert.deepEqual(legacyIdentity, { family: "legacy_unknown", contentLaneKey: "legacy_unknown" });
+  assert.equal(musicRoleForRoute(legacyIdentity.family, legacyIdentity.contentLaneKey), "narration_bed");
+  const lofiIdentity = musicIdentityFromContext({ ...ctx, store: { ...ctx.store, family: "lofi" } });
+  assert.deepEqual(lofiIdentity, { family: "lofi", contentLaneKey: "lofi" });
+  assert.equal(musicRoleForRoute(lofiIdentity.family, lofiIdentity.contentLaneKey), "primary_music");
+  const laneIdentity = musicIdentityFromContext({ ...ctx, store: { ...ctx.store, contentLane: { key: "meditation", family: "ambient" } } });
+  assert.deepEqual(laneIdentity, { family: "ambient", contentLaneKey: "meditation" });
+  assert.equal(musicRoleForRoute(laneIdentity.family, laneIdentity.contentLaneKey), "meditation_bed");
   for (const provider of ["yue2", "yue_2", "SUNO", " mureka", "", null, false, 3, {}, ["suno"]]) {
     for (const store of [ctx.store, { ...ctx.store, reuseMusicKey: "retained.mp3" }]) {
       await assert.rejects(music.run({ ...ctx, params: { provider }, store }), /unsupported explicit provider/);
@@ -77,6 +91,20 @@ async function main() {
   }
   assert.equal(storageCalls, 0, "invalid inputs cannot persist a misleading program or read audio");
   assert.equal(networkCalls, 0, "invalid selection cannot silently buy from a default provider");
+  for (const [store, expectedRole, expectedGain] of [
+    [{ ...ctx.store, family: "narrated_stock" }, "narration_bed", 0.1026],
+    [{ ...ctx.store, family: "lofi" }, "primary_music", 1],
+    [{ ...ctx.store, contentLane: { key: "meditation", family: "ambient" } }, "meditation_bed", 0.25],
+  ] as const) {
+    const before = sealedPrograms.length;
+    await assert.rejects(music.run({ ...ctx, store }), /admitted-first-storage-write/);
+    const sealed = sealedPrograms[before] as { role: string; mix: { bodyMusicVol: number; targetLufs: number } };
+    assert.equal(sealed.role, expectedRole);
+    assert.equal(sealed.mix.bodyMusicVol, expectedGain, `${expectedRole} must preserve its role-specific gain`);
+    assert.equal(sealed.mix.targetLufs, expectedRole === "primary_music" ? -16 : -18,
+      `${expectedRole} must preserve its role-specific mastering target`);
+  }
+  storageCalls = 0;
   for (const provider of ["suno", "minimax_music3", "yue2", undefined]) {
     await assert.rejects(music.run({ ...ctx, store: { ...ctx.store, preparedMusic: { ...prepared, provider } } }), /provider does not match/);
   }

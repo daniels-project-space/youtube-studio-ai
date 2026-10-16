@@ -67,6 +67,7 @@ function directDesign(
     programRoute,
     design: designPipeline({
       family: programBrief.family,
+      channelAwareScriptQa: true,
       nicheKey: programBrief.nicheKey,
       programBrief,
       programRoute,

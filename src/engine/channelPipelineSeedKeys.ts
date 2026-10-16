@@ -21,6 +21,9 @@ export function channelPipelineValidationSeedKeys(
     ["2.0.0-grounded-deterministic", "3.0.0-bound-visual-plan"].includes(entry.version ?? ""))) {
     keys.push("styleDNA");
   }
+  if (pipeline.some(entry => entry.block === "qa_script" && entry.version === "2.0.0-channel-aware")) {
+    keys.push("channelName");
+  }
   if (admittedRouteSeed !== undefined) {
     const route = parseChannelProgramRouteRunSeed(admittedRouteSeed);
     if (route.contentLaneKey !== contentLane.key || route.family !== contentLane.family) {
