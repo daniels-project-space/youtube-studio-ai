@@ -73,9 +73,25 @@ import {
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
 const PREPARED_MUSIC_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
 
+export function musicTrackVariationDirection(role: ChannelMusicRole): string {
+  switch (role) {
+    case "sleep_sound_bed":
+      return "preserve the continuous beatless texture and stable level; vary only a barely perceptible timbral or spatial detail, with no pulse, melody, chord change, transient, swell, or climax";
+    case "meditation_bed":
+      return "preserve the same gentle energy and sealed pulse-or-no-pulse direction; use subtle timbral variation without a startling event or climax";
+    case "narration_bed":
+      return "preserve the stable harmonic floor and restrained dynamics; vary only accompaniment beneath speech, with no lead melody or attention-grabbing event";
+    case "short_form_bed":
+      return "preserve the channel instrumentation and identity; use a distinct concise progression with one clear reveal and no added climax";
+    case "primary_music":
+      return "preserve the channel instrumentation and identity, with a distinct compatible melodic progression";
+  }
+}
+
 export async function generateMurekaTrackSet(input: {
   prompt: string;
   trackCount: number;
+  variationDirection: string;
   model?: string;
   generate?: typeof generateMureka;
   onCompletedGeneration?: () => void;
@@ -90,7 +106,7 @@ export async function generateMurekaTrackSet(input: {
     const generationIndex = jobIds.length;
     const prompt = generationIndex === 0
       ? input.prompt
-      : `${input.prompt}\nPart ${generationIndex + 1}: preserve the channel sound and instrumentation, with a distinct melodic progression.`;
+      : `${input.prompt}\nPart ${generationIndex + 1}: ${input.variationDirection}.`;
     const result = await generate({ prompt, model: input.model, timeoutMs: 600_000 });
     input.onCompletedGeneration?.();
     if (!result.tracks.length) throw new Error("music: Mureka generation returned no tracks");
@@ -842,7 +858,7 @@ export const music: Block = {
           const varied =
             g === 0
               ? providerPrompt
-              : `${providerPrompt} Part ${g + 1} of a continuous mix: same instrumentation, key family and mood, a different melodic progression.`;
+              : `${providerPrompt} Part ${g + 1} of a continuous mix: ${musicTrackVariationDirection(channelMusicProgram.role)}.`;
           ctx.log(`music: suno ${sunoModel} generation ${g + 1}/${gens} (custom mode, WAV upgrade)…`);
           const res = await generateSuno({
             prompt: varied,
@@ -865,6 +881,7 @@ export const music: Block = {
         const result = await generateMurekaTrackSet({
           prompt: providerPrompt,
           trackCount,
+          variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
           model: prov === "mureka" && provider === "mureka" ? modelOverride || undefined : undefined,
           onCompletedGeneration: () => {
             generations += 1;

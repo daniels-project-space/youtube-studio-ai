@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { generateMurekaTrackSet } from "../musicBlocks";
+import { generateMurekaTrackSet, musicTrackVariationDirection } from "../musicBlocks";
 
 async function main(): Promise<void> {
   const prompts: string[] = [];
@@ -9,6 +9,7 @@ async function main(): Promise<void> {
   const result = await generateMurekaTrackSet({
     prompt: "Locked channel identity and instrumentation.",
     trackCount: 4,
+    variationDirection: musicTrackVariationDirection("sleep_sound_bed"),
     model: "auto",
     onCompletedGeneration: () => { completedGenerations += 1; },
     generate: async (request) => {
@@ -38,10 +39,15 @@ async function main(): Promise<void> {
   assert.deepEqual(result.jobIds, jobIds);
   assert.equal(result.generationCount, 2);
   assert.equal(completedGenerations, 2, "each completed paid job is accounted before another can fail");
-  assert.match(prompts[1]!, /distinct melodic progression/u);
+  assert.match(prompts[1]!, /beatless texture/u);
+  assert.doesNotMatch(prompts[1]!, /melodic progression/u,
+    "sleep-track variation must not contradict its sealed no-melody role");
+  assert.match(musicTrackVariationDirection("primary_music"), /melodic progression/u);
+  assert.match(musicTrackVariationDirection("meditation_bed"), /pulse-or-no-pulse/u);
+  assert.match(musicTrackVariationDirection("narration_bed"), /beneath speech/u);
 
   await assert.rejects(
-    generateMurekaTrackSet({ prompt: "invalid", trackCount: 0 }),
+    generateMurekaTrackSet({ prompt: "invalid", trackCount: 0, variationDirection: "" }),
     /track count must be an integer between 1 and 8/u,
   );
 
