@@ -239,11 +239,9 @@ function crewProfileFor(ctx: StageContext, g: ChannelGrounding): ChannelProfile 
  *     doctrine" warning (P1-8, docs/GOLDEN_MODULE_AUDIT_2026-08.md).
  *  2. the editor_brief / critic_spec blocks — as a fallback for the ONE knob
  *     each of those roles' OWN surface also exposes (editor cadence; critic
- *     strictness + marketAware) — see roleProfile's crewFallback param. The
- *     director/DP/composer surfaces have no knob with an equivalent meaning
- *     (hookStyle/narrativeArc/coverageDensity/musicMood etc. are unrelated to
- *     directorStyle), so directorStyle has no landing spot below the show-bible
- *     resolver and is deliberately left unmapped.
+ *     strictness + marketAware), plus directorStyle as a high-level visual
+ *     stance for the cinematographer. It does not override story structure or
+ *     edit cadence.
  */
 function resolveChannelCrew(
   ctx: StageContext,
@@ -309,6 +307,16 @@ function dnaDigest(dna: StyleDNA | null): string {
     dna.narrative?.delivery ? `Delivery: ${dna.narrative.delivery}` : "",
   ].filter(Boolean);
   return parts.length ? `STYLE DNA (frozen channel identity — conform to it):\n${parts.join("\n")}` : "";
+}
+
+function directorVisualStyle(style: string): string {
+  const guidance: Record<string, string> = {
+    classical: "classical: favor coherent, motivated compositions and clear visual hierarchy",
+    kinetic: "kinetic: use purposeful energy and dynamic framing while keeping motion legible",
+    contemplative: "contemplative: favor patient composition, negative space, and restrained motion",
+    bold: "bold: use decisive scale, contrast, and visual emphasis without distorting evidence",
+  };
+  return `${guidance[style] ?? guidance.classical}; apply only to framing, lighting, and shot grammar, not story structure or edit cadence`;
 }
 
 /** Audio slice of the DNA, for the composer. */
@@ -424,10 +432,11 @@ export const dpBriefBlock: Block = {
     const bible = resolveBible(g, "dp_brief", ctx.log);
     const rc = resolveChannelCrew(ctx, g, bible);
     logCrewDoctrineGap(ctx, rc, "dp_brief", "cinematographer");
-    // No equivalent knob on CINEMATOGRAPHER_SURFACE for a show-bible hint —
-    // see resolveChannelCrew's doc comment. Nothing to thread here.
     const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief", undefined, g.profile));
-    const directives = cinematographerDirectives(config);
+    const directives = {
+      ...cinematographerDirectives(config),
+      ...(rc ? { channelDirectorStyle: directorVisualStyle(rc.directorStyle) } : {}),
+    };
     const out = await briefCinematographer(bible, crewCtx(ctx, g, directives));
     if (!out) failLoud("dp_brief");
     ctx.log(`dp_brief: ${out.footageQueries.length} queries`);

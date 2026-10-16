@@ -64,7 +64,8 @@ async function main() {
     const profile = buildChannelProfile({ row: { _id: "channel-fixture", name: identity.name, slug: "canonical-channel",
       status: "active", template: "narrated_stock", budget: 1,
       identity: { ...identity, creativeBrief: bible } }, archetype: "narrated_stock",
-      pipeline: CREW_BLOCKS.map(block => ({ block: block.id, params: { family: "narrated_stock" } })) });
+      pipeline: CREW_BLOCKS.map(block => ({ block: block.id, params: { family: "narrated_stock" } })),
+      moduleOverrides: { "show-bible": { directorStyle: "contemplative" } } });
     for (const block of blocks) {
       const ctx: StageContext = { ownerId: "owner-fixture", channelId: "channel-fixture", runId: "run-fixture",
         keyPrefix: "fixture/", params: { family: "narrated_stock" }, budgetUsd: 1,
@@ -76,6 +77,12 @@ async function main() {
       const prompt = calls.at(-1)!.prompt;
       assert.ok(prompt.startsWith(`Channel: ${identity.name}${identity.niche ? ` (${identity.niche})` : ""}.`), block.id);
       assert.doesNotMatch(prompt, /STALE/, `${block.id} must not mix canonical and loose identity`);
+      if (calls.at(-1)!.role === "cinematographer") {
+        assert.match(prompt, /contemplative/u,
+          "the channel's directorStyle must reach the cinematographer's actual prompt");
+        assert.match(prompt, /framing, lighting, and shot grammar/u,
+          "director style must inform visual grammar without taking over story or edit ownership");
+      }
       assert.deepEqual(ctx.store, before.store);
       assert.deepEqual(ctx.params, before.params);
       if (calls.at(-1)!.role === "composer_arrangement") {
