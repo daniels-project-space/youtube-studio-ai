@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { FALLBACK_UNDERSCORE_BRIEFS, fallbackMusicPrompt, spreadDefault } from "@/lib/identitySpread";
 
 const MUSIC = readFileSync(join(process.cwd(), "src/trigger/blocks/musicBlocks.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
@@ -48,6 +48,17 @@ function main(): void {
     spreadDefault("Investory", FALLBACK_UNDERSCORE_BRIEFS),
     "the same channel must always resolve to the same brief",
   );
+  const unnamedChannels = ["channel-101", "channel-202", "channel-303", "channel-404", "channel-505"];
+  const unnamedPrompts = unnamedChannels.map((id) => fallbackMusicPrompt("  ", id, "Market history", false));
+  assert.ok(
+    new Set(unnamedPrompts).size >= 4,
+    "blank names must fall back to each channel ID instead of collapsing onto the empty seed",
+  );
+  assert.equal(
+    fallbackMusicPrompt("  Investory ", "other-id", "Market history", false),
+    fallbackMusicPrompt("Investory", "different-id", "Market history", false),
+    "a valid channel name, not a storage ID, must anchor its stable sound",
+  );
 
   // ---- every brief must be usable UNDER narration -------------------------
   // A bed that competes with speech is worse than a shared one.
@@ -59,27 +70,19 @@ function main(): void {
       `"${brief.slice(0, 30)}" must forbid percussion competing with speech`,
     );
   }
+  for (const prompt of unnamedPrompts) {
+    assert.match(prompt, /no vocals, no lyrics/);
+    assert.match(prompt, /purely instrumental/);
+    assert.match(prompt, /no build-ups/);
+    assert.ok(/no percussion|no drums|no rhythm section/.test(prompt));
+  }
 
   // ---- lofi keeps its own sound -------------------------------------------
-  assert.match(
-    MUSIC,
-    /const isLoopFamily = musicRoute\?\.family === "music_loop";/,
-    "the loop family must be identified before the last resort is chosen",
-  );
-  assert.match(
-    MUSIC,
-    /isLoopFamily\s*\?\s*`warm cozy lofi hip-hop/,
-    "a lofi channel must still receive the lofi brief — its sound is the product",
-  );
-  assert.match(
-    MUSIC,
-    /spreadDefault\(seed, FALLBACK_UNDERSCORE_BRIEFS\)/,
-    "and everything else must draw from the range",
-  );
-  assert.ok(
-    !/\|\|\s*\n?\s*`warm cozy lofi hip-hop/.test(MUSIC),
-    "lofi must no longer be the unconditional final fallback for every family",
-  );
+  assert.match(MUSIC, /fallbackMusicPrompt\(ctx\.store\["channelName"\], ctx\.channelId, topic, isLoopFamily\)/);
+  const lofiPrompt = fallbackMusicPrompt("", "lofi-1", "Night rain", true);
+  assert.match(lofiPrompt, /warm cozy lofi hip-hop/);
+  assert.match(lofiPrompt, /boom-bap drums/);
+  assert.doesNotMatch(lofiPrompt, /no percussion|no drums/);
 
   // ---- the archetype must not hard-code one identity ----------------------
   assert.ok(

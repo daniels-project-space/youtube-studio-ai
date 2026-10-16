@@ -2,7 +2,7 @@
  * Shared music generation and prepared-track reuse for every channel family.
  * Provider admission, receipt verification, mastering and spend stay together.
  */
-import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { fallbackMusicPrompt } from "@/lib/identitySpread";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
 import { getMusicBrief } from "@/engine/creative/brief";
@@ -182,12 +182,7 @@ export const music: Block = {
     // declare nothing no longer sound identical.
     const musicRoute = channelProgramRouteFromContext(ctx);
     const isLoopFamily = musicRoute?.family === "music_loop";
-    const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
-    const lastResort = isLoopFamily
-      ? `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
-        `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
-        `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`
-      : `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
+    const lastResort = fallbackMusicPrompt(ctx.store["channelName"], ctx.channelId, topic, isLoopFamily);
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||

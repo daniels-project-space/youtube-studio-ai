@@ -151,6 +151,25 @@ export const FALLBACK_UNDERSCORE_BRIEFS = [
   "restrained and serious, no percussion, no build-ups, purely instrumental",
 ] as const;
 
+/** Resolve the shared music block's final prompt without losing unnamed channel identity. */
+export function fallbackMusicPrompt(
+  channelName: unknown,
+  channelId: unknown,
+  topic: string,
+  isLoopFamily: boolean,
+): string {
+  if (isLoopFamily) {
+    return `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
+      `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
+      `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`;
+  }
+
+  const namedChannel = typeof channelName === "string" ? channelName.trim() : "";
+  const id = typeof channelId === "string" || typeof channelId === "number" ? String(channelId).trim() : "";
+  const seed = namedChannel || id || "youtube-studio-channel";
+  return `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
+}
+
 export const FALLBACK_COMIC_STYLES = [
   "clean controlled comic illustration",
   "inked comic illustration with heavy spot blacks and confident contour lines",
