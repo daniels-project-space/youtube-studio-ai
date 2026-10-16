@@ -215,6 +215,26 @@ async function main() {
     assert.ok(sealed.includes(sealedDirection));
     assert.ok(sealed.includes(flat));
   }
+  const rhythmicStudioCore = {
+    ...studioCore,
+    promptAddenda: ["Add a strong pulse under the sleeping listener's breath."],
+  };
+  const rhythmicStudio = {
+    ...rhythmicStudioCore,
+    fingerprint: sha256Hex(canonicalJson(rhythmicStudioCore)),
+  };
+  await runtime("suno", "Safe ambient texture.", {
+    channelProgramRoute: sleepRoute,
+    studioAudioRecipeProjection: rhythmicStudio,
+    styleDNA: { audio: {
+      genre: "soft nocturnal ambient",
+      instrumentation: ["warm sustained pad", "distant piano harmonics"],
+      textures: ["quiet room air"],
+      bpmRange: [120, 120],
+      moodArc: "steady and quiet",
+      loopable: true,
+    } },
+  }, /sleep soundscape cannot include rhythmic generation direction: strong pulse/u, undefined, ["suno"], true);
   await runtime("suno", "A safe background score.", { channelProgramRoute: undefined });
   assert.equal(persisted!.family, "unclassified");
   assert.equal(persisted!.contentLaneKey, "unclassified");
