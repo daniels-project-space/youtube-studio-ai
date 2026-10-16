@@ -683,6 +683,7 @@ export function titleJudgeRankingPassesQualityBar(ranking: TitleJudgeRanking): b
 export function validateTitleJudgeResponse(
   value: unknown,
   candidateCount: number,
+  evidenceText = "",
 ): TitleJudgeAdmission {
   const issues: string[] = [];
   const rankings = (value as { rankings?: unknown } | null)?.rankings;
@@ -750,6 +751,17 @@ export function validateTitleJudgeResponse(
     if (typeof reason !== "string" || reason.trim().length === 0 || reason.length > 2_000) {
       issues.push(`judge ranking ${position + 1} has an invalid reason`);
       return;
+    }
+    if (grounding === "contradicted") {
+      const source = evidenceText.toLowerCase().replace(/\s+/g, " ").trim();
+      const quotes = [...reason.matchAll(/["“]([^"”]{12,240})["”]/g)]
+        .map((match) => match[1].toLowerCase().replace(/\s+/g, " ").trim());
+      if (!source || !quotes.some((quote) => source.includes(quote))) {
+        issues.push(
+          `judge ranking ${position + 1} calls a claim contradicted without quoting a matching source detail; use insufficient when evidence is absent`,
+        );
+        return;
+      }
     }
     seen.add(idx);
     admitted.push({ idx, clickScore, direct, identityFit, viewerMotivation, grounding, reason: reason.trim() });
@@ -1188,7 +1200,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             feedClause,
             `CANDIDATES:\n${survivors.map((c, i) => `${i}. [${c.frame}] ${c.title}`).join("\n")}`,
             `For EVERY candidate, first classify grounding as supported, contradicted, or insufficient and give ` +
-            `a concise source-aware reason. Assess the WHOLE promise: actor, event, cause, timing, scale, certainty, ` +
+            `a concise source-aware reason. Use contradicted ONLY when the supplied narration/script explicitly conflicts ` +
+            `with the candidate, and include a short exact quotation from that source in double quotes in the reason. ` +
+            `If evidence is absent, ambiguous, or only fails to establish the candidate, use insufficient; topic-only context ` +
+            `can never establish a contradiction. Assess the WHOLE promise: actor, event, cause, timing, scale, certainty, ` +
             `comparison and necessary conditions. A shared topic is not entailment. If the source describes a ` +
             `conditional or gradual outcome, stronger speed or certainty needs its own support. If your reason ` +
             `needs to excuse an exaggeration or missing qualification, grounding cannot be supported. Use contradicted ` +
@@ -1214,7 +1229,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           maxTokens: 2500,
           temperature: 0.2,
         });
-        const admission = validateTitleJudgeResponse(j, survivors.length);
+        const admission = validateTitleJudgeResponse(j, survivors.length, sourceText);
         if (!admission.pass) {
           lastIssues.push(...admission.issues);
           fixNote = `THE PREVIOUS JUDGE RESPONSE WAS INCOMPLETE OR MALFORMED. Fix every one of these: ${[...new Set(admission.issues)].slice(0, 6).join("; ")}.`;

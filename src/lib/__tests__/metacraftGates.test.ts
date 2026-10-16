@@ -229,6 +229,31 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
   assert.equal(valid.rankings[0].grounding, "supported");
   assert.equal(valid.rankings[0].identityFit, 8);
 
+  const contradiction = {
+    rankings: [{
+      idx: 0,
+      clickScore: 8,
+      direct: 8,
+      identityFit: 8,
+      viewerMotivation: 8,
+      grounding: "contradicted",
+      reason: 'The claim conflicts with the narration: "No engineers survived the collapse."',
+    }],
+  };
+  assert.equal(
+    validateTitleJudgeResponse(contradiction, 1, "Investigators confirmed: No engineers survived the collapse.").pass,
+    true,
+    "a contradiction can be recorded when its exact cited source detail is present",
+  );
+  for (const [name, evidenceText] of [
+    ["unsupported", "The narration describes the collapse and its aftermath."],
+    ["topic-only", ""],
+  ] as const) {
+    const result = validateTitleJudgeResponse(contradiction, 1, evidenceText);
+    assert.equal(result.pass, false, `${name} evidence cannot be mislabeled as a contradiction`);
+    assert.match(result.issues.join(" "), /without quoting a matching source detail/);
+  }
+
   for (const [name, value] of [
     ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["missing identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
@@ -280,8 +305,13 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
     "craftMetadata must rank only candidates that pass the executable quality-bar helper",
   );
   assert.ok(
-    source.includes("validateTitleJudgeResponse(j, survivors.length)"),
+    source.includes("validateTitleJudgeResponse(j, survivors.length, sourceText)"),
     "metacraft.ts: judge responses must pass the strict complete-ranking admission boundary",
+  );
+  assert.ok(
+    source.includes("include a short exact quotation from that source") &&
+      source.includes("can never establish a contradiction"),
+    "the semantic judge must distinguish an actual source conflict from missing evidence",
   );
   assert.ok(
     !source.includes("(r.direct ?? 10) >= 7"),
