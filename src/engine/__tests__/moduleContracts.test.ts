@@ -329,6 +329,34 @@ function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
   );
 }
 
+function visualReviewOwnershipIsFormatSpecificAndFailClosed(): void {
+  const generated = designPipeline({ family: "cinematic", publishMode: "draft" });
+  const withoutShotReview = generated.pipeline.filter((entry) => entry.block !== "qa_shots");
+  const validationSeeds = [
+    ...channelPipelineValidationSeedKeys(generated.contentLane, undefined, withoutShotReview),
+    // Even an externally seeded clip cannot stand in for the required review
+    // stage on the generated Novita chain.
+    "footageClips",
+  ];
+  assert.throws(
+    () => compilePipeline(validatePipeline(withoutShotReview, validationSeeds)),
+    /required Novita render-chain module is missing: qa_shots/,
+    "generated footage must retain its independent shot-review owner",
+  );
+
+  const integrated = designPipeline({ family: "whiteboard", publishMode: "draft" });
+  assert.ok(integrated.compilation, "the integrated Whiteboard module must compile with its own review contract");
+  assert.equal(
+    integrated.pipeline.some((entry) => entry.block === "qa_shots"),
+    false,
+    "a module that owns visual review must not need an unrelated shot-review stage",
+  );
+  assert.ok(
+    integrated.compilation.capabilities.includes("visuals.story_aligned"),
+    "integrated review must expose the same production capability as the standalone reviewer",
+  );
+}
+
 function runtimeConfigurationIsCompiledBeforeSpendReservation(): void {
   const design = designPipeline({
     family: "music_loop",
@@ -1015,6 +1043,7 @@ function main(): void {
   compileRepresentativeFamilies();
   defaultBudgetsCoverCompilerReservations();
   privateProbeKeepsEveryNonPublishingQualityRequirement();
+  visualReviewOwnershipIsFormatSpecificAndFailClosed();
   runtimeConfigurationIsCompiledBeforeSpendReservation();
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();
