@@ -959,7 +959,11 @@ export const hookCraft: Block = {
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
-    if (!hasCreativeTextKey()) return { hook: firstLine() };
+    if (!hasCreativeTextKey()) {
+      throw new Error(
+        "hook_craft FAILED: independent hook critic unavailable — refusing an unreviewed fallback hook",
+      );
+    }
 
     // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
     // The hook is the title/thumbnail line — the single highest-leverage string

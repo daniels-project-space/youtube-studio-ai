@@ -24,9 +24,35 @@ async function main(): Promise<void> {
   const originalKey = process.env.OPENROUTER_API_KEY;
   let providerCalls = 0;
   try {
-    process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
     const { registerAllBlocks } = await import("@/engine/blocks");
     registerAllBlocks();
+
+    delete process.env.OPENROUTER_API_KEY;
+    globalThis.fetch = async () => {
+      providerCalls++;
+      throw new Error("provider transport must not be reached without a configured critic");
+    };
+    const unreviewed = await runPipeline(
+      validatePipeline([{ block: "hook_craft", params: {} }], ["narrationText"]),
+      {
+        ownerId: "owner-hook-recovery-test",
+        channelId: "channel-hook-recovery-test",
+        runId: "run-hook-no-critic-test",
+        keyPrefix: "owners/owner-hook-recovery-test/",
+        budgetUsd: 1,
+        defaultRetries: 0,
+        seedStore: {
+          narrationText: "A factory inspection found a cracked valve before the pressure reached its limit.",
+        },
+        sink: { async upsert() {} },
+      },
+    );
+    assert.equal(unreviewed.ok, false, "missing critic configuration must fail the module");
+    assert.match(unreviewed.error ?? "", /independent hook critic unavailable/);
+    assert.equal(providerCalls, 0, "missing critic configuration must fail before provider dispatch");
+    assert.equal(Object.hasOwn(unreviewed.store, "hook"), false, "no unreviewed fallback may be persisted");
+
+    process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
     globalThis.fetch = async (url) => {
       assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
       providerCalls++;
