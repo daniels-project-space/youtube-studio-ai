@@ -233,6 +233,9 @@ export function assertModuleScorecard(value: unknown): ModuleScorecard {
     "triggerRuns", "triggerWaits", "convexReads", "convexWrites", "convexActions", "estimatedCostUsd",
     "capturedAt", "fingerprint",
   ], "record");
+  if (candidate.version !== MODULE_SCORECARD_VERSION) {
+    throw new Error(`module scorecard version is unsupported: ${String(candidate.version)}`);
+  }
   const { fingerprint: _fingerprint, ...input } = candidate;
   void _fingerprint;
   const rebuilt = createModuleScorecard(input as ModuleScorecardInput);

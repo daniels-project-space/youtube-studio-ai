@@ -53,6 +53,7 @@ const scorecard = createModuleScorecard(base);
 assert.equal(scorecard.version, MODULE_SCORECARD_VERSION);
 assert.match(scorecard.fingerprint, /^[0-9a-f]{64}$/);
 assert.deepEqual(assertModuleScorecard(scorecard), scorecard);
+assert.throws(() => assertModuleScorecard({ ...scorecard, version: "module-scorecard/v7" }), /version is unsupported/);
 
 const tampered = { ...scorecard, outputTokens: scorecard.outputTokens! + 1 };
 assert.throws(() => assertModuleScorecard(tampered), /fingerprint mismatch/);
