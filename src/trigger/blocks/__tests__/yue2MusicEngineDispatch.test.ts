@@ -2,21 +2,37 @@ import assert from "node:assert/strict";
 import Module, { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { yue2Sha256 } from "@/lib/yue2Evaluation";
 
 const load = createRequire(__filename);
 const fixture = JSON.parse(readFileSync("test-fixtures/music-composer/seaside-after/gpu-material.json", "utf8"));
 const arrangement = fixture.request.acceptedArrangement;
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 
+function arrangementWithRole(role: string) {
+  const body = { ...arrangement,
+    arrangement: { ...arrangement.arrangement, role },
+    musicIntent: { ...arrangement.musicIntent, role },
+  };
+  delete body.fingerprint;
+  const normalized = JSON.parse(JSON.stringify(body));
+  return { ...normalized, fingerprint: yue2Sha256(canonicalJson(normalized)) };
+}
+
 test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs are not polled", async () => {
   const originalLoad = loader._load;
   const previousSecret = process.env.MANAGEMENT_PROJECT_SECRET;
   const calls = { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 };
+  let bootstrapCalls = 0;
+  let route: unknown;
+  let inputArrangement: unknown = arrangement;
   let failVerification = true;
   process.env.MANAGEMENT_PROJECT_SECRET = "s".repeat(64);
 
   loader._load = function (id, ...args) {
     if (id === "@/lib/bootstrap") return { bootstrapSecrets: async (_log: unknown, options: unknown) => {
+      bootstrapCalls++;
       assert.deepEqual(options, { services: ["cloudflare", "render-engine"],
         required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "MANAGEMENT_PROJECT_SECRET"] });
     } };
@@ -41,7 +57,10 @@ test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs
     if (id === "@/lib/renderEngineYuE2Candidate") return { materializeRenderEngineYuE2Candidate: async () => {
       throw new Error("must not materialize absent output");
     } };
-    if (id === "./blockContext") return { musicProgramForCurrentRoute: () => undefined };
+    if (id === "./blockContext") return {
+      musicProgramForCurrentRoute: () => undefined,
+      channelProgramRouteFromContext: () => route,
+    };
     return originalLoad.call(this, id, ...args);
   };
 
@@ -59,7 +78,7 @@ test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs
           reserved_allocation_usd_micros: 30500 },
       },
       budgetUsd: 1, stageBudgetUsd: 0.04, assertInlinePaidExecutionLease: async () => {},
-      store: { topic: arrangement.topic, acceptedMusicArrangement: arrangement }, log: () => {},
+      store: { topic: arrangement.topic, acceptedMusicArrangement: inputArrangement }, log: () => {},
     } as never).then(() => null, caught => caught);
 
     const preflightError = await runBlock();
@@ -75,6 +94,20 @@ test("YuE2 preflight failures are not treated as paid jobs, and unqualified jobs
     assert.equal(error?.code, "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING");
     assert.match(error?.message ?? "", /b{32}/);
     assert.deepEqual(calls, { verify: 1, provision: 1, stage: 1, status: 0, output: 0, wait: 0 });
+
+    Object.assign(calls, { verify: 0, provision: 0, stage: 0, status: 0, output: 0, wait: 0 });
+    bootstrapCalls = 0;
+    route = { family: "sleep", contentLaneKey: "ambient_guided", requiredBlocks: [] };
+    inputArrangement = arrangement;
+    const wrongRole = await runBlock();
+    assert.match(wrongRole?.message ?? "", /requires a sleep_sound_bed arrangement/);
+    assert.equal(bootstrapCalls, 0, "route-role mismatch refuses before vault hydration or Engine calls");
+    inputArrangement = arrangementWithRole("meditation_bed");
+    failVerification = false;
+    const guidedMeditation = await runBlock();
+    assert.equal(guidedMeditation?.code, "RENDER_ENGINE_YUE2_FINAL_QUALIFICATION_PENDING");
+    assert.deepEqual(calls, { verify: 1, provision: 1, stage: 1, status: 0, output: 0, wait: 0 },
+      "the permitted meditation override reaches the existing non-dispatching qualification hold");
   } finally {
     loader._load = originalLoad;
     if (previousSecret === undefined) delete process.env.MANAGEMENT_PROJECT_SECRET;

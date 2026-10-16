@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
+import { isGuidedMeditationMusicRoleOverride, musicRoleForRoute } from "@/engine/channelMusicProgram";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
 import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
 import { ExecutionError } from "@/engine/executionErrors";
@@ -21,7 +22,7 @@ import {
 } from "@/lib/renderEngineYuE2StageClient";
 import { RENDER_ENGINE_STUDIO_PROJECT_NAME, RENDER_ENGINE_STUDIO_SITE } from "@/lib/renderEngineStudioProject";
 import { createYuE2AcceptedArrangementRequest } from "@/lib/yue2Evaluation";
-import { musicProgramForCurrentRoute } from "./blockContext";
+import { channelProgramRouteFromContext, musicProgramForCurrentRoute } from "./blockContext";
 
 export const RENDER_ENGINE_YUE2_MUSIC_VERSION = "5.0.0-render-engine-yue2-scored-v2";
 
@@ -60,6 +61,20 @@ const block: Block & { version: string } = {
       throw new Error("Render Engine YuE2 music requires a sealed YuE2 program; it cannot override another provider");
     }
     const arrangement = AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+    const route = channelProgramRouteFromContext(ctx);
+    if (route) {
+      const expectedRole = musicRoleForRoute(route.family, route.contentLaneKey);
+      if (arrangement.arrangement.role !== expectedRole && !isGuidedMeditationMusicRoleOverride(
+        route.family,
+        route.contentLaneKey,
+        arrangement.arrangement.role,
+      )) {
+        throw new Error(`Render Engine YuE2 music route requires a ${expectedRole} arrangement, received ${arrangement.arrangement.role}`);
+      }
+      if (route.requiredBlocks.includes("music_program_plan") && arrangement.arrangement.playback !== "repeat") {
+        throw new Error("Render Engine YuE2 music-loop route requires repeating playback");
+      }
+    }
     if (arrangement.ownerId !== ctx.ownerId || arrangement.channelId !== ctx.channelId ||
         arrangement.runId !== ctx.runId || arrangement.topic !== topic || !arrangement.symbolicScore ||
         !arrangement.reviewContext) {
