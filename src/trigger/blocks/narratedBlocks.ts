@@ -856,7 +856,7 @@ export function createScriptGenBlock(
       // The channel's locked narrative register (Style DNA) — outranks the
       // generic archetype tone in the prompt.
       narrative: (ctx.store["styleDNA"] as
-        | { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string } }
+        | { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; voiceProfile?: string; delivery?: string } }
         | null)?.narrative,
       // Script Lab playbook (distilled from WATCHING the niche's top videos).
       // The opening device rotates deterministically per run — openings never

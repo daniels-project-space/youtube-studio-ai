@@ -72,7 +72,10 @@ async function main(): Promise<void> {
       sentenceGapSec: 0.85,
       ttsSpeed: 0.94,
       precraftedHook: crafted,
-      narrative: { pacing: "Let each idea arrive slowly; leave room between discoveries." },
+      narrative: {
+        pacing: "Let each idea arrive slowly; leave room between discoveries.",
+        voiceProfile: "A warm, close presence with patient cadence and understated confidence.",
+      },
       channelVoice: {
         positioning: "Patient source-led stories about overlooked evidence in ordinary places.",
         vibe: "Curious, humane, and quietly exact.",
@@ -86,6 +89,8 @@ async function main(): Promise<void> {
     assert.match(prompt, /Creator-declared topic priorities \(in order\): 1\. How a bridge changed the town; 2\. What a court record reveals about daily life/);
     assert.match(prompt, /pacing: Let each idea arrive slowly; leave room between discoveries\./,
       "a pacing-only identity must shape generation just as it shapes the channel critic");
+    assert.match(prompt, /voice profile \(cadence, warmth, and presence\): A warm, close presence with patient cadence and understated confidence\./,
+      "the authored voice profile must reach the writer without becoming acoustic TTS instructions");
     for (const guidance of [
       "Patient source-led stories about overlooked evidence in ordinary places.",
       "Curious, humane, and quietly exact.",

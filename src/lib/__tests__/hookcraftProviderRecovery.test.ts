@@ -83,7 +83,10 @@ async function main(): Promise<void> {
         programBrief,
       }),
       sourceGrounding: "Chernobyl's ignored safety test failed in 1986. Engineers disabled the alarm in Reactor Four at 1:23 a.m. A separate log entry lists channel 12.",
-      narrative: { pacing: "Measured, with a deliberate pause before each reveal." },
+      narrative: {
+        pacing: "Measured, with a deliberate pause before each reveal.",
+        voiceProfile: "Warm low register, close and humane, with calm deliberate phrasing.",
+      },
       channelVoice: {
         positioning: "Evidence-led histories about overlooked decisions and their human consequences.",
         vibe: "Measured, humane, and exact.",
@@ -102,6 +105,8 @@ async function main(): Promise<void> {
     assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
     assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
       "channel narrative DNA must shape its cold open as well as the body script and critic");
+    assert.ok(generationPrompts[0]?.includes("voice profile (cadence, warmth, and presence): Warm low register, close and humane, with calm deliberate phrasing."),
+      "the authored voice profile must shape cold-open prose");
     for (const guidance of [
       "Intended audience: Curious adults who want clear evidence without academic jargon.",
       "Creator-declared topic priorities (in order): 1. How a bridge changed the town; 2. What a court record reveals about daily life",
