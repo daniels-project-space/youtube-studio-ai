@@ -426,10 +426,14 @@ export function createMetadataBlock(resolveDelivery?: (ctx: StageContext) => imp
     const sealedTitleProfile = typeof automaticVideoPlan?.titleProfile === "string"
       ? automaticVideoPlan.titleProfile
       : undefined;
+    const configuredTitleProfile = ctx.params["titleProfile"];
+    const explicitTitleProfile = configuredTitleProfile === "auto"
+      ? sealedTitleProfile
+      : typeof configuredTitleProfile === "string"
+        ? configuredTitleProfile
+        : sealedTitleProfile;
     const titleProfile = resolveTitleProfile(
-      typeof ctx.params["titleProfile"] === "string"
-        ? String(ctx.params["titleProfile"])
-        : sealedTitleProfile,
+      explicitTitleProfile,
       {
         family: typeof ctx.store["family"] === "string" ? String(ctx.store["family"]) : undefined,
         contentLane: typeof ctx.store["contentLane"] === "string"

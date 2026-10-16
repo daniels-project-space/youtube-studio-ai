@@ -44,8 +44,10 @@ async function main(): Promise<void> {
     );
 
     const titleProfileKnob = MODULE_REGISTRY.metadata?.customization?.knobs.find((knob) => knob.id === "titleProfile");
-    assert.deepEqual(titleProfileKnob?.values, Object.keys(TITLE_PROFILES),
-      "the module surface must expose the authoritative format-profile set");
+    assert.deepEqual(titleProfileKnob?.values, ["auto", ...Object.keys(TITLE_PROFILES)],
+      "the module surface must expose auto plus the authoritative format-profile set");
+    assert.equal(titleProfileKnob?.default, "auto",
+      "the visible default must match the route-sealed format profile used by execution");
     const longTopic = "How Roman Aqueducts Carried Fresh Water Across Long Distances Without Modern Pumps";
     const shortProfileOut = await metadataOptimized.run({
       ownerId: "owner-test",
@@ -67,6 +69,29 @@ async function main(): Promise<void> {
       "the persisted module knob must control the real deterministic title fallback");
     assert.notEqual(shortProfileOut.title, longTopic,
       "a profile-specific title envelope must not silently fall back to the channel's general profile");
+
+    const sealedMusicTopic = "Rainy Midnight Jazz for Deep Focus with Soft Piano and Vinyl Crackle";
+    const autoProfileOut = await metadataOptimized.run({
+      ownerId: "owner-test",
+      runId: "run-test-auto-profile",
+      channelId: "channel-test",
+      keyPrefix: "owner/test/",
+      params: { titleProfile: "auto" },
+      store: {
+        topic: sealedMusicTopic,
+        plannedTitle,
+        channelName: "Inked Histories",
+        niche: "history",
+        persona: "documentary narrator",
+        automaticVideoPlan: { titleProfile: "music_loop" },
+      },
+      budgetUsd: 5,
+      log: (message: string) => logs.push(message),
+    } as never) as { title: string };
+    assert.ok(autoProfileOut.title.length > TITLE_PROFILES.short_form.hardMaxChars,
+      "auto must not be rendered as general or short-form when the sealed plan is music");
+    assert.ok(autoProfileOut.title.length <= TITLE_PROFILES.music_loop.hardMaxChars,
+      "auto must honor the sealed music profile's hard title envelope");
   } finally {
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalKey;

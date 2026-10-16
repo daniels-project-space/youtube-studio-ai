@@ -16,7 +16,7 @@
  * to gain a "text" variant first — tracked as a follow-up.
  */
 import type { ModuleCard } from "./moduleRegistry";
-import { TITLE_PROFILES, type TitleProfileId } from "@/lib/titleProfile";
+import { TITLE_PROFILES } from "@/lib/titleProfile";
 
 const SCRIPT_MODULE: ModuleCard = {
   key: "script_gen",
@@ -333,8 +333,8 @@ const METADATA_MODULE: ModuleCard = {
     ],
     knobs: [
       {
-        id: "titleProfile", type: "enum", values: Object.keys(TITLE_PROFILES) as TitleProfileId[], default: "general",
-        describes: "title length envelope and discovery framing; leave unset to keep the channel/family auto-profile",
+        id: "titleProfile", type: "enum", values: ["auto", ...Object.keys(TITLE_PROFILES)], default: "auto",
+        describes: "title length envelope and discovery framing; auto follows the sealed format profile, then channel/family",
         servesStyles: ["documentary", "search", "serialized", "motivational", "children", "music", "shorts"],
       },
       // 0-3 rather than a boolean. It was a binary tied to one voice archetype,
