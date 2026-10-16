@@ -27,6 +27,7 @@ const draft: StyleDNADraft = {
     subject: "the chalk orbit diagram",
   },
   audio: {
+    role: "narration_bed",
     genre: "patient instrumental science underscore",
     bpmMin: 64,
     bpmMax: 78,
@@ -68,6 +69,11 @@ for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
 }
 
 const corruptions: Array<{ field: string; candidate: StyleDNADraft; issue: string }> = [
+  {
+    field: "audio.role",
+    candidate: { ...draft, audio: { ...draft.audio, role: "ambient_everything" as never } },
+    issue: "audio.role must declare a supported channel music purpose",
+  },
   { field: "composition", candidate: { ...draft, composition: " " }, issue: "composition is empty" },
   { field: "colorGrade", candidate: { ...draft, colorGrade: " " }, issue: "colorGrade is empty" },
   { field: "variationAxes", candidate: { ...draft, variationAxes: [" "] }, issue: "variationAxes has no approved variation" },

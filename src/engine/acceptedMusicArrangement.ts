@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { ChannelMusicRoleSchema } from "./channelMusicRole";
 
 export const ACCEPTED_MUSIC_ARRANGEMENT_VERSION = "accepted-music-arrangement/v1" as const;
 
@@ -79,7 +80,7 @@ export const MusicChannelGroundingSchema = z.array(MusicGroundingEntrySchema).mi
 });
 
 const arrangementControls = {
-  role: z.enum(["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"]),
+  role: ChannelMusicRoleSchema,
   tempoMode: z.enum(["metered", "unmetered"]).optional(),
   requestedDurationSec: z.number().finite().int().min(10).max(300),
   form: z.enum(["continuous", "through_composed", "sectional"]),

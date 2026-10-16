@@ -1,3 +1,5 @@
+import type { ChannelMusicRole } from "../channelMusicRole";
+
 /**
  * Creative-direction layer types — the "film crew" contracts.
  *
@@ -122,6 +124,8 @@ export interface StyleDNA {
 
   /* --- Audio / music --- */
   audio: {
+    /** Stable channel-level purpose; older persisted StyleDNA may omit it. */
+    role?: ChannelMusicRole;
     genre: string;
     /** [min, max] BPM band. */
     bpmRange: [number, number];

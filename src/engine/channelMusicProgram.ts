@@ -3,6 +3,9 @@ import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { spreadDefault } from "@/lib/identitySpread";
 import { sha256Hex } from "@/lib/sha256";
+import { ChannelMusicRoleSchema, type ChannelMusicRole } from "./channelMusicRole";
+
+export { ChannelMusicRoleSchema, type ChannelMusicRole } from "./channelMusicRole";
 
 export const CHANNEL_MUSIC_PROGRAM_VERSION = "channel-music-program/v1" as const;
 /** Exact maximum tolerated early high-band collapse in a retained Music3 WAV. */
@@ -25,15 +28,6 @@ export function music3StructuredCaptionWordCount(caption: string): number {
   const normalized = caption.trim();
   return normalized ? normalized.split(/\s+/u).length : 0;
 }
-
-export const ChannelMusicRoleSchema = z.enum([
-  "primary_music",
-  "narration_bed",
-  "meditation_bed",
-  "sleep_sound_bed",
-  "short_form_bed",
-]);
-export type ChannelMusicRole = z.infer<typeof ChannelMusicRoleSchema>;
 
 export const ChannelMusicProviderSchema = z.enum([
   "minimax_music3",

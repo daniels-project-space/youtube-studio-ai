@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChannelMusicRoleSchema, LoopableChannelMusicRoleSchema } from "./channelMusicRole";
 import { MusicArrangementIntentSchema, type MusicArrangementIntent } from "./acceptedMusicArrangement";
 import { getManifest } from "./registry";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -17,7 +18,7 @@ export interface YuE2PipelineSelection {
 
 export const YuE2PipelineSelectionSchema = z.object({
   musicIntent: MusicArrangementIntentSchema.and(z.object({
-    playback: z.enum(["repeat", "once"]), role: z.enum(["primary_music", "narration_bed", "meditation_bed", "sleep_sound_bed", "short_form_bed"]),
+    playback: z.enum(["repeat", "once"]), role: ChannelMusicRoleSchema,
     requestedDurationSec: z.number().int().min(10).max(300),
   })),
   sourceParams: YuE2SourceConfigSchema,
@@ -47,8 +48,8 @@ export function projectYuE2Pipeline(source: readonly PipelineEntry[], input: YuE
   }
   const versions = new Map([[composerIndex, composerVersion], [musicIndex, musicVersion], [assemblyIndex, assemblyVersion]]);
   if (source.some(entry => ["scene_planner", "keyframes", "loop_clips"].includes(entry.block))) {
-    const loopRoles = ["primary_music", "meditation_bed", "sleep_sound_bed"];
-    if (selected.musicIntent.playback !== "repeat" || !loopRoles.includes(selected.musicIntent.role)) {
+    if (selected.musicIntent.playback !== "repeat" ||
+      !LoopableChannelMusicRoleSchema.safeParse(selected.musicIntent.role).success) {
       throw new Error("YuE2 loop visuals require repeat primary-music, meditation, or sleep-sound intent");
     }
     const programIndex = indexOfOne(["music_program_plan"]), sceneIndex = indexOfOne(["scene_planner"]);

@@ -17,6 +17,7 @@ import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { produceAndCritique } from "@/engine/critiqueLoop";
+import { ChannelMusicRoleSchema } from "@/engine/channelMusicRole";
 import type { FamilyKey } from "@/engine/families";
 import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
 import {
@@ -97,6 +98,7 @@ const dnaSchema = z.object({
     subject: z.string(),
   }),
   audio: z.object({
+    role: ChannelMusicRoleSchema,
     genre: z.string(),
     bpmMin: z.number(),
     bpmMax: z.number(),
@@ -193,6 +195,9 @@ export function inspectStyleDNADraft(raw: StyleDNADraft, narrated: boolean, chan
   if (clampStrs(raw.motionVocabulary, 8).length < 1) issues.push("motionVocabulary has no permitted motion");
   if (!raw.motionDiscipline?.trim()) issues.push("motionDiscipline is empty");
   if (clampStrs(raw.visualAvoid, 10).length < 1) issues.push("visualAvoid has no explicit anti-patterns");
+  if (!ChannelMusicRoleSchema.safeParse(raw.audio?.role).success) {
+    issues.push("audio.role must declare a supported channel music purpose");
+  }
   if (!raw.audio?.genre?.trim()) issues.push("audio.genre is empty");
   if (
     !Number.isFinite(raw.audio?.bpmMin) || !Number.isFinite(raw.audio?.bpmMax) ||
@@ -427,7 +432,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `- motionDiscipline: camera/motion rules (e.g. locked tripod, no pans/zooms)`,
     `- visualAvoid: anti-patterns to NEVER render (include the niche's "cheap" tells)`,
     `- thumbnail: {composition (subject-on-third, high-contrast, mobile-legible), textRule (<=3 words/mood-phrase/none), palette (3-4 hex, contrast pushed past the video grade), subject}`,
-    `- audio: {genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), optional bodyMusicVol (0..1 channel mix gain), loopable}`,
+    `- audio: {role, genre, bpmMin, bpmMax, instrumentation, textures (1-2 only), moodArc, loudnessLufs (YouTube ref -14), optional bodyMusicVol (0..1 channel mix gain), loopable}. Choose role from channel purpose: primary_music for music-led, narration_bed for spoken programs, meditation_bed for meditation, sleep_sound_bed for unattended sleep, short_form_bed for Shorts.`,
     narrated
       ? `- narrative: {scriptStyle, hookStyle, pacing, voiceProfile (timbre/age/pace/warmth), delivery (emotional direction)}`
       : `- narrative: omit (this family has no narration)`,
@@ -536,6 +541,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       subject: raw.thumbnail.subject.trim(),
     },
     audio: {
+      role: raw.audio.role,
       genre: raw.audio.genre.trim(),
       bpmRange: [bpmMin, bpmMax],
       instrumentation: clampStrs(raw.audio.instrumentation, 8),
@@ -645,7 +651,7 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
   const desc: Record<QualityDimensionId, string> = {
     identity: `Reads unmistakably as "${dna.recurringSubject || "this channel"}" in "${dna.setting || "its setting"}" — palette ${dna.palette.join("/") || "on-brand"}, motifs (${dna.motifs.join(", ") || "—"}); only ${dna.variationAxes.join("/") || "approved axes"} may vary.`,
     loop_seam: `Seamless loop — no visible pop/velocity-flip at the boundary; only ${dna.motionVocabulary.join(", ") || "subtle ambient motion"}; ${dna.motionDiscipline || "camera locked"}.`,
-    music: `${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; emotional arc: ${dna.audio.moodArc}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
+    music: `${dna.audio.role ? `${dna.audio.role}: ` : ""}${dna.audio.genre || "on-genre"} at ${dna.audio.bpmRange[0]}-${dna.audio.bpmRange[1]} BPM, ${dna.audio.instrumentation.join("/") || "right instrumentation"}, ${dna.audio.textures.join("/") || "restrained texture"}; emotional arc: ${dna.audio.moodArc}; mastered to ${dna.audio.loudnessLufs} LUFS; ${dna.audio.loopable ? "loop-safe" : "natural ending"}.`,
     thumbnail: `${dna.thumbnail.subject || dna.recurringSubject || "clear subject"}; ${dna.thumbnail.composition || "subject-on-third, high-contrast, mobile-legible"}; text: ${dna.thumbnail.textRule || "≤3 words"}.`,
     script: dna.narrative ? `${dna.narrative.scriptStyle}; hook: ${dna.narrative.hookStyle}; pacing: ${dna.narrative.pacing}.` : "On-brand script with a strong hook and tight pacing.",
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",

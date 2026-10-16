@@ -1,4 +1,5 @@
 import { artifactContract } from "@/engine/artifactSchemas";
+import { LoopableChannelMusicRoleSchema } from "@/engine/channelMusicRole";
 import { ChannelProfileSchema, parseFrozenChannelProfile } from "@/engine/channelProfile";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import type { StageContext } from "@/engine/types";
@@ -20,8 +21,7 @@ export async function admitYuE2LoopSource(ctx: StageContext) {
     throw new Error("YuE2 loop visuals require the sealed YuE2 program, not a legacy provider plan");
   }
   const source = await verifyApprovedYuE2Source(ctx, "repeat");
-  const loopRoles = ["primary_music", "meditation_bed", "sleep_sound_bed"] as const;
-  if (!loopRoles.includes(source.arrangement.arrangement.role as typeof loopRoles[number])) {
+  if (!LoopableChannelMusicRoleSchema.safeParse(source.arrangement.arrangement.role).success) {
     throw new Error("YuE2 loop visuals require a primary-music, meditation, or sleep-sound arrangement");
   }
   return source;

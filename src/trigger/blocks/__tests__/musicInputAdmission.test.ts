@@ -162,6 +162,7 @@ async function main() {
   transferMode = true;
   const styleDNA = {
     audio: {
+      role: "meditation_bed" as const,
       genre: "quiet contemplative score", bpmRange: [60, 72], instrumentation: ["felt piano"],
       textures: ["soft room tone"], moodArc: "stillness toward reassurance", loudnessLufs: -18,
       bodyMusicVol: 0.37, loopable: false,
@@ -178,7 +179,6 @@ async function main() {
     params: { provider: "mureka" },
     store: { ...ctx.store, channelProgramRoute, styleDNA, musicBrief: {
       musicPrompt: "A measured, spacious meditation bed.",
-      musicIntent: { role: "meditation_bed", playback: "repeat", requestedDurationSec: 300 },
     } },
   }), /provider boundary reached/);
   const programEntry = [...writtenObjects.entries()].find(([key]) => key.includes("channel-music-program-"));
@@ -188,8 +188,20 @@ async function main() {
     role: string;
     mix: { bodyMusicVol: number };
   };
-  assert.equal(producedProgram.role, "meditation_bed", "the shared music producer must preserve the composer's explicit role instead of rebuilding a family default");
+  assert.equal(producedProgram.role, "meditation_bed", "the shared music producer must preserve the channel's declared role instead of rebuilding a family default");
   assert.equal(producedProgram.mix.bodyMusicVol, 0.37, "channel StyleDNA mix gain survives the real producer boundary");
+  storageCalls = 0;
+  networkCalls = 0;
+  await assert.rejects(music.run({
+    ...ctx,
+    params: { provider: "mureka" },
+    store: { ...ctx.store, channelProgramRoute, styleDNA, musicBrief: {
+      musicPrompt: "A beatless sleep soundscape.",
+      musicIntent: { role: "sleep_sound_bed", playback: "repeat", requestedDurationSec: 300 },
+    } },
+  }), /Composer role sleep_sound_bed conflicts with locked channel audio role meditation_bed/u);
+  assert.equal(storageCalls, 0, "a conflicting episode role cannot write a channel sound program");
+  assert.equal(networkCalls, 0, "a conflicting episode role cannot reach a paid music provider");
   const legacyAssembly = {
     id: "timeline_assemble",
     version: "fixture-assembly",

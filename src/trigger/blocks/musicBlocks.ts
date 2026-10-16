@@ -318,11 +318,17 @@ export const music: Block = {
     const configuredPrompt = typeof ctx.params.prompt === "string"
       ? ctx.params.prompt.trim().replace(/\s+/gu, " ").slice(0, 300)
       : "";
-    const routeRole = composerBrief?.musicIntent?.role ?? musicRoleForRoute(
+    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const channelRole = dna?.audio.role;
+    const composerRole = composerBrief?.musicIntent?.role;
+    if (channelRole && composerRole && channelRole !== composerRole) {
+      throw new Error(`music: Composer role ${composerRole} conflicts with locked channel audio role ${channelRole}`);
+    }
+    const selectedRole = channelRole ?? composerRole ?? musicRoleForRoute(
       musicRoute?.family ?? "",
       musicRoute?.contentLaneKey ?? "",
     );
-    const sleepBed = routeRole === "sleep_sound_bed";
+    const sleepBed = selectedRole === "sleep_sound_bed";
     const studioAudioRecipe = studioPostproductionRecipeProjectionFromUnknown(
       ctx.store["studioAudioRecipeProjection"],
       "audio_recipe",
@@ -330,7 +336,6 @@ export const music: Block = {
     const studioAudioDirection = studioAudioRecipe.promptAddenda.length
       ? ` Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
       : "";
-    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const a = dna?.audio;
     const dnaPrompt = a?.genre?.trim()
       ? [
@@ -382,7 +387,7 @@ export const music: Block = {
     const lastResort = musicFallbackPromptForRoute({
       family: musicRoute?.family,
       contentLaneKey: musicRoute?.contentLaneKey,
-      role: composerBrief?.musicIntent?.role,
+      role: selectedRole,
       topic,
       channelIdentitySeed: channelIdentityFingerprint,
       profileVersion: musicProfileVersion,
@@ -409,7 +414,7 @@ export const music: Block = {
       family: route?.family,
       contentLaneKey: route?.contentLaneKey,
       topic,
-      role: composerBrief?.musicIntent?.role,
+      role: selectedRole,
       musicProfileVersion,
       providerPreference: provider,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
