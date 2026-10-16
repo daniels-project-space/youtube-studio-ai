@@ -8,7 +8,12 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { ChannelMusicProgramSchema, createMusicProgramQualityReceipt } from "@/engine/channelMusicProgram";
+import {
+  ChannelMusicProgramSchema,
+  createMusicProgramQualityReceipt,
+  musicProgramTechnicalQualityFailures,
+  MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE,
+} from "@/engine/channelMusicProgram";
 import { measureNativeMusicQuality } from "@/lib/nativeMusicQuality";
 import {
   assertMusicAuditionNativeBytes,
@@ -148,6 +153,12 @@ export async function GET(request: Request) {
         checkpointFingerprint: undefined, immutableCheckpoint: undefined, nativeWavUrl,
         durationSec: result.review.durationSec, sampleRateHz: result.review.sampleRateHz, channels: result.review.channels,
         programFingerprint: result.review.programFingerprint,
+        approvalThresholds: {
+          minimumSectionScore: MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE,
+          minimumEmotionalDepthScore: program.quality.minimumEmotionalDepthScore,
+          minimumArrangementDepthScore: program.quality.minimumArrangementDepthScore,
+        },
+        technicalQualityPass: musicProgramTechnicalQualityFailures({ program, measurements: nativeQuality.measurements }).length === 0,
         audioLabel: checkpoint.version === "music-audition-checkpoint/v2" ? `Owner review: ${checkpoint.provider} master` : "Native worker WAV",
         nativeQuality,
         sections: program.generation.sections.map((section) => ({ id: section.id, label: section.label, instruction: section.instruction })),

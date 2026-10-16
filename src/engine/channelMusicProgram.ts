@@ -15,6 +15,7 @@ export const MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB = 18;
  */
 export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS = 450;
 export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS = 250;
+export const MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE = 0.75;
 
 /**
  * Music3's caption guidance is a quality boundary, not presentation copy.
@@ -1071,6 +1072,30 @@ export const MusicProgramQualityReceiptSchema = MusicProgramQualityReceiptBodySc
 
 export type MusicProgramQualityReceipt = z.infer<typeof MusicProgramQualityReceiptSchema>;
 
+/** Technical release failures shared by the owner desk and receipt admission. */
+export function musicProgramTechnicalQualityFailures(input: {
+  readonly program: unknown;
+  readonly measurements: unknown;
+}): string[] {
+  const program = ChannelMusicProgramSchema.parse(input.program);
+  const measurements = MusicProgramQualityReceiptBodySchema.shape.measurements.parse(input.measurements);
+  return [
+    Math.abs(measurements.integratedLufs - program.mix.targetLufs) > 2
+      ? "integrated loudness is outside the transparent ±2 LU window" : "",
+    measurements.truePeakDbtp > program.mix.truePeakMaxDbtp ? "true peak exceeds the sealed ceiling" : "",
+    measurements.lraLu < program.quality.minimumLraLu ? "loudness range is below the role-specific floor" : "",
+    measurements.crestDb < program.quality.minimumCrestDb ? "crest factor is below the role-specific floor" : "",
+    measurements.clippedSamples > program.quality.maximumClippedSamples ? "the master contains clipped samples" : "",
+    measurements.maximumConsecutiveCeilingSamples > program.quality.maximumConsecutiveCeilingSamples
+      ? "the master contains a flat-topped ceiling run" : "",
+    measurements.dcOffsetAbsolute > 0.02 ? "DC offset is above the release ceiling" : "",
+    measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
+    measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
+    measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
+      ? "opening-to-early-interior high-band energy collapsed (known Music3 degradation signature)" : "",
+  ].filter(Boolean);
+}
+
 export function createMusicProgramQualityReceipt(input: {
   readonly program: unknown;
   readonly output: unknown;
@@ -1089,31 +1114,9 @@ export function createMusicProgramQualityReceipt(input: {
     throw new Error("music quality receipt must review every sealed section exactly once and in order");
   }
   const failures = [
-    Math.abs(measurements.integratedLufs - program.mix.targetLufs) > 2
-      ? "integrated loudness is outside the transparent ±2 LU window"
-      : "",
-    measurements.truePeakDbtp > program.mix.truePeakMaxDbtp
-      ? "true peak exceeds the sealed ceiling"
-      : "",
-    measurements.lraLu < program.quality.minimumLraLu
-      ? "loudness range is below the role-specific floor"
-      : "",
-    measurements.crestDb < program.quality.minimumCrestDb
-      ? "crest factor is below the role-specific floor"
-      : "",
-    measurements.clippedSamples > program.quality.maximumClippedSamples
-      ? "the master contains clipped samples"
-      : "",
-    measurements.maximumConsecutiveCeilingSamples > program.quality.maximumConsecutiveCeilingSamples
-      ? "the master contains a flat-topped ceiling run"
-      : "",
-    measurements.dcOffsetAbsolute > 0.02 ? "DC offset is above the release ceiling" : "",
-    measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
-    measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
-    measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
-      ? "opening-to-early-interior high-band energy collapsed (known Music3 degradation signature)"
-      : "",
-    sectionReviews.some((section) => section.score < 0.75) ? "at least one musical section failed review" : "",
+    ...musicProgramTechnicalQualityFailures({ program, measurements }),
+    sectionReviews.some((section) => section.score < MUSIC_PROGRAM_MINIMUM_SECTION_REVIEW_SCORE)
+      ? "at least one musical section failed review" : "",
     audition.emotionalDepthScore < program.quality.minimumEmotionalDepthScore
       ? "human audition found insufficient emotional depth"
       : "",

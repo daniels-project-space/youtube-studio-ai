@@ -18,7 +18,11 @@ type Desk = {
   ok: boolean;
   error?: string;
   checkpoint?: { id?: string; decision: "awaiting" | "approved" | "rejected" | "blocked"; blockedReason?: string; savedReview?: SavedReview } | null;
-  review?: { nativeWavUrl?: string; audioLabel?: string; durationSec?: number; sampleRateHz?: number; channels?: number; nativeQuality?: NativeQuality; sections?: Section[] };
+  review?: {
+    nativeWavUrl?: string; audioLabel?: string; durationSec?: number; sampleRateHz?: number; channels?: number;
+    nativeQuality?: NativeQuality; sections?: Section[]; technicalQualityPass?: boolean;
+    approvalThresholds?: { minimumSectionScore: number; minimumEmotionalDepthScore: number; minimumArrangementDepthScore: number };
+  };
 };
 
 const measurementKeys = [
@@ -57,6 +61,12 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
     return review?.score.trim() !== "" && Number.isFinite(score) && score >= 0 && score <= 1 && Boolean(review?.evidence.trim());
   }) && emotionalDepthScore.trim() !== "" && Number.isFinite(Number(emotionalDepthScore)) && Number(emotionalDepthScore) >= 0 && Number(emotionalDepthScore) <= 1 &&
     arrangementDepthScore.trim() !== "" && Number.isFinite(Number(arrangementDepthScore)) && Number(arrangementDepthScore) >= 0 && Number(arrangementDepthScore) <= 1 && Boolean(notes.trim());
+  const thresholds = data?.review?.approvalThresholds;
+  const humanReviewPasses = completeReview && thresholds !== undefined && !hollowOrGeneric &&
+    (sections ?? []).every((section) => Number(sectionReviews[section.id]?.score) >= thresholds.minimumSectionScore) &&
+    Number(emotionalDepthScore) >= thresholds.minimumEmotionalDepthScore &&
+    Number(arrangementDepthScore) >= thresholds.minimumArrangementDepthScore;
+  const approvalReady = humanReviewPasses && data?.review?.technicalQualityPass === true;
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/music-audition-checkpoints?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
@@ -92,7 +102,7 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
     } finally { setRejecting(false); }
   }, [completeReview, data, emotionalDepthScore, arrangementDepthScore, hollowOrGeneric, load, notes, rejecting, runId, sectionReviews, sections]);
   const approve = useCallback(async () => {
-    if (!data?.checkpoint?.id || approving) return;
+    if (!data?.checkpoint?.id || approving || !approvalReady) return;
     setApproving(true);
     try {
       const response = await fetch("/api/music-audition-checkpoints", {
@@ -106,7 +116,7 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       const body = await response.json() as Desk;
       if (!response.ok || !body.ok) setData({ ...data, error: body.error ?? "Music approval was not accepted" }); else await load();
     } finally { setApproving(false); }
-  }, [approving, arrangementDepthScore, data, emotionalDepthScore, hollowOrGeneric, notes, runId, sectionReviews, load]);
+  }, [approvalReady, approving, arrangementDepthScore, data, emotionalDepthScore, hollowOrGeneric, notes, runId, sectionReviews, load]);
   if (!data?.checkpoint) return null;
   const inputStyle = { minWidth: 0, width: "100%", padding: "0.45rem 0.55rem" };
   return <section className="glass" style={{ padding: "1rem 1.15rem", marginBottom: "1.25rem" }}>
@@ -120,6 +130,9 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
       <audio controls preload="metadata" src={data.review.nativeWavUrl} style={{ width: "100%", marginTop: "0.75rem" }} />
     </>}
     {data.error && <p style={{ color: "var(--color-failed)", marginBottom: 0 }}>{data.error}</p>}
+    {data.checkpoint.decision === "awaiting" && completeReview && !approvalReady && <p role="status" style={{ color: "var(--color-amber)", fontSize: "0.78rem", margin: "0.55rem 0 0" }}>
+      {data.review?.technicalQualityPass !== true ? "Native WAV technical quality gate failed." : "Human review does not meet this program's sealed quality thresholds."}
+    </p>}
     {data.checkpoint.decision === "rejected" && data.checkpoint.savedReview && <details style={{ marginTop: "0.8rem" }}>
       <summary style={{ cursor: "pointer", fontSize: "0.88rem" }}>Saved owner feedback</summary>
       <p style={{ color: "var(--color-muted)", fontSize: "0.78rem" }}>Emotional depth {data.checkpoint.savedReview.audition.emotionalDepthScore.toFixed(2)} · arrangement depth {data.checkpoint.savedReview.audition.arrangementDepthScore.toFixed(2)} · hollow or generic {data.checkpoint.savedReview.audition.hollowOrGeneric ? "yes" : "no"}</p>
@@ -151,7 +164,7 @@ export function MusicAuditionPanel({ runId }: { runId: string }) {
         <label style={{ display: "flex", gap: "0.45rem", alignItems: "center", fontSize: "0.8rem", marginTop: "0.5rem" }}><input type="checkbox" checked={hollowOrGeneric} onChange={(event) => setHollowOrGeneric(event.target.checked)} /> sounds hollow or generic (fails approval)</label>
       </details>
       <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.75rem" }}>
-        <button type="button" disabled={approving} onClick={() => void approve()}>{approving ? "Recording QC…" : "Approve QC"}</button>
+        <button type="button" disabled={approving || !approvalReady} onClick={() => void approve()}>{approving ? "Recording QC…" : "Approve QC"}</button>
         <button type="button" disabled={rejecting || !completeReview} onClick={() => void reject()}>{rejecting ? "Rejecting…" : "Reject"}</button>
       </div>
     </>}

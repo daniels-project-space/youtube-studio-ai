@@ -5,6 +5,7 @@ import {
   ChannelMusicProgramSchema,
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
+  musicProgramTechnicalQualityFailures,
   instrumentalLyricsControl,
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MIN_WORDS,
   MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
@@ -701,6 +702,8 @@ const receiptInput = {
   },
 };
 const quality = createMusicProgramQualityReceipt({ program: lofi, ...receiptInput });
+assert.deepEqual(musicProgramTechnicalQualityFailures({ program: lofi, measurements: receiptInput.measurements }), [],
+  "the owner desk technical gate and durable release receipt share the same passing measurement decision");
 assert.equal(quality.programFingerprint, lofi.fingerprint);
 assert.equal(
   assertMusicProgramQualityReceipt({ program: lofi, receipt: quality }).fingerprint,
@@ -755,6 +758,14 @@ for (const rejection of independentQualityRejections) {
     rejection.expected,
     `the independent ${rejection.label} gate must reject a failing result`,
   );
+  if (rejection.measurements) {
+    const failures = musicProgramTechnicalQualityFailures({
+      program: lofi,
+      measurements: { ...receiptInput.measurements, ...rejection.measurements },
+    });
+    assert.match(failures.join("; "), rejection.expected,
+      `the owner desk must report the same technical failure for ${rejection.label}`);
+  }
 }
 
 const tampered = structuredClone(history);
