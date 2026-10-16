@@ -316,6 +316,60 @@ const LOFI_PRIMARY_MUSIC_PROFILES: readonly PrimaryMusicFallbackProfile[] = Obje
   }),
 ]);
 
+const MEDITATION_MUSIC_FALLBACKS = Object.freeze([
+  Object.freeze({
+    genre: "slow spacious ambient meditation",
+    instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
+    textures: ["wide calm stereo space", "gentle natural air"],
+    moodArc: "settle into a steady spacious calm, support slow breathing with subtle timbral change, and return without a strong melodic arrival",
+  }),
+  Object.freeze({
+    genre: "organic ambient meditation",
+    instrumentation: ["soft bowed strings", "low warm drone", "distant wooden flute"],
+    textures: ["open wood-room resonance", "quiet breath-like air"],
+    moodArc: "begin with spacious warmth, allow a slow harmonic opening, then return gently to the same grounded stillness",
+  }),
+  Object.freeze({
+    genre: "minimal piano meditation",
+    instrumentation: ["felt piano", "soft sustained cello", "subtle airy synth"],
+    textures: ["close felt detail", "long natural room decay"],
+    moodArc: "let sparse piano tones breathe over a calm sustained bed, widen briefly, and settle without a strong melodic arrival",
+  }),
+  Object.freeze({
+    genre: "soft tonal meditation ambient",
+    instrumentation: ["warm harmonium", "rounded low strings", "breathy reed tone"],
+    textures: ["soft harmonic air", "wide unhurried space"],
+    moodArc: "hold a gentle center while one warm harmony slowly opens and returns, keeping each change unhurried and predictable",
+  }),
+]);
+
+const SLEEP_SOUND_FALLBACKS = Object.freeze([
+  Object.freeze({
+    genre: "continuous low-arousal ambient sleep soundscape",
+    instrumentation: ["soft sustained synth pad", "distant piano harmonics"],
+    textures: ["steady filtered noise bed", "quiet natural room air"],
+    moodArc: "remain stable and unobtrusive for unattended sleep; no pulse, melodic phrase, cadence, crescendo, or attention-catching event",
+  }),
+  Object.freeze({
+    genre: "soft rain-texture sleep soundscape",
+    instrumentation: ["low diffuse drone", "soft sustained air tone"],
+    textures: ["even filtered rainfall", "deep quiet room tone"],
+    moodArc: "maintain a smooth, even field of sound through the night with no event, swell, pulse, or tonal arrival",
+  }),
+  Object.freeze({
+    genre: "deep ambient sleep soundscape",
+    instrumentation: ["rounded sub-audible drone", "soft sustained upper air"],
+    textures: ["steady brown-noise bed", "diffuse distant atmosphere"],
+    moodArc: "stay low, continuous, and tonally unobtrusive; changes remain nearly imperceptible with no new event or cadence",
+  }),
+  Object.freeze({
+    genre: "quiet ocean-air sleep soundscape",
+    instrumentation: ["soft low synth bed", "distant smooth resonance"],
+    textures: ["level ocean-air wash", "muted spacious room tone"],
+    moodArc: "preserve a calm unchanging horizon of sound without wave-like swells, pulse, melody, or attention-catching shifts",
+  }),
+]);
+
 const PRIMARY_MUSIC_FALLBACK_PROFILES: readonly PrimaryMusicFallbackProfile[] = Object.freeze([
   Object.freeze({
     genre: "cinematic post-rock instrumental",
@@ -686,18 +740,6 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
       textures: ["dry centered dialogue space", "subtle room depth"],
       moodArc: "quiet uncertainty gathers into restrained tension, then resolves without competing with speech",
     },
-    meditation_bed: {
-      genre: "slow spacious ambient meditation",
-      instrumentation: ["warm sustained pad", "sparse felt piano", "soft breathy flute"],
-      textures: ["wide calm stereo space", "gentle natural air"],
-      moodArc: "settle into a steady spacious calm, support slow breathing with subtle timbral change, and return without a strong melodic arrival",
-    },
-    sleep_sound_bed: {
-      genre: "continuous low-arousal ambient sleep soundscape",
-      instrumentation: ["soft sustained synth pad", "distant piano harmonics"],
-      textures: ["steady filtered noise bed", "quiet natural room air"],
-      moodArc: "remain stable and unobtrusive for unattended sleep; no pulse, melodic phrase, cadence, crescendo, or attention-catching event",
-    },
     short_form_bed: {
       genre: "concise modern instrumental underscore",
       instrumentation: ["muted bass", "soft compact percussion", "single restrained pluck"],
@@ -711,7 +753,11 @@ export function createChannelMusicProgram(input: CreateChannelMusicProgramInput)
         contentLaneKey,
         channelIdentitySeed: input.channelIdentityFingerprint,
       })
-    : roleDefaults[role];
+    : role === "meditation_bed"
+      ? spreadDefault(input.channelIdentityFingerprint, MEDITATION_MUSIC_FALLBACKS)
+      : role === "sleep_sound_bed"
+        ? spreadDefault(input.channelIdentityFingerprint, SLEEP_SOUND_FALLBACKS)
+        : roleDefaults[role];
   const genre = cleanText(input.genre, defaults.genre, 160);
   const instrumentation = unique(input.instrumentation, defaults.instrumentation, 12);
   const textures = unique(input.textures, defaults.textures, 8);

@@ -79,6 +79,52 @@ const sameIdentityDifferentEpisode = createChannelMusicProgram({
 assert.equal(musicSoundProfileFingerprint(lofiFallbackPrograms[0]!), musicSoundProfileFingerprint(sameIdentityDifferentEpisode),
   "episode topic changes must not reshuffle a channel's fallback sound identity");
 
+const soundscapeChannels = ["Investory", "Chalk & Compound", "Stoic Truths", "Seaside Ghibli", "Drawn Past"];
+const meditationFallbackPrograms = soundscapeChannels.map((channelName) => createChannelMusicProgram({
+  channelId: channelName,
+  channelIdentityFingerprint: sha256Hex(channelName),
+  family: "meditation",
+  contentLaneKey: "ambient_guided",
+  topic: "A quiet return to the breath",
+}));
+assert.ok(new Set(meditationFallbackPrograms.map((program) => program.identity.genre)).size >= 3,
+  "unconfigured meditation channels should receive distinct but stable ambient identities");
+const meditationFallbackSibling = createChannelMusicProgram({
+  channelId: "Investory",
+  channelIdentityFingerprint: sha256Hex("Investory"),
+  family: "meditation",
+  contentLaneKey: "ambient_guided",
+  topic: "A different guided meditation",
+});
+assert.equal(musicSoundProfileFingerprint(meditationFallbackPrograms[0]!), musicSoundProfileFingerprint(meditationFallbackSibling),
+  "episode topics must not reshuffle an unconfigured meditation channel's sound identity");
+assert.ok(meditationFallbackPrograms.every((program) =>
+  program.role === "meditation_bed" && program.mix.targetLufs === -18 && program.mix.narrationPriority,
+), "personalized meditation profiles must preserve guided-meditation role and mix controls");
+
+const sleepFallbackPrograms = soundscapeChannels.map((channelName) => createChannelMusicProgram({
+  channelId: channelName,
+  channelIdentityFingerprint: sha256Hex(channelName),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  topic: "A steady soundscape for rest",
+}));
+assert.ok(new Set(sleepFallbackPrograms.map((program) => program.identity.genre)).size >= 3,
+  "unconfigured sleep channels should receive distinct but stable soundscape identities");
+assert.ok(sleepFallbackPrograms.every((program) =>
+  program.role === "sleep_sound_bed" && program.identity.bpmRange === null &&
+  program.mix.targetLufs === -20 && program.mix.bodyMusicVol === 0.1026 && program.mix.narrationPriority,
+), "personalized sleep soundscapes must remain beatless and retain the narrated-sleep mix contract");
+const sleepFallbackSibling = createChannelMusicProgram({
+  channelId: "Investory",
+  channelIdentityFingerprint: sha256Hex("Investory"),
+  family: "sleep",
+  contentLaneKey: "ambient_guided",
+  topic: "Another sleep episode",
+});
+assert.equal(musicSoundProfileFingerprint(sleepFallbackPrograms[0]!), musicSoundProfileFingerprint(sleepFallbackSibling),
+  "episode topics must not reshuffle an unconfigured sleep channel's sound identity");
+
 const unclassified = createChannelMusicProgram({
   channelId: "channel-unclassified",
   channelIdentityFingerprint: sha("d"),
@@ -517,7 +563,8 @@ assert.deepEqual(
   ["arrival", "settle", "open", "drift", "return", "release"],
   "long meditation programs must keep calm variation distinct from an unstructured repeated pad",
 );
-assert.equal(longMeditation.identity.genre, "slow spacious ambient meditation");
+assert.ok(/meditation/iu.test(longMeditation.identity.genre),
+  "long guided meditations retain a meditation-specific channel fallback identity");
 assert.equal(longMeditation.mix.targetLufs, -18, "meditation retains a distinct target from sleep and primary music");
 assert.equal(longMeditation.mix.narrationPriority, true,
   "guided meditation must preserve speech as the foreground even while retaining its meditative musical role");
@@ -533,8 +580,8 @@ const authoredMeditationGain = createChannelMusicProgram({
 });
 assert.equal(authoredMeditationGain.mix.bodyMusicVol, 0.12,
   "an authored channel mix remains authoritative over the guided-meditation default");
-assert.deepEqual(longMeditation.identity.instrumentation, ["warm sustained pad", "sparse felt piano", "soft breathy flute"]);
-assert.match(longMeditation.identity.moodArc, /without a strong melodic arrival/u);
+assert.ok(longMeditation.identity.instrumentation.length >= 2);
+assert.match(longMeditation.identity.moodArc, /calm|stillness|unhurried|breath/u);
 assert.match(longMeditation.generation.structuredCaption, /BPM;.*Key\/scale:/u);
 
 const longNarration = createChannelMusicProgram({
