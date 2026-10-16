@@ -373,7 +373,7 @@ function assemble(hook: string, sections: ScriptSection[]): string {
   return assembleScriptNarration(hook, sections);
 }
 
-// CRAFT_RULES targets <15-word sentences; ~14 is the observed mean.
+// Duration estimate: observed average words per spoken sentence for sentence-gap accounting.
 const AVG_WORDS_PER_SENTENCE = 14;
 
 /**

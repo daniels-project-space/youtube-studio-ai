@@ -1351,8 +1351,8 @@ export function createQaScriptBlock(
           .some(value => value?.trim()))) {
         throw new Error("qa_script FAILED: channel-aware review requires a frozen channel name and authored Show Bible");
       }
-      // The hookcraft contract: the cold open's promise + the midpoint re-hook
-      // are CRAFT_RULES law — verify them here instead of hoping.
+      // The cold-open promise is always binding; re-engagement follows the
+      // accepted channel and route rather than one universal retention pattern.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
       const critiqueRequest = {
         prompt:
