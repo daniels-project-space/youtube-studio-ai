@@ -78,12 +78,24 @@ async function main() {
       niche: "astronomy education",
       persona: "A patient science teacher who explains mechanisms without condescension.",
       styleGrammar: "Hand-drawn diagrams revealed in narration order.",
+      motifHint: "a brass telescope crossing a hand-drawn orbit",
+      competitorContext: "Successful astronomy explainers open on a visible sky observation.",
       now: 23,
     });
     assert.equal(result.vibe, bible.vibe, "the reviewed revision, not the generic first draft, is returned");
     assert.deepEqual(calls.map((call) => call.kind), ["writer", "critic", "writer", "critic"]);
+    for (const prompt of [calls[0]!.prompt, calls[2]!.prompt]) {
+      assert.match(prompt, /DECLARED CHANNEL PROGRAM — CANON/);
+      assert.match(prompt, /astronomy education/);
+      assert.match(prompt, /patient science teacher/);
+      assert.match(prompt, /Hand-drawn diagrams revealed in narration order/);
+      assert.match(prompt, /Successful astronomy explainers/);
+    }
     assert.match(calls[1]!.prompt, /patient science teacher/);
     assert.match(calls[1]!.prompt, /Explain complex science mechanisms/);
+    assert.match(calls[1]!.prompt, /Channel niche: astronomy education/);
+    assert.match(calls[1]!.prompt, /Operator-preferred motif: a brass telescope crossing a hand-drawn orbit/);
+    assert.match(calls[1]!.prompt, /Successful astronomy explainers/);
     assert.match(calls[1]!.prompt, /critic owns evaluation, not generation/);
     assert.match(calls[2]!.prompt, /first draft's channel persona is too generic/);
     assert.equal(writerCalls, 2);
