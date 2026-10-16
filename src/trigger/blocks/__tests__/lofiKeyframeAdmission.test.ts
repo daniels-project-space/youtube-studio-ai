@@ -80,6 +80,7 @@ async function main() {
       reset(verdicts);
       const patch = await block.run(ctx);
       assert.equal(patch.f1Key, `still-${count}`);
+      assert.equal("f1Url" in patch, false, "only the durable key crosses the stage boundary");
       assert.equal(patch.__costUsd, count * 0.01);
       assert.equal(motions, 1); assert.equal(assets, 1); assert.equal(renders, count);
     }

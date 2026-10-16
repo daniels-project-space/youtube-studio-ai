@@ -6,7 +6,7 @@
  * Data flow (store keys), in pipeline order:
  *   topic_select  → topic
  *   scene_planner → scenes musicProgramMotionIntent
- *   keyframes     → f1Url f1Key motionPrompt
+ *   keyframes     → f1Key motionPrompt
  *   loop_clips    → loopRawKey loopRawUrl + two seam proofs
  *   upscale       → loopUnitKey loopUnitUrl loopUnitUpscaled loopUnitResolution
  *   music         → musicKey musicProvider musicUrl
@@ -1129,7 +1129,7 @@ export function createKeyframesBlock(
   return {
   id: "keyframes",
   consumes: ["scenes"],
-  produces: ["f1Url", "f1Key", "motionPrompt"],
+  produces: ["f1Key", "motionPrompt"],
   paid: true,
   run: async (ctx) => {
     // CLOUD REBUILD: one attested Novita still replaces the old local/Higgsfield
@@ -1262,7 +1262,6 @@ export function createKeyframesBlock(
         { retryable: false, code: "KEYFRAME_QUALITY_REJECTED" },
       );
     }
-    const f1Url = loop.value.url;
     const f1Local = loop.value.local;
     ctx.log(`keyframes: best still after ${stills} attempt(s) (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted})`);
 
@@ -1312,7 +1311,6 @@ export function createKeyframesBlock(
 
     ctx.log(`keyframes ok: still=${f1Key}`);
     return {
-      f1Url,
       f1Key,
       motionPrompt,
       [COST_PATCH_KEY]: imageCostUsd,
