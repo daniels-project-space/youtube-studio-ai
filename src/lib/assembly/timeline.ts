@@ -177,6 +177,33 @@ export function projectedDurationSec(t: Timeline): number {
   return t.audio.introSec + t.audio.bodySec + t.audio.tailSec;
 }
 
+export function assertFinalDurationMatchesTarget(
+  actualDurationSec: number,
+  targetDurationSec: number,
+  fps: number,
+  subject = "final master",
+): void {
+  if (!Number.isFinite(actualDurationSec) || actualDurationSec <= 0) {
+    throw new Error(`${subject} duration must be a positive finite number`);
+  }
+  if (!Number.isFinite(targetDurationSec) || targetDurationSec <= 0) {
+    throw new Error(`${subject} target duration must be a positive finite number`);
+  }
+  if (!Number.isSafeInteger(fps) || fps <= 0) {
+    throw new Error(`${subject} frame rate must be a positive integer`);
+  }
+
+  const toleranceSec = 1 / fps;
+  const driftSec = Math.abs(actualDurationSec - targetDurationSec);
+  if (driftSec > toleranceSec + 1e-6) {
+    throw new Error(
+      `${subject} duration ${actualDurationSec.toFixed(3)}s differs from target ` +
+      `${targetDurationSec.toFixed(3)}s by ${driftSec.toFixed(3)}s ` +
+      `(maximum ${toleranceSec.toFixed(3)}s at ${fps} fps)`,
+    );
+  }
+}
+
 /**
  * Validate a Timeline BEFORE spending any render compute (the rubric's "validate
  * before spend" + "fail loud"). Returns the parsed Timeline or a list of human errors.

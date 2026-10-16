@@ -22,6 +22,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { ExecutionError, classifyExecutionError } from "@/engine/executionErrors";
+import { assertFinalDurationMatchesTarget } from "@/lib/assembly/timeline";
 import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext } from "@/engine/types";
 import {
   assertVoiceGatePreconditions,
@@ -4239,6 +4240,9 @@ async function finishFromComposed(
     ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
+  const finalDurationSec = (await probe(finalVideo)).durationSec;
+  assertFinalDurationMatchesTarget(finalDurationSec, videoSec, 30, "timeline_assemble final master");
+
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
   await persistRenderedFile(videoKey, finalVideo, { contentType: "video/mp4" }, {
     beforeAttempt: o.assertOutputAuthority,
@@ -4262,18 +4266,18 @@ async function finishFromComposed(
     }
   }
   await recordAsset(ctx, "video", videoKey, {
-    durationSec: videoSec,
+    durationSec: finalDurationSec,
     narrationSec,
     introSec,
     quoteOverlays: quotes.length,
     source: "stock_footage",
     clips: footage.length,
   });
-  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
+  ctx.log(`timeline_assemble ok: video ${finalDurationSec.toFixed(3)}s/${videoSec}s target (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
   return {
     videoKey,
     videoLocalPath: finalVideo,
-    videoDurationSec: videoSec,
+    videoDurationSec: finalDurationSec,
     quotesApplied,
     insertsApplied,
     captionsApplied,

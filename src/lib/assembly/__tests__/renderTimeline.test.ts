@@ -108,30 +108,35 @@ async function idempotency(): Promise<void> {
   const original = structuredClone(t);
   const expected = projectedDurationSec(t);
   const finalKey = `render/${hashTimeline(t, "v1")}.mp4`;
-  const { be, calls, probes, cacheReads, cacheWrites, cache } = fake({ [finalKey]: "cached_final.mp4" }, 127.551);
+  const measured = expected + 0.5 / t.format.fps;
+  const { be, calls, probes, cacheReads, cacheWrites, cache } = fake({ [finalKey]: "cached_final.mp4" }, measured);
   const originalCache = new Map(cache);
   const r = await renderTimeline(t, be);
   assert.equal(r.cacheHits, 1, "final cache hit");
   assert.equal(r.videoKey, finalKey, "cached storage identity is unchanged");
   assert.equal(r.videoLocalPath, "cached_final.mp4", "returns the cached video");
-  assert.equal(r.durationSec, 127.551, "cached receipt must carry fractional measured duration, not the plan");
-  assert.notEqual(r.durationSec, expected);
+  assert.equal(r.durationSec, measured, "cached receipt must carry the fractional measured duration");
+  assert.ok(Math.abs(r.durationSec - expected) <= 1 / t.format.fps, "cached media must match the plan within one frame");
   assert.deepEqual(t, original, "independent authored expectation is unchanged");
   assert.deepEqual(probes, ["cached_final.mp4"], "inspect the exact cached final file once");
   assert.deepEqual(cacheReads, [finalKey], "do not fall through to the pre-overlay checkpoint");
   assert.deepEqual(cacheWrites, [], "successful inspection does not overwrite any cache");
   assert.deepEqual(cache, originalCache);
   assert.deepEqual(calls, [], "no render, finishing or publish work on a cache hit");
-  console.log("IDEMPOTENCY PASS: cached final measured once, fractional seconds preserved, zero render/cache-write/publish work");
+  console.log("IDEMPOTENCY PASS: cached final measured once, frame-bounded duration preserved, zero render/cache-write/publish work");
 }
 
 async function invalidCachedDuration(): Promise<void> {
-  for (const value of [0, -1, NaN, Infinity, -Infinity, new Error("fixture final probe failed")]) {
-    const t = plan();
+  const t = plan();
+  for (const value of [
+    0, -1, NaN, Infinity, -Infinity,
+    projectedDurationSec(t) + 2 / t.format.fps,
+    new Error("fixture final probe failed"),
+  ]) {
     const finalKey = `render/${hashTimeline(t, "v1")}.mp4`;
     const seed = { [finalKey]: "cached_final.mp4", [preOverlayCacheKey(t)]: "pre_overlay.mp4" };
     const { be, calls, probes, cacheReads, cacheWrites, cache } = fake(seed, value);
-    await assert.rejects(() => renderTimeline(t, be), value instanceof Error ? /fixture final probe failed/ : /final master duration/);
+    await assert.rejects(() => renderTimeline(t, be), value instanceof Error ? /fixture final probe failed/ : /duration/);
     assert.deepEqual(probes, ["cached_final.mp4"]);
     assert.deepEqual(cacheReads, [finalKey], "bad final cache must not fall back to a pre-overlay heal or full render");
     assert.deepEqual(calls, [], "failed cached inspection starts no rendering, finishing or publishing");
@@ -143,8 +148,18 @@ async function invalidCachedDuration(): Promise<void> {
 
 async function finalProbeContract(): Promise<void> {
   for (const healed of [false, true]) {
-    for (const value of [128.123, 0, -1, NaN, Infinity, -Infinity, new Error("fixture final probe failed")]) {
-      const t = plan();
+    const t = plan();
+    const target = projectedDurationSec(t);
+    const frameSec = 1 / t.format.fps;
+    const values = [
+      target,
+      target + frameSec * 0.5,
+      target - frameSec * 0.5,
+      target + frameSec * 2,
+      0, -1, NaN, Infinity, -Infinity,
+      new Error("fixture final probe failed"),
+    ];
+    for (const value of values) {
       t.audio.targetLufs = -14;
       const original = structuredClone(t);
       const finalKey = `render/${hashTimeline(t, "v1")}.mp4`;
@@ -157,7 +172,8 @@ async function finalProbeContract(): Promise<void> {
         calls.push("normalizeLoudness"); events.push(`normalize:${path}`);
         return { path: "normalized_final.mp4", warnings: [] };
       };
-      const success = typeof value === "number" && Number.isFinite(value) && value > 0;
+      const success = typeof value === "number" && Number.isFinite(value) &&
+        value > 0 && Math.abs(value - target) <= frameSec + 1e-6;
       if (success) {
         const r = await renderTimeline(t, be);
         assert.equal(r.durationSec, value);
@@ -166,7 +182,7 @@ async function finalProbeContract(): Promise<void> {
         assert.ok(events.indexOf("probe:normalized_final.mp4") < events.indexOf(`cachePut:${finalKey}`));
         assert.ok(events.indexOf(`cachePut:${finalKey}`) < events.indexOf("publish:normalized_final.mp4"));
       } else {
-        await assert.rejects(() => renderTimeline(t, be), value instanceof Error ? /fixture final probe failed/ : /final master duration/);
+        await assert.rejects(() => renderTimeline(t, be), value instanceof Error ? /fixture final probe failed/ : /duration/);
         assert.ok(!calls.includes("publish"), "invalid fresh/healed final must not publish");
         assert.ok(!cache.has(finalKey), "invalid fresh/healed final must not enter final cache");
         assert.deepEqual(cacheWrites, healed ? [] : [preKey], "only the existing fresh pre-overlay checkpoint may be written");
@@ -176,7 +192,7 @@ async function finalProbeContract(): Promise<void> {
       if (healed) assert.ok(!calls.some((call) => call.startsWith("renderCard") || call.startsWith("buildBody") || call === "composeIntro"));
     }
   }
-  console.log("FINAL PROBE PASS: fresh and pre-overlay heal preserve fractional measurements and reject invalid finals before final cache/publish");
+  console.log("FINAL PROBE PASS: fresh and healed outputs enforce one-frame target duration before final cache/publish");
 }
 
 async function healFromCheckpoint(): Promise<void> {

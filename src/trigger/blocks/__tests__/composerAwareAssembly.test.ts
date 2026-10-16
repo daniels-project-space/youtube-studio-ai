@@ -23,6 +23,7 @@ const convexEnv = { public: process.env.NEXT_PUBLIC_CONVEX_URL, private: process
 delete process.env.NEXT_PUBLIC_CONVEX_URL;
 delete process.env.CONVEX_URL;
 let networkCalls = 0;
+let finalProbeDurationSec = 10;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in assembly evaluation"); };
 
 async function encoded(path: string): Promise<string> {
@@ -50,7 +51,10 @@ loader._load = function (id, ...args) {
     assembleBeatBody: async (input: Args) => { calls.bodies.push(input); return encoded(String(input.outPath)); },
     composeWithIntro: async (input: Args) => { calls.compositions.push(input); return encoded(String(input.outPath)); },
     normalizeAudioOnly: async (_input: string, output: string, target: number) => { calls.targets.push(target); return encoded(output); },
-    probe: async () => ({ durationSec: 10, width: 1920, height: 1080, hasAudio: true }),
+    probe: async (path: string) => ({
+      durationSec: path.endsWith("video_norm.mp4") ? finalProbeDurationSec : 10,
+      width: 1920, height: 1080, hasAudio: true,
+    }),
     applyVoiceFx: async () => { calls.voiceFx++; throw new Error("assembly must not apply narration effects"); },
   };
   return actual;
@@ -229,6 +233,18 @@ async function main() {
       assert.equal(calls.bodies.length + calls.compositions.length + calls.targets.length, 0);
     }
   }
+
+  resetCalls();
+  finalProbeDurationSec = 10 + 2 / 30;
+  const wrongDurationContext = makeContext(false);
+  await assert.rejects(
+    () => revised.execute(wrongDurationContext),
+    /final master duration .* differs from target/i,
+    "the active legacy assembly must refuse a final file that drifts beyond one video frame",
+  );
+  assert.ok(!stored.has(`${wrongDurationContext.keyPrefix}runs/${wrongDurationContext.runId}/final.mp4`),
+    "duration-invalid output must not be persisted as the final master");
+  finalProbeDurationSec = 10;
   // Delegate identity and pass-through invariants are also checked directly;
   // neither a profile nor unrelated/voice params may be rewritten by the wrapper.
   let received: StageContext | undefined;
