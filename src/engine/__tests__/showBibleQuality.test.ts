@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   inspectShowBibleQuality,
   reconcileShowBibleCrew,
+  resolveShowBibleReview,
 } from "@/engine/creative/showBible";
 import type { ShowBible } from "@/engine/creative/types";
 
@@ -34,10 +35,23 @@ const bible: ShowBible = {
 };
 
 assert.deepEqual(inspectShowBibleQuality(bible, "narrated_stock"), []);
+assert.deepEqual(inspectShowBibleQuality({
+  ...bible,
+  positioning: "Astronomy for curious beginners.",
+  vibe: "Quietly curious and exacting.",
+  iconicMotif: "A brass telescope.",
+}, "narrated_stock"), [], "concise but concrete channel identities remain admissible");
+assert.deepEqual(resolveShowBibleReview({ deterministicIssues: [], criticScore: 0.92, criticIssues: [] }), {
+  score: 0.92, pass: true, issues: [],
+});
+assert.equal(resolveShowBibleReview({ deterministicIssues: [], criticScore: Number.NaN }).pass, false,
+  "an unavailable or invalid independent verdict cannot establish channel identity");
+assert.equal(resolveShowBibleReview({ deterministicIssues: ["vibe is generic"], criticScore: 1 }).pass, false,
+  "a generous critic cannot override deterministic identity defects");
 
 const cases: Array<{ candidate: ShowBible; issue: string }> = [
   { candidate: { ...bible, positioning: " " }, issue: "positioning is empty" },
-  { candidate: { ...bible, positioning: "A channel for people who enjoy interesting things." }, issue: "positioning lacks channel-specific substance" },
+  { candidate: { ...bible, positioning: "A channel for people." }, issue: "positioning lacks channel-specific substance" },
   { candidate: { ...bible, vibe: "calm, consistent, on-brand" }, issue: "vibe contains generic identity boilerplate" },
   { candidate: { ...bible, iconicMotif: "a single bold, recurring central subject" }, issue: "iconicMotif contains generic identity boilerplate" },
   { candidate: { ...bible, worksInSpace: ["same", "same", "same", "same", "same"] }, issue: "worksInSpace has fewer than five distinct entries" },
