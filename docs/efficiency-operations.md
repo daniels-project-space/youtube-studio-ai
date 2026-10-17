@@ -133,3 +133,63 @@ provider accounting and request coalescing remain unchanged. A deterministic
 when caller cleanup is absent, and zero with the shared cleanup. That verifies
 retained-reference prevention, not a claim of measured production memory or
 billed CPU savings.
+
+## Independent Convex and Trigger publication
+
+The serialized main-only publisher plans each runtime against its latest GitHub
+publication attempt and current native provider identity before installing npm
+tooling. A verified unchanged pair skips Node setup, installation and both
+publishers. A changed layer publishes independently. The full CI quality gate
+still precedes planning; credentials remain in the Production environment;
+source freshness is checked before setup, after install and before each write.
+
+A successful publication records its Git revision, target, publisher recipe and
+native fingerprint. Convex identity uses the canonical deployment's module
+hashes/configuration. Trigger identity uses the canonical production project's
+latest deployment, status and source commit. A later manual provider change
+holds the publisher rather than silently overwriting ongoing work. Native state
+is rechecked against the plan immediately before a publication attempt.
+
+An attempt is marked in progress before its publisher runs. Success is issued
+only after that command succeeds and native identity can be read back. Failed
+or interrupted attempts cannot be used as skip evidence; if their native state
+has changed, recovery is held for explicit review. Complete Trigger receipts
+also require the deployed source to match the workflow Git revision. Starting
+or completing an attempt from a PR, another repository, stale checkout or a
+different workflow attempt is rejected.
+
+There are no initial qualified receipts. Ordinary pushes hold at this boundary;
+a trusted manual workflow_dispatch on main is the existing explicit redeploy
+operation and establishes/replaces baselines after complete CI. Do not dispatch
+it merely to manufacture a savings demonstration or overwrite an unreviewed
+native runtime. Current website release/main source divergence must first be
+reconciled with ongoing work. No receipt is fabricated from a build plan.
+
+Both native identities require their existing provider read credentials even
+when no publish is needed. Only layers selected for writing require publisher
+credentials at the command gate. Native observation failure holds safely.
+Convex component deployments need complete component identity support before
+this root-deployment observer can certify them. Manual redeployments publish
+normally to cover environment/configuration changes. Vercel retains its separate
+same-revision promotion/redeploy safeguard.
+
+GitHub deployment metadata follows the documented deployment/status APIs:
+https://docs.github.com/en/rest/deployments/deployments
+https://docs.github.com/en/rest/deployments/statuses
+
+### Draft render qualification and current billing baseline
+
+Assembly Render Parity explicitly handles `ready_for_review`. Draft updates
+receive a deferral notice while the normal contract/security CI continues.
+Ready PRs, main releases and manual runs retain all real-render scenarios,
+PARITY_CARDS=1, the frozen dependency install and the existing 35-minute budget.
+Full parity for the current head remains required before merge; a draft skip is
+not qualification. Publishing queues and model/render settings are unchanged.
+
+On 17 October, GitHub's live organization budget API returned four blocking
+zero-dollar budgets (Actions, Codespaces, Packages, Git LFS), all unchanged.
+The October Studio usage response contained 6,504 Linux runner minutes,
+$39.024 gross fully offset by discounts, $0 net, plus 0.342235 GB-hours of
+Actions storage with $0 net. These are billing-period baselines, not savings
+attributable to this release. Publication plan/native-observer checks are
+read-only and do not create a worker image, model job, schedule or GPU lease.

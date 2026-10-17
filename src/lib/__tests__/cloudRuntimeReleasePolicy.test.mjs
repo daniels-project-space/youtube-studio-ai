@@ -92,23 +92,41 @@ assert.ok(guardIndex > 0);
 const admissionIndex = job.steps.findIndex(step=>step.id === "release_admission");
 assert.equal(admissionIndex, 1, "reject stale releases directly after checkout, before setup or install");
 assert.equal(job.steps[admissionIndex].run, "node scripts/cloud-runtime-release-policy.mjs");
-assert.deepEqual(job.steps.slice(admissionIndex + 1, guardIndex + 1).map(step => step.if), [
-  "steps.release_admission.outputs.deploy == 'true'",
-  "steps.release_admission.outputs.deploy == 'true'",
-  "steps.release_admission.outputs.deploy == 'true'",
-], "node setup, dependency install, and final guard require early admission");
+const planIndex = job.steps.findIndex(step => step.id === "publication_plan");
+assert.equal(planIndex, admissionIndex + 1, "plan against native state and receipts before installing tooling");
+assert.equal(job.steps[planIndex].run, "node scripts/cloud-runtime-publications.mjs plan");
+assert.equal(job.steps[planIndex].if, "steps.release_admission.outputs.deploy == 'true'");
+assert.deepEqual(job.steps.slice(planIndex + 1, guardIndex + 1).map(step => step.if), [
+  "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
+  "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
+  "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
+], "setup, install and final main guard run only for a required runtime publication");
 assert.equal(job.steps[guardIndex-1].name,"Install deploy tooling");
-assert.deepEqual(job.steps.slice(guardIndex+1).map(step=>step.if),[
-  "steps.release_policy.outputs.deploy == 'true'", "steps.release_policy.outputs.deploy == 'true'",
-]);
+assert.equal(job.needs, "typecheck", "the full quality gate precedes runtime planning and writes");
+assert.equal(job.environment, "Production");
+assert.equal(job.permissions.deployments, "write");
+assert.equal(job.steps[0].with["fetch-depth"], 0, "independent baselines need actual Git history");
+assert.match(job.if, /github\.event_name == 'push'/);
+assert.match(job.if, /github\.event_name == 'workflow_dispatch'/);
+assert.match(job.if, /refs\/heads\/main/);
+for (const layer of ["backend", "trigger"]) {
+  const attemptIndex = job.steps.findIndex(step => step.id === `${layer}_attempt`);
+  const deployIndex = job.steps.findIndex(step => step.id === `${layer}_deploy`);
+  const certifyIndex = job.steps.findIndex(step => step.name === `Certify native ${layer} publication`);
+  assert.ok(attemptIndex > guardIndex && deployIndex > attemptIndex && certifyIndex > deployIndex);
+  assert.equal(job.steps[attemptIndex].if, `steps.release_policy.outputs.deploy == 'true' && steps.publication_plan.outputs.${layer} == 'true'`);
+  assert.equal(job.steps[attemptIndex].run, "node scripts/cloud-runtime-publications.mjs start");
+  assert.equal(job.steps[attemptIndex].env.PUBLICATION_EXPECTED_NATIVE, `\${{ steps.publication_plan.outputs.${layer}_native }}`);
+  assert.equal(job.steps[deployIndex].if, `steps.release_policy.outputs.deploy == 'true' && steps.${layer}_attempt.outputs.deployment != ''`);
+  assert.equal(job.steps[certifyIndex].if, `steps.${layer}_deploy.outcome == 'success' && steps.${layer}_attempt.outputs.deployment != ''`);
+  assert.equal(job.steps[certifyIndex].run, "node scripts/cloud-runtime-publications.mjs complete");
+  assert.equal(job.steps[certifyIndex].env.PUBLICATION_DEPLOYMENT_ID, `\${{ steps.${layer}_attempt.outputs.deployment }}`);
+}
 const deployment = workflow.slice(workflow.indexOf("  deploy-cloud-runtimes:"));
 assert.match(deployment,/group: youtube-studio-cloud-runtimes[\s\S]*?queue: max\s+cancel-in-progress: false/,
   "a late stale job must not cancel the latest pending revision");
 assert.match(deployment,/id: release_policy[\s\S]*run: node scripts\/cloud-runtime-release-policy\.mjs/);
 assert.ok(deployment.indexOf("id: release_policy") > deployment.indexOf("npm ci"), "check directly before cloud writes, after tooling install");
-for (const name of ["Deploy canonical Convex runtime","Deploy Trigger production tasks"]) {
-  assert.match(deployment,new RegExp(`name: ${name}\\n\\s+if: steps\\.release_policy\\.outputs\\.deploy == 'true'`));
-}
 assert.match(deployment,/convex dev --once --typecheck=disable/);
 assert.match(deployment,/--skip-sync-env-vars/);
 assert.match(workflow,/needs: typecheck/);

@@ -75,8 +75,8 @@ test("real Git witnesses, imports, removals, stale manifests and missing history
     assert.equal(classifyChanges(["runtime/settings.json"], m, m).website, true);
     assert.ok(m.trigger.files.includes("requirements/model.txt"));
     assert.ok(m.trigger.files.includes(".github/runtime.json"));
-    assert.equal(impactSince(base, { cwd: root }).website, true);
-    assert.equal(impactSince(base, { cwd: root }).reason, "same-revision-redeployment");
+    assert.equal(impactSince(base, { cwd: root }).website, false, "unchanged successful cloud revisions do not republish");
+    assert.equal(impactSince(base, { cwd: root, redeploy: true }).reason, "same-revision-redeployment");
     assert.equal(vercel(base).status, 1, "a promotion/redeploy of the exact preview SHA must build");
     put("docs/operations.md", "metadata"); commit();
     assert.equal(impactSince(base, { cwd: root }).website, false);

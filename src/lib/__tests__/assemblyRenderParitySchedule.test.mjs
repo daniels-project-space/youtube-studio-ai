@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const yaml = require(require.resolve("js-yaml", { paths: [require.resolve("eslint")] }));
+const workflow = yaml.load(readFileSync(".github/workflows/assembly-render-parity.yml", "utf8"));
+assert.deepEqual(workflow.on.pull_request.types, ["opened", "synchronize", "reopened", "ready_for_review"]);
+assert.deepEqual(workflow.on.push.branches, ["main"]);
+assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
+const parity = workflow.jobs.parity;
+assert.equal(parity.if, "github.event_name != 'pull_request' || github.event.pull_request.draft == false");
+assert.equal(parity["timeout-minutes"], 35);
+const render = parity.steps.find(step => step.name === "Render and compare all essay assembly scenarios");
+assert.equal(render.run, "pnpm test:assembly-render-parity");
+assert.equal(render.env.PARITY_CARDS, "1");
+assert.equal(parity.steps.find(step => step.name === "Install").run, "pnpm install --frozen-lockfile");
+const notice = workflow.jobs["draft-notice"];
+assert.equal(notice.if, "github.event_name == 'pull_request' && github.event.pull_request.draft == true");
+assert.match(notice.steps[0].run, /Full parity must pass for the current head before merging/);
+assert.equal(workflow.concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+console.log("Render parity scheduling preserves ready/release/manual full qualification and reports draft deferral");

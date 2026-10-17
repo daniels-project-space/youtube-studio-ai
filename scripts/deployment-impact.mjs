@@ -31,7 +31,7 @@ export function classifyChanges(changed, before, after) {
   return result;
 }
 
-export function impactSince(base, { cwd = process.cwd(), head = "HEAD", force = false } = {}) {
+export function impactSince(base, { cwd = process.cwd(), head = "HEAD", force = false, redeploy = false } = {}) {
   if (force) return conservative("explicit-force-build");
   if (!/^[a-f0-9]{40}$/.test(base ?? "")) return conservative("missing-history");
   const git = args => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 20_000, maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
@@ -39,7 +39,7 @@ export function impactSince(base, { cwd = process.cwd(), head = "HEAD", force = 
     // Promotions/redeployments may reuse the preview's own SHA as the
     // previous revision even while production serves different code. A
     // same-revision request may also carry changed environment settings.
-    if (git(["rev-parse", head]).trim() === base) return conservative("same-revision-redeployment");
+    if (redeploy && git(["rev-parse", head]).trim() === base) return conservative("same-revision-redeployment");
     git(["merge-base", "--is-ancestor", base, head]);
     const read = revision => {
       const m = JSON.parse(git(["show", `${revision}:${manifestFile}`]));
@@ -61,7 +61,7 @@ export function impactSince(base, { cwd = process.cwd(), head = "HEAD", force = 
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const base = process.argv.find(arg => arg.startsWith("--base="))?.slice(7) ?? process.env.VERCEL_GIT_PREVIOUS_SHA;
-  const result = impactSince(base, { force: process.env.VERCEL_FORCE_BUILD === "1" });
+  const result = impactSince(base, { force: process.env.VERCEL_FORCE_BUILD === "1", redeploy: process.argv.includes("--vercel-ignore") });
   console.log(JSON.stringify(result));
   if (process.argv.includes("--vercel-ignore")) process.exitCode = result.website ? 1 : 0;
 }
