@@ -88,7 +88,7 @@ jobs:
       - name: Verify Studio deployment dependency witnesses
         run: |
           node scripts/deployment-inputs.mjs
-          node --test scripts/deployment-impact.test.mjs
+          node --test scripts/deployment-impact.test.mjs .github/scripts/readiness-process.test.mjs
       - name: Lint
         run: ${{ steps.pm.outputs.pm }} run lint
       - name: Production dependency audit

@@ -36,6 +36,10 @@ export function impactSince(base, { cwd = process.cwd(), head = "HEAD", force = 
   if (!/^[a-f0-9]{40}$/.test(base ?? "")) return conservative("missing-history");
   const git = args => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 20_000, maxBuffer: 32 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   try {
+    // Promotions/redeployments may reuse the preview's own SHA as the
+    // previous revision even while production serves different code. A
+    // same-revision request may also carry changed environment settings.
+    if (git(["rev-parse", head]).trim() === base) return conservative("same-revision-redeployment");
     git(["merge-base", "--is-ancestor", base, head]);
     const read = revision => {
       const m = JSON.parse(git(["show", `${revision}:${manifestFile}`]));

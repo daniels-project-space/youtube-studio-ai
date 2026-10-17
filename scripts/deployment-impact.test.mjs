@@ -70,7 +70,9 @@ test("real Git witnesses, imports, removals, stale manifests and missing history
     assert.ok(m.website.files.includes("src/lib/shared.ts"));
     assert.ok(m.trigger.files.includes("requirements/model.txt"));
     assert.ok(m.trigger.files.includes(".github/runtime.json"));
-    assert.equal(impactSince(base, { cwd: root }).website, false);
+    assert.equal(impactSince(base, { cwd: root }).website, true);
+    assert.equal(impactSince(base, { cwd: root }).reason, "same-revision-redeployment");
+    assert.equal(vercel(base).status, 1, "a promotion/redeploy of the exact preview SHA must build");
     put("docs/operations.md", "metadata"); commit();
     assert.equal(impactSince(base, { cwd: root }).website, false);
     assert.equal(vercel(base).status, 0, "actual preinstall command skips verified metadata");

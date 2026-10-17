@@ -20,6 +20,10 @@ Set `VERCEL_FORCE_BUILD=1` to explicitly force a build. Both old and new depende
 sets are considered, including removed imports and metadata files with actual
 runtime consumers. The classifier performs no provider writes or network fetches.
 
+An explicit redeploy/promotion with the same previous and current Git revision
+builds normally: its production environment or configuration may differ from
+the preview. Vercel supplied that exact condition during native qualification.
+
 Next's strict typecheck uses `tsconfig.website.json` for the website and imported
 helpers. CI's `typecheck` still uses the original `tsconfig.json` for the entire
 repository. No TypeScript errors are ignored. Tests and worker diagnostics remain
@@ -54,6 +58,20 @@ unchanged paid gates/schedules, and preservation of the ongoing worktree.
 Continue auditing per-function Convex reads, Trigger dispatch/retry/waits,
 temporary-directory ownership, caches and R2 lifecycle before describing the
 complete optimization goal as finished.
+
+## Managed readiness processes
+
+Each readiness test receives its own temporary directory. Its `tsx` compiler
+cache remains shared through a link to the existing cache; deleting disposable
+test files does not delete the cache. On Unix, the runner owns a separate process
+group for each test and stops remaining children after timeout, cancellation or
+parent exit. The existing 180-second/360-second test deadlines and full test
+selection remain in place. SIGINT/SIGTERM stops further admission and reports an
+interrupted, incomplete gate.
+
+The runner removes only its owned temporary directory after the process group
+has stopped. An unresolved process or cleanup error fails the gate and reports
+the retained path. Full stdout/stderr diagnostics remain in the CI log.
 
 ### Native candidate qualification, 17 October
 

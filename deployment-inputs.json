@@ -1684,7 +1684,7 @@
     "public/window.svg": "b2b2a44f6ebc70c450043c05a002e7a93ba5d651",
     "requirements/qa-narration-proof.txt": "7098fdbae1b3ace6f2a2ef8a0d8978ed4e6fce04",
     "requirements/qa-scene-analysis.txt": "aa0e346d7f3c75fce099bd630f7e08c0fb42ffb2",
-    "scripts/deployment-impact.mjs": "dac5d5c167b7fa69a9fb5b294ab20b9b5e841f17",
+    "scripts/deployment-impact.mjs": "b1d3883189d85232e14a41df26d6951d1aae4510",
     "scripts/deployment-inputs.mjs": "fb665e738556c1efc69682124984b690b9e48ebb",
     "scripts/mc_font.py": "56d1144b37afd910342fff16b12cf1b538b11814",
     "scripts/mc_page_render.py": "3c8f17d796888ba7458139711d087015e78ca349",
