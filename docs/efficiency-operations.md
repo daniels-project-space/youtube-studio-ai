@@ -117,3 +117,19 @@ Output names and remote object keys that do not identify tracked files are not
 host file inputs. TS filenames stored in a code catalog remain data: emitted
 imports determine module dependencies. This resource tracing adds no runtime
 file reads, provider requests, model downloads or generation calls.
+
+### Settled public evidence requests
+
+The shared public-evidence cache owns request settlement cleanup. Both success
+and failure release only the exact registered promise, after caller value
+publication has had a microtask to finish. Callers no longer manually delete
+requests in `finally`: a producer that returns synchronously can finish that
+block before its promise is registered, and an old completion after `clear()`
+must not remove a newer request.
+
+The existing 128-entry/five-minute value cache, deadlines, defensive copies,
+provider accounting and request coalescing remain unchanged. A deterministic
+1,000-request fixture retains 1,000 completed promises with the previous cache
+when caller cleanup is absent, and zero with the shared cleanup. That verifies
+retained-reference prevention, not a claim of measured production memory or
+billed CPU savings.

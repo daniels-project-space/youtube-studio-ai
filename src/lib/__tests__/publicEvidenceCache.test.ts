@@ -49,6 +49,34 @@ async function main(): Promise<void> {
     Date.now = originalNow;
   }
 
+  const owned = createPublicEvidenceCache<string>();
+  const settled = Promise.resolve("done");
+  owned.setInflight("settled", settled);
+  assert.equal(owned.getInflight("settled"), settled);
+  await settled;
+  await Promise.resolve();
+  assert.equal(owned.getInflight("settled"), undefined, "settled requests clean themselves without a caller finally");
+  const rejected = Promise.reject(new Error("offline failure"));
+  owned.setInflight("failed", rejected);
+  await assert.rejects(rejected, /offline failure/);
+  await Promise.resolve();
+  assert.equal(owned.getInflight("failed"), undefined, "failures must release retained requests and remain retryable");
+  let finishOld!: (value: string) => void;
+  let finishNew!: (value: string) => void;
+  const oldRequest = new Promise<string>((resolve) => { finishOld = resolve; });
+  const newRequest = new Promise<string>((resolve) => { finishNew = resolve; });
+  owned.setInflight("replace", oldRequest);
+  owned.clear();
+  owned.setInflight("replace", newRequest);
+  finishOld("old");
+  await oldRequest;
+  await Promise.resolve();
+  assert.equal(owned.getInflight("replace"), newRequest, "old completion cannot release a replacement after clear");
+  finishNew("new");
+  await newRequest;
+  await Promise.resolve();
+  assert.equal(owned.getInflight("replace"), undefined);
+
   clearMetacraftEvidenceCache();
   clearOutlierEvidenceCache();
   clearTrendEvidenceCache();

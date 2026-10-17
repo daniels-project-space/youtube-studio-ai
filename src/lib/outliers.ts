@@ -105,7 +105,6 @@ export async function fetchNicheOutliers(
       log(`outliers failed (${e instanceof Error ? e.message : e})`);
       return [];
     } finally {
-      outlierCache.deleteInflight(cacheKey);
       if (!successful) outlierCache.delete(cacheKey);
     }
   })();
