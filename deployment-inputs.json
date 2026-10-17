@@ -103,6 +103,7 @@
       "public/vox/fire_loop.mp4",
       "public/vox/water_loop.mp4",
       "public/window.svg",
+      "scripts/narration_transcript_proof.py",
       "src/app/(app)/Overview.module.css",
       "src/app/(app)/analytics/analytics.module.css",
       "src/app/(app)/analytics/page.tsx",
@@ -545,7 +546,8 @@
       "src/lib/yue2ExecutionAccounting.ts",
       "src/lib/yue2ExecutionPolicy.ts",
       "src/lib/yue2Headroom.ts",
-      "src/lib/yue2NativeAudio.ts"
+      "src/lib/yue2NativeAudio.ts",
+      "tsconfig.website.json"
     ],
     "uncertain": []
   },
@@ -634,6 +636,7 @@
       "convex/yue2ApprovalIdentity.ts",
       "convex/yue2Auditions.ts",
       "convex/yue2Continuations.ts",
+      "infra/novita/worker.py",
       "src/engine/acceptedMusicArrangement.ts",
       "src/engine/archetypes.ts",
       "src/engine/casefile.ts",
@@ -1572,6 +1575,7 @@
     "convex/yue2ApprovalIdentity.ts": "f547b69bdbd5d6e6a5e3022ca7a44356e6e5d6de",
     "convex/yue2Auditions.ts": "48a69fcbc0d31152bb9942cb60554ac3d4d1d391",
     "convex/yue2Continuations.ts": "a3c0a40f90c03747d10b76c3dfaeca06d4e5e542",
+    "infra/novita/worker.py": "d554e7777b6cbcfdf3dc98eda2dd079ed6ed6a69",
     "next.config.ts": "d152703f4c146afa3a396ed6c791746800772fd3",
     "package-lock.json": "d3e65c94ada7d6d949db4755cb33bff71ce3c02a",
     "package.json": "e3957d71d3e06f7a15cb6bd9bc7d1e050cce0a43",
@@ -1667,7 +1671,7 @@
     "requirements/qa-narration-proof.txt": "7098fdbae1b3ace6f2a2ef8a0d8978ed4e6fce04",
     "requirements/qa-scene-analysis.txt": "aa0e346d7f3c75fce099bd630f7e08c0fb42ffb2",
     "scripts/deployment-impact.mjs": "b1d3883189d85232e14a41df26d6951d1aae4510",
-    "scripts/deployment-inputs.mjs": "fb665e738556c1efc69682124984b690b9e48ebb",
+    "scripts/deployment-inputs.mjs": "9e3980992f717bd0cab306db9fa864b841b7f6c7",
     "scripts/mc_font.py": "56d1144b37afd910342fff16b12cf1b538b11814",
     "scripts/mc_page_render.py": "3c8f17d796888ba7458139711d087015e78ca349",
     "scripts/mc_textplace.py": "7c94fe3f740792d87fbb9752d8321b1bc218946f",

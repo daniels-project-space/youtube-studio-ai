@@ -71,7 +71,30 @@ export function createManifest(root = process.cwd()) {
         }
         pending.push(next);
       }
+      // A filesystem/spawn resource is a runtime input even when it is not a
+      // JS import (for example the pinned narration-proof Python script).
+      // Only repository-tracked files qualify; R2 keys, output filenames and
+      // arbitrary prose do not become paths to read from the host filesystem.
+      // Catalogued TS source names are data, not imports; module edges above
+      // remain responsible for code dependencies.
+      function staticResourcePath(node) {
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+        if (ts.isCallExpression(node)) {
+          if (node.expression.getText(ast) === "process.cwd" && node.arguments.length === 0) return ".";
+          const name = ts.isIdentifier(node.expression) ? node.expression.text
+            : ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : undefined;
+          if (name === "join" || name === "resolve") {
+            const parts = node.arguments.map(staticResourcePath);
+            if (parts.length && parts.every(part => typeof part === "string")) return path.posix.join(...parts);
+          }
+        }
+      }
       function visit(node) {
+        const resource = staticResourcePath(node);
+        if (typeof resource === "string" && !path.posix.isAbsolute(resource)) {
+          const candidate = path.posix.normalize(resource);
+          if (tracked.has(candidate) && !source(candidate)) pending.push(candidate);
+        }
         if (ts.isImportDeclaration(node)) {
           const clause = node.importClause, bindings = clause?.namedBindings;
           const onlyTypes = clause?.isTypeOnly || (!clause?.name && bindings && ts.isNamedImports(bindings) && bindings.elements.every(element => element.isTypeOnly));

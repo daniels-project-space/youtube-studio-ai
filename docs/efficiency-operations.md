@@ -105,3 +105,15 @@ successful publication. A previous Git commit alone is insufficient: a failed
 or held publication must remain eligible on the next revision. Until independent
 successful-publication receipts are wired into the serialized publisher, keep
 the existing conservative main-only deployment behavior.
+
+### Runtime file resources
+
+The generator also includes repository-tracked non-code files referenced by
+literal filenames or literal `join`/`resolve` calls in a runtime module. For
+example, `scripts/narration_transcript_proof.py` affects the website's imported
+narration-proof helper as well as the Trigger image; changing it must not skip
+the website merely because it is already classified as a worker file.
+Output names and remote object keys that do not identify tracked files are not
+host file inputs. TS filenames stored in a code catalog remain data: emitted
+imports determine module dependencies. This resource tracing adds no runtime
+file reads, provider requests, model downloads or generation calls.
