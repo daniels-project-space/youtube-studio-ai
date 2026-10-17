@@ -1,7 +1,10 @@
+import { assertPlanWeekPreparedImagesArgs as sharedValidator } from "@/lib/planWeekPreparedImagesArgs";
 import assert from "node:assert/strict";
 import { assertPlanWeekPreparedImagesArgs, buildPreparedH3Batch, hasGeneratedFootageStage } from "@/trigger/planWeekPreparedImages";
 import { planWeekPreparationKey, type PlanWeekPreparationManifest, type PlanWeekPreparedImages } from "@/lib/planWeekPreparation";
 import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
+
+assert.equal(assertPlanWeekPreparedImagesArgs, sharedValidator, "worker and API must use the same validator");
 
 const scope = { ownerId: "owner1", channelSlug: "history", batchId: "week-1", itemId: "item-1" };
 const base = {

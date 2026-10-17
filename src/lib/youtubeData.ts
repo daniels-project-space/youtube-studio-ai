@@ -205,13 +205,9 @@ export async function searchVideoIds(args: {
       .filter((id): id is string => Boolean(id));
   })();
   searchEvidenceCache.setInflight(key, request);
-  try {
-    const result = await request;
-    searchEvidenceCache.set(key, result);
-    return [...result];
-  } finally {
-    searchEvidenceCache.deleteInflight(key);
-  }
+  const result = await request;
+  searchEvidenceCache.set(key, result);
+  return [...result];
 }
 
 export interface VideoDetail {
@@ -306,13 +302,9 @@ export async function fetchVideoDetails(ids: string[]): Promise<VideoDetail[]> {
     return out;
   })();
   videoDetailsCache.setInflight(key, request);
-  try {
-    const result = await request;
-    videoDetailsCache.set(key, result);
-    return result.map(cloneVideoDetail);
-  } finally {
-    videoDetailsCache.deleteInflight(key);
-  }
+  const result = await request;
+  videoDetailsCache.set(key, result);
+  return result.map(cloneVideoDetail);
 }
 
 function cloneVideoDetail(detail: VideoDetail): VideoDetail {

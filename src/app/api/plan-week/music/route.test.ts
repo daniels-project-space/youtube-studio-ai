@@ -10,3 +10,6 @@ assert.match(source, /idempotencyKeys\.create/);
 assert.match(source, /ownedBy\(actor\.ownerId, payload\.manifestKey\)/);
 assert.match(source, /planWeekPreparedMusicAudioKey/);
 console.log("weekly prepared music dispatcher wiring passed");
+
+assert.match(source, /@\/lib\/planWeekPreparedMusicArgs/);
+assert.doesNotMatch(source, /@\/trigger\//, "API validation must not load worker implementations");

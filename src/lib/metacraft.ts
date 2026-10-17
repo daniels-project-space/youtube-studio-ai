@@ -188,7 +188,6 @@ export async function youtubeSuggest(seed: string): Promise<string[]> {
     } catch {
       return [];
     } finally {
-      suggestCache.deleteInflight(key);
       // A failed request is intentionally not cached. A later planning wave
       // gets a real retry instead of inheriting a transient network outage.
       if (!successful) suggestCache.delete(key);
@@ -236,7 +235,6 @@ export async function fetchCompetitorTitles(
       log?.(`metacraft: competitor research failed (${e instanceof Error ? e.message : e}) — continuing without`);
       return [];
     } finally {
-      competitorCache.deleteInflight(key);
       if (!successful) competitorCache.delete(key);
     }
   })();

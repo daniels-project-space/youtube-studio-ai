@@ -1,6 +1,9 @@
+import { assertPlanWeekPreparedScriptArgs as sharedValidator } from "@/lib/planWeekPreparedScriptArgs";
 import assert from "node:assert/strict";
 import { assertPlanWeekPreparedScriptArgs } from "@/trigger/planWeekPreparedScript";
 import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
+
+assert.equal(assertPlanWeekPreparedScriptArgs, sharedValidator, "worker and API must use the same validator");
 
 const scope = { ownerId: "owner1", channelSlug: "history", batchId: "week-1", itemId: "item-1" };
 const base = {
