@@ -1,9 +1,12 @@
+import { assertPlanWeekPreparedMusicArgs as sharedValidator } from "@/lib/planWeekPreparedMusicArgs";
 import assert from "node:assert/strict";
 import {
   assertPlanWeekPreparedMusicArgs,
   downloadPreparedMusicTracks,
 } from "@/trigger/planWeekPreparedMusic";
 import { planWeekPreparationKey } from "@/lib/planWeekPreparation";
+
+assert.equal(assertPlanWeekPreparedMusicArgs, sharedValidator, "worker and API must use the same validator");
 
 const base = {
   ownerId: "owner-1",

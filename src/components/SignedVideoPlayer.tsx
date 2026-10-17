@@ -27,7 +27,8 @@ export function signedVideoExpiresAt(src: string): number | null {
 export function sameSignedVideoObject(previous: string, next: string, base = "https://asset.invalid"): boolean {
   try {
     const a = new URL(previous, base), b = new URL(next, base);
-    return /^https?:$/.test(a.protocol) && a.origin === b.origin && a.pathname === b.pathname;
+    return /^https?:$/.test(a.protocol) && a.origin === b.origin && a.pathname === b.pathname
+      && (a.pathname !== "/api/asset-video" || a.searchParams.get("key") === b.searchParams.get("key"));
   } catch { return false; }
 }
 
@@ -139,11 +140,22 @@ function SignedVideoSession({
     if (Math.abs(video.currentTime - pending.restoreTime) > 0.025) video.currentTime = pending.restoreTime;
     finishRestore(video);
   }
-  function recover(manual = false): boolean {
+  function recover(manual = false, nativeFailure = false): boolean {
     const video = videoRef.current;
     if (!live.current || !video || operation.current || !assetKey.trim()) return false;
     const expiresAt = signedVideoExpiresAt(source.current);
-    if (!manual && (phase === "error" || expiresAt === null || expiresAt > Date.now() || attemptedSource.current === source.current)) return false;
+    let signingFacade = false;
+    try {
+      const current = new URL(source.current, window.location.href);
+      signingFacade = current.origin === window.location.origin && current.pathname === "/api/asset-video"
+        && current.searchParams.get("key") === assetKey;
+    } catch { /* Invalid sources never qualify for automatic renewal. */ }
+    // A redirect's final signature is invisible to currentSrc. One native
+    // failure can refresh the same owned facade; another failure during that
+    // restore terminates normally. No eager signing or polling is added.
+    if (!manual && (phase === "error" || (expiresAt === null && !(nativeFailure && signingFacade))
+      || (!(nativeFailure && signingFacade) && expiresAt !== null && expiresAt > Date.now())
+      || attemptedSource.current === source.current)) return false;
     // Manual retry hides its focused button. The native node survives recovery;
     // automatic recovery must never steal keyboard focus.
     if (manual) video.focus({ preventScroll: true });
@@ -203,6 +215,7 @@ function SignedVideoSession({
     <div className={styles.player} data-signed-video-state={phase}>
       <video
         {...nativeProps}
+        crossOrigin="anonymous"
         ref={assignRef}
         src={activeSrc}
         // Native autoplay must not restart an intentionally paused player after src changes.
@@ -210,7 +223,7 @@ function SignedVideoSession({
         onError={(event) => {
           const pending = operation.current;
           if (pending?.target && event.currentTarget.currentSrc === pending.target) fail(pending);
-          else if (!pending && !recover()) fail();
+          else if (!pending && !recover(false, true)) fail();
           onError?.(event);
         }}
         onPlay={(event) => {

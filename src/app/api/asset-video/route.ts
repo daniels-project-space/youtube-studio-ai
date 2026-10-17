@@ -83,12 +83,9 @@ async function verifyPreviewRanges(key: string, mimeType: string, signal: AbortS
 }
 
 /**
- * Same-origin streaming boundary for private video previews.
- *
- * The browser still controls seeking and sends Range requests; this route
- * forwards that range to the short-lived R2 URL and relays only safe media
- * headers. It exists for previews (including the exact Lo-Fi 15-second
- * fallback), not as a general R2 proxy.
+ * Ownership-checked signing boundary for private video previews. Playback
+ * redirects to private R2; Vercel never fetches or relays the video body.
+ * JSON preview probes retain their bounded single-byte range checks.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -101,6 +98,19 @@ export async function GET(request: Request) {
 
   try {
     request.signal.throwIfAborted();
+    if (!probe) {
+      const location = await presignDownload(key, { expiresIn: 300, responseContentType: mimeType });
+      request.signal.throwIfAborted();
+      return new NextResponse(null, { status: 307, headers: {
+        Location: location,
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+      } });
+    }
+    const range = request.headers.get("range");
+    if (range && !PREVIEW_PROBE_RANGES.some(allowed => allowed === range)) {
+      return NextResponse.json({ error: "unsupported preview probe range" }, { status: 400 });
+    }
     if (probe && !request.headers.get("range")) {
       const preview = await verifyPreviewRanges(key, mimeType, request.signal);
       return NextResponse.json(
@@ -109,17 +119,11 @@ export async function GET(request: Request) {
       );
     }
     const forwardedHeaders = new Headers();
-    const range = request.headers.get("range");
     if (range) forwardedHeaders.set("Range", range);
     const ifRange = request.headers.get("if-range");
     if (ifRange) forwardedHeaders.set("If-Range", ifRange);
-    // R2 can briefly return a stale 404 while a just-uploaded master becomes
-    // visible across its edge. Refresh the signature and use a short bounded
-    // retry window for that narrow transient class (and provider 5xx); missing
-    // objects still return a truthful 404 after the bounded retries. Large
-    // source-frame previews are especially prone to a single range miss, so
-    // give the exact range two fresh signatures before trying the streamed
-    // full-source fallback.
+    // Explicit probes retry the same single byte with fresh signatures.
+    // They never remove Range or turn a miss into a full-object download.
     let upstream: Response | null = null;
     const maxAttempts = 5;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -130,14 +134,6 @@ export async function GET(request: Request) {
       });
       request.signal.throwIfAborted();
       const attemptHeaders = new Headers(forwardedHeaders);
-      // Some R2 edges intermittently answer a valid non-zero range with a
-      // false 404 even though the same object and the initial range exist.
-      // A streamed full response is a safe preview fallback: it preserves
-      // the exact source frame and never buffers the master in this route.
-      if (attempt >= 2 && upstream?.status === 404 && range && !probe) {
-        attemptHeaders.delete("Range");
-        attemptHeaders.delete("If-Range");
-      }
       upstream = await fetch(signedUrl, {
         method: "GET",
         headers: attemptHeaders,
@@ -160,44 +156,9 @@ export async function GET(request: Request) {
       await delay(Math.min(2_000, 1_100 + 300 * attempt), undefined, { signal: request.signal });
     }
     if (!upstream) throw new Error("video request did not produce a response");
-    const responseHeaders = new Headers();
-    for (const name of [
-      "accept-ranges",
-      "content-length",
-      "content-range",
-      "content-type",
-      "etag",
-      "last-modified",
-    ]) {
-      const value = upstream.headers.get(name);
-      if (value) responseHeaders.set(name, value);
-    }
-    responseHeaders.set("Content-Type", upstream.headers.get("content-type") ?? mimeType);
-    responseHeaders.set("Cross-Origin-Resource-Policy", "same-origin");
-    responseHeaders.set("X-Content-Type-Options", "nosniff");
-    responseHeaders.set("Cache-Control", "private, max-age=600");
     if (!upstream.ok && upstream.status !== 206) {
       await upstream.body?.cancel().catch(() => {});
-      if (probe) {
-        return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
-      }
-      if (upstream.status >= 400 && upstream.status < 500) {
-        // R2 private buckets can report a missing/expired legacy object as
-        // either 404 or 403. A native player can race that object after all
-        // bounded probes have passed. Return a zero-length media sentinel so
-        // the element emits its normal onError/unavailable state without
-        // turning a known unavailable preview into a browser-console 4xx.
-        return new NextResponse(null, {
-          status: 200,
-          headers: {
-            "Content-Type": mimeType,
-            "Content-Length": "0",
-            "Cache-Control": "private, no-store",
-            "X-Asset-Unavailable": "true",
-          },
-        });
-      }
-      return NextResponse.json({ error: "video unavailable" }, { status: upstream.status >= 500 ? 503 : 404 });
+      return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
     if (probe) {
       await upstream.body?.cancel().catch(() => {});
@@ -206,10 +167,7 @@ export async function GET(request: Request) {
       // still fail later on a stale legacy object.
       return NextResponse.json({ available: !range || upstream.status === 206 }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
-    return new NextResponse(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    throw new Error("unexpected preview probe state");
   } catch {
     if (request.signal.aborted) {
       return new NextResponse(null, { status: 499, headers: { "Cache-Control": "private, no-store" } });

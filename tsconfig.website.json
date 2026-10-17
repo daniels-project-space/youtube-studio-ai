@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": ".next/cache/tsconfig.website.tsbuildinfo"
+  },
+  "include": [
+    "next-env.d.ts",
+    "next.config.ts",
+    "src/app/**/*.ts",
+    "src/app/**/*.tsx",
+    "src/middleware.ts",
+    "src/proxy.ts",
+    "src/instrumentation.ts",
+    "src/instrumentation-client.ts",
+    "src/**/*.d.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", "motion-graphics", "**/__tests__/**", "**/*.test.*", "**/*.spec.*"]
+}

@@ -58,6 +58,17 @@ export function createPublicEvidenceCache<T>(
     },
     setInflight(key, request) {
       inflight.set(key, request);
+      const release = () => {
+        // Let callers publish a successful value in their promise continuation
+        // before removing request coalescing. A settled request must not remain
+        // retained if its producer returned before a caller's finally block.
+        queueMicrotask(() => {
+          if (inflight.get(key) === request) inflight.delete(key);
+        });
+      };
+      // Handle both outcomes without changing or replacing the caller's promise.
+      // An older completion must never remove a newer request for the same key.
+      void request.then(release, release);
     },
     deleteInflight(key) {
       inflight.delete(key);

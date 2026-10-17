@@ -82,7 +82,6 @@ export async function fetchRedditTrends(
       log(`trends: ${top.length} reddit signal(s) from r/${selectedSubs.join(", r/")}`);
       return top;
     } finally {
-      trendsCache.deleteInflight(cacheKey);
       if (completed !== selectedSubs.length) trendsCache.delete(cacheKey);
     }
   })();

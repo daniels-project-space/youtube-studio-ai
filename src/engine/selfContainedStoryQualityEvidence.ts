@@ -12,7 +12,7 @@ import { sha256Hex } from "@/lib/sha256";
 import {
   WhiteboardRenderScheduleSchema,
   type WhiteboardRenderSchedule,
-} from "@/lib/whiteboardSync";
+} from "@/lib/whiteboardRenderSchedule";
 import type { VisualReviewCreativeLock, VisualReviewFrame } from "@/lib/visualReview";
 
 export const SELF_CONTAINED_STORY_PLAN_EVIDENCE_VERSION =
