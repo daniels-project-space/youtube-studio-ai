@@ -6,7 +6,9 @@ on:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**', '.serena/**']
   pull_request:
-    branches: [main]
+    # The live website currently follows this qualified release branch.
+    # Validate isolated release PRs without changing the main-only cloud gate.
+    branches: [main, fix/youtube-manual-h3-release-20261005]
   workflow_dispatch:
 concurrency:
   # Supersede obsolete pull-request checks, but never cancel a main release
@@ -83,6 +85,10 @@ jobs:
           else
             npx --yes tsc --noEmit
           fi
+      - name: Verify Studio deployment dependency witnesses
+        run: |
+          node scripts/deployment-inputs.mjs
+          node --test scripts/deployment-impact.test.mjs .github/scripts/readiness-process.test.mjs
       - name: Lint
         run: ${{ steps.pm.outputs.pm }} run lint
       - name: Production dependency audit

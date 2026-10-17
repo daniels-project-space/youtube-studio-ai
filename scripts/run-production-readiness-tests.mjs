@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { runReadinessProcess } from "../.github/scripts/readiness-process.mjs";
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,56 +57,38 @@ const DIRECT_TEST_CONCURRENCY = Number.isSafeInteger(requestedConcurrency)
   ? Math.max(1, Math.min(8, requestedConcurrency))
   : 4;
 
+const controller = new AbortController();
+let interruptedBy;
+const stopHandlers = new Map(["SIGINT", "SIGTERM"].map(name => [name, () => {
+  interruptedBy = name;
+  controller.abort();
+}]));
+for (const [name, handler] of stopHandlers) process.once(name, handler);
+
 function executeTest(test) {
-  return new Promise((resolve) => {
     const label = relative(root, test);
     // This fixture performs two independently bounded 120s renders plus the
     // full-decode comparison scans. Keep its aggregate budget above that sum.
     const timeoutMs = test === join(sourceRoot, "lib", "__tests__", "repeatedMusicBlackGate.test.ts")
       ? 360_000 : DIRECT_TEST_TIMEOUT_MS;
-    const child = spawn(tsx, [test], {
-      cwd: root,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let spawnError = null;
-    let timedOut = false;
-    let forceKill;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      forceKill = setTimeout(() => child.kill("SIGKILL"), 10_000);
-      forceKill.unref();
-    }, timeoutMs);
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => { spawnError = error; });
-    child.on("close", (status, signal) => {
-      clearTimeout(timer);
-      if (forceKill) clearTimeout(forceKill);
-      resolve({ label, status, signal, stdout, stderr, spawnError, timedOut, timeoutMs });
-    });
-  });
+    return runReadinessProcess({ command: tsx, args: [test], cwd: root,
+      label, timeoutMs, signal: controller.signal });
 }
 
 async function executeAllTests() {
   const results = new Array(tests.length);
   let nextIndex = 0;
   const worker = async () => {
-    while (nextIndex < tests.length) {
+    while (nextIndex < tests.length && !controller.signal.aborted) {
       const index = nextIndex++;
       results[index] = await executeTest(tests[index]);
       const result = results[index];
-      console.log(`[${++completed}/${tests.length}] ${result.status === 0 && !result.timedOut && !result.spawnError ? "PASS" : "FAIL"} ${result.label}`);
+      console.log(`[${++completed}/${tests.length}] ${result.status === 0 && !result.timedOut && !result.spawnError && !result.interrupted && !result.cleanupError ? "PASS" : "FAIL"} ${result.label}`);
     }
   };
   let completed = 0;
   await Promise.all(Array.from({ length: Math.min(DIRECT_TEST_CONCURRENCY, tests.length) }, worker));
-  return results;
+  return results.filter(Boolean);
 }
 
 // Run every selected test, then report. The default selects the complete gate.
@@ -121,11 +103,22 @@ if (selection.partial) {
 }
 console.log(`Running ${tests.length} direct readiness tests with ${DIRECT_TEST_CONCURRENCY} workers.`);
 const results = await executeAllTests();
+for (const [name, handler] of stopHandlers) process.removeListener(name, handler);
 const failures = [];
 for (const result of results) {
   console.log(`\n=== ${result.label} ===`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
+  if (result.cleanupError) {
+    console.error(result.cleanupError);
+    failures.push(result.label);
+    continue;
+  }
+  if (result.interrupted) {
+    console.error(`Interrupted: ${result.label}`);
+    failures.push(result.label);
+    continue;
+  }
   if (result.timedOut) {
     console.error(`Timed out after ${result.timeoutMs / 1_000}s: ${result.label}`);
     failures.push(result.label);
@@ -140,6 +133,11 @@ for (const result of results) {
     console.error(`${result.label} failed with exit code ${result.status ?? result.signal ?? "unknown"}`);
     failures.push(result.label);
   }
+}
+
+if (interruptedBy) {
+  console.error(`Readiness interrupted by ${interruptedBy}; completed ${results.length}/${tests.length}. COMPLETE PRODUCTION READINESS NOT VERIFIED.`);
+  process.exit(interruptedBy === "SIGINT" ? 130 : 143);
 }
 
 if (failures.length) {
