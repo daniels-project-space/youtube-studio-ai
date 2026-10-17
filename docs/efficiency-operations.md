@@ -54,3 +54,11 @@ unchanged paid gates/schedules, and preservation of the ongoing worktree.
 Continue auditing per-function Convex reads, Trigger dispatch/retry/waits,
 temporary-directory ownership, caches and R2 lifecycle before describing the
 complete optimization goal as finished.
+
+### Native candidate qualification, 17 October
+
+Candidate `791882eb14f2d8ec28bb18be3a8dbd9b599302fc` passed complete CI
+`39024962208`, including all readiness, dependency, structural and proof gates.
+Git preview `dpl_FtQ1mowUFEqKU6fxEPuLm59qDMmT` is READY on Next 16.3.8;
+authenticated `/api/health` returned the exact candidate revision. This operational
+receipt is a non-runtime change for native ignored-build qualification.
