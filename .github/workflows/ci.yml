@@ -147,7 +147,7 @@ jobs:
         # The policy uses only Node built-ins and Git, both present on the
         # hosted runner. Recheck after install to close the intervening race.
         run: node scripts/cloud-runtime-release-policy.mjs
-      - name: Plan independent native-verified runtime publications
+      - name: Plan independent runtime publications
         id: publication_plan
         if: steps.release_admission.outputs.deploy == 'true'
         env:

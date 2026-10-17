@@ -25,8 +25,8 @@ function observation({ missing = false, state = "success", changeReceipt = d => 
 const options = () => ({ api: observation(), recipe, observe: native,
   impact: () => ({ backend: false, trigger: false, reason: "verified-layer-inputs" }) });
 
-test("unchanged/native-matching publications skip both runtimes", async () => {
-  const plan = await planPublications(options());
+test("unchanged inputs skip both runtimes without provider credentials or native reads", async () => {
+  const plan = await planPublications({ ...options(), observe: async () => { throw Error("Unchanged runtime must not be read"); } });
   assert.equal(plan.any, false);
   assert.equal(plan.backend.deploy, false);
   assert.equal(plan.trigger.deploy, false);
@@ -59,9 +59,18 @@ for (const state of ["failure", "pending", "in_progress", "error", "inactive"]) 
   });
 }
 test("native drift protects ongoing manual development", async () => {
-  const plan = await planPublications({ ...options(), observe: async () => ({ fingerprint: "d".repeat(64), status: "DEPLOYED" }) });
+  const plan = await planPublications({ ...options(), impact: () => ({ backend: true, trigger: true, reason: "verified-layer-inputs" }),
+    observe: async () => ({ fingerprint: "d".repeat(64), status: "DEPLOYED" }) });
   assert.equal(plan.backend.held, true); assert.equal(plan.any, false);
   assert.equal(plan.backend.reason, "native-runtime-changed-outside-publisher");
+});
+test("only a changed layer is observed and its verified identity is not replaced by a second read", async () => {
+  const reads = [];
+  const plan = await planPublications({ ...options(), impact: () => ({ backend: false, trigger: true, reason: "verified-layer-inputs" }),
+    observe: async layer => { reads.push(layer); assert.equal(layer, "trigger"); return native(); } });
+  assert.deepEqual(reads, ["trigger"]);
+  assert.equal(plan.backend.deploy, false); assert.equal(plan.trigger.expectedNative, nativeHash);
+  requireRuntimeCredentials(plan, { TRIGGER_ACCESS_TOKEN: "fixture" });
 });
 test("an interrupted publication with changed native state requires explicit recovery", async () => {
   const plan = await planPublications({ ...options(), api: observation({ state: "in_progress" }),

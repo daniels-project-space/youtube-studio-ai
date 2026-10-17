@@ -123,18 +123,28 @@ export async function planPublications({ api, cwd = process.cwd(), head = "HEAD"
             else {
               const expectedNative = nativeReceipt.exec(statuses[0].description ?? "")?.[1];
               if (!expectedNative) decision.reason = "missing-native-publication-evidence";
-              else if ((await observe(layer)).fingerprint !== expectedNative) decision.reason = "native-runtime-changed-outside-publisher";
-              else if (latest.payload.recipe !== recipe) decision = { deploy: true, reason: "publisher-recipe-changed" };
               else {
                 const delta = impact(latest.sha, { cwd, head });
-                decision = { deploy: delta[layer] !== false, reason: delta.reason, baseline: latest.sha, receipt: latest.id };
+                const changedRecipe = latest.payload.recipe !== recipe;
+                const needsWrite = changedRecipe || delta[layer] !== false;
+                if (!needsWrite) {
+                  // Unchanged managed inputs require no write or native read.
+                  // Leave concurrent manual work alone without claiming the
+                  // live runtime still equals the historical source receipt.
+                  decision = { deploy: false, reason: "unchanged-managed-inputs-native-preserved", baseline: latest.sha, receipt: latest.id };
+                } else {
+                  const native = await observe(layer);
+                  if (native.fingerprint !== expectedNative) decision.reason = "native-runtime-changed-outside-publisher";
+                  else decision = { deploy: true, reason: changedRecipe ? "publisher-recipe-changed" : delta.reason,
+                    baseline: latest.sha, receipt: latest.id, expectedNative: native.fingerprint };
+                }
               }
             }
           }
         }
       } catch { decision = { deploy: false, held: true, reason: "unavailable-publication-evidence" }; }
     }
-    if (decision.deploy) {
+    if (decision.deploy && !decision.expectedNative) {
       try {
         const native = await observe(layer);
         if (!/^[a-f0-9]{64}$/.test(native.fingerprint)) throw new Error("Missing native identity");

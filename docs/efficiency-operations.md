@@ -137,9 +137,10 @@ billed CPU savings.
 ## Independent Convex and Trigger publication
 
 The serialized main-only publisher plans each runtime against its latest GitHub
-publication attempt and current native provider identity before installing npm
-tooling. A verified unchanged pair skips Node setup, installation and both
-publishers. A changed layer publishes independently. The full CI quality gate
+publication attempt before installing npm tooling. Verified unchanged inputs
+skip Node setup, installation and both publishers without requiring provider
+credentials. A changed layer verifies current native identity and publishes
+independently. The full CI quality gate
 still precedes planning; credentials remain in the Production environment;
 source freshness is checked before setup, after install and before each write.
 
@@ -147,8 +148,10 @@ A successful publication records its Git revision, target, publisher recipe and
 native fingerprint. Convex identity uses the canonical deployment's module
 hashes/configuration. Trigger identity uses the canonical production project's
 latest deployment, status and source commit. A later manual provider change
-holds the publisher rather than silently overwriting ongoing work. Native state
-is rechecked against the plan immediately before a publication attempt.
+holds a requested write rather than silently overwriting ongoing work. An
+unchanged layer is left alone, including manual provider changes; a skip does
+not certify its current live source. Native state is rechecked against the
+original verified plan immediately before a publication attempt.
 
 An attempt is marked in progress before its publisher runs. Success is issued
 only after that command succeeds and native identity can be read back. Failed
@@ -165,9 +168,10 @@ it merely to manufacture a savings demonstration or overwrite an unreviewed
 native runtime. Current website release/main source divergence must first be
 reconciled with ongoing work. No receipt is fabricated from a build plan.
 
-Both native identities require their existing provider read credentials even
-when no publish is needed. Only layers selected for writing require publisher
-credentials at the command gate. Native observation failure holds safely.
+Only layers selected for writing require provider credentials and current
+native observations. Unchanged source inputs are skipped using their qualified
+historical publication receipt, without probing or overwriting concurrent
+provider work. Native observation failure for a requested write holds safely.
 Convex component deployments need complete component identity support before
 this root-deployment observer can certify them. Manual redeployments publish
 normally to cover environment/configuration changes. Vercel retains its separate
