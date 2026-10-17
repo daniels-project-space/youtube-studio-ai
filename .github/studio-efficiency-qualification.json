@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "qualifiedAt": "2026-10-17",
+  "runtimeRevision": "f372b811c4e259b59ff2cec3dd40616ed840a57d",
+  "qualityGate": {
+    "workflowRun": 39035081701,
+    "conclusion": "success",
+    "directReadinessChecks": 930,
+    "fullRenderParityRun": 39035012687,
+    "fullRenderParityConclusion": "success"
+  },
+  "nativePublications": {
+    "backend": {
+      "githubDeployment": 7140123192,
+      "target": "astute-camel-689",
+      "conclusion": "success"
+    },
+    "trigger": {
+      "githubDeployment": 7140124292,
+      "target": "proj_vorkjqmnnpkzoiqqgbuu",
+      "version": "20261017.1",
+      "conclusion": "success"
+    }
+  },
+  "guardrails": {
+    "paidModelTestsStarted": false,
+    "autopilotEnabled": false,
+    "footagePruningEnabled": false,
+    "triggerSchedules": 0,
+    "spendingLimitsRaised": false
+  },
+  "purpose": "Record exact runtime qualification and verify metadata-only release admission against genuine native publication receipts. This file is evidence, not an input to publication policy."
+}
