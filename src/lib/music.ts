@@ -27,6 +27,8 @@
  * `-stream_loop`: it folds the track's tail into its head with one crossfade
  * so end==start and every loop splice is seamless.
  */
+import type { MusicProvider, MusicTrack } from "@/lib/musicTypes";
+export type { MusicProvider, MusicTrack } from "@/lib/musicTypes";
 import { execFile } from "node:child_process";
 import { stat, unlink } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -95,7 +97,7 @@ export function withMusicGenerationCost(
   return failure;
 }
 
-export type MusicProvider = "mureka" | "suno" | "minimax_music3";
+
 
 /* --------------------- seamless self-loop (tail→head fold) --------------------- */
 
@@ -323,15 +325,7 @@ export async function selfLoopAudio(
   return outPath;
 }
 
-export interface MusicTrack {
-  /** Best available URL for this clip (WAV when the upgrade succeeded, else mp3). */
-  url: string;
-  /** Lossless WAV URL when the conversion succeeded. */
-  wavUrl?: string;
-  /** Provider clip id (Suno audioId). */
-  audioId?: string;
-  durationSec?: number;
-}
+
 
 export interface MusicResult {
   provider: MusicProvider;

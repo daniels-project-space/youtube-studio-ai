@@ -80,3 +80,28 @@ Candidate `791882eb14f2d8ec28bb18be3a8dbd9b599302fc` passed complete CI
 Git preview `dpl_FtQ1mowUFEqKU6fxEPuLm59qDMmT` is READY on Next 16.3.8;
 authenticated `/api/health` returned the exact candidate revision. This operational
 receipt is a non-runtime change for native ignored-build qualification.
+
+## Shared website request contracts
+
+Weekly script, music and image API dispatchers import their argument validators
+from `src/lib/planWeekPrepared*Args.ts`. The Trigger modules re-export the same
+functions and types for existing callers. Keep canonical manifest bindings,
+shot/candidate limits, accepted providers/profiles and cost ceilings in those
+shared validators; do not duplicate validation in the dispatchers.
+
+The whiteboard render schedule and timing-repair schemas live in
+`src/lib/whiteboardRenderSchedule.ts`. The renderer retains its public exports;
+quality-evidence readers consume the schema without importing the renderer.
+This does not change rendering, generation, repair policy or task admission.
+
+Against release `e08dcf84`, these changes reduce the derived website runtime
+closure from 553 to 531 files (26 removed, four shared contracts added), including
+removal of all three producer task modules, script/music generation, the
+whiteboard renderer and the Mastra agent implementation. This is source dependency
+evidence, not a measured reduction in billed CPU or a production release receipt.
+
+Cloud publication skipping must compare each runtime against a verified
+successful publication. A previous Git commit alone is insufficient: a failed
+or held publication must remain eligible on the next revision. Until independent
+successful-publication receipts are wired into the serialized publisher, keep
+the existing conservative main-only deployment behavior.

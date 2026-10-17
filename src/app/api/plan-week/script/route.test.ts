@@ -11,3 +11,6 @@ assert.match(source, /ownedBy\(actor\.ownerId, payload\.manifestKey\)/);
 assert.match(source, /planWeekPreparedScriptKey/);
 console.log("weekly prepared script dispatcher wiring passed");
 
+
+assert.match(source, /@\/lib\/planWeekPreparedScriptArgs/);
+assert.doesNotMatch(source, /@\/trigger\//, "API validation must not load worker implementations");
