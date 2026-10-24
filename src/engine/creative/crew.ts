@@ -8,6 +8,7 @@
  * custom goal" contract: only the agent + the doctrine differ.
  */
 import { z } from "zod";
+import { CADENCE_BASE as EDITOR_CADENCE_BASE } from "@/lib/crew/editor";
 import { agentJson, agentJsonConfiguration } from "@/agents/mastra";
 import {
   ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
@@ -224,8 +225,10 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
 
 /* ------------------------------- Editor -------------------------------- */
 
+const minEditorCadence = Math.min(...Object.values(EDITOR_CADENCE_BASE));
+const maxEditorCadence = Math.max(...Object.values(EDITOR_CADENCE_BASE));
 const cutSchema = z.object({
-  sections: z.array(z.object({ name: z.string(), cutsPerMin: z.number() })).default([]),
+  sections: z.array(z.object({ name: z.string(), cutsPerMin: z.number().finite().min(minEditorCadence).max(maxEditorCadence) })).default([]),
   transitions: z.string().default(""),
   captionStyle: z.string().default(""),
   overlayRule: z.string().default(""),
@@ -250,8 +253,9 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
         (bible.editorDoctrine ? `Your doctrine: ${bible.editorDoctrine}\n\n` : "") +
         `Cut this video. Provide: cut cadence per section (name + cuts per minute), the transition ` +
         `language, caption styling intent, and the overlay/quote-card placement rule. Match the channel's ` +
-        `pace — calibrate cutsPerMin to real editing practice: contemplative/documentary 2-5, standard ` +
-        `essay 4-7, energetic explainer 8-12 (a "deliberate, breathing" edit is NOT 8+ cuts/min). Return STRICT JSON ` +
+        `pace — calibrate cutsPerMin to real editing practice: still ${EDITOR_CADENCE_BASE.still}, contemplative/documentary 2-5, standard ` +
+        `essay 4-7, energetic explainer 8-12, frenetic ${EDITOR_CADENCE_BASE.frenetic} ` +
+        `(a "deliberate, breathing" edit is NOT 8+ cuts/min). Supported range: ${minEditorCadence}-${maxEditorCadence} cuts/min. Return STRICT JSON ` +
         `{"sections":[{"name":string,"cutsPerMin":number}],"transitions":string,"captionStyle":string,"overlayRule":string}.`,
     });
     const proposedSections = raw.sections ?? [];
@@ -260,7 +264,7 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
       cutsPerMin: section.cutsPerMin,
     }));
     const invalidSection = sections.some((section) =>
-      !section.name || !Number.isFinite(section.cutsPerMin) || section.cutsPerMin < 2 || section.cutsPerMin > 12,
+      !section.name || !Number.isFinite(section.cutsPerMin) || section.cutsPerMin < minEditorCadence || section.cutsPerMin > maxEditorCadence,
     );
     const uniqueSectionNames = new Set(sections.map((section) => section.name.toLocaleLowerCase("en-US")));
     const transitions = raw.transitions?.trim() ?? "";
@@ -268,7 +272,7 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
     const overlayRule = raw.overlayRule?.trim() ?? "";
     const missing: string[] = [];
     if (sections.length === 0) missing.push("section cadence");
-    if (invalidSection) missing.push("valid named cadence between 2 and 12 cuts per minute");
+    if (invalidSection) missing.push(`valid named cadence between ${minEditorCadence} and ${maxEditorCadence} cuts per minute`);
     if (uniqueSectionNames.size !== sections.length) missing.push("distinct section names");
     if (!transitions) missing.push("transition language");
     if (!captionStyle) missing.push("caption styling");

@@ -494,7 +494,9 @@ function hookQualityProfile(args: HookCraftArgs): QualityProfile {
 
 /** Channels that invent in-world facts by design skip grounding. */
 function isFictionRegister(niche?: string, style?: string): boolean {
-  return style === "meditation" || /fiction|sci-fi|speculative|fantasy/i.test(niche ?? "");
+  return style === "meditation" || /\b(?:fiction|sci-fi|speculative|fantasy)\b/i.test(
+    (niche ?? "").replace(/\bnon[\s-]*fiction\b/gi, ""),
+  );
 }
 
 /**
@@ -673,12 +675,13 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       log: a.log,
     });
 
-    const rawCandidates = (gen.candidates ?? [])
+    const rawCandidates = (Array.isArray(gen?.candidates) ? gen.candidates : [])
+      .filter((c) => c && typeof c.hook === "string" && typeof c.opening === "string")
       .map((c) => ({
-        device: String(c.device ?? "unknown"),
-        hook: String(c.hook ?? "").trim(),
-        opening: String(c.opening ?? "").trim(),
-        loop: String(c.loop ?? "").trim(),
+        device: typeof c.device === "string" ? c.device : "unknown",
+        hook: c.hook!.trim(),
+        opening: c.opening!.trim(),
+        loop: typeof c.loop === "string" ? c.loop.trim() : "",
       }))
       .filter((c) => c.hook && c.opening);
     const seenCandidates = new Set<string>();
@@ -696,6 +699,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       }));
     const survivors = candidates.filter((c) => c.lint.pass);
     lastIssues = candidates.flatMap((c) => c.lint.issues);
+    if (!candidates.length) lastIssues.push("generator returned no usable candidate objects with spoken hook and opening strings");
     a.log?.(
       `hookcraft: ${rawCandidates.length} generated, ${candidates.length} unique, ${survivors.length} pass lint` +
       `${survivors.length ? ` (best local signal ${Math.max(...survivors.map((c) => c.quality.score))}/100)` : ` (${lastIssues.slice(0, 3).join("; ")})`}`,
@@ -741,7 +745,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const admission = validateHookJudgeResponse(j, survivors.length);
         if (!admission.pass) throw new Error(`judge response rejected (${admission.issues.join("; ")})`);
         verdicts = admission.verdicts;
-        best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
+        best = typeof j.best === "number" && Number.isInteger(j.best) && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
       } catch (e) {
         // Unlike an ordinary known judge failure, a post-dispatch outcome with
         // unknown provider work cannot safely become a lint-only cold open.

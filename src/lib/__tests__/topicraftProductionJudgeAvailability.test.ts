@@ -33,7 +33,11 @@ async function main(): Promise<void> {
       const prompt = String(body.messages?.at(-1)?.content ?? "");
       if (prompt.includes("Score each 1-10 on ALL FOUR")) {
         judgeCalls++;
-        throw new Error("fixture topic judge unavailable");
+        return Response.json({
+          id: `topicraft-invalid-judge-${judgeCalls}`, model: body.model,
+          choices: [{ message: { content: JSON.stringify({ rankings: [] }) } }],
+          usage: { prompt_tokens: 20, completion_tokens: 30, total_tokens: 50 },
+        });
       }
       generationCalls++;
       return Response.json({

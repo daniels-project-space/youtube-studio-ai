@@ -29,9 +29,10 @@ import {
   cinematographerDirectives,
   resolveCinematographerConfig,
 } from "@/lib/crew/cinematographer";
-import { editorDirectives, resolveEditorConfig } from "@/lib/crew/editor";
+import { EDITOR_SURFACE, editorDirectives, resolveEditorConfig } from "@/lib/crew/editor";
 import { composerDirectives, resolveComposerConfig } from "@/lib/crew/composer";
-import { applyCriticPolicy, resolveCriticConfig } from "@/lib/crew/critic";
+import { CRITIC_SURFACE, applyCriticPolicy, resolveCriticConfig } from "@/lib/crew/critic";
+import type { CustomizationSurface } from "@/engine/customization";
 import {
   briefDirector,
   briefCinematographer,
@@ -339,20 +340,32 @@ function roleProfile(
    */
   crewFallback?: Record<string, unknown>,
   frozenProfile?: ChannelProfile,
+  surface?: CustomizationSurface,
 ): ChannelProfile {
+  const roleParams = frozenProfile ? {
+    ...frozenProfile.pipeline.find((entry) => entry.block === block)?.params,
+    ...ctx.params,
+    ...frozenProfile.moduleOverrides?.[block],
+  } : ctx.params;
+  const preset = typeof roleParams.preset === "string" ? surface?.presets[roleParams.preset] : undefined;
+  // A role preset is an explicit choice too. Crew hints must not become knob
+  // overrides that erase it when the role resolver later expands the preset.
+  const fallback = Object.fromEntries(Object.entries(crewFallback ?? {}).filter(([key]) =>
+    !Object.prototype.hasOwnProperty.call(preset ?? {}, key),
+  ));
   if (frozenProfile) {
     return {
       ...frozenProfile,
       pipeline: frozenProfile.pipeline.map((entry) => entry.block === block
         ? {
             ...entry,
-            params: { ...crewFallback, ...(entry.params ?? {}), ...ctx.params },
+            params: { ...fallback, ...(entry.params ?? {}), ...ctx.params },
           }
         : entry),
     };
   }
   return {
-    pipeline: [{ block, params: { ...crewFallback, ...ctx.params } }],
+    pipeline: [{ block, params: { ...fallback, ...ctx.params } }],
     moduleOverrides: {},
   } as unknown as ChannelProfile;
 }
@@ -461,7 +474,7 @@ export const editorBriefBlock: Block = {
     // config always wins). rc === null (no saved show-bible config, or a
     // resolution failure) means no fallback object at all — zero regression.
     const config = resolveEditorConfig(
-      roleProfile(ctx, "editor_brief", rc ? { cadence: rc.editorCadence } : undefined, g.profile),
+      roleProfile(ctx, "editor_brief", rc ? { cadence: rc.editorCadence } : undefined, g.profile, EDITOR_SURFACE),
     );
     const directives = editorDirectives(config);
     const out = await briefEditor(bible, crewCtx(ctx, g, directives));
@@ -520,6 +533,7 @@ export const criticSpecBlock: Block = {
         "critic_spec",
         rc ? { strictness: rc.criticStrictness, marketAware: rc.marketAwareCritic } : undefined,
         g.profile,
+        CRITIC_SURFACE,
       ),
     );
     const out = await briefCritic(bible, crewCtx(ctx, g, config));

@@ -8,7 +8,7 @@ import { join } from "node:path";
 // primarily useful for spelling corrections.
 const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
 const packageStart = source.indexOf('`Write the YouTube description + tags for this video.`');
-const packageEnd = source.indexOf('if (!description || tags.length < 5)', packageStart);
+const packageEnd = source.indexOf('if (!description || tags.length < 5 || tags.length > 8)', packageStart);
 assert.ok(packageStart >= 0 && packageEnd > packageStart, "metadata package request must remain locatable");
 const packageSource = source.slice(packageStart, packageEnd);
 

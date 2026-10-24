@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import { briefEditor, type CrewContext } from "@/engine/creative/crew";
 import type { ShowBible } from "@/engine/creative/types";
+import { buildChannelProfile } from "@/engine/channelProfile";
+import { EDITOR_SURFACE, editorDirectives, resolveEditorConfig } from "@/lib/crew/editor";
 
 const bible: ShowBible = {
   positioning: "A field guide to overlooked astronomy for curious beginners.",
@@ -46,6 +48,28 @@ async function main() {
   };
 
   try {
+    const supportedCadences: number[] = [];
+    const selections = [
+      ...Object.keys(EDITOR_SURFACE.presets).map(preset => ({ preset })),
+      ...EDITOR_SURFACE.knobs.find(knob => knob.id === "cadence")!.values!.map(cadence => ({ cadence })),
+    ];
+    for (const params of selections) {
+      const profile = buildChannelProfile({
+        row: { _id: "channel", name: "C", slug: "c", status: "active", template: "narrated_stock", budget: 0, identity: {} },
+        archetype: "narrated_stock", pipeline: [{ block: "editor_brief", params }],
+      });
+      const config = resolveEditorConfig(profile);
+      // The initial accelerate point exposes the measured cadence's base too.
+      const directives = editorDirectives({ ...config, pacingShape: "accelerate" });
+      const cutsPerMin = directives.cutsPerMin ?? directives.pacingCurve![0].cutsPerMin;
+      supportedCadences.push(cutsPerMin);
+      output = { ...validBrief, sections: [{ name: "Opening", cutsPerMin }] };
+      assert.deepEqual(await briefEditor(bible, { ...context, roleDirectives: JSON.stringify(directives) }), output,
+        `supported editor selection ${JSON.stringify(params)} must survive the creative parser`);
+    }
+    assert.ok(supportedCadences.includes(2), "still minimum is covered");
+    assert.ok(supportedCadences.includes(15), "frenetic maximum is covered");
+
     output = { ...validBrief, sections: [] };
     assert.equal(await briefEditor(bible, context), undefined,
       "transitions and captions cannot substitute for a per-section cut plan");
@@ -54,10 +78,10 @@ async function main() {
     assert.equal(await briefEditor(bible, context), undefined,
       "zero cadence must not be silently admitted as an editorial cut plan");
 
-    for (const cutsPerMin of [1.99, 12.01]) {
+    for (const cutsPerMin of [Math.min(...supportedCadences) - 0.01, Math.max(...supportedCadences) + 0.01, -1, NaN, Infinity, -Infinity]) {
       output = { ...validBrief, sections: [{ name: "Opening", cutsPerMin }] };
       assert.equal(await briefEditor(bible, context), undefined,
-        "cadence outside the documented 2-12 range must be rejected");
+        "out-of-range and non-finite cadence must be rejected, never clamped");
     }
 
     output = { ...validBrief, sections: [{ name: "Opening", cutsPerMin: 4 }, { name: " opening ", cutsPerMin: 5 }] };
@@ -78,6 +102,7 @@ async function main() {
     output = structuredClone(validBrief);
     assert.deepEqual(await briefEditor(bible, context), validBrief,
       "a complete, in-range cut sheet remains admissible");
+    console.log("EDITOR BRIEF QUALITY PASS: all presets and cadences, still minimum, frenetic maximum, invalid bounds and incomplete output");
   } finally {
     globalThis.fetch = originalFetch;
     if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY;

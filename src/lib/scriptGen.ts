@@ -4,7 +4,7 @@
  * approved OpenRouter creative-text model then writes the narration continuing from it. Pure helper;
  * the `script_gen` block wraps it. Failures are loud — no thin-script fallback.
  */
-import { creativeTextJson, hasCreativeTextKey, scriptCreativeTextModel } from "@/lib/creativeText";
+import { creativeTextJson, hasCreativeTextKey, scriptCreativeTextModel, OpenRouterGenerationOutcomeUnknownError } from "@/lib/creativeText";
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
@@ -570,11 +570,16 @@ async function synthFullScriptOneShot(
           temperature: 0.8,
           prompt: [
             `You are CONTINUING a long-form YouTube narration script about "${req.topic}".`,
+            req.channelName ? `Channel: ${req.channelName}.` : "",
+            req.persona ? `Channel voice/persona: ${req.persona}` : "",
             programRouteClause(req),
+            seriesClause(req.series),
+            hookMandate(crafted),
             styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
             voiceTagClause(req),
             CRAFT_RULES,
             `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
+            `Already-written narration:\n${sections.map((s) => `${s.heading}: ${s.narration}`).join("\n")}`,
             `Write ${Math.max(2, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) that fit ` +
               `BEFORE the conclusion, each developing a distinct new idea in depth.`,
             `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
@@ -588,6 +593,7 @@ async function synthFullScriptOneShot(
         sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
         wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
       } catch (e) {
+        if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         log(`scriptGen one-shot top-up failed (${e instanceof Error ? e.message : e})`);
       }
     }
@@ -617,6 +623,7 @@ async function synthFullScriptOneShot(
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${duration}s) ✓`);
     return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
+    if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
     const detail = oneShotTimedOut
       ? `timed out after ${ONE_SHOT_TIMEOUT_MS}ms (provider request aborted)`
       : e instanceof Error ? e.message : e;
@@ -667,6 +674,7 @@ async function synthLongScript(
       });
       return (o.sections ?? []).filter((s): s is { heading: string; brief: string } => Boolean(s && typeof s.heading === "string"));
     } catch (e) {
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
       log(`scriptGen long: outline chunk failed (${e instanceof Error ? e.message : e})`);
       return [];
     }
@@ -694,6 +702,7 @@ async function synthLongScript(
     });
     closingRaw = typeof head.closing_line === "string" ? head.closing_line : "";
   } catch (e) {
+    if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
     // An empty catch is the purest silent degradation: the episode simply loses
     // its distilled quote, and the ending is written without it, and the run
     // reads exactly like one that had it.
@@ -736,7 +745,10 @@ async function synthLongScript(
     // sent 10-75x per chunked long-form run.
     const sectionPrompt = [
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
+      req.channelName ? `Channel: ${req.channelName}.` : "",
+      req.persona ? `Channel voice/persona: ${req.persona}` : "",
       programRouteClause(req),
+      seriesClause(req.series),
       styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
@@ -747,10 +759,12 @@ async function synthLongScript(
       "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
       `Return STRICT JSON {"narration":string}.`,
       `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
+      sections.length ? `Completed sections (in order; do NOT repeat): ${sections.map((section) => section.heading).join("; ")}` : "",
+      sections.length ? `Recent narration (continue without repeating):\n${sections.slice(-2).map((section) => `${section.heading}: ${section.narration}`).join("\n")}` : "",
       sections.length === 0 ? hookMandate(crafted) : "",
       `Write ${perSection}-${Math.min(400, perSection + 80)} words of SPOKEN narration in 2-3 FULL paragraphs for ` +
         `THIS section only — substantive and specific, no heading label, do not repeat earlier sections.`,
-      reachingEnd ? "This is the FINAL section: end on a single, definitive closing sentence." : "",
+      reachingEnd ? "Approach the end of the body; a dedicated conclusion follows this section." : "",
     ].filter(Boolean).join("\n\n");
     // RETRY transient failures — a dropped section used to permanently lose ~300
     // words, which is the main reason long videos came out short under model load.
@@ -767,10 +781,12 @@ async function synthLongScript(
           added = true;
         }
       } catch (e) {
+        if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         log(`scriptGen long: section "${s.heading}" attempt ${attempt + 1}/3 failed (${e instanceof Error ? e.message : e})`);
         if (attempt < 2) await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
       }
     }
+    if (!added) throw new Error(`scriptGen: section "${s.heading}" failed after 3 attempts — refusing an incomplete story`);
     log(`scriptGen long: ${sections.length} sections, ${total}/${targetWords} words`);
   }
   if (sections.length === 0) throw new Error("scriptGen: long-form produced no narration");
@@ -785,7 +801,10 @@ async function synthLongScript(
       log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
+        req.channelName ? `Channel: ${req.channelName}.` : "",
+        req.persona ? `Channel voice/persona: ${req.persona}` : "",
         programRouteClause(req),
+        `Pay off the cold-open promise: ${crafted.loop}. Cold open: ${crafted.coldOpen}`,
         seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
@@ -806,14 +825,20 @@ async function synthLongScript(
       temperature: 0.78,
     });
     const cn = spoken(req, typeof c.narration === "string" ? c.narration : "");
-    if (cn.length > 0) sections.push({ heading: "Conclusion", narration: cn });
+    if (!cn) throw new Error("conclusion returned no usable narration");
+    sections.push({ heading: "Conclusion", narration: cn });
   } catch (e) {
-    log(`scriptGen long: conclusion failed (${e instanceof Error ? e.message : e})`);
+    if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
+    throw new Error(`scriptGen long: conclusion failed (${e instanceof Error ? e.message : e})`);
   }
 
   const hook = spoken(req, hookRaw);
   const closingLine = normalizeScriptClosingLine(closingRaw);
   const narrationText = assemble(hook, sections);
+  const finalWords = words(narrationText);
+  if (finalWords < Math.round(wordBudget * 0.8)) {
+    throw new Error(`scriptGen: long-form script is ${finalWords}/${wordBudget} words (<80% of budget)`);
+  }
   const duration = estSeconds(narrationText, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: duration });
   return { hook, sections: assignRoles(sections), narrationText, estDurationSec: duration, closingLine, hookLoop: crafted.loop, crafted };
@@ -1149,6 +1174,7 @@ export async function synthScript(
       sections.splice(insertionIndex, 0, ...extra);
       wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
     } catch (e) {
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
       log(`scriptGen short: top-up failed (${e instanceof Error ? e.message : e})`);
     }
     if (wordCount < minWords) {
@@ -1164,7 +1190,7 @@ export async function synthScript(
     hook,
     sections: assignRoles(sections),
     narrationText,
-    estDurationSec: estSeconds(narrationText, gapSec),
+    estDurationSec: estSeconds(narrationText, gapSec, req.ttsSpeed ?? 1),
     closingLine,
     hookLoop: crafted.loop,
     crafted,

@@ -1105,6 +1105,11 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         maxTokens: 2500,
         temperature: 0.85,
       });
+      if (!gen || !Array.isArray(gen.candidates) || gen.candidates.length === 0 || gen.candidates.some((candidate) =>
+        !candidate || typeof candidate !== "object" ||
+        typeof candidate.title !== "string" || !candidate.title.trim() ||
+        typeof candidate.frame !== "string" || !candidate.frame.trim(),
+      )) throw new Error("generator returned an incomplete or malformed title slate");
     } catch (e) {
       if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
       if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
@@ -1368,9 +1373,13 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           maxTokens: 1400,
           temperature: 0.8,
         });
-        description = String(pkg.description ?? "").trim();
-        tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);
-        if (!description || tags.length < 5) throw new Error("winner package came back empty");
+        if (!pkg || typeof pkg.description !== "string" || typeof pkg.tagsCsv !== "string") {
+          throw new Error("winner package has malformed description or tags");
+        }
+        description = pkg.description.trim();
+        tags = [...new Map(pkg.tagsCsv.split(",").map((t) => t.trim()).filter(Boolean)
+          .map((tag) => [tag.toLowerCase(), tag])).values()];
+        if (!description || tags.length < 5 || tags.length > 8) throw new Error("winner package is incomplete");
       } catch (e) {
         // A completed-but-unusable package response is safe to replace with the
         // deterministic package below: we know the provider work is over and

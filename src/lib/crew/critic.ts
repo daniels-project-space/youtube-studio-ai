@@ -68,14 +68,15 @@ const MARKET_ASSERTION: ValidationAssertion = {
  *   marketAware → inject the competitor-benchmark assertion (idempotent)
  */
 export function applyCriticPolicy(spec: ValidationSpec, cfg: CriticConfig): ValidationSpec {
-  const assertions: ValidationAssertion[] = spec.assertions.map((a) => {
+  const authored = [...spec.assertions];
+  if (cfg.marketAware && !authored.some((a) => a.id === MARKET_ASSERTION.id)) {
+    authored.push({ ...MARKET_ASSERTION });
+  }
+  const assertions: ValidationAssertion[] = authored.map((a) => {
     if (cfg.strictness === "lenient" && a.severity === "block") return { ...a, severity: "warn" };
     if (cfg.strictness === "strict" && a.severity === "warn") return { ...a, severity: "block" };
     return a;
   });
-  if (cfg.marketAware && !assertions.some((a) => a.id === MARKET_ASSERTION.id)) {
-    assertions.push({ ...MARKET_ASSERTION });
-  }
   return { assertions };
 }
 

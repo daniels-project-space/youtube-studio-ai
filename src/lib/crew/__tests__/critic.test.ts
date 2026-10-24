@@ -53,6 +53,10 @@ function marketAwareInjects(): void {
   assert.equal(again.assertions.filter((a) => a.id === "market_benchmark").length, 1, "no duplicate market_benchmark");
   const off = applyCriticPolicy(spec, { strictness: "standard", marketAware: false });
   assert.ok(!off.assertions.some((a) => a.id === "market_benchmark"), "marketAware off ⇒ no competitor assertion");
+  const strict = applyCriticPolicy(spec, { strictness: "strict", marketAware: true });
+  assert.equal(strict.assertions.find((a) => a.id === "market_benchmark")?.severity, "block", "strict policy also gates its injected assertion");
+  assert.deepEqual(applyCriticPolicy(strict, { strictness: "strict", marketAware: true }), strict, "reapplying strict policy cannot change the gate");
+  assert.equal(spec.assertions.length, 2, "policy does not mutate its input");
   console.log("MARKET-AWARE PASS: flag injects a real competitor assertion (idempotent)");
 }
 

@@ -127,6 +127,49 @@ const dnaSchema = z.object({
 export type StyleDNADraft = z.infer<typeof dnaSchema>;
 type RawDNA = StyleDNADraft;
 
+/** Review the exact bounded identity that downstream modules will receive. */
+function normalizeStyleDNADraft(raw: RawDNA, paletteSeed?: readonly string[]): RawDNA {
+  const palette = clampHexes(raw.palette, 6);
+  return {
+    ...raw,
+    palette: palette.length >= 2 ? palette : clampHexes(paletteSeed, 6),
+    recurringSubject: raw.recurringSubject.trim(),
+    setting: raw.setting.trim(),
+    composition: raw.composition.trim(),
+    colorGrade: raw.colorGrade.trim(),
+    motifs: clampStrs(raw.motifs, 8),
+    variationAxes: clampStrs(raw.variationAxes, 6),
+    motionVocabulary: clampStrs(raw.motionVocabulary, 8),
+    motionDiscipline: raw.motionDiscipline.trim(),
+    visualAvoid: clampStrs(raw.visualAvoid, 10),
+    thumbnail: {
+      composition: raw.thumbnail.composition.trim(),
+      textRule: raw.thumbnail.textRule.trim(),
+      palette: clampHexes(raw.thumbnail.palette, 5),
+      subject: raw.thumbnail.subject.trim(),
+    },
+    audio: {
+      ...raw.audio,
+      genre: raw.audio.genre.trim(),
+      instrumentation: clampStrs(raw.audio.instrumentation, 8),
+      textures: clampStrs(raw.audio.textures, 4),
+      moodArc: raw.audio.moodArc.trim(),
+    },
+    narrative: raw.narrative ? {
+      scriptStyle: raw.narrative.scriptStyle.trim(),
+      hookStyle: raw.narrative.hookStyle.trim(),
+      pacing: raw.narrative.pacing.trim(),
+      voiceProfile: raw.narrative.voiceProfile.trim(),
+      delivery: raw.narrative.delivery.trim(),
+    } : undefined,
+    seo: {
+      titleFormula: raw.seo.titleFormula.trim(),
+      descriptionStructure: raw.seo.descriptionStructure.trim(),
+      playlistStrategy: raw.seo.playlistStrategy.trim(),
+    },
+  };
+}
+
 /** The different-model critic's verdict on a DNA draft (specificity + fidelity). */
 const critiqueSchema = z.object({
   score: z.number().finite().min(0).max(1),
@@ -211,6 +254,9 @@ export function inspectStyleDNADraft(raw: StyleDNADraft, narrated: boolean, chan
   if (clampStrs(raw.audio?.instrumentation, 8).length < 1) issues.push("audio.instrumentation is empty");
   if (clampStrs(raw.audio?.textures, 4).length < 1) issues.push("audio.textures is empty");
   if (!raw.audio?.moodArc?.trim()) issues.push("audio.moodArc is empty");
+  for (const key of ["titleFormula", "descriptionStructure", "playlistStrategy"] as const) {
+    if (!raw.seo?.[key]?.trim()) issues.push(`seo.${key} is empty`);
+  }
   if (
     !Number.isFinite(raw.audio?.loudnessLufs) || raw.audio.loudnessLufs < -23 || raw.audio.loudnessLufs > -12
   ) {
@@ -453,14 +499,15 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       threshold: 0.8,
       maxIters: 2,
       log: (m) => log(m),
-      produce: (priorIssues) => {
+      produce: async (priorIssues) => {
         const fix = priorIssues.length
           ? `\n\nYOUR PREVIOUS DRAFT FAILED REVIEW — FIX EVERY ONE OF THESE, do not repeat them:\n- ${priorIssues.join("\n- ")}`
           : "";
-        return agentJson({
+        const raw = await agentJson({
           role: "showrunner", schema: dnaSchema, log: (m) => log(m),
           maxTokens: 2600, temperature: 0.7, prompt: prompt + fix,
         });
+        return normalizeStyleDNADraft(raw, input.palette);
       },
       critique: async (raw) => {
         const det = inspectStyleDNADraft(raw, narrated, input.name);
@@ -516,54 +563,16 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   }
   if (narrated && !raw.narrative) gaps.push("narrative DNA missing for a narrated family — voice/script under-grounded");
 
-  const palette = clampHexes(raw.palette, 6);
-  const bpmMin = Math.max(40, Math.min(raw.audio.bpmMin, raw.audio.bpmMax));
-  const bpmMax = Math.max(raw.audio.bpmMin, raw.audio.bpmMax);
+  const { bpmMin, bpmMax, ...audioIdentity } = raw.audio;
 
   const dna: StyleDNA = {
+    ...raw,
     source: g.hasVision ? "research+vision" : "research",
     confidence,
     groundingGaps: gaps,
-    palette: palette.length >= 2 ? palette : clampHexes(input.palette, 6),
-    recurringSubject: raw.recurringSubject.trim(),
-    setting: raw.setting.trim(),
-    composition: raw.composition.trim(),
-    colorGrade: raw.colorGrade.trim(),
-    motifs: clampStrs(raw.motifs, 8),
-    variationAxes: clampStrs(raw.variationAxes, 6),
-    motionVocabulary: clampStrs(raw.motionVocabulary, 8),
-    motionDiscipline: raw.motionDiscipline.trim(),
-    visualAvoid: clampStrs(raw.visualAvoid, 10),
-    thumbnail: {
-      composition: raw.thumbnail.composition.trim(),
-      textRule: raw.thumbnail.textRule.trim(),
-      palette: clampHexes(raw.thumbnail.palette, 5),
-      subject: raw.thumbnail.subject.trim(),
-    },
     audio: {
-      role: raw.audio.role,
-      genre: raw.audio.genre.trim(),
+      ...audioIdentity,
       bpmRange: [bpmMin, bpmMax],
-      instrumentation: clampStrs(raw.audio.instrumentation, 8),
-      textures: clampStrs(raw.audio.textures, 4),
-      moodArc: raw.audio.moodArc.trim(),
-      loudnessLufs: Number.isFinite(raw.audio.loudnessLufs) ? raw.audio.loudnessLufs : -14,
-      ...(raw.audio.bodyMusicVol === undefined ? {} : { bodyMusicVol: raw.audio.bodyMusicVol }),
-      loopable: raw.audio.loopable,
-    },
-    narrative: raw.narrative
-      ? {
-          scriptStyle: raw.narrative.scriptStyle.trim(),
-          hookStyle: raw.narrative.hookStyle.trim(),
-          pacing: raw.narrative.pacing.trim(),
-          voiceProfile: raw.narrative.voiceProfile.trim(),
-          delivery: raw.narrative.delivery.trim(),
-        }
-      : undefined,
-    seo: {
-      titleFormula: raw.seo.titleFormula.trim(),
-      descriptionStructure: raw.seo.descriptionStructure.trim(),
-      playlistStrategy: raw.seo.playlistStrategy.trim(),
     },
     refreshedAt: input.now,
   };

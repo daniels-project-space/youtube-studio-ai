@@ -48,6 +48,7 @@ async function runScenario(endWithSummary: boolean): Promise<void> {
       persona: "Patient, humane historical storytelling grounded in ordinary evidence.",
       narrative: { scriptStyle: "Source-led, curious, and quietly exact.", pacing: "Let each discovery breathe." },
       maxSeconds: 30,
+      ttsSpeed: 0.94,
       endWithSummary,
       precraftedHook: crafted,
       structure: { beats: [{ name: "Compare records", note: "Keep the date contradiction central." }] },
@@ -70,6 +71,9 @@ async function runScenario(endWithSummary: boolean): Promise<void> {
     });
 
     assert.equal(calls, 2, "a short first draft should use exactly one bounded continuation");
+    const words = script.narrationText.split(/\s+/).filter(Boolean).length;
+    assert.equal(script.estDurationSec, Math.round(words / ((Number(process.env.NARRATION_WPS) || 3.1) * 0.94)),
+      "short-form duration must use the same voice speed as its word budget");
     const continuationPrompt = prompts[1]!;
     for (const evidence of [
       crafted.coldOpen,

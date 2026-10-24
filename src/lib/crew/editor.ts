@@ -65,7 +65,7 @@ const SILENCE_TRIM_PROFILES: Record<string, { minSilenceSec: number; padSec: num
 };
 
 /** Base cuts/min used to anchor the pacing CURVE (measured → 6 for curve math). */
-const CADENCE_BASE: Record<string, number> = { still: 2, slow: 3, measured: 6, snappy: 8, frenetic: 15 };
+export const CADENCE_BASE: Readonly<Record<string, number>> = { still: 2, slow: 3, measured: 6, snappy: 8, frenetic: 15 };
 
 /** Build a pacing curve ({atFrac,cutsPerMin}[]) from a base cuts/min + a shape. `flat` ⇒ undefined (Assembly keeps its constant cadence = parity). */
 export function buildPacingCurve(shape: string, baseCpm: number): { atFrac: number; cutsPerMin: number }[] | undefined {

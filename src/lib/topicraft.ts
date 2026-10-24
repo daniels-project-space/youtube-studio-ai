@@ -65,6 +65,8 @@ import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 import { embedText, cosine, hasEmbedKey } from "@/lib/embeddings";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
+import { ExecutionError } from "@/engine/executionErrors";
 
 // The complete topic-intel surface, re-exported for standalone consumers.
 export { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
@@ -449,7 +451,7 @@ export function lintBet(
   }
 
   // Banned words across every user-visible field.
-  const visible = `${topic} ${bet.provisionalTitle} ${bet.angle}`.toLowerCase();
+  const visible = `${topic} ${bet.provisionalTitle} ${bet.angle} ${bet.hookPromise} ${bet.thumbnailMoment}`.toLowerCase();
   for (const w of o.bannedWords) {
     if (w && visible.includes(w.toLowerCase())) issues.push(`contains banned term "${w}"`);
   }
@@ -722,7 +724,15 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         temperature: 0.85,
         log: (m) => log(m),
       });
+      if (!gen || !Array.isArray(gen.bets) || gen.bets.length === 0 || gen.bets.some((bet) =>
+        !bet || typeof bet !== "object" ||
+        !["topic", "angle", "provisionalTitle", "thumbnailMoment", "hookPromise", "evidence"].every((key) =>
+          typeof bet[key as keyof TopicBet] === "string" && String(bet[key as keyof TopicBet]).trim().length > 0,
+        ) || !["hero", "hub", "help"].includes(String(bet.betType)),
+      )) throw new Error("generator returned an incomplete or malformed bet slate");
     } catch (e) {
+      if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
       lastIssues = [`generator returned invalid JSON (${e instanceof Error ? e.message.slice(0, 80) : e})`];
       log(`topicraft: attempt ${attempt + 1} gen failed (${lastIssues[0]}) -> ${attempt === 0 ? "retrying" : "FAILING LOUD"}`);
       fixNote = "THE PREVIOUS ATTEMPT RETURNED INVALID JSON — return STRICT, valid JSON only.";
@@ -748,7 +758,6 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         avoidNorm, avoidTokens, keptTokens, channelName: a.channelName, allowHype, isMusicNiche,
         topicPool: a.topicPool, titleProfile: titleProfileId,
       });
-      if (lint.pass) keptTokens.push(tokenSet(c.topic));
       return { ...c, lint };
     });
     let survivors = linted.flatMap(({ lint, ...bet }) => lint.pass ? [bet as TopicBet] : []);
@@ -765,6 +774,9 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         const j = await retryOnUnusableOutput(() => creativeTextJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
+            `CHANNEL IDENTITY JSON:\n${JSON.stringify({ persona: a.persona, styleGrammar: a.styleGrammar,
+              topicPool: a.topicPool, voice: doctrine?.voice, family: a.family, contentLane: a.contentLane,
+              targetSeconds: a.targetSeconds, bannedWords })}`,
             `TITLE ENVELOPE: ${titleProfile.id} (${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} target chars, hard ${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}). ` +
               `Packageability means the provisional title follows this envelope and reads as ${titleProfile.guidance.toLowerCase()}`,
             a.programDirective
@@ -772,7 +784,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
               : "",
             evidenceClauses.length ? `THE EVIDENCE the bets claim to ride:\n\n${evidenceClauses.join("\n\n").slice(0, 4000)}` : "",
             avoidAll.length ? `ALREADY DONE (freshness check):\n${avoidAll.slice(-40).join(" | ")}` : "",
-            `BETS:\n${survivors.map((b, i) => `${i}. [${b.betType}] ${b.topic} — title "${b.provisionalTitle}" — evidence: ${b.evidence}`).join("\n")}`,
+            `BETS:\n${survivors.map((b, i) => `${i}. ${JSON.stringify(b)}`).join("\n")}`,
             `Score each 1-10 on ALL FOUR: demand (does its CITED evidence really prove people want this NOW), ` +
               `freshness (vs the done list — punish near-repeats), fit (identity + voice archetype), ` +
               `packageability (do title + thumbnail moment + hook promise form ONE click-winning promise unit). ` +
@@ -801,6 +813,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           scores: { demand: r.demand, freshness: r.freshness, fit: r.fit, packageability: r.packageability },
         }));
       } catch (e) {
+        if (e instanceof ExecutionError && e.code === "INLINE_PAID_EXECUTION_LEASE_REQUIRED") throw e;
+        if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         const detail = e instanceof Error ? e.message : String(e);
         if (quality === "production") {
           // A Topicraft bet becomes the title, hook, thumbnail promise and
@@ -827,9 +841,11 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         gated = survivors;
       }
 
-      // Accumulate gated wins (unique by normalized topic) across attempts.
+      // Similar promises must compete on judged quality before deduplication.
+      // An earlier lint-passing but unqualified bet must not hide a better one.
       for (const g of gated) {
-        if (!won.some((w) => normTopic(w.topic) === normTopic(g.topic))) won.push(g);
+        if (!won.some((w) => normTopic(w.topic) === normTopic(g.topic) ||
+          jaccard(tokenSet(w.topic), tokenSet(g.topic)) >= 0.6)) won.push(g);
       }
       if (won.length >= count) {
         const portfolio = selectRequiredCallbackPortfolio(won, count, requiredCallbacks);
