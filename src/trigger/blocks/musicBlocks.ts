@@ -498,7 +498,7 @@ export const music: Block = {
       dnaPrompt ? arcNote : basePrompt,
       studioAudioDirection,
     ].filter(Boolean).join(" ");
-    const makeChannelMusicProgram = (moduleDirection: string): ChannelMusicProgram => createChannelMusicProgram({
+    const makeChannelMusicProgram = (moduleDirection: string, providerPreference: MusicProvider = provider): ChannelMusicProgram => createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
       family: route?.family,
@@ -506,7 +506,7 @@ export const music: Block = {
       topic,
       role: selectedRole,
       musicProfileVersion,
-      providerPreference: provider,
+      providerPreference,
       durationSec: Number(ctx.params.generationDurationSec ?? 300),
       tempoMode: acceptedTempoMode ?? composerBrief?.musicIntent?.tempoMode,
       genre: a?.genre,
@@ -569,20 +569,20 @@ export const music: Block = {
             : " + Studio audio direction withheld by this legacy sleep-module version"
           : " + approved Studio audio direction"
         : ""}`);
-    const channelMusicProgramKey =
-      `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}channel-music-program-${channelMusicProgram.fingerprint}.json`;
-    await putObject(
-      channelMusicProgramKey,
-      Buffer.from(JSON.stringify(channelMusicProgram, null, 2)),
-      { contentType: "application/json" },
-    );
-    await recordAsset(ctx, "channel_music_program", channelMusicProgramKey, {
-      fingerprint: channelMusicProgram.fingerprint,
-      providerPreference: channelMusicProgram.generation.providerPreference,
-      role: channelMusicProgram.role,
-      spendUsd: 0,
-      productionMusicKey: null,
-    });
+    const persistChannelMusicProgram = async (replacesProgramFingerprint?: string): Promise<string> => {
+      const key = `${musicRunAudioPrefix(ctx.ownerId, ctx.runId)}channel-music-program-${channelMusicProgram.fingerprint}.json`;
+      await putObject(key, Buffer.from(JSON.stringify(channelMusicProgram, null, 2)), { contentType: "application/json" });
+      await recordAsset(ctx, "channel_music_program", key, {
+        fingerprint: channelMusicProgram.fingerprint,
+        providerPreference: channelMusicProgram.generation.providerPreference,
+        role: channelMusicProgram.role,
+        spendUsd: 0,
+        productionMusicKey: null,
+        ...(replacesProgramFingerprint ? { replacesProgramFingerprint } : {}),
+      });
+      return key;
+    };
+    let channelMusicProgramKey = await persistChannelMusicProgram();
     ctx.log(
       `music: sealed channel sound program ${channelMusicProgram.fingerprint.slice(0, 12)} ` +
       `(${channelMusicProgram.role}, ${channelMusicProgram.generation.sections.length} authored sections) before spend`,
@@ -965,6 +965,11 @@ export const music: Block = {
         billedGenerations === 0;
       if (provider !== "minimax_music3" && admissionRejected && hasProviderKey(altProvider)) {
         ctx.log(`music: ${provider} is quota/billing-dead (${msg.slice(0, 120)}) — FAILING OVER to ${altProvider}`);
+        // Audition receipts bind the actual provider; retain the rejected route
+        // and seal its replacement before any alternate work is accepted.
+        const replacesProgramFingerprint = channelMusicProgram.fingerprint;
+        channelMusicProgram = makeChannelMusicProgram(modulePromptDirection, altProvider);
+        channelMusicProgramKey = await persistChannelMusicProgram(replacesProgramFingerprint);
         usedProvider = altProvider;
         await generateWith(altProvider);
       } else {
