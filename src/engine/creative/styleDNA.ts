@@ -14,7 +14,7 @@
  * the per-channel bar every critic judges against.
  */
 import { z } from "zod";
-import { agentJson } from "@/agents/mastra";
+import { agentJson, isGenerationOutcomeUnknown, completedGenerationRepairIssues } from "@/agents/mastra";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { ChannelMusicRoleSchema } from "@/engine/channelMusicRole";
@@ -335,12 +335,12 @@ const NARRATED: ReadonlySet<FamilyKey> = new Set(
  * established; the Doctor must heal it before any video ships. We do not invent
  * a fake subject/setting — those stay empty and become explicit gaps.
  */
-function ungroundedDNA(input: StyleDNAInput): StyleDNA {
+function ungroundedDNA(input: StyleDNAInput, failureReason?: string): StyleDNA {
   return {
     source: "ungrounded",
     confidence: 0,
     groundingGaps: [
-      "no LLM key at inception — Style DNA was not distilled",
+      failureReason ?? "no LLM key at inception — Style DNA was not distilled",
       "recurringSubject + setting undefined (the channel has no locked identity yet)",
     ],
     palette: clampHexes(input.palette, 6),
@@ -467,6 +467,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `(e.g. time-of-day, season). Be concrete and opinionated — generic answers are failures.`,
     "",
     `Return STRICT JSON:`,
+    `All list fields must be JSON arrays, never comma-separated strings. In particular audio.instrumentation and audio.textures are string[], audio.bpmMin/audio.bpmMax/audio.loudnessLufs are numbers, and audio.loopable is boolean.`,
     `- palette: 3-5 hex colors (dominant→accent), grounded in the vision analysis if present`,
     `- recurringSubject: the ONE concrete subject/character that IS the brand`,
     `- setting: the recurring world/place shared by every video`,
@@ -498,6 +499,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       label: "styleDNA",
       threshold: 0.8,
       maxIters: 2,
+      repairOutputErrors: completedGenerationRepairIssues,
       log: (m) => log(m),
       produce: async (priorIssues) => {
         const fix = priorIssues.length
@@ -505,7 +507,9 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
           : "";
         const raw = await agentJson({
           role: "showrunner", schema: dnaSchema, log: (m) => log(m),
-          maxTokens: 2600, temperature: 0.7, prompt: prompt + fix,
+          // Live 2600-token output ended at finish_reason=length after 1903
+          // reasoning tokens, truncating the identity JSON. Preserve answer room.
+          maxTokens: 4000, temperature: 0.7, prompt: prompt + fix,
         });
         return normalizeStyleDNADraft(raw, input.palette);
       },
@@ -522,15 +526,17 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
               `It MUST be custom to THIS channel — generic boilerplate that could describe any channel is a FAILURE.`,
               `AUTHORITATIVE CHANNEL IDENTITY (must not be displaced by competitor research):\n${styleDNAIdentityAuditContext(input)}`,
               `Judge identity fit separately from research fidelity. The recurring subject, setting, motifs, audio and narrative voice must express the declared program and persona; research may inform execution and packaging, not replace them.`,
+              `FIELD OWNERSHIP: seo.titleFormula is a reusable template with [BRACKET] variables by design. The metadata module supplies episode-specific values later. Do not require literal episode values or example substitutions inside this template.`,
               g.text ? `RESEARCH THE DNA SHOULD REFLECT (reverse-engineered from real top performers):\n${g.text}` : `No external research was available — judge whether the DNA is at least vividly genre-specific.`,
               `DNA DRAFT:\n${JSON.stringify(raw)}`,
               `Score 0..1 — 1.0 = a concrete locked recurring subject + setting, palette/motifs/motion that clearly derive from the research and the niche's real conventions; 0.0 = vague filler.`,
-              `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Penalize vague adjectives, any field copy-pasteable to another channel, and anything not grounded in the research.`,
+              `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Issues are mandatory repairs for actual identity, specificity, feasibility or grounding defects, not optional polish or alternate wording. Return an empty issues array when no such defect exists. Penalize vague adjectives, any field copy-pasteable to another channel, and anything not grounded in the research.`,
             ].join("\n\n"),
           });
           criticScore = v.score;
           llmIssues = clampStrs(v.issues, 6);
         } catch (e) {
+          if (isGenerationOutcomeUnknown(e)) throw e;
           log(`styleDNA: critic failed (${e instanceof Error ? e.message : e}) — deterministic-only this iter`);
         }
         return resolveStyleDNAReview({
@@ -541,10 +547,9 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       },
     });
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     log(`styleDNA: distil failed (${e instanceof Error ? e.message : e}) — ungrounded, Doctor to retry`);
-    const u = ungroundedDNA(input);
-    u.groundingGaps = [`distil call failed: ${e instanceof Error ? e.message : String(e)}`, ...u.groundingGaps];
-    return u;
+    return ungroundedDNA(input, `distil call failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   const raw = loop.value;
 

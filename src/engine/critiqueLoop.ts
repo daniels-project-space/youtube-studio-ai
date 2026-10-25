@@ -331,6 +331,8 @@ export interface LoopOptions<T> {
   threshold?: number;
   /** Hard cap on iterations (1–8). Default 3. */
   maxIters?: number;
+  /** Recognize only completed, unusable output. Repairs share the existing iteration budget. */
+  repairOutputErrors?: (error: unknown) => string[] | undefined;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
   /** Label for logs/observability. */
   label?: string;
@@ -394,7 +396,18 @@ export async function produceAndCritique<T>(
   let lastValue: T | undefined;
   try {
     for (let iter = 1; iter <= maxIters; iter++) {
-      const value = await o.produce(priorIssues, iter);
+      let value: T;
+      try {
+        value = await o.produce(priorIssues, iter);
+      } catch (error) {
+        const repairIssues = o.repairOutputErrors?.(error);
+        if (!repairIssues?.length) throw error;
+        priorIssues = repairIssues.slice(0, MAX_CRITIQUE_ISSUES).map(issue => issue.slice(0, MAX_CRITIQUE_ISSUE_LENGTH));
+        history.push({ score: 0, pass: false, fatal: true, issues: priorIssues });
+        log(`${label}: iter ${iter}/${maxIters} output-invalid; no critic dispatched`, { issues: priorIssues.slice(0, 4) });
+        if (iter === maxIters && lastValue === undefined) throw error;
+        continue;
+      }
       lastValue = value;
       const admission = validateCritiqueResponse(await o.critique(value, iter));
       if (!admission.pass || !admission.critique) {

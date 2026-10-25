@@ -18,8 +18,8 @@
  * They are also marked `external` in trigger.config.ts so they install in the
  * image rather than being bundled.
  */
-import type { z } from "zod";
-import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
+import { z } from "zod";
+import { creativeTextJson, hasCreativeTextKey, OpenRouterGenerationOutcomeUnknownError } from "@/lib/creativeText";
 import { openRouterModel } from "@/lib/openRouter";
 import {
   getOrCreateModelResponse,
@@ -245,6 +245,23 @@ export class MastraGenerationOutcomeUnknownError extends Error {
     );
     this.name = "MastraGenerationOutcomeUnknownError";
   }
+}
+
+/** Optional creative output may degrade only when provider completion is known. */
+export function isGenerationOutcomeUnknown(error: unknown): boolean {
+  return error instanceof MastraGenerationOutcomeUnknownError ||
+    (error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown");
+}
+
+/** A completed but unusable response may be repaired, never an uncertain dispatch. */
+export function completedGenerationRepairIssues(error: unknown): string[] | undefined {
+  if (error instanceof z.ZodError) {
+    return error.issues.map(issue => `Invalid ${issue.path.join(".") || "draft"}: ${issue.message}`);
+  }
+  if (error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "consumed_unusable") {
+    return ["The completed response was not valid JSON. Return the complete requested JSON object, with correct field types and no markdown or commentary."];
+  }
+  return undefined;
 }
 
 /** A native provider rejected the request before a generation could start. */

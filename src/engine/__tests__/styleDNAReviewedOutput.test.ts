@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { synthStyleDNA, type StyleDNADraft } from "@/engine/creative/styleDNA";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 
 const draft: StyleDNADraft = {
   palette: ["#102030", "#203040", "#304050", "#405060", "#506070", "#607080", "#708090"],
@@ -42,19 +43,26 @@ async function main(): Promise<void> {
   const previousKey = process.env.OPENROUTER_API_KEY;
   let reviewed: StyleDNADraft | undefined;
   let calls = 0;
+  let malformedFirst = false;
+  let alwaysMalformed = false;
+  let uncertainCritic = false;
   process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
     const body = JSON.parse(String(init?.body));
     const prompt = String(body.messages.at(-1)?.content);
     const critic = prompt.includes("Audit this channel's STYLE DNA");
+    if (critic && uncertainCritic) { calls++; return Response.json({ choices: [] }); }
     if (critic) {
+      assert.ok(prompt.includes("seo.titleFormula is a reusable template with [BRACKET] variables by design"),
+        "the identity critic must not take over episode-specific metadata work");
       reviewed = JSON.parse(prompt.split("DNA DRAFT:\n")[1]!.split("\n\nScore 0..1")[0]!) as StyleDNADraft;
     }
     calls++;
     return Response.json({
       id: `style-dna-${calls}`, model: body.model,
-      choices: [{ message: { content: JSON.stringify(critic ? { score: 0.95, issues: [] } : draft) } }],
+      choices: [{ message: { content: JSON.stringify(critic ? { score: 0.95, issues: [] }
+        : alwaysMalformed || malformedFirst && calls === 1 ? { ...draft, audio: { ...draft.audio, instrumentation: "piano registers" } } : draft) } }],
       usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140, cost: 0.001 },
     });
   };
@@ -72,6 +80,26 @@ async function main(): Promise<void> {
     assert.deepEqual(result.audio.instrumentation, reviewed.audio.instrumentation);
     assert.equal(result.audio.genre, reviewed.audio.genre);
     assert.equal(result.audio.moodArc, reviewed.audio.moodArc);
+    malformedFirst = true;
+    calls = 0;
+    const repaired = await synthStyleDNA({ family: "music_loop", name: "The Slow Glasshouse", now: 43 });
+    assert.notEqual(repaired.source, "ungrounded", "one completed schema mismatch must get an informed repair, not erase identity");
+    assert.equal(calls, 3, "one invalid draft, one corrected draft, one independent critic within the two-attempt budget");
+    assert.deepEqual(repaired.audio.bpmRange, [30, 35]);
+    malformedFirst = false;
+    uncertainCritic = true;
+    calls = 0;
+    await assert.rejects(synthStyleDNA({ family: "music_loop", name: "The Slow Glasshouse", now: 44 }),
+      OpenRouterGenerationOutcomeUnknownError);
+    assert.equal(calls, 2, "an uncertain critic must stop, not regenerate an already-paid identity");
+    uncertainCritic = false;
+    alwaysMalformed = true;
+    calls = 0;
+    const failed = await synthStyleDNA({ family: "music_loop", name: "The Slow Glasshouse", now: 45 });
+    assert.equal(calls, 2);
+    assert.equal(failed.source, "ungrounded");
+    assert.ok(failed.groundingGaps.some(gap => gap.startsWith("distil call failed:")));
+    assert.ok(failed.groundingGaps.every(gap => !gap.includes("no LLM key")), "schema failure must not falsely blame credentials");
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;

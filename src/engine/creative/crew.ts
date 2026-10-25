@@ -9,7 +9,7 @@
  */
 import { z } from "zod";
 import { CADENCE_BASE as EDITOR_CADENCE_BASE } from "@/lib/crew/editor";
-import { agentJson, agentJsonConfiguration } from "@/agents/mastra";
+import { agentJson, agentJsonConfiguration, isGenerationOutcomeUnknown } from "@/agents/mastra";
 import {
   ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
   SCORED_ARRANGEMENT_COMPOSER_MAX_OUTPUT_TOKENS,
@@ -125,6 +125,7 @@ export async function briefDirector(bible: ShowBible, ctx: CrewContext): Promise
     }));
     return { hook, beats };
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     // Returning undefined is the right degradation — a video without a director
     // brief still renders. But the log has to say the brief is GONE, not just
     // echo a provider error, or a run that shipped with no structure/beats reads
@@ -215,6 +216,7 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
       avoid,
     };
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     // Returning undefined is the right degradation — a video without a dp
     // brief still renders. But the log has to say the brief is GONE, not just
     // echo a provider error, or a run that shipped with no visual specs reads
@@ -289,6 +291,7 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
       overlayRule,
     };
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     // Returning undefined is the right degradation — a video without a editor
     // brief still renders. But the log has to say the brief is GONE, not just
     // echo a provider error, or a run that shipped with no cut plan reads
@@ -346,6 +349,7 @@ export async function briefComposer(
       },
     };
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     // Returning undefined is the right degradation — a video without a composer
     // brief still renders. But the log has to say the brief is GONE, not just
     // echo a provider error, or a run that shipped with no music arc reads
@@ -697,6 +701,7 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
     }
     return { assertions };
   } catch (e) {
+    if (isGenerationOutcomeUnknown(e)) throw e;
     // Returning undefined is the right degradation — a video without a critic
     // brief still renders. But the log has to say the brief is GONE, not just
     // echo a provider error, or a run that shipped with no review spec reads

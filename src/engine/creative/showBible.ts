@@ -6,7 +6,7 @@
  * fail-closed quality gate so incomplete identity is never persisted.
  */
 import { z } from "zod";
-import { agentJson } from "@/agents/mastra";
+import { agentJson, completedGenerationRepairIssues } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { FAMILY_CREW as FAMILY_CREW_RAW, type FamilyKey } from "@/engine/families";
@@ -235,6 +235,7 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       label: "showBible",
       threshold: 0.8,
       maxIters: 2,
+      repairOutputErrors: completedGenerationRepairIssues,
       log: (message) => log(message),
       produce: async (priorIssues) => {
         const repair = priorIssues.length
