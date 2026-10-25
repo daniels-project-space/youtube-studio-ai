@@ -192,7 +192,7 @@ export async function POST(request: Request) {
       assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
       const [programBytes, auditionWavBytes] = await Promise.all([
         getObjectBytes(result.review.channelMusicProgramKey),
-        getObjectBytes(wavKey),
+        getObjectBytes(wavKey, undefined, { maxBytes: output.byteLength }),
       ]);
       const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
       if (program.fingerprint !== checkpoint.programFingerprint) throw new Error("music audition frozen program identity mismatch");
@@ -215,7 +215,8 @@ export async function POST(request: Request) {
         assertOwnedKey(actor.ownerId, result.review.musicProviderAuditionSourceKey, "music audition source receipt");
         assertOwnedKey(actor.ownerId, result.review.sourceMusicKey, "provider music source");
         const [sourceReceiptBytes, sourceMusicBytes] = await Promise.all([
-          getObjectBytes(result.review.musicProviderAuditionSourceKey), getObjectBytes(result.review.sourceMusicKey),
+          getObjectBytes(result.review.musicProviderAuditionSourceKey),
+          getObjectBytes(result.review.sourceMusicKey, undefined, { maxBytes: checkpoint.sourceOutput.byteLength }),
         ]);
         const source = MusicProviderAuditionSourceSchema.parse(JSON.parse(Buffer.from(sourceReceiptBytes).toString("utf8")));
         if (source.fingerprint !== checkpoint.musicProviderAuditionSourceFingerprint ||
@@ -234,6 +235,7 @@ export async function POST(request: Request) {
       const nativeQuality = await measureNativeMusicQuality({
         audio: auditionWavBytes,
         durationSec: output.durationSec,
+        sourceKind: checkpoint.version === "music-audition-checkpoint/v1" ? "native" : "provider_mix",
       });
       const reviewReceiptFingerprint = sha256Hex(canonicalJson({
         version: "music-audition-human-review/v1", checkpointFingerprint: checkpoint.checkpointFingerprint,

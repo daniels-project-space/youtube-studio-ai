@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB } from "@/engine/channelMusicProgram";
+import { MUSIC_PROVIDER_MIX_MAX_SECONDS, MUSIC_PROVIDER_AUDITION_MAX_BYTES } from "@/engine/musicAuditionLimits";
 
 /**
  * Native Music3 takes must be measured from the exact WAV that is retained for
@@ -161,11 +162,14 @@ function postOpeningProbeStarts(durationSec: number, windowDurationSec: number):
 export async function measureNativeMusicQuality(input: {
   readonly audio: Uint8Array;
   readonly durationSec: number;
+  readonly sourceKind?: "native" | "provider_mix";
 }): Promise<NativeMusicQualityAnalysis> {
-  if (!Number.isFinite(input.durationSec) || input.durationSec < 6 || input.durationSec > 300) {
-    throw new Error("native music QA requires a measured WAV duration from 6 to 300 seconds");
+  const maximumSeconds = input.sourceKind === "provider_mix" ? MUSIC_PROVIDER_MIX_MAX_SECONDS : 300;
+  const maximumBytes = input.sourceKind === "provider_mix" ? MUSIC_PROVIDER_AUDITION_MAX_BYTES : 50_000_000;
+  if (!Number.isFinite(input.durationSec) || input.durationSec < 6 || input.durationSec > maximumSeconds) {
+    throw new Error(`native music QA requires a measured WAV duration from 6 to ${maximumSeconds} seconds`);
   }
-  if (input.audio.byteLength < 44 || input.audio.byteLength > 50_000_000) {
+  if (input.audio.byteLength < 44 || input.audio.byteLength > maximumBytes) {
     throw new Error("native music QA received WAV bytes outside its bounded range");
   }
   const workDir = await mkdtemp(join(tmpdir(), "native-music-qa-"));

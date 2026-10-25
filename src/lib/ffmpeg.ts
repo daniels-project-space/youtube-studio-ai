@@ -10,6 +10,7 @@
  *      duration; mux audio; output mp4 (yuv420p, +faststart).
  */
 import { spawn } from "node:child_process";
+import { MUSIC_PROVIDER_MIX_MAX_SECONDS, MUSIC_PROVIDER_AUDITION_MAX_BYTES } from "@/engine/musicAuditionLimits";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -3800,8 +3801,8 @@ export async function decodeMusicAuditionPcmWav(
   outputPath: string,
   durationSec: number,
 ): Promise<{ durationSec: number; byteLength: number }> {
-  if (!Number.isFinite(durationSec) || durationSec < 6 || durationSec > 300) {
-    throw new FfmpegError("music audition decode requires a measured 6–300 second source");
+  if (!Number.isFinite(durationSec) || durationSec < 6 || durationSec > MUSIC_PROVIDER_MIX_MAX_SECONDS) {
+    throw new FfmpegError(`music audition decode requires a measured 6–${MUSIC_PROVIDER_MIX_MAX_SECONDS} second source`);
   }
   await run(FFMPEG, [
     "-hide_banner", "-nostdin", "-y", "-i", inputPath,
@@ -3823,7 +3824,7 @@ export async function decodeMusicAuditionPcmWav(
     throw new FfmpegError("music audition decode did not produce the exact stereo 32 kHz PCM review format");
   }
   const { size } = await stat(outputPath);
-  if (!Number.isSafeInteger(size) || size < 44 || size > 50_000_000) {
+  if (!Number.isSafeInteger(size) || size < 44 || size > MUSIC_PROVIDER_AUDITION_MAX_BYTES) {
     throw new FfmpegError("music audition WAV exceeds its retained review bounds");
   }
   return { durationSec: measuredDurationSec, byteLength: size };

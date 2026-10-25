@@ -7,11 +7,13 @@ assert.ok(start >= 0, "shared music must own the executable block");
 const music = source.slice(start);
 
 const prepared = music.indexOf('const preparedMusic = ctx.store["preparedMusic"]');
-const providerPrompt = music.indexOf("const providerPrompt = provider === \"minimax_music3\"");
+const providerPrompt = music.indexOf("const providerPromptForGeneration =");
+const preparedMaster = music.indexOf("const masterBytes = await getObjectBytes(preparedMusic.musicKey");
+const completedReuse = music.indexOf("[COST_PATCH_KEY]: 0", preparedMaster);
 
 assert.ok(prepared >= 0, "music must recognize the runner-admitted prepared weekly receipt");
 assert.ok(
-  providerPrompt > prepared,
+  preparedMaster > prepared && completedReuse > preparedMaster && providerPrompt > completedReuse,
   "a verified prepared music master must be consumed before provider generation is considered",
 );
 for (const required of [

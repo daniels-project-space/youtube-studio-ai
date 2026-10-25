@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MUSIC_PROVIDER_MIX_MAX_SECONDS, MUSIC_PROVIDER_AUDITION_MAX_BYTES } from "./musicAuditionLimits";
 
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -12,7 +13,7 @@ const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const text = (maximum: number) => z.string().trim().min(1).max(maximum);
 const NativeOutputIntegritySchema = z.object({
   contentSha256: FingerprintSchema,
-  byteLength: z.number().int().min(44).max(50_000_000),
+  byteLength: z.number().int().min(44).max(MUSIC_PROVIDER_AUDITION_MAX_BYTES),
 }).passthrough();
 
 /**
@@ -98,8 +99,8 @@ export type MusicAuditionCheckpoint = z.infer<typeof MusicAuditionCheckpointSche
 
 const ProviderAuditionOutputSchema = z.object({
   contentSha256: FingerprintSchema,
-  byteLength: z.number().int().min(44).max(50_000_000),
-  durationSec: z.number().positive().max(300),
+  byteLength: z.number().int().min(44).max(MUSIC_PROVIDER_AUDITION_MAX_BYTES),
+  durationSec: z.number().positive().max(MUSIC_PROVIDER_MIX_MAX_SECONDS),
   sampleRateHz: z.literal(32_000),
   channels: z.literal(2),
   codec: z.literal("pcm_s16le"),
@@ -116,7 +117,7 @@ const MusicProviderAuditionSourceBodySchema = z.object({
   sourceOutput: z.object({
     contentSha256: FingerprintSchema,
     byteLength: z.number().int().positive().max(250_000_000),
-    durationSec: z.number().positive().max(300),
+    durationSec: z.number().positive().max(MUSIC_PROVIDER_MIX_MAX_SECONDS),
     codec: z.literal("mp3"),
   }).strict(),
   auditionWavKey: text(1_200),
@@ -169,7 +170,7 @@ export function createMusicProviderAuditionSource(input: {
     throw new Error("music provider audition source does not match the sealed provider route");
   }
   if (input.sourceBytes.byteLength < 1_000 || input.sourceBytes.byteLength > 250_000_000 ||
-      !Number.isFinite(input.durationSec) || input.durationSec < 6 || input.durationSec > 300) {
+      !Number.isFinite(input.durationSec) || input.durationSec < 6 || input.durationSec > MUSIC_PROVIDER_MIX_MAX_SECONDS) {
     throw new Error("music provider audition source is outside its byte or duration bounds");
   }
   const auditionOutput = {

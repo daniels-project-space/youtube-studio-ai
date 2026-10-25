@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MUSIC_PROVIDER_MIX_MAX_SECONDS, MUSIC_PROVIDER_AUDITION_MAX_BYTES } from "./musicAuditionLimits";
 
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -87,8 +88,8 @@ const MusicAuditionReviewBodySchema = z.object({
   programFingerprint: FingerprintSchema,
   output: z.object({
     contentSha256: FingerprintSchema,
-    byteLength: z.number().int().min(44).max(50_000_000),
-    durationSec: z.number().positive().max(300),
+    byteLength: z.number().int().min(44).max(MUSIC_PROVIDER_AUDITION_MAX_BYTES),
+    durationSec: z.number().positive().max(MUSIC_PROVIDER_MIX_MAX_SECONDS),
     sampleRateHz: z.literal(32_000),
     channels: z.literal(2),
     codec: z.literal("pcm_s16le"),

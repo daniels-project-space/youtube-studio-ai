@@ -3,6 +3,7 @@
  * Provider admission, receipt verification, mastering and spend stay together.
  */
 import { boundedInteger } from "@/engine/boundedNumber";
+import { MUSIC_PROVIDER_MIX_MAX_SECONDS } from "@/engine/musicAuditionLimits";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getMusicBrief, getVisualBrief } from "@/engine/creative/brief";
 import { acceptedMusicArrangementForRun } from "@/engine/acceptedMusicArrangement";
@@ -1021,8 +1022,8 @@ export const music: Block = {
     let musicAuditionWavKey: string | undefined;
     if (usedProvider !== "minimax_music3") {
       const sourceProbe = await probe(local);
-      if (!sourceProbe.hasAudio || sourceProbe.hasVideo || sourceProbe.durationSec < 6 || sourceProbe.durationSec > 300) {
-        throw new Error("music: mastered provider output is not an auditionable 6–300 second audio-only source");
+      if (!sourceProbe.hasAudio || sourceProbe.hasVideo || sourceProbe.durationSec < 6 || sourceProbe.durationSec > MUSIC_PROVIDER_MIX_MAX_SECONDS) {
+        throw new Error(`music: mastered provider output is not an auditionable 6–${MUSIC_PROVIDER_MIX_MAX_SECONDS} second audio-only source`);
       }
       const retained = await retainProviderMusicAuditionSource({
         ctx,
