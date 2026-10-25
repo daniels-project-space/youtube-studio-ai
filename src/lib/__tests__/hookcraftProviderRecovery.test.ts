@@ -102,8 +102,9 @@ async function main(): Promise<void> {
       /both attempts failed the gate.*hook judge unavailable/,
       "production must refuse a cold open whose retention judge never returned a valid verdict",
     );
-    assert.equal(judgeCalls, 2, "production retries the complete cold-open slate exactly once");
-    assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
+    assert.equal(judgeCalls, 2, "production retries the existing cold-open slate exactly once");
+    assert.equal(generatorCalls, 1, "a failed reviewer must not purchase replacement candidate text");
+    assert.ok(judgePrompts[1]?.includes("previous review was unusable"), "the replacement review must repair its response rather than reuse a cached malformed verdict");
     assert.match(generationPrompts[0] ?? "", /authored guide defines the channel voice and outranks the generic archetype below/);
     assert.ok(generationPrompts[0]?.includes("pacing: Measured, with a deliberate pause before each reveal."),
       "channel narrative DNA must shape its cold open as well as the body script and critic");
@@ -126,9 +127,9 @@ async function main(): Promise<void> {
     assert.equal(draftFailure.verdict.factCheck, "unchecked",
       "numeric source matching must not be presented as full semantic fact verification");
     assert.equal(judgeCalls, 3, "the explicit draft preview makes one judge attempt, not a hidden retry");
-    assert.doesNotMatch(generationPrompts[2] ?? "", /FROZEN CHANNEL EDITORIAL IDENTITY/,
+    assert.doesNotMatch(generationPrompts[1] ?? "", /FROZEN CHANNEL EDITORIAL IDENTITY/,
       "legacy callers without a Show Bible keep the unconditioned cold-open prompt");
-    assert.doesNotMatch(generationPrompts[2] ?? "", /CANONICAL CHANNEL PROGRAM CONTEXT/,
+    assert.doesNotMatch(generationPrompts[1] ?? "", /CANONICAL CHANNEL PROGRAM CONTEXT/,
       "legacy callers without a sealed program route keep their previous audience/topic context");
 
     judgeMode = "pass";
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
       "a judge-approved cold open cannot change a sourced year and pass as grounded",
     );
     assert.equal(judgeCalls, 5, "the mismatched year is checked after a real passing judge verdict and one retry");
-    assert.equal(generatorCalls, 5, "the source mismatch receives only Hookcraft's existing single bounded retry");
+    assert.equal(generatorCalls, 4, "the source mismatch receives only Hookcraft's existing single bounded retry");
     hook = "Chernobyl's ignored safety test failed in 1986.";
 
     hook = "Chernobyl's ignored safety test affected thirteen nearby workers.";
@@ -149,14 +150,14 @@ async function main(): Promise<void> {
       "a spelled-out quantity must not bypass numeric source grounding",
     );
     assert.equal(judgeCalls, 7, "a spelled-out numeric mismatch is checked after judging and receives one bounded retry");
-    assert.equal(generatorCalls, 7, "a spelled-out source mismatch gets only Hookcraft's existing one retry");
+    assert.equal(generatorCalls, 6, "a spelled-out source mismatch gets only Hookcraft's existing one retry");
     hook = "Chernobyl's ignored safety test affected twelve nearby workers.";
     const spokenNumberControl = await craftHook(args);
     assert.equal(spokenNumberControl.hook, hook,
       "a spelled-out quantity must match its equivalent digit-form source evidence");
     assert.equal(spokenNumberControl.verdict.factCheck, "unchecked",
       "numeric presence still must not be represented as full semantic fact verification");
-    assert.equal(generatorCalls, 8, "an equivalent spoken quantity passes without an unnecessary regeneration");
+    assert.equal(generatorCalls, 7, "an equivalent spoken quantity passes without an unnecessary regeneration");
     hook = "Chernobyl's ignored safety test failed in 1986.";
 
     hook = "Chernobyl's ignored safety test affected 12 percent of the district.";
@@ -166,7 +167,7 @@ async function main(): Promise<void> {
       "a sourced number cannot be reassigned to a different unit merely because the digits match",
     );
     assert.equal(judgeCalls, 10, "a mismatched unit remains gated after each judge-approved slate");
-    assert.equal(generatorCalls, 10, "a mismatched unit receives only the existing one retry");
+    assert.equal(generatorCalls, 9, "a mismatched unit receives only the existing one retry");
     hook = "Chernobyl's ignored safety test failed in 1986.";
 
     generatedHooks = [
@@ -177,13 +178,13 @@ async function main(): Promise<void> {
     const laterGroundedCandidate = await craftHook(args);
     assert.equal(laterGroundedCandidate.hook, generatedHooks[2],
       "numeric source checks must cover later judge-ranked candidates, not only the first two");
-    assert.equal(generatorCalls, 11, "two rejected numeric candidates do not trigger unnecessary regeneration when a grounded candidate remains");
+    assert.equal(generatorCalls, 10, "two rejected numeric candidates do not trigger unnecessary regeneration when a grounded candidate remains");
     generatedHooks = undefined;
 
     const groundedControl = await craftHook(args);
     assert.equal(groundedControl.verdict.factCheck, "unchecked",
       "matching a sourced year does not upgrade the limited numeric check into a fact-check verdict");
-    assert.equal(generatorCalls, 12, "a valid sourced numeric claim passes on the first attempt");
+    assert.equal(generatorCalls, 11, "a valid sourced numeric claim passes on the first attempt");
 
     judgeMode = "unknown";
     await assert.rejects(
@@ -192,7 +193,7 @@ async function main(): Promise<void> {
       "an ambiguous judge outcome must propagate to execution recovery instead of becoming lint-only success",
     );
     assert.equal(judgeCalls, 13, "the ambiguous judge outcome must not be automatically replayed");
-    assert.equal(generatorCalls, 13, "each requested hook reaches exactly one generation call per attempt");
+    assert.equal(generatorCalls, 12, "each requested hook reaches exactly one generation call per attempt");
     console.log("HOOKCRAFT PROVIDER RECOVERY PASS — production refusal, draft diagnostics, and ambiguity remain distinct");
   } finally {
     (Module as unknown as { _load: typeof originalLoad })._load = originalLoad;

@@ -75,7 +75,7 @@ async function main(): Promise<void> {
           assert.match(prompt, /editorial intent, NOT evidence/);
           assert.match(prompt, /Score low for ignoring, contradicting, or overstating it/);
         }
-        assert.equal(body.max_tokens, 1400);
+        assert.equal(body.max_tokens, 2500);
         // Four provider candidates intentionally collapse to one unique
         // survivor before judging; return exactly one verdict for the actual
         // candidate list so the strict hook admission contract is exercised

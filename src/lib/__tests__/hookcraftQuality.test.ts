@@ -24,7 +24,7 @@ assert.ok(repeated.repeatedTerms > concrete.repeatedTerms, "repeated content wor
 assert.ok(repeated.score < concrete.score, "repetition should reduce the local quality score");
 
 assert.equal(HOOK_MAX_OUTPUT_TOKENS, 4800, "four candidates need answer room beyond the measured 3069 reasoning tokens");
-assert.equal(HOOK_JUDGE_MAX_OUTPUT_TOKENS, 1400, "judge output must stay bounded for the structured verdict");
+assert.equal(HOOK_JUDGE_MAX_OUTPUT_TOKENS, 2500, "judge output needs answer room beyond the measured 1343 reasoning tokens");
 
 const source = readFileSync(join(process.cwd(), "src/lib/hookcraft.ts"), "utf8");
 assert.match(source, /rawCandidates/, "generated candidates should be deduplicated before lint/judge work");

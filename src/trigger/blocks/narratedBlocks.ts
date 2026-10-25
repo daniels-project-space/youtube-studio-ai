@@ -911,6 +911,7 @@ export function createScriptGenBlock(
     };
 
     let precraftedHook: Script["crafted"] | undefined;
+    let hookRepairIssues: string[] | undefined;
     const loop = await produceAndCritique<Script>({
       label: "script_gen",
       threshold: laneQuality.critiqueThreshold,
@@ -924,8 +925,8 @@ export function createScriptGenBlock(
           {
             ...req,
             ...(priorIssues.length ? { priorIssues } : {}),
-            // Only the narration was rejected, so the regen must not re-bill
-            // hookcraft (Pro + grounded fact-checks).
+            ...(hookRepairIssues ? { hookRepairIssues } : {}),
+            // Keep approved hooks only for body-owned repairs.
             ...(priorIssues.length && precraftedHook ? { precraftedHook } : {}),
           },
           ctx.log,
@@ -970,8 +971,10 @@ export function createScriptGenBlock(
                 ? `\n${channelProgramContextPrompt(programRoute!)}\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.`
                 : "") +
               channelCritiqueBrief(scriptChannel) +
-              ` Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 ` +
-              `issues, each under 140 characters.\n\n` +
+              ` Return STRICT JSON {"pass": boolean, "issues": string[], "repairTarget": "body" | "cold_open" | "both"} — at most 5 ` +
+              `issues, each under 140 characters. Set repairTarget to the owner of the defects. ` +
+              `The body writer cannot change the fixed cold open; hook defects must target cold_open or both.\n\n` +
+              `FIXED COLD OPEN:\n${draft.hook}\n\nCOMPLETE NARRATION (including cold open):\n` +
               scriptCritiqueExcerpt(draft.narrationText),
             // Reasoning route: the ceiling covers the THINKING and the answer, and a
             // findings list is the expensive verdict — a clean pass is cheap to emit,
@@ -988,6 +991,11 @@ export function createScriptGenBlock(
           const rejectionIssues = issues.length
             ? issues
             : ["independent narrative critic rejected the draft without usable remediation"];
+          if (rejected && (crit.repairTarget === "cold_open" || crit.repairTarget === "both")) {
+            precraftedHook = undefined;
+            hookRepairIssues = rejectionIssues;
+            ctx.log("script_gen: delegating rejected cold open to Hookcraft", { issues: rejectionIssues });
+          }
           if (rejected) ctx.log(`script_gen: draft rejected by critic — regenerating once`, { issues: rejectionIssues });
           // The `0.01 * iter` term preserves the legacy "keep the informed
           // second attempt" rule: produceAndCritique returns the best candidate
@@ -998,6 +1006,7 @@ export function createScriptGenBlock(
             : { score: 1, pass: true, issues: [] };
         } catch (e) {
           // An independent critic outage cannot be treated as a quality pass.
+          if (e instanceof OpenRouterGenerationOutcomeUnknownError || e instanceof ExecutionError) throw e;
           throw new Error(
             `script_gen FAILED: independent narrative critic unavailable — refusing an unreviewed script (${e instanceof Error ? e.message : e})`,
           );
@@ -1459,6 +1468,7 @@ export function createQaScriptBlock(
     } catch (e) {
       // A confirmed quality failure must propagate. A model/parse/network
       // error is also fail-closed: unverified is not approved for paid media.
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError || e instanceof ExecutionError) throw e;
       if (e instanceof Error && e.message.startsWith("qa_script FAILED")) throw e;
       throw new Error(
         `qa_script FAILED: independent narrative critic unavailable — refusing paid narration (${e instanceof Error ? e.message : e})`,

@@ -7,7 +7,11 @@ import type { ShowBible, StyleDNA } from "@/engine/creative/types";
 import { narrationPhysicsFor, narrationSpeedForStyleDNA } from "@/engine/golden";
 import { synthStyleDNA, styleDNAConfidence } from "@/engine/creative/styleDNA";
 import { briefDirector, briefCinematographer, briefEditor, briefComposer } from "@/engine/creative/crew";
-import { synthScript } from "@/lib/scriptGen";
+import { SCRIPT_DURATION_MAX_RATIO, type Script } from "@/lib/scriptGen";
+import { registerAllBlocks } from "@/engine/blocks";
+import { getManifest } from "@/engine/registry";
+import { CHANNEL_AWARE_SCRIPT_GEN_VERSION, CHANNEL_AWARE_SCRIPT_QA_VERSION } from "@/engine/channelAwareScriptQaSelection";
+import type { StageContext } from "@/engine/types";
 import { craftMetadata } from "@/lib/metacraft";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { parseShowBibleVoice } from "@/engine/showBibleVoice";
@@ -67,6 +71,7 @@ async function main(): Promise<void> {
   let priorReport: { input: unknown; completedStages: string[]; scope?: string; passed?: boolean } | undefined;
   let narrationPacing: { sentenceGapSec: number; ttsSpeed: number } | undefined;
   const stages: Record<string, unknown> = {};
+  const logs: { message: string; details?: unknown }[] = [];
   globalThis.fetch = async (url, options) => {
     if (String(url) !== "https://openrouter.ai/api/v1/chat/completions") {
       throw new Error("text proof refuses unrelated network operations");
@@ -90,7 +95,10 @@ async function main(): Promise<void> {
     }).catch(() => { receipts.push({ dispatchIndex, status: response.status, unreadable: true }); }));
     return response;
   };
-  const log = (message: string) => console.log(`[${caseName}] ${message}`);
+  const log = (message: string, details?: unknown) => {
+    logs.push({ message, ...(details === undefined ? {} : { details }) });
+    console.log(`[${caseName}] ${message}`, details ?? "");
+  };
   async function stage<T>(name: string, produce: () => Promise<T>): Promise<T> {
     log(`starting ${name}`);
     const output = await produce();
@@ -137,18 +145,40 @@ async function main(): Promise<void> {
       const physics = narrationPhysicsFor(input.niche);
       narrationPacing = { sentenceGapSec: physics.sentenceGap,
         ttsSpeed: narrationSpeedForStyleDNA(dna.narrative) ?? physics.speed };
-      const script = await stage("script", () => synthScript({ ...input, channelName: input.name,
-        ...narrationPacing,
-        channelVoice: parseShowBibleVoice(bible) ?? undefined, narrative: dna.narrative, structure: director ?? undefined,
-        style: caseName === "quiet" ? "meditation" : "essay", language: "en" }, log));
+      registerAllBlocks();
+      const writer = getManifest("script_gen", CHANNEL_AWARE_SCRIPT_GEN_VERSION);
+      const critic = getManifest("qa_script", CHANNEL_AWARE_SCRIPT_QA_VERSION);
+      assert.ok(writer && critic, "the actual channel-aware writer and admission modules must be registered");
+      const moduleContext: StageContext = {
+        ownerId: "private-module-proof", channelId: `private-${caseName}-proof`,
+        runId: `private-${caseName}-${Date.now()}`, keyPrefix: "private-module-proof/", budgetUsd: 1,
+        params: { ...narrationPacing, maxSeconds: input.maxSeconds,
+          style: caseName === "quiet" ? "meditation" : "essay", language: "en", qualityProfile: "production" },
+        store: { topic: input.topic, channelName: input.name, niche: input.niche, persona: input.persona,
+          showBible: bible, styleDNA: dna, criticDoctrine: bible.criticDoctrine, structure: director }, log,
+      };
+      const script = await stage("script", async () => {
+        const patch = await writer.execute(moduleContext);
+        assert.ok(patch.script && typeof patch.narrationText === "string", "writer must return the real script handoff");
+        const result = patch.script as Script;
+        assert.equal(result.narrationText, patch.narrationText);
+        return result;
+      });
       assert.ok(script.narrationText.trim() && script.sections.length, "script must contain actual spoken content");
-      assert.ok(script.estDurationSec <= input.maxSeconds * 1.15,
-        "spoken output must remain within 15% of its requested duration before packaging");
+      assert.ok(script.estDurationSec <= input.maxSeconds * SCRIPT_DURATION_MAX_RATIO,
+        "spoken output must satisfy the same duration ceiling as the actual writer");
+      await stage("script-qa", async () => {
+        const patch = await critic.execute({ ...moduleContext, params: {},
+          store: { ...moduleContext.store, script, narrationText: script.narrationText } });
+        assert.equal(patch.scriptApproved, true, "packaging cannot precede actual independent module admission");
+        return patch;
+      });
       const metadata = await stage("metadata", () => craftMetadata({ ...input, channelName: input.name,
         narrationText: script.narrationText, coldOpen: script.crafted?.coldOpen, hookLoop: script.hookLoop,
         quote: script.closingLine, competitorTitles: [], channelVoice: parseShowBibleVoice(bible) ?? undefined,
         titleFormula: dna.seo.titleFormula, descriptionStructure: dna.seo.descriptionStructure, language: "en", log }));
       assert.ok(metadata.judged, "unjudged packaging is not a passing chain");
+      assert.equal(metadata.packageFallback, false, "degraded packaging is not a passing output-quality proof");
     });
   } catch (error) {
     failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -157,7 +187,8 @@ async function main(): Promise<void> {
     globalThis.fetch = nativeFetch;
     await Promise.all(pendingReceipts);
     const report = { caseName, scope: args.includes("--identity-only") ? "identity" : "text-chain",
-      input, completedStages: Object.keys(stages), passed: !failure,
+      input, completedStages: Object.keys(stages), passed: !failure, logs,
+      scriptModules: { writer: CHANNEL_AWARE_SCRIPT_GEN_VERSION, critic: CHANNEL_AWARE_SCRIPT_QA_VERSION },
       failure, dispatches, receipts, reusedShowBibleFrom: resumeDirectory ? resolve(resumeDirectory) : undefined,
       narrationPacing,
       conservativeReservedUsd: reservedUsd, usage: scope.snapshot(),

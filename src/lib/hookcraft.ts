@@ -225,7 +225,8 @@ const WPS = 3.1; // matches scriptGen's calibrated TTS rate
 // Live receipt 20261025-05 ended at length: 3069 reasoning tokens left only
 // 124 answer tokens under 3200. Four candidates need real JSON answer room.
 export const HOOK_MAX_OUTPUT_TOKENS = 4800;
-export const HOOK_JUDGE_MAX_OUTPUT_TOKENS = 1400;
+// Live 20261025-06 judge: 1393/1400 tokens, 1343 reasoning, finish=length.
+export const HOOK_JUDGE_MAX_OUTPUT_TOKENS = 2500;
 
 function words(t: string): number {
   return t.split(/\s+/).filter(Boolean).length;
@@ -455,6 +456,8 @@ export interface CraftedHook {
 
 export interface HookCraftArgs {
   topic: string;
+  /** Full-script reviewer feedback owned by this cold-open module. */
+  repairIssues?: string[];
   /** Final spoken runtime; claims about this video's own length must agree. */
   targetSeconds?: number;
   /** Hook plus opening share this caller-owned spoken-word budget. */
@@ -607,6 +610,10 @@ function registerClause(a: HookCraftArgs): string {
  * Throws when both attempts fail (callers get an honest failure, never a
  * could-open-any-video hook).
  */
+interface HookSlate {
+  candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[];
+}
+
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
   if (!hasCreativeTextKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
   if (a.targetSeconds !== undefined && (!Number.isFinite(a.targetSeconds) || a.targetSeconds <= 0)) {
@@ -619,26 +626,33 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     : `RUNTIME CONTRACT: the final spoken video targets ${a.targetSeconds} seconds for planning, but actual audio is not measured yet. Do not promise an exact running time for THIS video in spoken text, even the target duration. Use a brief pause or moment rather than a literal number of minutes or seconds. Factual durations discussed as subject matter remain allowed; do not convert them into a promise about this video's runtime.`;
   const quality = hookQualityProfile(a);
   const skipConcreteness = a.style === "meditation";
-  const deviceList = Object.entries(HOOK_DEVICES)
-    .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true))
+  const devices = Object.entries(HOOK_DEVICES)
+    .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true));
+  const deviceList = devices
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
   const lang = a.language && a.language !== "en" ? `\nWrite all spoken text in ${a.language}.` : "";
 
   let fixNote = "";
   let lastIssues: string[] = [];
+  let judgeRetrySlate: HookSlate | undefined;
+  let judgeRepairNote = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
     // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
     // provider prompt caching can reuse the stable doctrine on later attempts.
-    const gen = await creativeTextJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
+    const gen: HookSlate = judgeRetrySlate ?? await creativeTextJsonPro<HookSlate>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
+        a.repairIssues?.length ? `Repair these full-script review defects while preserving the authored topic, persona and source constraints: ${a.repairIssues.slice(0, 5).map(issue => issue.slice(0, 140)).join("; ")}` : "",
         `FIRST, silently analyze the topic: its core tension, the viewer's pain or fascination, and the ` +
           `emotional stakes. When admitted source grounding is present, choose a surprising fact it supports; ` +
           `without source grounding, do not present an invented detail as verified. Write every candidate from ` +
           `that analysis.`,
-        `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +
+        (devices.length < 4
+          ? `Write 4 candidates using the ${devices.length} devices below. Use each at least once; the remaining candidate may reuse a device with a distinct execution. `
+          : `Write 4 candidates, EACH using a DIFFERENT device from this list. `) +
+          `(Choose devices that best fit this topic ` +
           `and register; for search-intent topics favor problem_agitation/wrong_way/result_first, for ` +
           `browse/suggested-style topics favor curiosity, contrarian and scene devices):`,
         deviceList,
@@ -706,6 +720,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       }
       throw error;
     });
+    judgeRetrySlate = undefined;
 
     const rawCandidates = (Array.isArray(gen?.candidates) ? gen.candidates : [])
       .filter((c) => c && typeof c.hook === "string" && typeof c.opening === "string")
@@ -747,6 +762,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await creativeTextJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            a.repairIssues?.length ? `The replacement cold open must also resolve these full-script review defects: ${a.repairIssues.slice(0, 5).map(issue => issue.slice(0, 140)).join("; ")}` : "",
             timingDirective,
             a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
             a.sourceGrounding?.trim() ?? "",
@@ -771,6 +787,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?` +
               (a.targetSeconds === undefined ? "" : ` An exact spoken promise about THIS video's runtime is unverified before audio measurement: mark honest=false even if the number matches the planning target. Time facts about the subject are not runtime promises.`),
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
+            judgeRepairNote,
             `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
           ].filter(Boolean).join("\n\n"),
           maxTokens: HOOK_JUDGE_MAX_OUTPUT_TOKENS,
@@ -779,6 +796,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const admission = validateHookJudgeResponse(j, survivors.length);
         if (!admission.pass) throw new Error(`judge response rejected (${admission.issues.join("; ")})`);
         verdicts = admission.verdicts;
+        judgeRepairNote = "";
         best = typeof j.best === "number" && Number.isInteger(j.best) && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
       } catch (e) {
         // Unlike an ordinary known judge failure, a post-dispatch outcome with
@@ -791,9 +809,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           // The cold open is the highest-leverage retention surface and feeds
           // the script, title promise and visual plan. Local lint catches only
           // structural defects; it cannot replace a retention/voice/honesty
-          // verdict. Regenerate once, then fail this production stage honestly.
+          // verdict. Re-review the existing slate within the same two-attempt
+          // budget; a reviewer failure is not a defect in the candidate text.
           lastIssues.push(`hook judge unavailable: ${detail.slice(0, 160)}`);
-          fixNote = "THE RETENTION JUDGE DID NOT RETURN A VALID VERDICT. Regenerate every candidate with valid JSON; do not ship an unscored cold open.";
+          judgeRetrySlate = gen;
+          judgeRepairNote = `The previous review was unusable. Return a complete valid JSON verdict for each of the ${survivors.length} existing candidates, with every requested score and explicit honest boolean. Do not rewrite candidates or omit entries.`;
           a.log?.(
             `hookcraft: JUDGE FAILED (${detail}) — production refuses ${survivors.length} ` +
             `lint-only cold open(s); punch/specificity/curiosity/voiceMatch/promise were never scored`,

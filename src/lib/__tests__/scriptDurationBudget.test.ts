@@ -40,6 +40,8 @@ async function main(): Promise<void> {
     assert.equal(calls, 1);
     assert.match(prompts[0]!, /cold open.*60 words/i);
     assert.match(prompts[0]!, /219 words/);
+    assert.ok(prompts[0]!.includes("frozen channel narrative and director's accepted structure outrank the generic arc"));
+    assert.ok(prompts[0]!.includes("use invitations rather than commands"));
     assert.ok(prompts[0]!.includes("do not state this video's exact running time before audio is measured"));
     assert.equal(fits.estDurationSec, 90);
 

@@ -47,6 +47,8 @@ function arcRules(bodyWordBudget?: number): string {
     ? `in at most ${Math.max(1, Math.floor(bodyWordBudget / 4))} words. Combine movements when necessary to fit the body budget.\n`
     : "in 60-120 words.\n";
   return (
+  "STRUCTURE OWNERSHIP: the frozen channel narrative and director's accepted structure outrank the generic arc below. " +
+  "Adapt or combine its movements; do not force an argument, re-hook, practical assignment or imperative against the authored experience.\n" +
   "STRUCTURE — write the sections as a STORY JOURNEY, not an essay outline:\n" +
   "- INTRO (first section) = ARRIVAL: it follows the cold open (never repeats it), re-anchors the viewer " +
   "in the channel's recognizable ritual shape, honors where the journey stands, and lays out today's path " +
@@ -56,8 +58,8 @@ function arcRules(bodyWordBudget?: number): string {
   "open a movement with abstract theory. ONE theme and ONE carrying image/metaphor hold the entire episode " +
   "together — every movement returns to it from one layer DEEPER (progression, never lateral restarts). " +
   "Each movement is a story beat: a turn, a deepening, a small reveal.\n" +
-  "- INTEGRATION (the movement before the outro): turn today's lesson into the viewer's ACTUAL day — one " +
-  "concrete, immediately doable carry-out, stated plainly.\n" +
+  "- INTEGRATION (the movement before the outro): when the channel calls for practical application, offer one concrete carry-out. " +
+  "Otherwise allow reflection or an emotional landing. If the channel requires opt-in choices, use invitations rather than commands.\n" +
   "- OUTRO (final section) = THE LANDING: explicitly pay off the loop the cold open opened, close with the " +
   "channel's ritual (a practice, a meditation, a recap, a sign-off), and leave ONE quotable line that " +
   "distills the whole episode — the takeaway the viewer carries. Never a flat stop."
@@ -166,6 +168,8 @@ export interface ScriptRequest {
   voiceTags?: boolean;
   /** Critic issues from a rejected prior draft — the regen must fix these. */
   priorIssues?: string[];
+  /** Cold-open defects routed back to Hookcraft, not patched by the body writer. */
+  hookRepairIssues?: string[];
   /** A hook already crafted + judge-gated in a prior attempt. A critic-reject
    * regen passes the first attempt's hook here so the regen does NOT re-bill
    * hookcraft (Pro call + judge + grounded fact-checks) for a hook that
@@ -1025,10 +1029,10 @@ export async function synthScript(
   // THE COLD OPEN COMES FIRST — crafted and judge-gated by hookcraft (lint +
   // punch/specificity/curiosity/voiceMatch gates, one retry, loud fail). The
   // director's hook idea is honored INSIDE the craft as intent, never verbatim.
-  // A critic-reject regen reuses the already-gated hook (precraftedHook) so it
-  // never re-bills the hookcraft Pro call + grounded fact-checks.
+  // Body-only repairs reuse the approved hook; rejected hooks return to Hookcraft.
   const crafted = req.precraftedHook ?? await craftHook({
     topic: req.topic,
+    repairIssues: req.hookRepairIssues,
     targetSeconds: maxSeconds,
     maxColdOpenWords: Math.max(1, Math.floor(Math.min(30, maxSeconds / 2) * effectiveWps(gapSec, req.ttsSpeed ?? 1))),
     channelName: req.channelName,

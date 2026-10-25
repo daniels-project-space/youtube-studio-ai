@@ -24,7 +24,11 @@ async function main(): Promise<void> {
     const value = judge
       ? { verdicts: [{ punch: 9, specificity: 9, curiosity: 9, voiceMatch: 9, promise: 9, honest: true }], best: 0 }
       : { candidates: [{ device: "you_stakes", hook, opening, loop: "Let the unfinished cup wait." }] };
-    if (!judge) assert.ok(prompt.includes("31 spoken words"));
+    if (!judge) {
+      assert.ok(prompt.includes("31 spoken words"));
+      assert.ok(prompt.includes("using the 3 devices below"), "four gentle candidates must not require four distinct devices from a three-device list");
+      assert.ok(prompt.includes("remaining candidate may reuse a device with a distinct execution"));
+    }
     return Response.json({ id: `hook-duration-${calls}`, model: body.model,
       choices: [{ message: { content: JSON.stringify(value) } }],
       usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200, cost: 0.001 },

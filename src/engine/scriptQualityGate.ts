@@ -24,17 +24,20 @@ export function scriptCritiqueExcerpt(narration: string): string {
   ].join("\n\n[... OMITTED ...]\n\n");
 }
 
-export function parseScriptCritique(value: unknown): { pass: boolean; issues: string[] } {
+export function parseScriptCritique(value: unknown): { pass: boolean; issues: string[]; repairTarget?: "body" | "cold_open" | "both" } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("malformed script critique: expected an object with pass and issues");
   }
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).length !== 2 || typeof row.pass !== "boolean" || !Array.isArray(row.issues) ||
+  if (Object.keys(row).some(key => !["pass", "issues", "repairTarget"].includes(key)) ||
+      ("repairTarget" in row && !["body", "cold_open", "both"].includes(row.repairTarget as string)) ||
+      typeof row.pass !== "boolean" || !Array.isArray(row.issues) ||
       row.issues.length > 5 || row.issues.some((issue) => typeof issue !== "string" || !issue.trim() || issue.length > 140)) {
     throw new Error("malformed script critique: expected an explicit boolean verdict and at most five bounded text issues");
   }
   const issues = row.issues.map((issue: string) => issue.trim());
-  return { pass: row.pass && issues.length === 0, issues };
+  return { pass: row.pass && issues.length === 0, issues,
+    ...(row.repairTarget !== undefined ? { repairTarget: row.repairTarget as "body" | "cold_open" | "both" } : {}) };
 }
 
 export function assertScriptCritiqueAccepted(input: {
