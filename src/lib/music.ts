@@ -591,6 +591,10 @@ export async function generateSuno(args: {
   timeoutMs?: number;
 }): Promise<MusicResult> {
   const model = args.model ?? SUNO_DEFAULT_MODEL;
+  const direction = args.prompt.trim();
+  if (direction.length > 950) {
+    throw new MusicError("suno 950-character style limit would truncate approved music direction");
+  }
   const wantClips = Math.max(1, Math.min(2, args.wantClips ?? 1));
   const headers = {
     Authorization: `Bearer ${sunoKey()}`,
@@ -604,13 +608,13 @@ export async function generateSuno(args: {
     customMode: true,
     instrumental: args.instrumental ?? true,
     model,
-    style: trimPrompt(args.prompt, 950),
+    style: direction,
     title: trimPrompt(args.title?.trim() || "Instrumental Mix", 78),
     callBackUrl: "https://example.com/none",
   };
   // Legacy non-custom fallback (the pre-2026-06-10 request shape).
   const legacyBody = {
-    prompt: trimPrompt(args.prompt, 480),
+    prompt: direction,
     customMode: false,
     instrumental: args.instrumental ?? true,
     model,
@@ -665,6 +669,9 @@ export async function generateSuno(args: {
     // invalid request before generation admission.
     const explicitSchemaRejection = bodyIndex === 0 && (created.status === 400 || created.status === 422);
     if (explicitSchemaRejection) {
+      if (direction.length > 480) {
+        throw new MusicError("suno legacy fallback would truncate approved music direction", { status: created.status });
+      }
       taskId = undefined;
       continue;
     }

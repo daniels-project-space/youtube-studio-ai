@@ -1288,6 +1288,9 @@ export function createQaScriptBlock(
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    if (!narration.trim()) {
+      throw new Error("qa_script FAILED: narration contains no spoken text");
+    }
     const script = ctx.store["script"];
     if (script !== undefined) assertScriptNarrationConsistent(script, "qa_script");
     const bannedMatches = findChannelBannedWords(

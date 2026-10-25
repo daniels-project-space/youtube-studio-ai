@@ -543,12 +543,14 @@ export function musicProviderPromptForProgram(
     throw new Error("music provider prompt limit must be an integer of at least 160 characters");
   }
   const identity = program.identity;
+  // This is the sealed sound, not optional prompt decoration. Truncating a
+  // phrase can remove its resolution or negation and change the approved brief.
   const core = [
-    identity.genre.slice(0, 100),
-    identity.instrumentation.slice(0, 3).map((item) => item.slice(0, 30)).join(", "),
-    identity.textures.slice(0, 2).map((item) => item.slice(0, 26)).join(", "),
-    `Topic: ${program.topic.slice(0, 90)}`,
-    `Mood: ${identity.moodArc.slice(0, 100)}`,
+    identity.genre,
+    identity.instrumentation.join(", "),
+    identity.textures.join(", "),
+    `Topic: ${program.topic}`,
+    `Mood: ${identity.moodArc}`,
     identity.bpmRange ? `Tempo ${identity.bpmRange[0]}-${identity.bpmRange[1]} BPM` : "Beatless, no pulse or tempo",
     "Instrumental, no vocals or lyrics",
   ].filter(Boolean).join("; ");

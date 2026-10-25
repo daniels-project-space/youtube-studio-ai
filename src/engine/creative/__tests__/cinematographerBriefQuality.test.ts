@@ -71,6 +71,10 @@ async function main() {
     assert.equal(await briefCinematographer(bible, context), undefined,
       "duplicate search terms cannot satisfy the distinct query minimum");
 
+    output = { ...validBrief, footageQueries: [...validQueries.slice(0, 7), "  SATURN   rings\tcloseup  "] };
+    assert.equal(await briefCinematographer(bible, context), undefined,
+      "case and whitespace variants of one stock search cannot supply an eighth distinct query");
+
     for (const incomplete of [
       { ...validBrief, promptStyle: " " },
       { ...validBrief, palette: ["navy"] },

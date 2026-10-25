@@ -30,6 +30,8 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
 let storageCalls = 0, networkCalls = 0;
 let transferMode = false;
+let captureTracks = false;
+const trackPrompts: string[] = [];
 const reads: { key: string; options: unknown }[] = [];
 const writtenObjects = new Map<string, Uint8Array>();
 loader._load = function (id, ...args) {
@@ -50,7 +52,15 @@ loader._load = function (id, ...args) {
     publicUrl: () => "https://fixture.invalid/reused.mp3",
   };
   if (id === "@/lib/music") return {
-    generateMureka: async () => { throw new Error("provider boundary reached; no generation in this contract test"); },
+    generateMureka: async ({ prompt }: { prompt: string }) => {
+      if (captureTracks) {
+        trackPrompts.push(prompt);
+        if (trackPrompts.length === 1) return {
+          jobId: "fixture-job-1", tracks: [{ url: "https://fixture.invalid/music.mp3" }],
+        };
+      }
+      throw new Error("provider boundary reached; no generation in this contract test");
+    },
     MusicError: class MusicError extends Error {
       safeToFallback = false;
       acceptedUnits = 0;
@@ -196,6 +206,24 @@ async function main() {
   assert.equal(storageCalls, 1, "a matching frozen program reaches the existing storage path");
   assert.equal(networkCalls, 0);
   transferMode = true;
+  captureTracks = true;
+  const authoredInstruments = ["felt piano with unhurried decaying notes", "bowed bass", "muted guitar", "bass clarinet"];
+  const authoredMood = "Begin with a cool, restrained question carried by the piano and let the bass answer patiently; only near the end resolve into warmer harmony without increasing loudness.";
+  await assert.rejects(music.run({
+    ...ctx, params: { provider: "mureka", trackCount: 2 },
+    store: { topic: "An evening ledger", styleDNA: { audio: {
+      role: "narration_bed", genre: "intimate chamber score", instrumentation: authoredInstruments,
+      textures: ["natural room"], moodArc: authoredMood, bpmRange: [58, 66],
+    } } },
+  }), /provider boundary reached/);
+  assert.equal(trackPrompts.length, 2, "the real producer requests a second composition for the same channel");
+  for (const prompt of trackPrompts) {
+    assert.ok(prompt.length <= 900, "variation must share the provider budget, not extend an already full prompt");
+    for (const cue of [...authoredInstruments, authoredMood]) assert.ok(prompt.includes(cue));
+  }
+  assert.match(trackPrompts[1]!, /vary only accompaniment beneath speech, with no lead melody or attention-grabbing event\./);
+  captureTracks = false;
+  writtenObjects.clear();
   const styleDNA = {
     audio: {
       role: "meditation_bed" as const,
@@ -260,11 +288,21 @@ async function main() {
     /Additional module direction, subordinate to the locked channel sound and route contract: Add a delicate bell accent to the final phrase\./u,
     "MiniMax receives manual module direction as subordinate to channel identity, matching other providers");
   const sleepDirection = "Build through bright dramatic swells to a powerful climax.";
+  captureTracks = true;
+  trackPrompts.length = 0;
   await assert.rejects(music.run({
     ...ctx,
     params: { provider: "mureka", prompt: sleepDirection },
     store: { topic: "A quiet night for sleep", channelProgramRoute },
   }), /provider boundary reached/u);
+  captureTracks = false;
+  assert.equal(trackPrompts.length, 2);
+  for (const prompt of trackPrompts) {
+    assert.ok(prompt.length <= 900, "sleep tracks also fit the real compact-provider limit");
+    assert.match(prompt, /Beatless, no pulse or tempo/);
+    assert.doesNotMatch(prompt, /dramatic swells|powerful climax/iu);
+  }
+  assert.match(trackPrompts[1]!, /no pulse, melody, chord change, transient, swell, or climax/);
   const sleepProgramEntry = [...writtenObjects.entries()].find(([key]) =>
     key.includes("channel-music-program-") && key !== programEntry[0] && key !== moduleGainEntry[0] && key !== minimaxProgramEntry[0]);
   assert.ok(sleepProgramEntry, "sleep output must be frozen into the same shared Music program contract");

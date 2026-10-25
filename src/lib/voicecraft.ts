@@ -340,7 +340,7 @@ export async function renderNarration(o: {
   const eleven: ElevenSettings = {
     stability: o.physics.stability,
     ...(o.physics.style ? { style: o.physics.style } : {}),
-    ...(o.seed ? { seed: o.seed } : {}),
+    ...(o.seed !== undefined ? { seed: o.seed } : {}),
   };
   return synthNarration({
     text: o.text,

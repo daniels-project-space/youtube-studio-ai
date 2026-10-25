@@ -9,6 +9,7 @@ import {
   validateVoiceCastingAuditionReceipt,
   validateVoiceCastingReadinessReceipt,
   voiceCastingOutputFingerprint,
+  type PersistedVoiceCasting,
 } from "../voiceCastingReceipt";
 
 const ownerId = "owner_daniel";
@@ -120,6 +121,42 @@ const providerReady = {
   providerSelectionReceipt,
   localColdOpenReceipt,
 };
+for (const field of ["providerSelectionReceipt", "localColdOpenReceipt"]) {
+  for (const value of [null, false, ""]) {
+    const malformed: unknown = { ...ready, [field]: value };
+    assert.equal(validateVoiceCastingReadinessReceipt({
+      cast: malformed as PersistedVoiceCasting,
+      ownerId,
+      channelId,
+      now: judgedAt + 1_000,
+    }), false, `${field}=${JSON.stringify(value)} is present and must not fall back to legacy proof`);
+  }
+}
+for (const newerReceipts of [
+  { providerSelectionReceipt: { ...providerSelectionReceipt, provider: "qwen3" as const } },
+  { localColdOpenReceipt: { ...localColdOpenReceipt, audioFingerprint: "bad" } },
+  {
+    providerSelectionReceipt: { ...providerSelectionReceipt, score: ready.score },
+    localColdOpenReceipt: { ...localColdOpenReceipt, audioFingerprint: "bad" },
+  },
+  {
+    providerSelectionReceipt: { ...providerSelectionReceipt, score: ready.score },
+    localColdOpenReceipt: { ...localColdOpenReceipt, provider: "qwen3" as const },
+  },
+]) {
+  assert.equal(validateVoiceCastingReadinessReceipt({
+    cast: { ...ready, ...newerReceipts },
+    ownerId,
+    channelId,
+    now: judgedAt + 1_000,
+  }), false, "legacy receipts must not admit invalid newer evidence preferred by the pipeline caller");
+}
+assert.equal(validateVoiceCastingReadinessReceipt({
+  cast: { ...ready, ...providerReady },
+  ownerId,
+  channelId,
+  now: judgedAt + 1_000,
+}), true, "valid current provider proof may coexist with older audition receipts");
 assert.equal(validateVoiceCastingReadinessReceipt({
   cast: providerReady,
   ownerId,

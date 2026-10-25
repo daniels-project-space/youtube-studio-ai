@@ -355,19 +355,22 @@ export function validateVoiceCastingReadinessReceipt(args: {
   channelId: string;
   now?: number;
 } {
-  const legacy = validateVoiceCastingAuditionReceipt(args) && validateVoiceColdOpenReceipt({
+  // Callers prefer the newer receipts when present, so legacy evidence cannot
+  // qualify a cast whose effective provider/local proof is incomplete or invalid.
+  if (args.cast?.providerSelectionReceipt !== undefined || args.cast?.localColdOpenReceipt !== undefined) {
+    return validateVoiceProviderSelectionReceipt(args) && validateVoiceLocalColdOpenReceipt({
+      receipt: args.cast.localColdOpenReceipt,
+      ownerId: args.ownerId,
+      channelId: args.channelId,
+      voiceId: args.cast.voiceId,
+      provider: args.cast.providerSelectionReceipt.provider,
+      now: args.now,
+    });
+  }
+  return validateVoiceCastingAuditionReceipt(args) && validateVoiceColdOpenReceipt({
     receipt: args.cast.coldOpenReceipt,
     ownerId: args.ownerId, channelId: args.channelId, voiceId: args.cast.voiceId, now: args.now,
   });
-  const providerMetadata = validateVoiceProviderSelectionReceipt(args) && validateVoiceLocalColdOpenReceipt({
-    receipt: args.cast.localColdOpenReceipt,
-    ownerId: args.ownerId,
-    channelId: args.channelId,
-    voiceId: args.cast.voiceId,
-    provider: args.cast.providerSelectionReceipt.provider,
-    now: args.now,
-  });
-  return legacy || providerMetadata;
 }
 
 export function voiceCastingOutputFingerprint(cast: PersistedVoiceCasting): string {

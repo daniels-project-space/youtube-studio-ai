@@ -60,6 +60,7 @@ export interface CrewContext {
 function header(bible: ShowBible, ctx: CrewContext): string {
   return [
     `Channel: ${ctx.channelName ?? "this channel"}${ctx.niche ? ` (${ctx.niche})` : ""}.`,
+    `Content family: ${ctx.family}.`,
     `Positioning: ${bible.positioning}`,
     `Vibe: ${bible.vibe}`,
     `Iconic motif: ${bible.iconicMotif}`,
@@ -69,7 +70,7 @@ function header(bible: ShowBible, ctx: CrewContext): string {
     ctx.roleDirectives ? `Operator role directives: ${ctx.roleDirectives}` : "",
     `Video topic: "${ctx.topic}".`,
     ctx.serializedEpisodeContext ?? "",
-    ctx.targetSeconds ? `Target length: ~${Math.round(ctx.targetSeconds / 60)} min.` : "",
+    ctx.targetSeconds ? `Target length: ${ctx.targetSeconds} seconds.` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -169,7 +170,7 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
         `{"footageQueries":string[],"promptStyle":string,"palette":string[],"motion":string,"avoid":string[]}.`,
     });
     const queries = [...new Map((raw.footageQueries ?? [])
-      .map((query) => query.trim())
+      .map((query) => query.trim().replace(/\s+/gu, " "))
       .filter((query) => {
         const words = query.split(/\s+/u);
         return words.length >= 2 && words.length <= 5;
@@ -426,7 +427,7 @@ export async function briefComposerWithArrangement(
     ? scoredArrangementComposerResponseSchema
     : arrangementComposerResponseWithTempoSchema;
   const promptContext = [
-    header(bible, ctx), `Content family: ${ctx.family}.`,
+    header(bible, ctx),
     musicIntent ? `Explicit music intent (required exact values, not suggestions): ${JSON.stringify(musicIntent)}` : "",
     ctx.persona ? `Channel persona: ${ctx.persona}` : "",
     ctx.styleGrammar ? `Channel style grammar: ${ctx.styleGrammar}` : "",

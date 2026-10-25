@@ -224,6 +224,21 @@ async function main(): Promise<void> {
     calls = 0;
     globalThis.fetch = async () => {
       calls += 1;
+      return Response.json({ msg: "custom mode unsupported" }, { status: 400 });
+    };
+    await assert.rejects(generateSuno({ prompt: `${"warm room ".repeat(60)}no percussion`, timeoutMs: 0 }),
+      /legacy.*truncate.*approved music direction/i,
+      "schema fallback cannot cut off the approved sound or its final exclusion");
+    assert.equal(calls, 1, "a brief that cannot fit legacy mode must not be resubmitted in altered form");
+
+    calls = 0;
+    await assert.rejects(generateSuno({ prompt: "a".repeat(951), timeoutMs: 0 }),
+      /950.character.*approved music direction/i);
+    assert.equal(calls, 0, "oversize music direction is rejected before a provider request");
+
+    calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
       throw new TypeError("ambiguous preferred-provider submission");
     };
     await assert.rejects(generateMusic({ provider: "mureka", prompt: "test", timeoutMs: 0 }));

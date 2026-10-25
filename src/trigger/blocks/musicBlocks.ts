@@ -99,6 +99,7 @@ export function musicDnaTempoDirection(input: {
 
 export async function generateMusicTrackSet(input: {
   prompt: string;
+  promptForGeneration?: (generationIndex: number) => string;
   trackCount: number;
   variationDirection: string;
   generate: (request: {
@@ -115,7 +116,7 @@ export async function generateMusicTrackSet(input: {
   const jobIds: string[] = [];
   while (tracks.length < input.trackCount) {
     const generationIndex = jobIds.length;
-    const prompt = generationIndex === 0
+    const prompt = input.promptForGeneration ? input.promptForGeneration(generationIndex) : generationIndex === 0
       ? input.prompt
       : `${input.prompt}\nPart ${generationIndex + 1}: ${input.variationDirection}.`;
     const result = await input.generate({
@@ -726,16 +727,27 @@ export const music: Block = {
         [COST_PATCH_KEY]: 0,
       };
     }
-    const providerPrompt = provider === "minimax_music3" || channelMusicProgram.role === "sleep_sound_bed"
-      ? channelMusicProgram.generation.structuredCaption
-      : musicProviderPromptForProgram(channelMusicProgram, basePrompt, [
-          studioAudioDirection,
-          modulePromptDirection,
-          dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
-          composerPrompt,
-          musicProgram?.audio.direction,
-        ].filter(Boolean).join(" "), 900,
-        (ctx.params as Record<PropertyKey, unknown>)[MUSIC_REQUIRED_STUDIO_DIRECTION_POLICY] === true);
+    const providerPromptForGeneration = (generationIndex: number): string => {
+      const variation = generationIndex === 0 ? ""
+        : `Part ${generationIndex + 1}: ${musicTrackVariationDirection(channelMusicProgram.role)}.`;
+      const requiredDirection = sleepBed
+        ? preserveRequiredStudioDirection && studioAudioRecipe.promptAddenda.length
+          ? `Approved sleep texture only; preserve stable low arousal, no pulse or melody: ${studioAudioRecipe.promptAddenda.join(" ")}`
+          : ""
+        : [
+            studioAudioDirection,
+            modulePromptDirection,
+            dnaPrompt ? (a?.loopable ? "Loop-friendly, resolves back to the tonic." : "Natural ending.") : "",
+            composerPrompt,
+            musicProgram?.audio.direction,
+          ].filter(Boolean).join(" ");
+      return provider === "minimax_music3"
+        ? channelMusicProgram.generation.structuredCaption
+        : musicProviderPromptForProgram(channelMusicProgram, sleepBed ? "" : basePrompt,
+            [variation, requiredDirection].filter(Boolean).join(" "), 900,
+            !!variation || preserveRequiredStudioDirection);
+    };
+    const providerPrompt = providerPromptForGeneration(0);
 
     // MULTI-TRACK MIX: a single looped track reads as stale on long videos.
     // trackCount asks for N distinct clips, crossfade-concatenated before the
@@ -886,6 +898,7 @@ export const music: Block = {
       } else if (prov === "suno") {
         const result = await generateMusicTrackSet({
           prompt: providerPrompt,
+          promptForGeneration: providerPromptForGeneration,
           trackCount,
           variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
           generate: ({ prompt, remainingTrackCount, generationIndex }) => {
@@ -914,6 +927,7 @@ export const music: Block = {
         ctx.log(`music: generating ${trackCount} requested Mureka tracks…`);
         const result = await generateMusicTrackSet({
           prompt: providerPrompt,
+          promptForGeneration: providerPromptForGeneration,
           trackCount,
           variationDirection: musicTrackVariationDirection(channelMusicProgram.role),
           generate: ({ prompt }) => generateMureka({

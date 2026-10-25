@@ -3,7 +3,7 @@ import Module from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  AcceptedMusicArrangementSchema, projectAcceptedMusicArrangementToYuEStyle,
+  AcceptedMusicArrangementSchema, createMusicReviewContext, MusicReviewContextSchema, projectAcceptedMusicArrangementToYuEStyle,
   type AcceptedMusicArrangement, type AcceptedMusicArrangementDraft,
 } from "@/engine/acceptedMusicArrangement";
 import { compilePipeline, type PipelinePolicy } from "@/engine/pipelineCompiler";
@@ -285,8 +285,13 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
       });
     };
     const sleepRoute = frozenRoute("sleep");
-    const briefForRoute = (arrangement: AcceptedMusicArrangementDraft) => {
+    const briefForRoute = (arrangement: AcceptedMusicArrangementDraft, family: "sleep" | "music_loop") => {
       const routeBrief = structuredClone(validMusicBrief!);
+      const reviewContext = MusicReviewContextSchema.parse(routeBrief.reviewContext);
+      routeBrief.reviewContext = createMusicReviewContext({
+        topic: reviewContext.topic, family, channelName: reviewContext.channelName,
+        promptContext: reviewContext.promptContext.replace(/^Content family: .+$/mu, `Content family: ${family}.`),
+      });
       delete routeBrief.musicIntent;
       routeBrief.arrangement = arrangement;
       return routeBrief;
@@ -294,7 +299,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     await assert.rejects(planner.execute({
       ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "route-sleep-mismatch",
       keyPrefix: "fixtures/accepted-arrangement/", params: {},
-      store: { topic: seedStore.topic, musicBrief: briefForRoute(draft("primary_music")), channelProgramRoute: sleepRoute },
+      store: { topic: seedStore.topic, musicBrief: briefForRoute(draft("primary_music"), "sleep"), channelProgramRoute: sleepRoute },
       budgetUsd: 1, log: () => {},
     }), /requires a sleep_sound_bed arrangement/);
     const musicLoopRoute = frozenRoute("music_loop");
@@ -302,7 +307,7 @@ export async function runAcceptedMusicArrangementHandoffTests(): Promise<Accepte
     await assert.rejects(planner.execute({
       ownerId: "owner-arrangement", channelId: "channel-arrangement", runId: "route-music-loop-once",
       keyPrefix: "fixtures/accepted-arrangement/", params: {},
-      store: { topic: seedStore.topic, musicBrief: briefForRoute(oneShotScore), channelProgramRoute: musicLoopRoute },
+      store: { topic: seedStore.topic, musicBrief: briefForRoute(oneShotScore, "music_loop"), channelProgramRoute: musicLoopRoute },
       budgetUsd: 1, log: () => {},
     }), /requires repeating playback/);
     await assert.rejects(planner.execute({

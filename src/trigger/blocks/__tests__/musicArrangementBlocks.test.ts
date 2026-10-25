@@ -228,7 +228,7 @@ async function main() {
     assert.equal(request.temperature, 0.8);
     assert.ok(request.prompt.includes(bible.composerDoctrine!));
     assert.ok(request.prompt.includes("ambient strings"));
-    assert.ok(request.prompt.includes("30 min"));
+    assert.ok(request.prompt.includes("Target length: 1800 seconds."));
     assert.match(request.prompt, /Channel-grounding standard: turn each supplied persona/);
     assert.match(request.prompt, /distinctive to this channel and episode, not a list of mood adjectives/);
     assert.match(request.prompt, /do not invent identity traits or preferences/);

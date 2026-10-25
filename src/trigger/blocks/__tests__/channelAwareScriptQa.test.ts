@@ -73,6 +73,18 @@ async function main() {
     assert.equal(allManifests().includes(selected), false, "no silent default migration");
     const invoke = (manifest: typeof legacy, ctx = context) => createModelUsageScope().run(() => manifest.execute(ctx));
 
+    const beforeEmptyNarration = prompts.length;
+    for (const manifest of [legacy, selected]) {
+      for (const narrationText of ["   ", "\n\t\r\n", "\u00a0\u2003"]) {
+        await assert.rejects(invoke(manifest, { ...context,
+          store: { ...context.store, narrationText },
+        }), /qa_script FAILED: narration contains no spoken text/,
+        "blank output must never receive script approval, even when the critic would pass it");
+      }
+    }
+    assert.equal(prompts.length, beforeEmptyNarration,
+      "empty narration must be rejected before buying an independent review");
+
     await invoke(legacy);
     const baseline = prompts.at(-1)!;
     assert.match(baseline, /require a genuine, specific POINT OF VIEW/);
