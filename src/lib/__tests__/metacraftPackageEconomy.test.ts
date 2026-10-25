@@ -15,7 +15,7 @@ const packageSource = source.slice(packageStart, packageEnd);
 assert.match(packageSource, /one concise, useful paragraph/, "description must be compact and viewer-useful");
 assert.match(packageSource, /Do not add a keyword dump, hashtag block/, "keyword stuffing must stay prohibited");
 assert.match(packageSource, /exactly 5-8 comma-separated/, "tags must stay deliberately bounded");
-assert.match(packageSource, /maxTokens:\s*1400/, "the two-field package must keep its measured low-cost ceiling");
+assert.match(packageSource, /maxTokens:\s*2500/, "the concise package must cover the pinned route's measured reasoning plus its answer");
 assert.doesNotMatch(packageSource, /25-30|14-20|8-12/, "legacy keyword-volume targets must not return");
 
 console.log("metacraft concise-package policy test passed");

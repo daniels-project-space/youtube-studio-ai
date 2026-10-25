@@ -1102,7 +1102,9 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           fixNote,
           `Return STRICT JSON {"candidates":[{"frame":string,"title":string}]}.`,
         ].filter(Boolean).join("\n\n"),
-        maxTokens: 2500,
+        // 20261025-02 receipt #14: length at 2,493/2,500 tokens,
+        // including 2,397 reasoning tokens and only 96 answer tokens.
+        maxTokens: 4000,
         temperature: 0.85,
       });
       if (!gen || !Array.isArray(gen.candidates) || gen.candidates.length === 0 || gen.candidates.some((candidate) =>
@@ -1345,7 +1347,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
 
       const w = survivors[best];
       // ONE description+tags, written FOR the winner (parallel work already done).
-      // Mechanical structured output — flash, no thinking.
+      // The pinned route budgets reasoning and structured output together.
       let description = "";
       let tags: string[] = [];
       let packageFallback = false;
@@ -1358,7 +1360,16 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `TITLE: "${w.title}" | Channel: "${a.channelName ?? ""}" | Niche: ${a.niche ?? "general"}`,
             a.quote ? `THE QUOTE (open the description with it): "${a.quote}"` : "",
             suggests.length ? `REAL SEARCH QUERIES (lean keyword phrasing on these):\n- ${suggests.join("\n- ")}` : "",
-            `DESCRIPTION: ${a.descriptionStructure ? `follow the channel structure: ${a.descriptionStructure}. ` : ""}` +
+            a.descriptionStructure
+              ? `DESCRIPTION STRUCTURE TEMPLATE (style and order only, not factual evidence): ${JSON.stringify(a.descriptionStructure)}. ` +
+                `Adapt its form to the supplied source; omit template slots that need unsupported facts.`
+              : "",
+            `Do not generate chapter timestamps or timestamped chapter lists, even if the template requests them. ` +
+              `Downstream deterministic buildChapters owns measured chapter timing. ` +
+              `Do not invent precise runtime claims or production credits (including voice, composition, and sound design). ` +
+              `Such claims require explicit supplied source or measured delivery evidence; the channel name, planning notes, ` +
+              `and description template do not establish them. Planned duration is not measured runtime.`,
+            `DESCRIPTION: ` +
               `Open with THE QUOTE${a.quote ? "" : " (or the strongest hook line)"}, then give one concise, useful paragraph ` +
               `that makes the viewing value clear. Put a primary search phrase naturally in the first sentence. Add one ` +
               `"Subscribe for more:" line without inventing a URL. Do not add a keyword dump, hashtag block, filler CTA, or ` +
@@ -1367,16 +1378,21 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
               `that this video actually uses. Tags are not a keyword-stuffing surface.${lang}`,
             `Return STRICT JSON {"description":string,"tagsCsv":string}.`,
           ].filter(Boolean).join("\n\n"),
-          // This is a small two-field, non-reasoning package contract. The
-          // JSON-ceiling audit's measured multi-field floor is 1200; 1400
-          // leaves headroom without paying for the former keyword dump.
-          maxTokens: 1400,
+          // 20261025-02 receipt #17: length at 1,393/1,400 tokens,
+          // including 1,340 reasoning tokens and only 53 answer tokens.
+          // Keep the answer concise while allowing the route's reasoning.
+          maxTokens: 2500,
           temperature: 0.8,
         });
         if (!pkg || typeof pkg.description !== "string" || typeof pkg.tagsCsv !== "string") {
           throw new Error("winner package has malformed description or tags");
         }
         description = pkg.description.trim();
+        // Reject generated timing before the caller appends deterministic
+        // buildChapters output. Do not sanitize a fabricated package into a pass.
+        if (/^\s*(?:[-*+>#]\s*)*(?:\d+[.)]\s+)?(?:\[\s*|\(\s*)?\d{1,3}:[0-5]\d(?::[0-5]\d)?(?![\d:])/m.test(description.normalize("NFKC"))) {
+          throw new Error("winner package contains generated chapter timestamps; measured chapters belong downstream");
+        }
         tags = [...new Map(pkg.tagsCsv.split(",").map((t) => t.trim()).filter(Boolean)
           .map((tag) => [tag.toLowerCase(), tag])).values()];
         if (!description || tags.length < 5 || tags.length > 8) throw new Error("winner package is incomplete");
