@@ -214,6 +214,9 @@ function freezeDiagnosis(value: CreatorIntentDiagnosis): CreatorIntentDiagnosis 
       requiredBlockOrder: Object.freeze(
         value.outputShape.requiredBlockOrder.map((pair) => Object.freeze([...pair] as [string, string])),
       ),
+      ...(value.outputShape.serializedProgram
+        ? { serializedProgram: Object.freeze({ ...value.outputShape.serializedProgram }) }
+        : {}),
     }),
     ambiguity: Object.freeze({
       ...value.ambiguity,

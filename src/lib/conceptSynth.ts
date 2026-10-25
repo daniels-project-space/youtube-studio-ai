@@ -26,6 +26,18 @@ type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const CADENCES = new Set(["daily", "weekly", "biweekly", "monthly"]);
+const MIN_TOPIC_POOL_SIZE = 6;
+const MAX_TOPIC_POOL_SIZE = 10;
+const CALLBACK_WORDS = new Intl.Segmenter(undefined, { granularity: "word" });
+const GENERIC_CALLBACK_CTA = /\b(?:subscribe|follow|like|comment|ring the bell)\b/i;
+
+interface ConceptContract {
+  palette: string[];
+  topicPool: string[];
+  requiredCallbacks: string[];
+  archetypeKey?: string;
+  issues: string[];
+}
 
 function asStringArray(v: unknown, max: number, maxChars = 160): string[] {
   if (!Array.isArray(v)) return [];
@@ -36,6 +48,11 @@ function asStringArray(v: unknown, max: number, maxChars = 160): string[] {
   return values.filter((value, index) => (
     values.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index
   )).slice(0, max);
+}
+
+function isValidCallback(value: string): boolean {
+  const wordCount = Array.from(CALLBACK_WORDS.segment(value)).filter((part) => part.isWordLike).length;
+  return wordCount >= 2 && wordCount <= 5 && !GENERIC_CALLBACK_CTA.test(value);
 }
 
 /** Deterministic fallback so the builder works even without an LLM key. */
@@ -53,6 +70,28 @@ function fallbackConcept(seed: string): ChannelConcept {
     cadence: "weekly",
     archetypeKey: "lofi-ambient",
   };
+}
+
+function inspectConceptContract(
+  raw: Partial<ChannelConcept> & { palette?: unknown; topicPool?: unknown; requiredCallbacks?: unknown },
+): ConceptContract {
+  const palette = asStringArray(raw.palette, 5).filter((color) => HEX.test(color));
+  const topicPool = asStringArray(raw.topicPool, MAX_TOPIC_POOL_SIZE);
+  const requiredCallbacks = asStringArray(raw.requiredCallbacks, 4, 60).filter(isValidCallback);
+  const archetypeKey = ARCHETYPE_KEYS.includes(raw.archetypeKey ?? "") ? raw.archetypeKey : undefined;
+  const issues: string[] = [];
+  if (palette.length < 3) issues.push(`palette must contain at least 3 valid unique hex colors (got ${palette.length})`);
+  if (topicPool.length < MIN_TOPIC_POOL_SIZE) {
+    issues.push(`topicPool must contain at least ${MIN_TOPIC_POOL_SIZE} unique concrete video topic ideas (got ${topicPool.length})`);
+  }
+  if (requiredCallbacks.length < 2) {
+    issues.push(
+      `requiredCallbacks must contain 2-4 unique 2-5 word identity motifs and no generic calls to action ` +
+      `(got ${requiredCallbacks.length} usable)`,
+    );
+  }
+  if (!archetypeKey) issues.push("archetypeKey must be an allowed archetypeKey from the original list");
+  return { palette, topicPool, requiredCallbacks, archetypeKey, issues };
 }
 
 export async function synthChannelConcept(
@@ -98,11 +137,26 @@ export async function synthChannelConcept(
     return fallbackConcept(seed);
   }
 
+  let contract = inspectConceptContract(raw);
+  if (contract.issues.length) {
+    log(`conceptSynth: incomplete concept contract (${contract.issues.length} issue(s)) — requesting one repair`);
+    raw = await creativeTextJson({
+      prompt: `${prompt}\n\nREPAIR these contract violations in the full JSON response: ${contract.issues.join("; ")}.`,
+      system,
+      tier: "pro",
+      maxTokens: 1500,
+      temperature: 0.7,
+    });
+    contract = inspectConceptContract(raw);
+    if (contract.issues.length) {
+      const archetypeIssue = contract.issues.find((issue) => issue.startsWith("archetypeKey"));
+      if (archetypeIssue) throw new Error(`conceptSynth: invalid archetypeKey after repair (${contract.issues.join("; ")})`);
+      throw new Error(`conceptSynth: output contract failed after repair (${contract.issues.join("; ")})`);
+    }
+  }
+
   const fb = fallbackConcept(seed);
-  const archetypeKey = ARCHETYPE_KEYS.includes(raw.archetypeKey ?? "")
-    ? (raw.archetypeKey as string)
-    : "lofi-ambient";
-  const palette = asStringArray(raw.palette, 5).filter((c) => HEX.test(c));
+  const archetypeKey = contract.archetypeKey!;
   const cadence =
     typeof raw.cadence === "string" && CADENCES.has(raw.cadence) ? raw.cadence : fb.cadence;
 
@@ -112,10 +166,10 @@ export async function synthChannelConcept(
     persona: (typeof raw.persona === "string" && raw.persona.trim()) || fb.persona,
     styleGrammar:
       (typeof raw.styleGrammar === "string" && raw.styleGrammar.trim()) || fb.styleGrammar,
-    palette: palette.length >= 2 ? palette : fb.palette,
-    topicPool: asStringArray(raw.topicPool, 12).length ? asStringArray(raw.topicPool, 12) : fb.topicPool,
-    bannedWords: asStringArray(raw.bannedWords, 8),
-    requiredCallbacks: asStringArray(raw.requiredCallbacks, 4, 60),
+    palette: contract.palette,
+    topicPool: contract.topicPool,
+    bannedWords: asStringArray(raw.bannedWords, 6),
+    requiredCallbacks: contract.requiredCallbacks,
     cadence,
     archetypeKey,
     voiceId: getArchetype(archetypeKey).defaultVoiceId,

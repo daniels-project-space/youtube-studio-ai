@@ -92,6 +92,22 @@ assert.deepEqual(
   serializedBrief.serializedProgram,
   "CreatorIntentDiagnosis must carry the exact sealed serialized_program/v1 contract",
 );
+assert.equal(
+  Object.isFrozen(serializedDiagnosis.outputShape.serializedProgram),
+  true,
+  "the nested recurrence contract must remain immutable with its diagnosis receipt",
+);
+const parsedSerializedDiagnosis = parseCreatorIntentDiagnosis(serializedDiagnosis);
+assert.equal(
+  Object.isFrozen(parsedSerializedDiagnosis.outputShape.serializedProgram),
+  true,
+  "parsing a persisted diagnosis must freeze its cloned recurrence contract",
+);
+assert.equal(
+  Reflect.set(parsedSerializedDiagnosis.outputShape.serializedProgram!, "seriesTitle", "Tampered title"),
+  false,
+  "a parsed diagnosis must reject runtime mutation of its sealed recurrence contract",
+);
 assert.notEqual(
   serializedDiagnosis.fingerprint,
   deriveCreatorIntentDiagnosis({

@@ -16,7 +16,7 @@
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
 import { hasCreativeTextKey } from "@/lib/creativeText";
-import { produceAndCritique } from "@/engine/critiqueLoop";
+import { produceAndCritique, type Critique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
 import {
   channelProgramBriefPositioningText,
@@ -176,6 +176,56 @@ function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string
   }
   issues.push(...nameWorldIssues(raw, channelName));
   return issues;
+}
+
+/** Merge deterministic quality checks with the independent critic's verdict. */
+export function scoreStyleDnaCritique(
+  deterministic: readonly string[],
+  critic: { score: number; issues: readonly string[] } | null,
+): Critique {
+  const deterministicIssues = [...deterministic];
+  if (!critic) {
+    return {
+      score: 0,
+      pass: false,
+      issues: [...deterministicIssues, "independent specificity critic unavailable; candidate cannot pass"],
+    };
+  }
+  const criticScore = Math.max(0, Math.min(1, Number(critic.score) || 0));
+  return {
+    score: deterministicIssues.length ? Math.min(criticScore, 0.6) : criticScore,
+    pass: deterministicIssues.length === 0 && criticScore >= 0.8,
+    issues: [...deterministicIssues, ...clampStrs(critic.issues, 6)],
+  };
+}
+
+export function buildStyleDnaCriticPrompt(input: {
+  name: string;
+  programBriefText: string;
+  persona?: string;
+  styleGrammar?: string;
+  exampleClipNotes?: string;
+  researchText: string;
+  draft: unknown;
+}): string {
+  const canon = [
+    `Channel name: ${input.name}`,
+    input.programBriefText ? `Declared channel program: ${input.programBriefText}` : "",
+    input.persona ? `Operator persona (canonical): ${input.persona}` : "",
+    input.styleGrammar ? `Visual style seed (canonical): ${input.styleGrammar}` : "",
+    input.exampleClipNotes ? `Operator example direction: ${input.exampleClipNotes}` : "",
+  ].filter(Boolean).join("\n");
+  return [
+    `Audit this channel's STYLE DNA for specificity, channel-identity fidelity, and research fidelity.`,
+    `CHANNEL CANON (must not be overridden):\n${canon}`,
+    `The recurring subject, setting, motifs, and narrative voice must embody the name, declared program, persona, style seed, and example direction. Research may inform execution and packaging, but it must not replace or relocate the channel's canon. Penalize any mismatch, even if the draft is otherwise vivid.`,
+    input.researchText
+      ? `RESEARCH (secondary evidence; it must fit the channel canon):\n${input.researchText}`
+      : `No external research was available — judge whether the DNA is vividly specific while preserving the channel canon.`,
+    `DNA DRAFT:\n${JSON.stringify(input.draft)}`,
+    `Score 0..1 — 1.0 = a concrete locked identity, setting, palette/motifs/motion, and voice that fit both the channel canon and available evidence; 0.0 = vague filler or a wrong-world identity.`,
+    `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Penalize vague adjectives, copy-pasteable fields, and any conflict with the channel canon.`,
+  ].join("\n\n");
 }
 
 /** Families that narrate (so a missing narrative block is a real grounding gap). */
@@ -368,30 +418,32 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
       },
       critique: async (raw) => {
         const det = deterministicIssues(raw, narrated, input.name);
-        let llmScore = det.length ? 0.5 : 0.8;
-        let llmIssues: string[] = [];
+        let criticVerdict: { score: number; issues: string[] } | null = null;
         try {
           const v = await agentJson({
             role: "critic", schema: critiqueSchema, log: (m) => log(m),
             maxTokens: 900, temperature: 0.3,
-            prompt: [
-              `Audit this channel's STYLE DNA for GENUINE specificity and fidelity to the research.`,
-              `It MUST be custom to THIS channel — generic boilerplate that could describe any channel is a FAILURE.`,
-              g.text ? `RESEARCH THE DNA SHOULD REFLECT (reverse-engineered from real top performers):\n${g.text}` : `No external research was available — judge whether the DNA is at least vividly genre-specific.`,
-              `DNA DRAFT:\n${JSON.stringify(raw)}`,
-              `Score 0..1 — 1.0 = a concrete locked recurring subject + setting, palette/motifs/motion that clearly derive from the research and the niche's real conventions; 0.0 = vague filler.`,
-              `Return JSON {"score": number, "issues": [concrete, specific fixes]}. Penalize vague adjectives, any field copy-pasteable to another channel, and anything not grounded in the research.`,
-            ].join("\n\n"),
+            prompt: buildStyleDnaCriticPrompt({
+              name: input.name,
+              programBriefText,
+              persona: input.persona,
+              styleGrammar: input.styleGrammar,
+              exampleClipNotes: input.exampleClipNotes,
+              researchText: g.text,
+              draft: raw,
+            }),
           });
-          llmScore = Math.max(0, Math.min(1, Number(v.score) || 0));
-          llmIssues = clampStrs(v.issues, 6);
+          criticVerdict = {
+            score: Math.max(0, Math.min(1, Number(v.score) || 0)),
+            issues: clampStrs(v.issues, 6),
+          };
         } catch (e) {
-          log(`styleDNA: critic failed (${e instanceof Error ? e.message : e}) — deterministic-only this iter`);
+          const unavailable = scoreStyleDnaCritique(det, null);
+          const issue = unavailable.issues.at(-1) ?? "independent specificity critic unavailable";
+          log(`styleDNA: critic failed (${e instanceof Error ? e.message : e}) — ${issue}; stopping distillation`);
+          throw new Error(issue);
         }
-        // Deterministic failures cap the score and block acceptance outright.
-        const score = det.length ? Math.min(llmScore, 0.6) : llmScore;
-        const pass = det.length === 0 && llmScore >= 0.8;
-        return { score, pass, issues: [...det, ...llmIssues] };
+        return scoreStyleDnaCritique(det, criticVerdict);
       },
     });
   } catch (e) {

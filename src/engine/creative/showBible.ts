@@ -2,8 +2,8 @@
  * Showrunner — writes a channel's Show Bible once at creation. Reuses competitor
  * signals already gathered by auto-SEO to ground the works/avoid doctrine. Runs
  * through the pinned OpenRouter creative-text route via the `showrunner` agent,
- * with a
- * deterministic fallback so channel creation never hard-fails.
+ * with strict output admission. Incomplete output is repaired once, then fails
+ * rather than being persisted as a complete channel identity.
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
@@ -14,12 +14,22 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import { VIDEO_CREW_ROLES, type ShowBible, type VideoCrewRole } from "./types";
-import { fallbackChannelMotif, fallbackChannelVibe } from "@/lib/identitySpread";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
 /** Family → the crew roles that format needs (typed view of the families map). */
 const FAMILY_CREW = FAMILY_CREW_RAW as Record<FamilyKey, VideoCrewRole[]>;
+const MIN_SPACE_PATTERNS = 5;
+const MAX_SPACE_PATTERNS = 8;
+const DOCTRINE_FIELD: Record<VideoCrewRole, keyof Pick<ShowBible,
+  "directorDoctrine" | "dpDoctrine" | "editorDoctrine" | "composerDoctrine" | "criticDoctrine"
+>> = {
+  director: "directorDoctrine",
+  cinematographer: "dpDoctrine",
+  editor: "editorDoctrine",
+  composer: "composerDoctrine",
+  critic: "criticDoctrine",
+};
 
 export interface ShowBibleInput {
   family: FamilyKey;
@@ -50,26 +60,64 @@ const bibleSchema = z.object({
   composerDoctrine: z.string().optional(),
   criticDoctrine: z.string().optional(),
 });
+type BibleDraft = z.input<typeof bibleSchema>;
 
-function fallbackBible(input: ShowBibleInput): ShowBible {
-  const crew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
-  const programBriefText = input.programBrief
-    ? channelProgramBriefPositioningText(input.programBrief)
-    : "";
+function distinctPatterns(values: readonly string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim().replace(/\s+/g, " ");
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+    if (result.length === MAX_SPACE_PATTERNS) break;
+  }
+  return result;
+}
+
+function inspectBible(raw: BibleDraft, input: ShowBibleInput): { bible: ShowBible; issues: string[] } {
+  const worksInSpace = distinctPatterns(raw.worksInSpace ?? []);
+  const avoidInSpace = distinctPatterns(raw.avoidInSpace ?? []);
+  const positioning = raw.positioning.trim();
+  const vibe = raw.vibe.trim();
+  const iconicMotif = (input.motifHint || raw.iconicMotif).trim();
+  const activeCrew = reconcileCrew(input.family, raw.activeCrew ?? []);
+  const issues: string[] = [];
+  if (worksInSpace.length < MIN_SPACE_PATTERNS) {
+    issues.push(`worksInSpace requires at least ${MIN_SPACE_PATTERNS} distinct niche-specific patterns (got ${worksInSpace.length})`);
+  }
+  if (avoidInSpace.length < MIN_SPACE_PATTERNS) {
+    issues.push(`avoidInSpace requires at least ${MIN_SPACE_PATTERNS} distinct niche-specific anti-patterns (got ${avoidInSpace.length})`);
+  }
+  const worksKeys = new Set(worksInSpace.map((value) => value.toLowerCase()));
+  if (avoidInSpace.some((value) => worksKeys.has(value.toLowerCase()))) {
+    issues.push("worksInSpace and avoidInSpace must not contradict by repeating the same pattern");
+  }
+  if (!positioning) issues.push("positioning must be non-empty");
+  if (!vibe) issues.push("vibe must be non-empty");
+  if (!iconicMotif) issues.push("iconicMotif must be non-empty");
+  for (const role of activeCrew) {
+    const field = DOCTRINE_FIELD[role];
+    if (!raw[field]?.trim()) issues.push(`${field} is required for active crew role ${role}`);
+  }
+
   return {
-    positioning: programBriefText
-      ? `${input.name} — ${programBriefText}`
-      : `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
-    // Spread by channel name. A single fallback pair meant every channel that
-    // hit this path received identical creative doctrine — and the show bible
-    // drives crew, register and look, so it is the worst place in the system
-    // for a shared default.
-    vibe: input.persona ?? fallbackChannelVibe(input.name),
-    iconicMotif: input.motifHint ?? input.styleGrammar ?? fallbackChannelMotif(input.name),
-    worksInSpace: [],
-    avoidInSpace: [],
-    activeCrew: crew,
-    refreshedAt: input.now,
+    bible: {
+      positioning,
+      vibe,
+      iconicMotif,
+      worksInSpace,
+      avoidInSpace,
+      activeCrew,
+      directorDoctrine: raw.directorDoctrine?.trim() || undefined,
+      dpDoctrine: raw.dpDoctrine?.trim() || undefined,
+      editorDoctrine: raw.editorDoctrine?.trim() || undefined,
+      composerDoctrine: raw.composerDoctrine?.trim() || undefined,
+      criticDoctrine: raw.criticDoctrine?.trim() || undefined,
+      refreshedAt: input.now,
+    },
+    issues,
   };
 }
 
@@ -89,8 +137,7 @@ function reconcileCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
 export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> {
   const log = input.log ?? (() => {});
   if (!hasCreativeTextKey()) {
-    log("showBible: no non-Google creative-model key — deterministic fallback");
-    return fallbackBible(input);
+    throw new Error("showBible: creative-model key required for a qualified Bible");
   }
 
   const familyCrew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
@@ -123,8 +170,7 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
     .filter(Boolean)
     .join("\n");
 
-  try {
-    const raw = await agentJson({
+  const requestBible = (requestPrompt: string) => agentJson({
       role: "showrunner",
       schema: bibleSchema,
       log: (m) => log(m),
@@ -139,36 +185,38 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       // up to five doctrine strings — about 12 list items in practice, plus eight
       // prose fields, on a route where reasoning is billed from the same budget.
       //
-      // Falling back here is not a bad video, it is a bad CHANNEL. fallbackBible
-      // returns worksInSpace: [] and avoidInSpace: [] with no doctrines, crew.ts's
-      // header() then omits both clauses entirely, and the bible is persisted at
-      // inception — so every crew brief for that channel, for its whole life, is
-      // written without the proven patterns and the anti-patterns the prompt
-      // itself calls critical.
+      // These are channel-level contracts, not optional video polish: patterns
+      // and role doctrines persist into every crew brief. A malformed Bible is
+      // repaired once, then rejected rather than being silently persisted.
       maxTokens: 4000,
       temperature: 0.8,
-      prompt,
+      prompt: requestPrompt,
     });
-    const bible: ShowBible = {
-      positioning: raw.positioning.trim(),
-      vibe: raw.vibe.trim(),
-      iconicMotif: (input.motifHint || raw.iconicMotif).trim(),
-      worksInSpace: (raw.worksInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
-      avoidInSpace: (raw.avoidInSpace ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),
-      activeCrew: reconcileCrew(input.family, raw.activeCrew ?? []),
-      directorDoctrine: raw.directorDoctrine?.trim() || undefined,
-      dpDoctrine: raw.dpDoctrine?.trim() || undefined,
-      editorDoctrine: raw.editorDoctrine?.trim() || undefined,
-      composerDoctrine: raw.composerDoctrine?.trim() || undefined,
-      criticDoctrine: raw.criticDoctrine?.trim() || undefined,
-      refreshedAt: input.now,
-    };
-    log("showBible: ready", { motif: bible.iconicMotif.slice(0, 50), crew: bible.activeCrew });
-    return bible;
+
+  let raw: BibleDraft;
+  try {
+    raw = await requestBible(prompt);
   } catch (e) {
-    log(`showBible: synth failed (${e instanceof Error ? e.message : e}) — fallback`);
-    return fallbackBible(input);
+    log(`showBible: structured generation failed; refusing incomplete fallback (${e instanceof Error ? e.message : e})`);
+    throw new Error("showBible: structured generation failed; refusing an unqualified fallback");
   }
+
+  let inspected = inspectBible(raw, input);
+  if (inspected.issues.length) {
+    log(`showBible: incomplete quality contract (${inspected.issues.length} issue(s)) — requesting one repair`);
+    raw = await requestBible(
+      `${prompt}\n\nREPAIR these quality failures in the full JSON response: ${inspected.issues.join("; ")}. ` +
+      `Both worksInSpace and avoidInSpace must each contain 5-8 distinct, specific patterns grounded in this channel's niche.`,
+    );
+    inspected = inspectBible(raw, input);
+    if (inspected.issues.length) {
+      throw new Error(`Show Bible quality contract failed after repair: ${inspected.issues.join("; ")}`);
+    }
+  }
+
+  const bible = inspected.bible;
+  log("showBible: ready", { motif: bible.iconicMotif.slice(0, 50), crew: bible.activeCrew });
+  return bible;
 }
 
 export { FAMILY_CREW };

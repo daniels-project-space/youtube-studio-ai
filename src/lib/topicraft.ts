@@ -252,11 +252,10 @@ export function normalizeRequiredCallbacks(values: readonly string[] | undefined
 }
 
 function callbackText(bet: TopicBet): string {
+  // Match the prompt contract: recurring identity belongs to the story premise, not its packaging.
   return normTopic([
     bet.topic,
     bet.angle,
-    bet.provisionalTitle,
-    bet.thumbnailMoment,
     bet.hookPromise,
   ].join(" "));
 }

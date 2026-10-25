@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { buildQualityBar } from "@/engine/creative/styleDNA";
+import {
+  buildQualityBar,
+  buildStyleDnaCriticPrompt,
+  scoreStyleDnaCritique,
+} from "@/engine/creative/styleDNA";
 import type { FamilyKey } from "@/engine/families";
 import type { StyleDNA } from "@/engine/creative/types";
 
@@ -88,5 +92,34 @@ const quizCaptions = buildQualityBar("quizyear", DNA, 123).dimensions.find(
   (dimension) => dimension.id === "captions",
 );
 assert.match(quizCaptions?.description ?? "", /prompts, options, timer, and reveal text/);
+
+const unavailableCritic = scoreStyleDnaCritique([], null);
+assert.equal(unavailableCritic.pass, false, "missing independent critique must never accept a style draft");
+assert.equal(unavailableCritic.score, 0);
+assert.match(unavailableCritic.issues.join(" "), /specificity critic unavailable/);
+
+const reviewedDraft = scoreStyleDnaCritique([], { score: 0.92, issues: [] });
+assert.equal(reviewedDraft.pass, true, "a clear independent review above the bar may accept a grounded draft");
+
+const deterministicFailure = scoreStyleDnaCritique(["channel identity is too generic"], {
+  score: 1,
+  issues: [],
+});
+assert.equal(deterministicFailure.pass, false, "the model critic cannot override deterministic identity failures");
+assert.equal(deterministicFailure.score, 0.6);
+
+const criticPrompt = buildStyleDnaCriticPrompt({
+  name: "Neon Archive",
+  programBriefText: "Concept: a research-led series about private archives in imagined cities.",
+  persona: "A precise archivist working from a neon penthouse, never a cozy cafe.",
+  styleGrammar: "Hard-edged glass reflections, restrained magenta, no rustic props.",
+  exampleClipNotes: "Keep the camera above the city and let evidence drive each reveal.",
+  researchText: "Competitors favor warm desk lamps and parchment textures.",
+  draft: DNA,
+});
+assert.match(criticPrompt, /Declared channel program: Concept: a research-led series/);
+assert.match(criticPrompt, /Operator persona \(canonical\): A precise archivist/);
+assert.match(criticPrompt, /research may inform execution and packaging, but it must not replace or relocate the channel's canon/i);
+assert.match(criticPrompt, /Competitors favor warm desk lamps/);
 
 console.log("style DNA quality-bar family coverage passed");

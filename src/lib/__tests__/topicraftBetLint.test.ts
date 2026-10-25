@@ -259,6 +259,37 @@ console.log("topicraftBetLint.test.ts: craftTopics demand/freshness/fit/packagea
     "bounded selection must find an exact callback cover instead of getting trapped by the first greedy overlap",
   );
   assert.deepEqual(exactCover.missing, []);
+
+  const packagingOnly = [
+    ["provisional title", baseBet({
+      topic: "The forgotten bridge inspection",
+      angle: "A neglected warning before disaster",
+      provisionalTitle: "The Human Cost of the Bridge Inquiry",
+      thumbnailMoment: "An inspector studies a damaged support",
+      hookPromise: "The warning that changed the final decision",
+    })],
+    ["thumbnail moment", baseBet({
+      topic: "The forgotten bridge inspection",
+      angle: "A neglected warning before disaster",
+      provisionalTitle: "The Bridge Inquiry Revisited",
+      thumbnailMoment: "A family photograph reveals the human cost",
+      hookPromise: "The warning that changed the final decision",
+    })],
+  ] as const;
+  for (const [field, bet] of packagingOnly) {
+    const result = selectRequiredCallbackPortfolio([bet], 1, ["human cost"]);
+    assert.deepEqual(result.missing, ["human cost"], `${field} alone must not satisfy a story-identity callback`);
+  }
+  const hookCoverage = selectRequiredCallbackPortfolio([
+    baseBet({
+      topic: "The forgotten bridge inspection",
+      angle: "A neglected warning before disaster",
+      provisionalTitle: "The Bridge Inquiry Revisited",
+      thumbnailMoment: "An inspector studies a damaged support",
+      hookPromise: "The human cost hidden in the final report",
+    }),
+  ], 1, ["human cost"]);
+  assert.deepEqual(hookCoverage.missing, [], "a callback in the promised story hook must satisfy identity coverage");
 }
 
 console.log("topicraftBetLint.test.ts: required channel callbacks are selected and fail closed deterministically");
