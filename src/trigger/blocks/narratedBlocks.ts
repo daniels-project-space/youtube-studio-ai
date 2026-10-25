@@ -164,6 +164,7 @@ import {
   assertScriptLanguagePolicy,
   scriptClosingLineIssue,
   scriptLanguagePolicyIssue,
+  SCRIPT_DURATION_MAX_RATIO,
   synthScript,
   translateScript,
   type Script,
@@ -829,6 +830,20 @@ export function createScriptGenBlock(
       ctx.log(`script_gen: reused + translated base script → ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
     }
+    // Match narration_tts's effective pacing even when the pipeline omits
+    // explicit mirrors: params > authored DNA speed > niche physics.
+    const physics = narrationPhysics(opt(ctx, "niche"));
+    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
+      ?.narrative;
+    const dnaSpeed = narrationSpeedForStyleDNA(dnaPacing);
+    const explicitSpeed = ctx.params["ttsSpeed"];
+    if (explicitSpeed !== undefined && (typeof explicitSpeed !== "number" || !Number.isFinite(explicitSpeed))) {
+      throw new Error("script_gen: ttsSpeed must be a finite number");
+    }
+    const ttsSpeed = assertNarrationSpeed(
+      explicitSpeed === undefined ? (dnaSpeed ?? physics.speed) : explicitSpeed,
+      "script_gen: ttsSpeed",
+    );
     const req = {
       topic,
       channelName: opt(ctx, "channelName"),
@@ -842,10 +857,9 @@ export function createScriptGenBlock(
       language: ctx.params["language"] as string | undefined,
       maxSeconds: ctx.params["maxSeconds"] as number | undefined,
       endWithSummary: ctx.params["endWithSummary"] as boolean | undefined,
-      // Mirrors of narration_tts pacing (set by the pipeline customizer) so the
-      // word budget accounts for real pauses AND voice speed, not just words.
-      sentenceGapSec: ctx.params["sentenceGapSec"] as number | undefined,
-      ttsSpeed: ctx.params["ttsSpeed"] as number | undefined,
+      // Budget for the same pauses and voice speed narration_tts will use.
+      sentenceGapSec: Number(ctx.params["sentenceGapSec"] ?? physics.sentenceGap ?? 0.85),
+      ttsSpeed,
       // Channel voice performs ElevenLabs v3 [audio tags] — the writer places
       // them inline (mirrored from narration_tts.ttsProvider by the designer/
       // architect invariants).
@@ -927,7 +941,7 @@ export function createScriptGenBlock(
             issues: [languageIssue],
           };
         }
-        const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+        const durationLimitSec = (req.maxSeconds ?? 240) * SCRIPT_DURATION_MAX_RATIO;
         if (!Number.isFinite(draft.estDurationSec) || draft.estDurationSec > durationLimitSec) {
           const issue =
             `script duration ${Math.round(draft.estDurationSec)}s exceeds the ${Math.round(durationLimitSec)}s ceiling; ` +
@@ -993,7 +1007,7 @@ export function createScriptGenBlock(
     if (loop.fatal) {
       throw new Error(`script_gen FAILED: channel-banned wording remains after the informed retry — ${loop.critique.issues.join("; ")}`);
     }
-    const durationLimitSec = (req.maxSeconds ?? 240) * 1.12;
+    const durationLimitSec = (req.maxSeconds ?? 240) * SCRIPT_DURATION_MAX_RATIO;
     if (!Number.isFinite(loop.value.estDurationSec) || loop.value.estDurationSec > durationLimitSec) {
       throw new Error(
         `script_gen FAILED: duration remained above the ${Math.round(durationLimitSec)}s ceiling after ` +

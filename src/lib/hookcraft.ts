@@ -222,7 +222,9 @@ const WPS = 3.1; // matches scriptGen's calibrated TTS rate
 // Four candidates of 50–110 words each fit comfortably under this ceiling.
 // Keeping the ceiling close to the structured output prevents malformed
 // providers from spending a large completion on a short creative brief.
-export const HOOK_MAX_OUTPUT_TOKENS = 3200;
+// Live receipt 20261025-05 ended at length: 3069 reasoning tokens left only
+// 124 answer tokens under 3200. Four candidates need real JSON answer room.
+export const HOOK_MAX_OUTPUT_TOKENS = 4800;
 export const HOOK_JUDGE_MAX_OUTPUT_TOKENS = 1400;
 
 function words(t: string): number {
@@ -241,7 +243,7 @@ function sentences(t: string): string[] {
 export function lintHook(
   hook: string,
   opening: string,
-  opts: { skipConcreteness?: boolean; gentle?: boolean } = {},
+  opts: { skipConcreteness?: boolean; gentle?: boolean; maxColdOpenWords?: number } = {},
 ): HookLint {
   const issues: string[] = [];
   const hs = sentences(hook);
@@ -255,8 +257,15 @@ export function lintHook(
   if (estHookSeconds > 10) issues.push(`hook speaks in ~${estHookSeconds}s (max ~10s)`);
   // Gentle registers (guided meditation): openings are LEGITIMATELY short and
   // often begin with a welcome — the mass-produced-filler heuristics misfire.
-  const minOpen = opts.gentle ? 15 : 40;
-  if (openingWords < minOpen || openingWords > 140) issues.push(`opening is ${openingWords} words (want ${opts.gentle ? "15" : "50"}-110)`);
+  const coldOpenLimit = opts.maxColdOpenWords;
+  const minOpen = coldOpenLimit === undefined ? opts.gentle ? 15 : 40
+    : Math.min(opts.gentle ? 15 : 40, Math.max(1, Math.floor(coldOpenLimit / 4)));
+  if (openingWords < minOpen || openingWords > 140) issues.push(`opening is ${openingWords} words (want ${minOpen}-110)`);
+  if (coldOpenLimit !== undefined && (!Number.isSafeInteger(coldOpenLimit) || coldOpenLimit < 1)) {
+    issues.push("cold-open word budget must be a positive integer");
+  } else if (coldOpenLimit !== undefined && words(hook) + openingWords > coldOpenLimit) {
+    issues.push(`cold open is ${words(hook) + openingWords} words (maximum ${coldOpenLimit} for this video's duration)`);
+  }
 
   const lower = `${hook} ${opening}`.toLowerCase();
   const bannedHits = BANNED_OPENERS.filter((b) => lower.includes(b))
@@ -446,6 +455,10 @@ export interface CraftedHook {
 
 export interface HookCraftArgs {
   topic: string;
+  /** Final spoken runtime; claims about this video's own length must agree. */
+  targetSeconds?: number;
+  /** Hook plus opening share this caller-owned spoken-word budget. */
+  maxColdOpenWords?: number;
   /** The video's (working) title — the cold open must confirm the clicked promise. */
   title?: string;
   channelName?: string;
@@ -596,6 +609,14 @@ function registerClause(a: HookCraftArgs): string {
  */
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
   if (!hasCreativeTextKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
+  if (a.targetSeconds !== undefined && (!Number.isFinite(a.targetSeconds) || a.targetSeconds <= 0)) {
+    throw new Error("hookcraft: target duration must be finite and positive");
+  }
+  if (a.maxColdOpenWords !== undefined && (!Number.isSafeInteger(a.maxColdOpenWords) || a.maxColdOpenWords < 1)) {
+    throw new Error("hookcraft: cold-open word budget must be a positive integer");
+  }
+  const timingDirective = a.targetSeconds === undefined ? ""
+    : `RUNTIME CONTRACT: the final spoken video targets ${a.targetSeconds} seconds for planning, but actual audio is not measured yet. Do not promise an exact running time for THIS video in spoken text, even the target duration. Use a brief pause or moment rather than a literal number of minutes or seconds. Factual durations discussed as subject matter remain allowed; do not convert them into a promise about this video's runtime.`;
   const quality = hookQualityProfile(a);
   const skipConcreteness = a.style === "meditation";
   const deviceList = Object.entries(HOOK_DEVICES)
@@ -621,11 +642,15 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `and register; for search-intent topics favor problem_agitation/wrong_way/result_first, for ` +
           `browse/suggested-style topics favor curiosity, contrarian and scene devices):`,
         deviceList,
-        `Per candidate, the proven 0-30s retention arc (the steepest drop is seconds 10-20 — viewers decide at ` +
+        a.maxColdOpenWords !== undefined
+          ? `Per candidate, hook PLUS opening must fit within ${a.maxColdOpenWords} spoken words TOTAL. Scale the opening to this short runtime; never write a full 30-second introduction for a shorter video.`
+          : `Per candidate, the proven 0-30s retention arc (the steepest drop is seconds 10-20 — viewers decide at ` +
           `~15s whether the video honors its promise):`,
         `- hook (seconds 0-7): 1-2 spoken sentences, FIRST sentence ≤ 20 words. Pattern-breaks AND confirms ` +
           `the viewer clicked the right video — the topic must be unmistakable immediately.`,
-        `- opening (seconds 7-30): the NEXT 50-110 spoken words. By ~15 seconds total the PAYOFF must be ` +
+        (a.maxColdOpenWords !== undefined
+          ? `- opening: use only the words remaining from the ${a.maxColdOpenWords}-word combined budget after the hook. The PAYOFF must be `
+          : `- opening (seconds 7-30): the NEXT 50-110 spoken words. By ~15 seconds total the PAYOFF must be `) +
           `explicit — the viewer knows exactly what they will get and why it is worth the runtime (videos that ` +
           `do this retain 52% vs 44% at the 1-minute mark). Then escalate with at least one more concrete ` +
           `specific (a name, number, date, place, object of THIS topic) and close on an open loop the video ` +
@@ -642,6 +667,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
         `"${a.topic}"`,
+        timingDirective,
         a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
         a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
@@ -673,6 +699,12 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       maxTokens: HOOK_MAX_OUTPUT_TOKENS,
       temperature: 0.95,
       log: a.log,
+    }).catch((error: unknown) => {
+      if (error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "consumed_unusable") {
+        a.log?.("hookcraft: generator completed with unusable JSON; any repair uses the remaining existing attempt");
+        return { candidates: [] };
+      }
+      throw error;
     });
 
     const rawCandidates = (Array.isArray(gen?.candidates) ? gen.candidates : [])
@@ -694,7 +726,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       })
       .map((c) => ({
         ...c,
-        lint: lintHook(c.hook, c.opening, { skipConcreteness, gentle: a.style === "meditation" }),
+        lint: lintHook(c.hook, c.opening, { skipConcreteness, gentle: a.style === "meditation", maxColdOpenWords: a.maxColdOpenWords }),
         quality: hookQualitySignal(c.hook, c.opening, { topic: a.topic, title: a.title }),
       }));
     const survivors = candidates.filter((c) => c.lint.pass);
@@ -715,6 +747,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await creativeTextJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            timingDirective,
             a.programRoute ? channelProgramContextPrompt(a.programRoute) : "",
             a.sourceGrounding?.trim() ?? "",
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",
@@ -735,7 +768,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             `- promise: by ~15 seconds (the first ~45 spoken words), does the viewer know EXACTLY what they ` +
               `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}` +
               `${a.topicPromise ? ", while fulfilling or honestly narrowing Topicraft's opening promise" : ""}?`,
-            `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?`,
+            `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?` +
+              (a.targetSeconds === undefined ? "" : ` An exact spoken promise about THIS video's runtime is unverified before audio measurement: mark honest=false even if the number matches the planning target. Time facts about the subject are not runtime promises.`),
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
             `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
           ].filter(Boolean).join("\n\n"),

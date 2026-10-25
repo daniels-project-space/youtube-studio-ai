@@ -18,6 +18,8 @@ import {
   readChannelBannedWords,
 } from "@/engine/channelLanguagePolicy";
 
+export const SCRIPT_DURATION_MAX_RATIO = 1.12;
+
 export interface ScriptSection {
   heading: string;
   narration: string;
@@ -40,11 +42,15 @@ function assignRoles(sections: ScriptSection[]): ScriptSection[] {
  * integration step that lands in the viewer's actual day → ritual close with
  * a quotable takeaway. Generalized for every channel archetype.
  */
-const ARC_RULES =
+function arcRules(bodyWordBudget?: number): string {
+  const arrival = bodyWordBudget !== undefined && bodyWordBudget < 600
+    ? `in at most ${Math.max(1, Math.floor(bodyWordBudget / 4))} words. Combine movements when necessary to fit the body budget.\n`
+    : "in 60-120 words.\n";
+  return (
   "STRUCTURE — write the sections as a STORY JOURNEY, not an essay outline:\n" +
   "- INTRO (first section) = ARRIVAL: it follows the cold open (never repeats it), re-anchors the viewer " +
   "in the channel's recognizable ritual shape, honors where the journey stands, and lays out today's path " +
-  "in 60-120 words.\n" +
+  arrival +
   "- BODY (middle sections) = THE JOURNEY: experience BEFORE explanation — drop the viewer into the " +
   "concrete scene, story, or practice FIRST and distill the principle only once they are inside it; never " +
   "open a movement with abstract theory. ONE theme and ONE carrying image/metaphor hold the entire episode " +
@@ -54,7 +60,9 @@ const ARC_RULES =
   "concrete, immediately doable carry-out, stated plainly.\n" +
   "- OUTRO (final section) = THE LANDING: explicitly pay off the loop the cold open opened, close with the " +
   "channel's ritual (a practice, a meditation, a recap, a sign-off), and leave ONE quotable line that " +
-  "distills the whole episode — the takeaway the viewer carries. Never a flat stop.";
+  "distills the whole episode — the takeaway the viewer carries. Never a flat stop."
+  );
+}
 
 /**
  * Formal series/program support (Calm-style progressive curriculum): each
@@ -500,6 +508,8 @@ async function synthFullScriptOneShot(
 ): Promise<Script | null> {
   const model = scriptCreativeTextModel();
   const minWords = Math.round(wordBudget * 0.85);
+  const hookWordCount = spoken(req, crafted.coldOpen).split(/\s+/).filter(Boolean).length;
+  const bodyWordBudget = wordBudget - hookWordCount;
   // Time-box the one-shot so a slow/overloaded Pro call can't stall script_gen for
   // 15+ min — on timeout we fall back to chunked generation. maxTokens sized to a
   // full long-form script (~10k words) + thinking, not the old bloated 48k.
@@ -533,10 +543,13 @@ async function synthFullScriptOneShot(
           ? `A previous complete draft exceeded its duration ceiling. Write more concisely without dropping the central argument or ending: ${req.priorIssues.join("; ")}`
           : "",
         CRAFT_RULES,
-        ARC_RULES,
+        arcRules(),
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
           `TOTAL (between ${minWords} and ${Math.round(wordBudget * 1.1)} words — do NOT exceed the upper bound; an ` +
-          `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
+          `over-length script overshoots its slot). The separately spoken cold open already contains ${hookWordCount} words; ` +
+          `write roughly ${bodyWordBudget} words across the sections, not ${wordBudget} additional words. ` +
+          `Do not promise this video's exact runtime in spoken text before audio is measured; factual durations within the subject remain allowed. ` +
+          `Write the FULL length as 8-18 substantive sections, each developing ` +
           `a distinct idea in depth (about 250-450 words each). Do NOT pad or stop short.`,
         `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
         `Also return closing_line: one resonant takeaway of no more than 10 spoken words and 80 characters.`,
@@ -554,7 +567,6 @@ async function synthFullScriptOneShot(
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
-    const hookWordCount = spoken(req, crafted.coldOpen).split(/\s+/).filter(Boolean).length;
     let wordCount = hookWordCount + sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
     // TOP-UP before surrendering to the chunked path: the chunked fallback costs
     // 10-25 MORE Pro calls. If the one-shot under-delivered but got most of the
@@ -605,7 +617,7 @@ async function synthFullScriptOneShot(
     // rendered ~4 min). length_check only guards the LOW end; trim trailing BODY
     // sections (keep the opener + the conclusion) until within ~12% of budget so
     // the ask is honored on the high end too. Generalizes to every family.
-    const overCap = Math.round(wordBudget * 1.12);
+    const overCap = Math.round(wordBudget * SCRIPT_DURATION_MAX_RATIO);
     if (wordCount > overCap && sections.length > 3) {
       const before = wordCount;
       while (wordCount > overCap && sections.length > 3) {
@@ -998,6 +1010,7 @@ export async function synthScript(
 ): Promise<Script> {
   assertScriptVoiceInputForRoute(req);
   const maxSeconds = req.maxSeconds ?? 240;
+  if (!Number.isFinite(maxSeconds) || maxSeconds <= 0) throw new Error("scriptGen: target duration must be finite and positive");
   const gapSec = req.sentenceGapSec ?? 0;
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget
   // overshot the slot ~15% (render #6: 848s actual vs 660s target).
@@ -1016,6 +1029,8 @@ export async function synthScript(
   // never re-bills the hookcraft Pro call + grounded fact-checks.
   const crafted = req.precraftedHook ?? await craftHook({
     topic: req.topic,
+    targetSeconds: maxSeconds,
+    maxColdOpenWords: Math.max(1, Math.floor(Math.min(30, maxSeconds / 2) * effectiveWps(gapSec, req.ttsSpeed ?? 1))),
     channelName: req.channelName,
     bannedWords: req.bannedWords,
     niche: req.niche,
@@ -1043,6 +1058,11 @@ export async function synthScript(
     const script = await synthLongScript(req, crafted, maxSeconds, wordBudget, log);
     return bindProgramRoute(req, script);
   }
+  const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
+  const hook = spoken(req, crafted.coldOpen);
+  const hookWordCount = countWords(hook);
+  const bodyWordBudget = wordBudget - hookWordCount;
+  if (bodyWordBudget < 1) throw new Error("scriptGen: approved cold open exhausts the entire spoken word budget");
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook
   // idea already went through hookcraft above).
@@ -1066,18 +1086,20 @@ export async function synthScript(
     styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
     playbookFull(req),
     voiceTagClause(req),
-    ARC_RULES,
+    arcRules(bodyWordBudget),
     structureClause,
     req.priorIssues?.length
       ? `A previous draft was REJECTED by the channel's critic for these issues — this draft MUST fix every one:\n` +
         req.priorIssues.map((i) => `- ${i}`).join("\n")
       : "",
     CRAFT_RULES,
-    `Target length: about ${maxSeconds} seconds — write the FULL length, roughly ${wordBudget} words of ` +
-      `narration total (do NOT stop short; aim for at least ${Math.round(wordBudget * 0.9)} words across the sections).`,
+    `Target length: about ${maxSeconds} seconds, ${wordBudget} words TOTAL including the fixed cold open. ` +
+      `The already-written cold open contains ${hookWordCount} words. Write roughly ${bodyWordBudget} words across your sections, ` +
+      `not ${wordBudget} additional words. Do not repeat the cold open. The duration is a planning target, not a spoken promise: ` +
+      `do not state this video's exact running time before audio is measured. Time facts about the subject remain allowed.`,
     req.endWithSummary === false
       ? ""
-      : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences.",
+      : "End with a FINAL section that recaps the key takeaway in 2-3 sentences in the channel's own register. Do not speak structural labels such as 'In summary'.",
     "ENDING AWARENESS: the video holds a brief OUTRO card after the narration, so the narration must land on a " +
       "single DEFINITIVE closing sentence — a clean, conclusive final thought, never trailing off mid-idea. Then " +
       "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 10 spoken words and ≤ 80 characters) that distills " +
@@ -1106,10 +1128,10 @@ export async function synthScript(
   };
 
   const rawClosing = (raw as { closing_line?: unknown }).closing_line;
-  const closingLine = normalizeScriptClosingLine(rawClosing);
-  const hook = spoken(req, crafted.coldOpen);
-  const sections: ScriptSection[] = Array.isArray(raw.sections)
-    ? raw.sections
+  let closingLine = normalizeScriptClosingLine(rawClosing);
+  const readSections = (value: unknown): ScriptSection[] => Array.isArray(value)
+    ? value
+        .filter((s) => s && typeof s === "object" && !Array.isArray(s))
         .map((s) => {
           const o = s as { heading?: unknown; narration?: unknown };
           return {
@@ -1119,6 +1141,7 @@ export async function synthScript(
         })
         .filter((s) => s.narration.length > 0)
     : [];
+  let sections = readSections(raw.sections);
 
   if (sections.length === 0) {
     throw new Error("scriptGen: model returned no usable narration sections");
@@ -1129,8 +1152,6 @@ export async function synthScript(
   // seconds of narration. Mirror the one-shot rule: <80% of budget → ONE
   // continuation call splices extra body sections before the outro; still
   // short → fail LOUD (a thin script is a real failure, never a silent ship).
-  const countWords = (t: string) => t.split(/\s+/).filter(Boolean).length;
-  const hookWordCount = countWords(hook);
   let wordCount = hookWordCount + sections.reduce((n, s) => n + countWords(s.narration), 0);
   const minWords = Math.round(wordBudget * 0.8);
   if (wordCount < minWords) {
@@ -1163,12 +1184,7 @@ export async function synthScript(
             `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
         ].filter(Boolean).join("\n\n"),
       });
-      const extra = (more.sections ?? [])
-        .map((s) => ({
-          heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""),
-          narration: spoken(req, typeof s.narration === "string" ? s.narration : ""),
-        }))
-        .filter((s) => s.narration.length > 0);
+      const extra = readSections(more.sections);
       // Keep a requested summary last; otherwise the continuation follows all existing sections.
       const insertionIndex = req.endWithSummary === false ? sections.length : Math.max(1, sections.length - 1);
       sections.splice(insertionIndex, 0, ...extra);
@@ -1182,6 +1198,38 @@ export async function synthScript(
         `scriptGen: short-form script is ${wordCount}/${wordBudget} words after top-up (<80% of budget) — ` +
           `refusing to ship a video that runs far under its target length`,
       );
+    }
+  }
+
+  const maxWords = Math.floor(Math.floor(maxSeconds * SCRIPT_DURATION_MAX_RATIO) * effectiveWps(gapSec, req.ttsSpeed ?? 1));
+  if (wordCount > maxWords) {
+    log(`scriptGen short: ${wordCount}/${wordBudget} words — revising the body once to preserve the requested duration`);
+    const revised = await creativeTextJson<{ sections?: unknown; closing_line?: unknown }>({
+      tier: "pro", maxTokens: 13000, temperature: 0.6,
+      prompt: [
+        `REVISE THE BODY of this YouTube narration about "${req.topic}" to fit its spoken duration without losing the story or its payoff.`,
+        req.channelName ? `Channel: ${req.channelName}.` : "",
+        req.persona ? `Channel voice/persona: ${req.persona}` : "",
+        programRouteClause(req), seriesClause(req.series), hookMandate(crafted),
+        styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
+        playbookFull(req), voiceTagClause(req), structureClause, CRAFT_RULES,
+        `Total target: ${maxSeconds} seconds, ${wordBudget} words. Fixed cold open: ${hookWordCount} words. ` +
+          `Return roughly ${bodyWordBudget} body words in total, never more than ${maxWords - hookWordCount}. ` +
+          `The fixed cold open below is prepended separately: do not rewrite or return it.`,
+        `FIXED COLD OPEN:\n${hook}`,
+        `BODY TO REVISE:\n${JSON.stringify(sections)}`,
+        req.priorIssues?.length ? `Preserve these prior critic repairs: ${req.priorIssues.join("; ")}` : "",
+        req.endWithSummary === false ? "No summary section is required." : "Keep a concise final summary and a definitive closing thought.",
+        `Remove repetition, not evidence or distinctive channel details. Do not promise this video's exact runtime before audio is measured, or speak structural labels such as 'In summary'. Time facts about the subject remain allowed. ` +
+          `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}. Plain spoken narration only; closing_line must be <=10 words and <=80 characters.`,
+      ].filter(Boolean).join("\n\n"),
+    });
+    sections = readSections(revised.sections);
+    if (!sections.length) throw new Error("scriptGen: duration correction returned no usable narration sections");
+    closingLine = normalizeScriptClosingLine(revised.closing_line);
+    wordCount = hookWordCount + sections.reduce((n, section) => n + countWords(section.narration), 0);
+    if (wordCount < minWords || wordCount > maxWords) {
+      throw new Error(`scriptGen: duration correction is ${wordCount}/${wordBudget} words, outside the 80%-112% spoken word budget`);
     }
   }
 

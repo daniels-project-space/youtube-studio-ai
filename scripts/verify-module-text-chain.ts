@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { synthShowBible, inspectShowBibleQuality } from "@/engine/creative/showBible";
-import type { ShowBible } from "@/engine/creative/types";
+import type { ShowBible, StyleDNA } from "@/engine/creative/types";
+import { narrationPhysicsFor, narrationSpeedForStyleDNA } from "@/engine/golden";
 import { synthStyleDNA, styleDNAConfidence } from "@/engine/creative/styleDNA";
 import { briefDirector, briefCinematographer, briefEditor, briefComposer } from "@/engine/creative/crew";
 import { synthScript } from "@/lib/scriptGen";
@@ -63,6 +64,8 @@ async function main(): Promise<void> {
   const pendingReceipts: Promise<void>[] = [];
   let reservedUsd = 0;
   let failure: string | undefined;
+  let priorReport: { input: unknown; completedStages: string[]; scope?: string; passed?: boolean } | undefined;
+  let narrationPacing: { sentenceGapSec: number; ttsSpeed: number } | undefined;
   const stages: Record<string, unknown> = {};
   globalThis.fetch = async (url, options) => {
     if (String(url) !== "https://openrouter.ai/api/v1/chat/completions") {
@@ -102,16 +105,23 @@ async function main(): Promise<void> {
       const identity = { ...input, now: Date.now(), log };
       const bible = await stage("show-bible", async () => {
         if (!resumeDirectory) return synthShowBible(identity);
-        const prior = JSON.parse(await readFile(resolve(resumeDirectory, "report.json"), "utf8"));
-        assert.deepEqual(prior.input, input, "reuse requires the identical authored channel and topic");
-        assert.ok(prior.completedStages.includes("show-bible"), "only a completed show bible can be reused");
+        priorReport = JSON.parse(await readFile(resolve(resumeDirectory, "report.json"), "utf8"));
+        assert.deepEqual(priorReport!.input, input, "reuse requires the identical authored channel and topic");
+        assert.ok(priorReport!.completedStages.includes("show-bible"), "only a completed show bible can be reused");
         const saved = JSON.parse(await readFile(resolve(resumeDirectory, "show-bible.json"), "utf8")) as ShowBible;
         assert.deepEqual(inspectShowBibleQuality(saved, input.family), [], "saved bible still satisfies the module's output contract");
         log(`reusing completed show bible from ${resolve(resumeDirectory)}`);
         return saved;
       });
       assert.ok(bible.worksInSpace.length && bible.avoidInSpace.length, "an empty fallback bible is not qualification");
-      const dna = await stage("style-dna", () => synthStyleDNA(identity));
+      const dna = await stage("style-dna", async () => {
+        if (resumeDirectory && priorReport?.scope === "identity" && priorReport.passed === true &&
+            priorReport.completedStages.includes("style-dna")) {
+          log(`reusing independently admitted identity from ${resolve(resumeDirectory)}`);
+          return JSON.parse(await readFile(resolve(resumeDirectory, "style-dna.json"), "utf8")) as StyleDNA;
+        }
+        return synthStyleDNA(identity);
+      });
       assert.notEqual(dna.source, "ungrounded", "an ungrounded skeleton is not a usable channel identity");
       assert.ok(dna.confidence >= styleDNAConfidence({ hasVision: false, hasTitles: false, hasDatabank: false, accepted: true }),
         "identity must pass independent review, not merely return a filled object");
@@ -124,7 +134,11 @@ async function main(): Promise<void> {
       await stage("cinematographer", () => briefCinematographer(bible, ctx));
       await stage("editor", () => briefEditor(bible, ctx));
       await stage("composer", () => briefComposer(bible, ctx));
+      const physics = narrationPhysicsFor(input.niche);
+      narrationPacing = { sentenceGapSec: physics.sentenceGap,
+        ttsSpeed: narrationSpeedForStyleDNA(dna.narrative) ?? physics.speed };
       const script = await stage("script", () => synthScript({ ...input, channelName: input.name,
+        ...narrationPacing,
         channelVoice: parseShowBibleVoice(bible) ?? undefined, narrative: dna.narrative, structure: director ?? undefined,
         style: caseName === "quiet" ? "meditation" : "essay", language: "en" }, log));
       assert.ok(script.narrationText.trim() && script.sections.length, "script must contain actual spoken content");
@@ -145,6 +159,7 @@ async function main(): Promise<void> {
     const report = { caseName, scope: args.includes("--identity-only") ? "identity" : "text-chain",
       input, completedStages: Object.keys(stages), passed: !failure,
       failure, dispatches, receipts, reusedShowBibleFrom: resumeDirectory ? resolve(resumeDirectory) : undefined,
+      narrationPacing,
       conservativeReservedUsd: reservedUsd, usage: scope.snapshot(),
       limitations: "Text-only standalone module integration; not production channel creation, render, or release qualification." };
     await writeFile(resolve(directory, "report.json"), JSON.stringify(report, null, 2), { flag: "wx" });

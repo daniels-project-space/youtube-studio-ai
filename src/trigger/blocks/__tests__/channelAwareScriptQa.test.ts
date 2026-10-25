@@ -218,7 +218,7 @@ async function main() {
       if (prompt.includes("You are the cold-open director")) {
         content = { candidates: [{ device: "result_first",
           hook: "Chernobyl's ignored safety test failed in 1986.",
-          opening: "At 1:23 a.m., engineers disabled the alarm in Reactor Four. Within minutes, a routine check became the decision that sent the roof into the sky. The surviving logs show who saw the warning first, why the shutdown came too late, and how one ignored test changed the night.",
+          opening: "At 1:23 a.m., engineers disabled Reactor Four's alarm. A routine check became a disaster. Surviving logs trace the warning, the delayed shutdown, and the decisions that changed the night.",
           loop: "Why did the ignored test change the night?" }] };
       } else if (prompt.includes("You are a brutal YouTube retention judge")) {
         content = { verdicts: [{ punch: 9, specificity: 9, curiosity: 9, voiceMatch: 9,
@@ -248,7 +248,7 @@ async function main() {
       avoidInSpace: ["Never turn an evidence gap into a suspense claim."],
     };
     const integrationPipeline = selectChannelAwareScriptQa([
-      { block: "script_gen", params: { maxSeconds: 35, qualityProfile: "production" } },
+      { block: "script_gen", params: { maxSeconds: 45, qualityProfile: "production" } },
       { block: "qa_script" },
     ]);
     assert.deepEqual(integrationPipeline.map(({ block, version }) => ({ block, version })), [
@@ -272,6 +272,9 @@ async function main() {
       sink: { async upsert() {} },
     });
     assert.equal(integrated.ok, true, integrated.error);
+    const integratedScript = integrated.store.script as { estDurationSec: number };
+    assert.ok(integratedScript.estDurationSec >= 45 * 0.8 && integratedScript.estDurationSec <= 45 * 1.15,
+      "the evidence-led fixture must fit the authored pacing budget");
     assert.equal(integratedPrompts.length, 5,
       "the integrated writer and critic should make one hook generation, one hook review, one body generation, and two script reviews");
     for (const prompt of [integratedPrompts[0], integratedPrompts[1], integratedPrompts[2],

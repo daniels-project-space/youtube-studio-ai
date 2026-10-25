@@ -23,7 +23,7 @@ const repeated = hookQualitySignal(
 assert.ok(repeated.repeatedTerms > concrete.repeatedTerms, "repeated content words should be visible to the signal");
 assert.ok(repeated.score < concrete.score, "repetition should reduce the local quality score");
 
-assert.equal(HOOK_MAX_OUTPUT_TOKENS, 3200, "generation output must stay bounded for four short candidates");
+assert.equal(HOOK_MAX_OUTPUT_TOKENS, 4800, "four candidates need answer room beyond the measured 3069 reasoning tokens");
 assert.equal(HOOK_JUDGE_MAX_OUTPUT_TOKENS, 1400, "judge output must stay bounded for the structured verdict");
 
 const source = readFileSync(join(process.cwd(), "src/lib/hookcraft.ts"), "utf8");

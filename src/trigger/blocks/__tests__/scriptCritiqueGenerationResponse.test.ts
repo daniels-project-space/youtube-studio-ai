@@ -31,7 +31,7 @@ const malformed: Array<[string, unknown]> = [
   ["array verdict", []], ["null response", null],
 ];
 
-interface RecordedRequest { kind: "candidates" | "judge" | "script" | "critic"; prompt: string }
+interface RecordedRequest { kind: "candidates" | "judge" | "script" | "duration-repair" | "critic"; prompt: string }
 
 async function main(): Promise<void> {
   const normalizedBans = readChannelBannedWords(["  forbidden   phrase ", "FORBIDDEN PHRASE"]);
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
           assert.match(prompt, /Existing cold-open fact checks remain authoritative/);
         }
         if (currentLabel === "banned-word-retry") assert.match(prompt, /forbidden phrase/);
-        assert.equal(body.max_tokens, 3200);
+        assert.equal(body.max_tokens, 4800);
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
@@ -93,14 +93,25 @@ async function main(): Promise<void> {
         const overlong = currentLabel.startsWith("duration-overlong") &&
           (currentLabel.endsWith("exhausted") || attempt === 1);
         const excessWords = overlong ? ` ${Array.from({ length: 180 }, (_, index) => `extra${index}`).join(" ")}` : "";
-        value = { sections: sections.map((section) => ({ ...section,
-          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 ? " This forbidden phrase must be removed." : ""}${excessWords}${attempt > 1 ? " Clear water kept the wooden wheel moving." : ""}` })),
+        // One policy violation or revision marker is enough to exercise the
+        // rejection; repeating it in every section also breaks the time budget.
+        value = { sections: sections.map((section, index) => ({ ...section,
+          narration: `${section.narration}${currentLabel === "banned-word-retry" && attempt === 1 && index === 0 ? " This forbidden phrase must be removed." : ""}${excessWords}${attempt > 1 && index === 0 && !overlong ? " Clear water kept the wooden wheel moving." : ""}` })),
           closing_line:
             currentLabel === "closing-line-exhausted" || (currentLabel === "closing-line-retry" && attempt === 1)
               ? "Carry the seed through the garden gate to find the hidden stream"
               : currentLabel === "closing-line-length-retry" && attempt === 1
                 ? "A".repeat(81)
               : "Follow the warm stone to the truth." };
+      } else if (prompt.startsWith("REVISE THE BODY")) {
+        kind = "duration-repair";
+        assert.ok(currentLabel.startsWith("duration-overlong"),
+          "only deliberate overrun fixtures may request body correction");
+        const excessWords = currentLabel.endsWith("exhausted")
+          ? ` ${Array.from({ length: 180 }, (_, index) => `extra${index}`).join(" ")}` : "";
+        value = { sections: sections.map((section) => ({ ...section,
+          narration: `${section.narration}${excessWords}` })),
+          closing_line: "Follow the warm stone to the truth." };
       } else if (prompt.startsWith("Critique this YouTube narration draft for quality")) {
         kind = "critic";
         assert.equal(body.max_tokens, 2500, "critic budget is not lowered");
@@ -145,7 +156,7 @@ async function main(): Promise<void> {
       const expectedHookAttempts = label === "topic-promise-mismatch" ? 2 : 1;
       const expectedJudgeCalls = label === "topic-promise-mismatch" ? 1 : expectedHookAttempts;
       assert.equal(requests.filter((request) => request.kind === "candidates").length, expectedHookAttempts,
-        `${label}: bounded Hookcraft candidate attempts`);
+        `${label}: bounded Hookcraft candidate attempts (${result.error ?? "completed"})`);
       assert.equal(requests.filter((request) => request.kind === "judge").length, expectedJudgeCalls,
         `${label}: judge provider calls match the expected bounded reuse path`);
       assert.ok(logs.some((line) => /4 generated, 1 unique, 1 pass lint/.test(line)), "real deterministic hook lint ran before duplicate candidates were judged");
@@ -157,6 +168,8 @@ async function main(): Promise<void> {
     assert.equal(good.result.ok, true, good.result.error);
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "critic"]);
     const script = good.result.store.script as Script;
+    assert.ok(script.estDurationSec >= 75 * 0.8 && script.estDurationSec <= 75 * 1.15,
+      "the base fixture must fit the actual pacing budget");
     const internalCriticPrompt = requests.find((request) => request.kind === "critic")?.prompt ?? "";
     assert.match(internalCriticPrompt, /Patient stories that reveal meaning through small, observed details/);
     assert.match(internalCriticPrompt, /Let the scene breathe before explaining its meaning/);
@@ -189,6 +202,9 @@ async function main(): Promise<void> {
     assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
       "deterministic policy catches the first draft before critic spend and retries once");
     assert.doesNotMatch((bannedRetry.result.store.script as Script).narrationText, /forbidden phrase/i);
+    const bannedScript = bannedRetry.result.store.script as Script;
+    assert.ok(bannedScript.estDurationSec >= 75 * 0.8 && bannedScript.estDurationSec <= 75 * 1.15,
+      "the policy repair must fit the actual pacing budget without duration repair");
 
     currentLabel = "stale-topic-promise";
     requests = [];
@@ -223,21 +239,26 @@ async function main(): Promise<void> {
 
     const durationRetry = await run("duration-overlong-retry", [{ pass: true, issues: [] }]);
     assert.equal(durationRetry.result.ok, true, durationRetry.result.error);
-    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script", "critic"],
-      "overlong narration is caught before critic spend and receives one informed retry");
-    assert.match(requests.filter((request) => request.kind === "script")[1].prompt, /exceeds the .* ceiling/,
-      "duration remediation reaches the regeneration prompt");
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "duration-repair", "critic"],
+      "overlong narration receives one bounded body correction before critic spend");
+    assert.match(requests.find((request) => request.kind === "duration-repair")!.prompt, /REVISE THE BODY/,
+      "the overrun reaches the duration correction request");
     assert.ok((durationRetry.result.store.script as Script).estDurationSec <= 75 * 1.12,
       "the accepted retry must meet the measured duration ceiling");
+    assert.ok((durationRetry.result.store.script as Script).estDurationSec >= 75 * 0.8,
+      "body correction must preserve a full-length script rather than truncate it");
     assert.ok((durationRetry.result.store.script as Script).narrationText.includes(sections[2].narration),
       "duration correction preserves the decisive ending rather than trimming it off");
+    assert.equal((durationRetry.result.store.script as Script).hook, script.hook,
+      "body correction retains the independently judged cold open");
 
     const durationExhausted = await run("duration-overlong-exhausted", []);
     assert.equal(durationExhausted.result.ok, false);
-    assert.match(durationExhausted.result.error ?? "", /duration remained above the .* ceiling after the informed retry/);
-    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "script"],
+    assert.match(durationExhausted.result.error ?? "", /duration correction is \d+\/\d+ words, outside the 80%-112% spoken word budget/);
+    assert.deepEqual(requests.map((request) => request.kind), ["candidates", "judge", "script", "duration-repair"],
       "repeated overlong narration fails before paid critique and downstream work");
     assert.equal(Object.hasOwn(durationExhausted.result.store, "narrationText"), false);
+    assert.equal(Object.hasOwn(durationExhausted.result.store, "script"), false);
 
     const closingLineExhausted = await run("closing-line-exhausted", []);
     assert.equal(closingLineExhausted.result.ok, false);

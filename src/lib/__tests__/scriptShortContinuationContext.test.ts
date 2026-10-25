@@ -13,7 +13,7 @@ const crafted = {
 
 const initialNarration = "The surveyor's first mark followed the summer bank, not the winter flood line.";
 const finalNarration = "Mara kept the ledger open because one date still challenged her first conclusion.";
-const continuationNarration = Array.from({ length: 80 }, (_, index) => `continuation${index + 1}`).join(" ");
+const continuationNarration = Array.from({ length: 45 }, (_, index) => `continuation${index + 1}`).join(" ");
 
 async function runScenario(endWithSummary: boolean): Promise<void> {
   const previousFetch = globalThis.fetch;
