@@ -16,6 +16,37 @@ const mediaTypes:Record<HyperYoutubeStage["modelId"],string> = {
   "qwen3-tts":"audio/wav", "yue2":"audio/flac", "ernie-image-turbo":"image/png",
 };
 const extensions:Record<string,string> = {"audio/wav":"wav","audio/flac":"flac","image/png":"png"};
+type JsonObject=Record<string,unknown>;
+function object(value:unknown,label:string):JsonObject {
+  if (!value || typeof value!=="object" || Array.isArray(value)) throw new Error(`Invalid HRS ${label}`);
+  return value as JsonObject;
+}
+function string(value:unknown,label:string):string {
+  if (typeof value!=="string") throw new Error(`Invalid HRS ${label}`);
+  return value;
+}
+function output(value:unknown):NonNullable<HyperYoutubeJob["output"]> {
+  const item=object(value,"output receipt");
+  const available=item.available;
+  if (typeof available!=="boolean" || !Number.isSafeInteger(item.generation) ||
+      !Number.isSafeInteger(item.bytes) || typeof item.downloadUrl!=="string" && item.downloadUrl!==null)
+    throw new Error("Invalid HRS output receipt");
+  return {projectId:string(item.projectId,"output project ID"),jobId:string(item.jobId,"output job ID"),
+    generation:item.generation as number,bucket:string(item.bucket,"output bucket"),key:string(item.key,"output key"),
+    sha256:string(item.sha256,"output digest"),bytes:item.bytes as number,
+    contentType:string(item.contentType,"output content type"),available,downloadUrl:item.downloadUrl};
+}
+function parseJob(value:unknown):HyperYoutubeJob {
+  const item=object(value,"job"),destination=object(item.outputDestination,"output destination");
+  const result:HyperYoutubeJob={id:string(item.id,"job ID"),projectId:string(item.projectId,"project ID"),
+    modelId:string(item.modelId,"model ID"),state:string(item.state,"job state"),
+    generation:item.generation as number,idempotencyKey:string(item.idempotencyKey,"idempotency key"),
+    outputDestination:{bucket:string(destination.bucket,"destination bucket"),
+      projectPrefix:string(destination.projectPrefix,"destination prefix")}};
+  if (!Number.isSafeInteger(result.generation) || result.generation<0) throw new Error("Invalid HRS job generation");
+  if (item.output!==undefined) result.output=item.output===null?null:output(item.output);
+  return result;
+}
 
 /** The caller owns its durable request key and persists the returned job ID. */
 export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:string;projectToken:string;
@@ -28,14 +59,15 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
     throw new Error("Invalid HRS YouTube project binding");
   const call = options.fetch ?? fetch;
   const root = `${base.toString().replace(/\/$/, "")}/api/v1/projects/${options.projectId}`;
-  async function request(path:string, method:"GET"|"POST", body?:unknown):Promise<any> {
+  async function request(path:string, method:"GET"|"POST", body?:unknown):Promise<unknown> {
     const response = await call(root + path, {method,redirect:"error",signal:AbortSignal.timeout(30_000),
       headers:{authorization:`Bearer ${options.projectToken}`,accept:"application/json",...(body === undefined ? {} : {"content-type":"application/json"})},
       ...(body === undefined ? {} : {body:JSON.stringify(body)})});
     if (!response.ok) throw Object.assign(new Error(`HRS YouTube request failed (${response.status})`),{status:response.status});
-    return response.json();
+    return await response.json() as unknown;
   }
-  function validate(job:HyperYoutubeJob, stage:HyperYoutubeStage, key:string):HyperYoutubeJob {
+  function validate(value:unknown, stage:HyperYoutubeStage, key:string):HyperYoutubeJob {
+    const job=parseJob(value);
     if (!job || !uuid.test(job.id) || job.projectId !== options.projectId || job.modelId !== stage.modelId ||
         job.idempotencyKey !== key || !Number.isSafeInteger(job.generation) || job.generation < 0 ||
         job.outputDestination?.bucket !== options.outputBucket || job.outputDestination.projectPrefix !== options.outputPrefix)
@@ -47,8 +79,8 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
       if (!idempotencyKey || idempotencyKey.length > 160 ||
           (stage.seed !== undefined && (!Number.isSafeInteger(stage.seed) || stage.seed < 0)))
         throw new Error("Invalid HRS stage identity or seed");
-      const environment = await request("/environments","POST",{modelId:stage.modelId,spec:{}});
-      if (!uuid.test(environment.id) || environment.modelId !== stage.modelId)
+      const environment = object(await request("/environments","POST",{modelId:stage.modelId,spec:{}}),"environment");
+      if (!uuid.test(string(environment.id,"environment ID")) || environment.modelId !== stage.modelId)
         throw new Error("HRS environment does not match the requested model");
       return validate(await request("/jobs","POST",{environmentId:environment.id,idempotencyKey,
         outputKind:"intermediate",finalRetention:"project-default",inputs:stage.inputs,

@@ -5,24 +5,30 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hyperYoutubeStillKey, renderHyperYoutubeStill } from "@/lib/hyperYoutubeStill";
+import { configuredHyperYoutubeStageClient, type HyperYoutubeJob } from "@/lib/hyperYoutubeStageClient";
 import { composeHyperYoutubeStill16x9 } from "@/lib/hyperYoutubeStillComposition";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
 
 async function main() {
   const scope={ownerId:"owner",channelId:"channel",runId:"run",attempt:1,prompt:"A cozy lakeside room"};
   const source=Buffer.from("native bytes"), states=["running","completed"], keys:string[]=[];
-  const base={id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",projectId:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",generation:1,
-    output:{bucket:"youtube",key:"projects/youtube/jobs/output.png",sha256:"a".repeat(64),bytes:source.length,contentType:"image/png"}};
-  const client:any={submit:async(_:unknown,key:string)=>{keys.push(key);return {...base,state:"queued"}},
-    get:async()=>({...base,state:states.shift()}),download:async()=>source};
+  const jobId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",projectId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const makeJob=(state:string,key:string):HyperYoutubeJob=>({id:jobId,projectId,modelId:"ernie-image-turbo",state,generation:1,
+    idempotencyKey:key,outputDestination:{bucket:"youtube",projectPrefix:"projects/youtube/"},
+    output:{projectId,jobId,generation:1,bucket:"youtube",key:`projects/youtube/jobs/${jobId}/1/output.png`,
+      sha256:"a".repeat(64),bytes:source.length,contentType:"image/png",available:true,downloadUrl:"https://example.com/output.png"}});
+  const client:ReturnType<typeof configuredHyperYoutubeStageClient>={
+    binding:async()=>({baseUrl:"https://hrs.example",projectId,projectToken:"test-token",outputBucket:"youtube",outputPrefix:"projects/youtube/"}),
+    submit:async(_stage,key)=>{keys.push(key);return makeJob("queued",key)},
+    get:async(_id,_stage,key)=>makeJob(states.shift()??"completed",key),download:async()=>source};
   let waits=0;
   const rendered=await renderHyperYoutubeStill({scope,client,wait:async()=>{waits++}});
-  assert.equal(waits,2);assert.equal(rendered.jobId,base.id);assert.deepEqual(rendered.bytes,source);
+  assert.equal(waits,2);assert.equal(rendered.jobId,jobId);assert.deepEqual(rendered.bytes,source);
   states.push("completed");await renderHyperYoutubeStill({scope,client,wait:async()=>{}});
   assert.equal(keys[0],keys[1],"a retry submits the exact same HRS job identity");
   assert.equal(hyperYoutubeStillKey(scope),hyperYoutubeStillKey({...scope,prompt:"changed"}),
     "a changed retry must conflict with the existing immutable request rather than create another job");
-  await assert.rejects(renderHyperYoutubeStill({scope,client:{...client,submit:async()=>({...base,state:"failed"})},wait:async()=>{}}),/ended failed/);
+  await assert.rejects(renderHyperYoutubeStill({scope,client:{...client,submit:async(_stage,key)=>makeJob("failed",key)},wait:async()=>{}}),/ended failed/);
   const dir=await mkdtemp(join(tmpdir(),"hrs-still-test-"));
   try {
     const original=join(dir,"original.png"), input=join(dir,"input.png"), output=join(dir,"output.png");
