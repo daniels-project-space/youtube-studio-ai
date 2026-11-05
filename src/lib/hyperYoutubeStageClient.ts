@@ -6,7 +6,7 @@ export type HyperYoutubeStage =
   | { modelId: "yue2"; inputs: { prompt:string; lyrics:string; abc?:string }; seed?:number }
   | { modelId: "ernie-image-turbo"; inputs: { prompt:string }; seed?:number };
 
-type Job = { id:string; projectId:string; modelId:string; state:string; generation:number;
+export type HyperYoutubeJob = { id:string; projectId:string; modelId:string; state:string; generation:number;
   idempotencyKey:string; outputDestination:{bucket:string;projectPrefix:string};
   output?:{projectId:string;jobId:string;generation:number;bucket:string;key:string;sha256:string;
     bytes:number;contentType:string;available:boolean;downloadUrl:string|null}|null };
@@ -34,7 +34,7 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
     if (!response.ok) throw Object.assign(new Error(`HRS YouTube request failed (${response.status})`),{status:response.status});
     return response.json();
   }
-  function validate(job:Job, stage:HyperYoutubeStage, key:string):Job {
+  function validate(job:HyperYoutubeJob, stage:HyperYoutubeStage, key:string):HyperYoutubeJob {
     if (!job || !uuid.test(job.id) || job.projectId !== options.projectId || job.modelId !== stage.modelId ||
         job.idempotencyKey !== key || !Number.isSafeInteger(job.generation) || job.generation < 0 ||
         job.outputDestination?.bucket !== options.outputBucket || job.outputDestination.projectPrefix !== options.outputPrefix)
@@ -42,7 +42,7 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
     return job;
   }
   return {
-    async submit(stage:HyperYoutubeStage, idempotencyKey:string):Promise<Job> {
+    async submit(stage:HyperYoutubeStage, idempotencyKey:string):Promise<HyperYoutubeJob> {
       if (!idempotencyKey || idempotencyKey.length > 160 ||
           (stage.seed !== undefined && (!Number.isSafeInteger(stage.seed) || stage.seed < 0)))
         throw new Error("Invalid HRS stage identity or seed");
@@ -53,13 +53,13 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
         outputKind:"intermediate",finalRetention:"project-default",inputs:stage.inputs,
         settings:stage.seed === undefined ? {} : {seed:stage.seed},inputRefs:[]}),stage,idempotencyKey);
     },
-    async get(id:string,stage:HyperYoutubeStage,idempotencyKey:string):Promise<Job> {
+    async get(id:string,stage:HyperYoutubeStage,idempotencyKey:string):Promise<HyperYoutubeJob> {
       if (!uuid.test(id)) throw new Error("Invalid HRS job ID");
       const job = validate(await request(`/jobs/${id}`,"GET"),stage,idempotencyKey);
       if (job.id !== id) throw new Error("HRS returned a different job");
       return job;
     },
-    async download(job:Job,stage:HyperYoutubeStage,idempotencyKey:string,maxBytes=100_000_000):Promise<Buffer> {
+    async download(job:HyperYoutubeJob,stage:HyperYoutubeStage,idempotencyKey:string,maxBytes=100_000_000):Promise<Buffer> {
       validate(job,stage,idempotencyKey);
       const out=job.output, expectedType=mediaTypes[stage.modelId];
       const expectedKey=`${options.outputPrefix}jobs/${job.id}/${job.generation}/output.${extensions[expectedType]}`;
@@ -82,4 +82,10 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
       return bytes;
     },
   };
+}
+
+export function configuredHyperYoutubeStageClient() {
+  return createHyperYoutubeStageClient({baseUrl:process.env.HRS_YOUTUBE_BASE_URL ?? "",
+    projectId:process.env.HRS_YOUTUBE_PROJECT_ID ?? "",projectToken:process.env.HRS_YOUTUBE_PROJECT_TOKEN ?? "",
+    outputBucket:process.env.HRS_YOUTUBE_OUTPUT_BUCKET ?? "",outputPrefix:process.env.HRS_YOUTUBE_OUTPUT_PREFIX ?? ""});
 }

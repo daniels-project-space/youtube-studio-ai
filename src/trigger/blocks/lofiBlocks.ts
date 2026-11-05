@@ -35,7 +35,7 @@ import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
-import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
+import { requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { requireAutomaticPackageToOpeningReceipt } from "@/engine/packageToOpening";
@@ -101,7 +101,9 @@ import { verifyCurrentYuE2ReleaseSource } from "@/lib/yue2ReleaseSource";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { renderNovitaImage } from "@/lib/novitaMedia";
+import { renderHyperYoutubeStill } from "@/lib/hyperYoutubeStill";
+import { composeHyperYoutubeStill16x9 } from "@/lib/hyperYoutubeStillComposition";
+import { wait } from "@trigger.dev/sdk/v3";
 import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
 import {
   assertPinnedMiniMaxMusic3Receipt,
@@ -172,7 +174,6 @@ const producerTopicSchema = z.object({
 import {
   makeRunTempDir,
   downloadTo,
-  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
   writeBytes,
 } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, publicUrl } from "@/lib/storage";
@@ -1282,7 +1283,7 @@ export function createKeyframesBlock(
   produces: ["f1Url", "f1Key", "motionPrompt"],
   paid: true,
   run: async (ctx) => {
-    // CLOUD REBUILD: one attested Novita still replaces the old local/Higgsfield
+    // One project-scoped HRS still replaces the old local/Higgsfield
     // path, retaining a durable receipt and a bounded direct-worker envelope.
     // We make ONE keyframe; the seamless loop is built from one forward i2v clip
     // (crossfade self-loop), so we never need a second "frame B" still.
@@ -1291,7 +1292,7 @@ export function createKeyframesBlock(
     const scene = scenesFromStore(ctx)[0];
     const aspect = (ctx.params.aspectRatio as string) ?? "16:9";
     if (aspect !== "16:9") {
-      throw new Error(`keyframes: ${aspect} is not covered by the pinned Novita production profile`);
+      throw new Error(`keyframes: ${aspect} is not covered by the 16:9 still composition`);
     }
 
     const baseFluxPrompt = composeFluxPrompt({
@@ -1322,14 +1323,10 @@ export function createKeyframesBlock(
     // The director loop is deliberately bounded. Admit its complete possible
     // still fanout before the first worker so a retry can never borrow the
     // run-wide budget or leave a partially regenerated visual behind.
-    novitaCostEnvelope({
-      label: "keyframes",
-      imageJobs: maximumImageAttempts,
-      maxCostUsd: ctx.stageBudgetUsd,
-    });
     let stills = 0;
-    let imageCostUsd = 0;
-    const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string }>({
+    const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string;
+      sourceSha256:string; compositeSha256:string; sourceKey:string; sourceBucket:string; sourceBytes:number;
+      projectId:string; generation:number; idempotencyKey:string }>({
       label: "keyframe",
       threshold: 0.8,
       maxIters: maximumImageAttempts,
@@ -1340,25 +1337,27 @@ export function createKeyframesBlock(
           ? ` Correct these problems from the previous attempt: ${priorIssues.join("; ")}.`
           : "";
         stills++;
-        ctx.log(`keyframes: generating still (Novita local Z-Image Turbo), attempt ${stills}…`);
-        const rendered = await renderNovitaImage({
-          prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-keyframe`,
-          id: `keyframe-${stills}`,
-          prompt: baseFluxPrompt + fix,
-          profileId: "production",
-          maxCostUsd: PRICE.novitaImageMaxUsd,
-          lifecycle: {
-            ownerId: ctx.ownerId,
-            channelId: ctx.channelId,
-            runId: ctx.runId,
-            blockId: "keyframes",
-          },
-        });
-        imageCostUsd += rendered.costUsd;
-        const local = await downloadTo(rendered.url, join(tmp, `f1_${stills}.png`), {
-          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-        });
-        return { url: rendered.url, local, key: rendered.key, jobId: rendered.jobId, model: rendered.model };
+        ctx.log(`keyframes: generating ERNIE still through Hyper, attempt ${stills}…`);
+        const bucket=process.env.HRS_YOUTUBE_OUTPUT_BUCKET;
+        if (!bucket || bucket !== process.env.R2_BUCKET) throw new Error("keyframes: HRS and YouTube R2 buckets must match");
+        const rendered = await renderHyperYoutubeStill({scope:{ownerId:String(ctx.ownerId),channelId:String(ctx.channelId),
+          runId:ctx.runId,attempt:stills,prompt:baseFluxPrompt+fix},wait:async(jobId,check)=>{
+          await wait.for({seconds:10,idempotencyKey:`hrs-still:${jobId}:${check}`});
+        }});
+        const local=join(tmp,`f1_${stills}.png`);
+        // Preserve the native square at original size. A blurred extension of
+        // the same image fills the surrounding 16:9 canvas; no source pixels
+        // are cropped or resampled in the central image.
+        const composite=await composeHyperYoutubeStill16x9(rendered.bytes,join(tmp,`f1_native_${stills}.png`),local);
+        const compositeSha256=sha256BytesHex(composite);
+        const key=`${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-keyframe/${rendered.jobId}-${rendered.generation}.png`;
+        await putObject(key,composite,{bucket,contentType:"image/png"});
+        if (sha256BytesHex(await getObjectBytes(key,bucket,{maxBytes:100_000_000})) !== compositeSha256)
+          throw new Error("keyframes: project R2 composition failed verification");
+        return {url:publicUrl(key),local,key,jobId:rendered.jobId,model:"ernie-image-turbo",
+          sourceKey:rendered.output.key,sourceBucket:rendered.output.bucket,sourceBytes:rendered.output.bytes,
+          sourceSha256:rendered.output.sha256,projectId:rendered.projectId,generation:rendered.generation,
+          idempotencyKey:rendered.idempotencyKey,compositeSha256};
       },
       critique: async (cand) => {
         if (!canCritique) return { score: 1, pass: true, issues: [] };
@@ -1418,9 +1417,13 @@ export function createKeyframesBlock(
 
     const f1Key = loop.value.key;
     await recordAsset(ctx, "keyframe", f1Key, {
-      provider: "novita-z-image-turbo-local",
+      provider: "hyper-ernie-image-turbo",
       jobId: loop.value.jobId,
       model: loop.value.model,
+      sourceBucket:loop.value.sourceBucket,sourceKey:loop.value.sourceKey,sourceBytes:loop.value.sourceBytes,
+      sourceSha256:loop.value.sourceSha256,projectId:loop.value.projectId,generation:loop.value.generation,
+      idempotencyKey:loop.value.idempotencyKey,
+      compositeSha256:loop.value.compositeSha256,composition:"square-native-on-blurred-16:9/v1",
       attempts: stills,
       identityScore: loop.critique.score,
     });
@@ -1465,7 +1468,6 @@ export function createKeyframesBlock(
       f1Url,
       f1Key,
       motionPrompt,
-      [COST_PATCH_KEY]: imageCostUsd,
     };
   },
   };

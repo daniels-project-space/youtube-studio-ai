@@ -205,7 +205,7 @@ async function routingProof(): Promise<void> {
     "src/trigger/blocks/whiteboardScribeBlocks.ts": /renderAttestedNovitaImageBytes/,
     "src/trigger/blocks/documentaryCollageShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/loreShortBlocks.ts": /createAttestedNovitaImageGenerator/,
-    "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
+    "src/trigger/blocks/lofiBlocks.ts": /renderHyperYoutubeStill/,
   };
   for (const [relative, expected] of Object.entries(explicitInjection)) {
     assert.match(await readFile(join(process.cwd(), relative), "utf8"), expected);
@@ -260,7 +260,7 @@ async function main(): Promise<void> {
   await rejectedAttestationStillAccounts();
   await providerReceiptSurvivesDeliveryCrash();
   await routingProof();
-  console.log("PRODUCTION IMAGE ROUTING PASS: Nano is thumbnail-only; renderer art is attested Novita and fail-closed");
+  console.log("PRODUCTION IMAGE ROUTING PASS: Nano is thumbnail-only; lofi stills use HRS and other renderer routes retain their current checks");
 }
 
 main().catch((error) => {
