@@ -99,7 +99,7 @@ function Review({ runId, reload }: { runId: string; reload: () => void }) {
     <dl className={styles.facts}>
       <div><dt>Requested source</dt><dd>{time(quality.requestedDurationSec)}</dd></div>
       <div><dt>Measured source</dt><dd>{quality.actualDurationSec.toFixed(3)} s</dd></div>
-      <div><dt>Allocation estimate</dt><dd>${(review.allocation.allocatedCostUsdMicros / 1_000_000).toFixed(6)}</dd></div>
+      <div><dt>Allocation estimate</dt><dd>{review.allocation.allocatedCostUsdMicros === null ? "Unavailable" : `$${(review.allocation.allocatedCostUsdMicros / 1_000_000).toFixed(6)}`}</dd></div>
       <div><dt>Provider bill</dt><dd>Unknown</dd></div>
     </dl>
     {!quality.durationMatches && <p className={styles.warning}>{quality.naturalLoopDurationAccepted

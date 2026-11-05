@@ -82,8 +82,8 @@ loader._load = function (id, ...args) {
     }
     async mutation(ref: Parameters<typeof getFunctionName>[0]) { assert.equal(getFunctionName(ref), "assets:recordAsset"); }
   } };
-  if (id.endsWith("/yue2DurableEvaluation")) return {
-    readDurableYuE2Candidate: async () => { durableReads++; return structuredClone(currentMaterial); },
+  if (id.endsWith("/yue2CandidateReview")) return {
+    readYuE2CandidateForReview: async () => { durableReads++; return structuredClone(currentMaterial); },
     executeDurableYuE2Evaluation: async () => { throw new Error("Adoption must never generate"); },
   };
   if (id.endsWith("/storage")) return {
@@ -379,6 +379,15 @@ async function main() {
   for (const patch of [{ nativeFrames: frames + 1 }, { channelId: "foreign" }, { technicalStatus: "blocked" }]) {
     await assert.rejects(prepareApprovedYuE2AssemblySource({ ...ctx, store: { ...ctx.store, yue2MusicCandidate: { ...candidate, ...patch } } }, 2));
   }
+  const hrsJobId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const hrsCandidate={...candidate,version:"shared-yue2-music-candidate/v2-hrs",jobId:hrsJobId,
+    candidateKey:`${root}candidate-hrs.json`,allocatedCostUsdMicros:null,costBasis:"unreported"};
+  reset();approval=createYuE2SourceApproval({basis:{...basis,jobId:hrsJobId},submission,reviewedAt:12345,revision:1});
+  currentMaterial={...material,candidate:{...material.candidate,jobId:hrsJobId}};
+  const hrsSource=await prepareApprovedYuE2AssemblySource({...ctx,store:{...ctx.store,yue2MusicCandidate:hrsCandidate}},2);
+  try { assert.equal(hrsSource.evidence.candidateSha256,hrsCandidate.candidateSha256);
+    assert.equal(hrsSource.evidence.nativeFrames,hrsCandidate.nativeFrames); }
+  finally { await hrsSource.cleanup(); }
   const once = createAcceptedMusicArrangement({ ownerId: candidate.ownerId, channelId: candidate.channelId, runId: candidate.runId,
     topic: arrangement.topic, sourceBrief: { musicIntent: { playback: "once", role: "narration_bed", requestedDurationSec: 12 },
       reviewContext: createMusicReviewContext({ topic: arrangement.topic, family: "narrated", channelName: "Synthetic background fixture",

@@ -8,7 +8,7 @@ const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
 export const YuE2SourceApprovalBasisSchema = z.object({
   ownerId: id, channelId: id, runId: id, invocationSha256: hash,
   candidateSha256: hash, arrangementFingerprint: hash,
-  jobId: z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),
+  jobId: z.union([z.string().regex(/^yue2-eval-[a-f0-9]{64}$/u),z.string().uuid()]),
   listeningAudioKey: z.string(), listeningAudioSha256: hash,
   nativeFrames: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   sampleRateHz: z.literal(48000), channels: z.literal(2),

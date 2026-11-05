@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { resolveHyperYoutubeProject } from "@/lib/hyperYoutubeProject";
 
 /** Project-scoped HRS contract; provider credentials remain in HRS. */
 export interface HyperThumbnailRequest {
@@ -14,9 +15,16 @@ export interface HyperThumbnailClientOptions {
 }
 /** Explicit project binding; never silently fall back to a different provider. */
 export function configuredHyperThumbnailClient() {
-  return createHyperThumbnailClient({baseUrl:process.env.HRS_YOUTUBE_BASE_URL ?? "",
-    projectId:process.env.HRS_YOUTUBE_PROJECT_ID ?? "",projectToken:process.env.HRS_YOUTUBE_PROJECT_TOKEN ?? "",
-    outputBucket:process.env.HRS_YOUTUBE_OUTPUT_BUCKET ?? "",outputPrefix:process.env.HRS_YOUTUBE_OUTPUT_PREFIX ?? ""});
+  const base=new URL(process.env.HRS_YOUTUBE_BASE_URL ?? "");
+  if (base.protocol!=="https:" || base.username || base.password || base.search || base.hash || !process.env.HRS_YOUTUBE_PROJECT_TOKEN)
+    throw new Error("Invalid HRS YouTube connection");
+  let resolved:ReturnType<typeof resolveHyperYoutubeProject>|undefined;
+  const binding=()=>resolved ??= resolveHyperYoutubeProject().catch(error=>{resolved=undefined;throw error;});
+  const client=async()=>createHyperThumbnailClient(await binding());
+  return {binding,uploadReference:async(...args:Parameters<ReturnType<typeof createHyperThumbnailClient>["uploadReference"]>)=>(await client()).uploadReference(...args),
+    submit:async(...args:Parameters<ReturnType<typeof createHyperThumbnailClient>["submit"]>)=>(await client()).submit(...args),
+    get:async(...args:Parameters<ReturnType<typeof createHyperThumbnailClient>["get"]>)=>(await client()).get(...args),
+    download:async(...args:Parameters<ReturnType<typeof createHyperThumbnailClient>["download"]>)=>(await client()).download(...args)};
 }
 export function hasConfiguredHyperThumbnailClient():boolean {
   try { configuredHyperThumbnailClient(); return true; } catch { return false; }

@@ -37,6 +37,8 @@ async function main() {
   const caller=await readFile(join(process.cwd(),"src/trigger/blocks/lofiBlocks.ts"),"utf8");
   assert.match(caller,/renderHyperYoutubeStill\(/);assert.match(caller,/composeHyperYoutubeStill16x9\(/);
   assert.match(caller,/getObjectBytes\(key,bucket,\{maxBytes:100_000_000\}\)/);
+  assert.match(caller,/getObjectBytes\(receiptKey,bucket,\{maxBytes:100_000\}\)/,
+    "the actual keyframe caller verifies the stored project receipt before returning");
   console.log("HRS YouTube still handoff: ok");
 }
 void main();

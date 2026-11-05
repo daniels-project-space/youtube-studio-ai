@@ -1,7 +1,7 @@
-import type { readDurableYuE2Candidate } from "./yue2DurableEvaluation";
+import type { readYuE2CandidateForReview } from "./yue2CandidateReview";
 import type { YuE2AuditionRecord } from "@/engine/yue2Audition";
 
-type Material = NonNullable<Awaited<ReturnType<typeof readDurableYuE2Candidate>>>;
+type Material = NonNullable<Awaited<ReturnType<typeof readYuE2CandidateForReview>>>;
 
 /** Public owner-only projection; storage keys and worker configuration stay server-side. */
 export type YuE2CandidateReview = {
@@ -20,6 +20,6 @@ export type YuE2CandidateReview = {
     contextRetained: boolean;
     channelPersonalityVerified: false;
   };
-  allocation: { allocatedCostUsdMicros: number; providerBilledCostUsdMicros: null };
+  allocation: { allocatedCostUsdMicros: number | null; providerBilledCostUsdMicros: null };
   quality: Material["quality"];
 };

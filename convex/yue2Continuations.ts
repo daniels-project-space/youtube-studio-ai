@@ -134,9 +134,9 @@ export const verifyReleaseSource = query({ args: { ...scope, source: v.optional(
   verifiedWorkerDeploymentFields(run);
   const invocation = run.pipelineInvocationSnapshot as PipelineInvocationSnapshot | undefined;
   const required = Boolean(run.yue2ContinuationId || invocation?.entries.some(entry =>
-    entry.block === "music" && entry.version === "3.0.0-yue2-candidate") ||
+    entry.block === "music" && ["3.0.0-yue2-candidate","4.0.0-yue2-hrs"].includes(entry.version ?? "")) ||
     (Array.isArray(invocation?.compilationModules) && invocation.compilationModules.some(module =>
-      module?.id === "music" && module.version === "3.0.0-yue2-candidate")));
+      module?.id === "music" && ["3.0.0-yue2-candidate","4.0.0-yue2-hrs"].includes(module.version ?? ""))));
   if (!required && args.source === undefined) return null;
   const source = YuE2AssemblySourceSchema.parse(args.source);
   const row = await assertYuE2Continuation(ctx, run);

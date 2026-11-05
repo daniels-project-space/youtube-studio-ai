@@ -102,6 +102,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderHyperYoutubeStill } from "@/lib/hyperYoutubeStill";
+import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 import { composeHyperYoutubeStill16x9 } from "@/lib/hyperYoutubeStillComposition";
 import { wait } from "@trigger.dev/sdk/v3";
 import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
@@ -1325,7 +1326,7 @@ export function createKeyframesBlock(
     // run-wide budget or leave a partially regenerated visual behind.
     let stills = 0;
     const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string;
-      sourceSha256:string; compositeSha256:string; sourceKey:string; sourceBucket:string; sourceBytes:number;
+      sourceSha256:string; compositeSha256:string; sourceKey:string; sourceBucket:string; sourceBytes:number; receiptKey:string;
       projectId:string; generation:number; idempotencyKey:string }>({
       label: "keyframe",
       threshold: 0.8,
@@ -1338,9 +1339,10 @@ export function createKeyframesBlock(
           : "";
         stills++;
         ctx.log(`keyframes: generating ERNIE still through Hyper, attempt ${stills}…`);
-        const bucket=process.env.HRS_YOUTUBE_OUTPUT_BUCKET;
+        const client=configuredHyperYoutubeStageClient();
+        const bucket=(await client.binding()).outputBucket;
         if (!bucket || bucket !== process.env.R2_BUCKET) throw new Error("keyframes: HRS and YouTube R2 buckets must match");
-        const rendered = await renderHyperYoutubeStill({scope:{ownerId:String(ctx.ownerId),channelId:String(ctx.channelId),
+        const rendered = await renderHyperYoutubeStill({client,scope:{ownerId:String(ctx.ownerId),channelId:String(ctx.channelId),
           runId:ctx.runId,attempt:stills,prompt:baseFluxPrompt+fix},wait:async(jobId,check)=>{
           await wait.for({seconds:10,idempotencyKey:`hrs-still:${jobId}:${check}`});
         }});
@@ -1354,10 +1356,18 @@ export function createKeyframesBlock(
         await putObject(key,composite,{bucket,contentType:"image/png"});
         if (sha256BytesHex(await getObjectBytes(key,bucket,{maxBytes:100_000_000})) !== compositeSha256)
           throw new Error("keyframes: project R2 composition failed verification");
+        const receiptKey=`${key}.receipt.json`;
+        const receipt=Buffer.from(canonicalJson({version:"hrs-youtube-lofi-still/v1",projectId:rendered.projectId,
+          jobId:rendered.jobId,generation:rendered.generation,idempotencyKey:rendered.idempotencyKey,
+          modelId:"ernie-image-turbo",source:rendered.output,composition:"square-native-on-blurred-16:9/v1",
+          output:{bucket,key,sha256:compositeSha256,bytes:composite.byteLength,contentType:"image/png"}}));
+        await putObject(receiptKey,receipt,{bucket,contentType:"application/json"});
+        if (sha256BytesHex(await getObjectBytes(receiptKey,bucket,{maxBytes:100_000})) !== sha256BytesHex(receipt))
+          throw new Error("keyframes: project R2 receipt failed verification");
         return {url:publicUrl(key),local,key,jobId:rendered.jobId,model:"ernie-image-turbo",
           sourceKey:rendered.output.key,sourceBucket:rendered.output.bucket,sourceBytes:rendered.output.bytes,
           sourceSha256:rendered.output.sha256,projectId:rendered.projectId,generation:rendered.generation,
-          idempotencyKey:rendered.idempotencyKey,compositeSha256};
+          idempotencyKey:rendered.idempotencyKey,compositeSha256,receiptKey};
       },
       critique: async (cand) => {
         if (!canCritique) return { score: 1, pass: true, issues: [] };
@@ -1423,6 +1433,7 @@ export function createKeyframesBlock(
       sourceBucket:loop.value.sourceBucket,sourceKey:loop.value.sourceKey,sourceBytes:loop.value.sourceBytes,
       sourceSha256:loop.value.sourceSha256,projectId:loop.value.projectId,generation:loop.value.generation,
       idempotencyKey:loop.value.idempotencyKey,
+      receiptKey:loop.value.receiptKey,
       compositeSha256:loop.value.compositeSha256,composition:"square-native-on-blurred-16:9/v1",
       attempts: stills,
       identityScore: loop.critique.score,

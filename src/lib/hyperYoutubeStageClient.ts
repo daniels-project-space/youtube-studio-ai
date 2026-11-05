@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveHyperYoutubeProject } from "@/lib/hyperYoutubeProject";
 
 /** Native HRS stages supported for the YouTube project. */
 export type HyperYoutubeStage =
@@ -85,7 +86,10 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
 }
 
 export function configuredHyperYoutubeStageClient() {
-  return createHyperYoutubeStageClient({baseUrl:process.env.HRS_YOUTUBE_BASE_URL ?? "",
-    projectId:process.env.HRS_YOUTUBE_PROJECT_ID ?? "",projectToken:process.env.HRS_YOUTUBE_PROJECT_TOKEN ?? "",
-    outputBucket:process.env.HRS_YOUTUBE_OUTPUT_BUCKET ?? "",outputPrefix:process.env.HRS_YOUTUBE_OUTPUT_PREFIX ?? ""});
+  let resolved:ReturnType<typeof resolveHyperYoutubeProject>|undefined;
+  const binding=()=>resolved ??= resolveHyperYoutubeProject().catch(error=>{resolved=undefined;throw error;});
+  const client=async()=>createHyperYoutubeStageClient(await binding());
+  return {binding,submit:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["submit"]>)=>(await client()).submit(...args),
+    get:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["get"]>)=>(await client()).get(...args),
+    download:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["download"]>)=>(await client()).download(...args)};
 }

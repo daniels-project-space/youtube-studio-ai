@@ -29,7 +29,7 @@ try {
     assert.equal(result.productionReady, false, "source selection is not automatic production qualification");
     assert.ok(result.runtimeBlockers.some(reason => reason.includes("YuE2")));
     const modules = result.compilation!.modules;
-    assert.equal(modules.find(module => module.id === "music")?.version, "3.0.0-yue2-candidate");
+    assert.equal(modules.find(module => module.id === "music")?.version, "4.0.0-yue2-hrs");
     assert.equal(modules.find(module => module.id === "composer_brief")?.version, "3.0.0-yue2-score");
     assert.equal(modules.find(module => module.id === (family === "music_loop" ? "assemble" : "timeline_assemble"))?.version,
       playback === "once" ? "3.1.0-yue2-reviewed-once" : "3.0.0-yue2-reviewed-loop");
@@ -55,7 +55,8 @@ try {
     const changed = designPipeline({ ...opts, yue2Music: { ...chosen, sourceParams: { ...sourceParams, seed: 43 } } });
     assert.notEqual(changed.compilation!.fingerprint, result.compilation!.fingerprint);
     const higher = designPipeline({ ...opts, yue2Music: { ...chosen, sourceParams: { ...sourceParams, maxCostUsd: 0.08 } } });
-    assert.ok(Math.abs(higher.compilation!.reservedMaxCostUsd - result.compilation!.reservedMaxCostUsd - 0.04) < 1e-8);
+    assert.equal(higher.compilation!.reservedMaxCostUsd, result.compilation!.reservedMaxCostUsd,
+      "a legacy per-job ceiling does not limit prepaid HRS work");
   }
   const baseline = designPipeline({ family: "music_loop", nicheKey: "lofi" }).pipeline;
   assert.throws(() => selectYuE2Pipeline(baseline, { ...selection, musicIntent: { ...selection.musicIntent, playback: "once" } }), /narrated timeline/);
@@ -64,7 +65,7 @@ try {
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief" ? { ...entry, version: "2.0.0-accepted-arrangement" } : entry), selection), /explicitly pinned/);
   assert.throws(() => selectYuE2Pipeline(baseline.map(entry => entry.block === "composer_brief"
     ? { ...entry, params: { ...entry.params, musicIntent: { ...selection.musicIntent, playback: "once" } } } : entry), selection), /explicit music intent/);
-  for (const patch of [{ seed: undefined }, { personalCreatorAcknowledged: false }, { maxCostUsd: 0.01 }, { provider: "suno" }]) {
+  for (const patch of [{ seed: undefined }, { personalCreatorAcknowledged: false }, { provider: "suno" }]) {
     assert.throws(() => selectYuE2Pipeline(baseline, { ...selection, sourceParams: { ...sourceParams, ...patch } }));
   }
   const missingPlayback = { ...selection, musicIntent: { role: "primary_music", requestedDurationSec: 30 } } as YuE2PipelineSelection;
