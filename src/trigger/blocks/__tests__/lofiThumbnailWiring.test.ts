@@ -11,8 +11,8 @@ const replay = read("src/lib/thumbnailRefreshReplay.ts");
 
 assert.match(
   block,
-  /family.*music_loop[\s\S]*prepareLofiThumbnailReference[\s\S]*generateFalNanoBananaLofiThumbnailWithReceipt[\s\S]*lofi_nano_banana_15s_reference[\s\S]*generateFalNanoBananaProThumbnailWithReceipt/,
-  "Lo-Fi must take its Fal 15-second reference-edit branch before the sealed native Pro thumbnail path",
+  /family.*music_loop[\s\S]*prepareLofiThumbnailReference[\s\S]*uploadReference[\s\S]*client\.submit[\s\S]*lofi_nano_banana_15s_reference[\s\S]*client\.submit/,
+  "Lo-Fi must submit its exact frame and the standard path must use the HRS candidate client",
 );
 assert.doesNotMatch(
   block,
@@ -31,8 +31,8 @@ assert.doesNotMatch(
 );
 assert.match(
   block,
-  /version: "thumbnail-lofi-fal-nano-banana-evidence\/v2"[\s\S]*mode: "lofi-render-frame-native"/,
-  "the active Lo-Fi evidence must identify the native single-reference edit",
+  /createHyperThumbnailEvidence\(\{result,requestContext,[\s\S]*mode:"lofi-render-frame-native"/,
+  "the active Lo-Fi evidence must identify the HRS single-reference edit",
 );
 assert.match(
   lofi,

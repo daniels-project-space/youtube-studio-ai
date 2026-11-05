@@ -11,6 +11,7 @@ import {
   type FalNanoBananaProThumbnailReceipt,
 } from "@/lib/falNanoBananaProThumbnailContract";
 import type { NovitaImageProviderReceipt } from "@/lib/novitaMedia";
+import type { HyperThumbnailResult } from "@/lib/hyperThumbnailClient";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -111,6 +112,32 @@ export interface PlanWeekFalNanoBananaProProviderRenderReceipt extends PlanWeekR
   createdAt: number;
 }
 
+export interface PlanWeekHrsProviderRenderReceipt extends PlanWeekRenderScope {
+  version:"plan-week-provider-render/v4"; provider:"google-gemini-api"; route:"hrs-gemini-nano-banana-pro";
+  sourceKey:string; sourceContentType:"image/png"; model:"gemini-3-pro-image"; apiVersion:"hrs/v1";
+  profileId:"hrs-youtube-thumbnail-candidate/v1"; width:number; height:number; expectedWords:string[];
+  costUsd:number; accounting:"estimate"; requestSha256:string; requestCanonicalJson:string;
+  responseSha256:string; createdAt:number; candidateId:string; projectId:string; outputBucket:string; outputKey:string; outputBytes:number; sourceSha256:null;
+}
+export function planWeekHrsCandidateIdentity(scope:PlanWeekRenderScope):string {
+  return canonicalJson({contract:"studio-plan-week-thumbnail-candidate/v1",scope});
+}
+export function makePlanWeekHrsProviderRenderReceipt(scope:PlanWeekRenderScope,args:{result:HyperThumbnailResult;
+  sourceKey:string;width:number;height:number;expectedWords:string[];estimatedCostUsd:number}):PlanWeekHrsProviderRenderReceipt {
+  const r=args.result;
+  if (r.sourceSha256 !== null) throw new Error("Plan-week HRS candidate must not carry a source frame");
+  const receipt:PlanWeekHrsProviderRenderReceipt={version:"plan-week-provider-render/v4",...scope,
+    provider:"google-gemini-api",route:"hrs-gemini-nano-banana-pro",sourceKey:args.sourceKey,sourceContentType:"image/png",
+    model:"gemini-3-pro-image",apiVersion:"hrs/v1",profileId:"hrs-youtube-thumbnail-candidate/v1",width:args.width,height:args.height,
+    expectedWords:args.expectedWords,costUsd:args.estimatedCostUsd,accounting:"estimate",requestSha256:r.requestSha256,
+    requestCanonicalJson:canonicalJson({provider:r.provider,modelId:r.modelId,settings:r.settings,candidateId:r.candidateId,
+      request:r.request,referenceAssets:r.referenceAssets}),responseSha256:r.output.sha256,createdAt:Date.parse(r.completedAt),
+    candidateId:r.candidateId,projectId:r.projectId,outputBucket:r.output.bucket,outputKey:r.output.key,
+    outputBytes:r.output.bytes,sourceSha256:null};
+  if (!validatePlanWeekProviderRenderReceipt(receipt,scope)) throw new Error("Invalid HRS plan-week receipt");
+  return receipt;
+}
+
 /** Existing immutable rows remain readable; no new render path creates this shape. */
 export interface LegacyPlanWeekNovitaProviderRenderReceipt extends PlanWeekRenderScope {
   version: "plan-week-provider-render/v1";
@@ -134,11 +161,13 @@ export interface LegacyPlanWeekNovitaProviderRenderReceipt extends PlanWeekRende
 }
 
 export type PlanWeekProviderRenderReceipt =
+  | PlanWeekHrsProviderRenderReceipt
   | PlanWeekFalNanoBananaProProviderRenderReceipt
   | PlanWeekNanoBananaProviderRenderReceipt
   | LegacyPlanWeekNovitaProviderRenderReceipt;
 
 export type PlanWeekThumbnailProviderRenderReceipt =
+  | PlanWeekHrsProviderRenderReceipt
   | PlanWeekFalNanoBananaProProviderRenderReceipt
   | PlanWeekNanoBananaProviderRenderReceipt;
 
@@ -298,7 +327,7 @@ function validScope(
     value.sourceKey === value.destinationKey ||
     !Number.isFinite(value.costUsd) ||
     value.costUsd < 0 ||
-    value.costUsd > PLAN_WEEK_IMAGE_UNIT_USD + Number.EPSILON ||
+    (value.version !== "plan-week-provider-render/v4" && value.costUsd > PLAN_WEEK_IMAGE_UNIT_USD + Number.EPSILON) ||
     !Number.isFinite(value.createdAt) ||
     value.createdAt <= 0 ||
     typeof value.requestCanonicalJson !== "string" ||
@@ -526,6 +555,27 @@ export function validatePlanWeekProviderRenderReceipt(
 ): receipt is PlanWeekProviderRenderReceipt {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
   const version = (receipt as { version?: unknown }).version;
+  if (version === "plan-week-provider-render/v4") {
+    const value = receipt as PlanWeekHrsProviderRenderReceipt;
+    try {
+      const identity = JSON.parse(value.requestCanonicalJson);
+      return validScope(value,expected) && value.provider === "google-gemini-api" && value.route === "hrs-gemini-nano-banana-pro" &&
+        value.model === "gemini-3-pro-image" && value.apiVersion === "hrs/v1" && value.profileId === "hrs-youtube-thumbnail-candidate/v1" &&
+        value.accounting === "estimate" && /^image\/png$/.test(value.sourceContentType) && SHA256.test(value.responseSha256) &&
+        /^[a-f0-9-]{36}$/i.test(value.projectId) && SHA256.test(value.candidateId) && !!value.outputBucket &&
+        value.outputKey.startsWith("projects/") && !value.outputKey.includes("..") && Number.isSafeInteger(value.outputBytes) &&
+        value.outputBytes > 0 && value.outputBytes <= 25_000_000 && value.sourceSha256 === null && Number.isInteger(value.width) &&
+        Number.isInteger(value.height) && value.width >= 1024 && value.height >= 576 &&
+        Array.isArray(value.expectedWords) && value.expectedWords.length > 0 && value.expectedWords.length <= 2 &&
+        value.expectedWords.every(word => typeof word === "string" && !!word.trim() && word.length <= 64 &&
+          typeof identity.request?.creativeDirection === "string" && identity.request.creativeDirection.toUpperCase().includes(word.toUpperCase())) &&
+        canonicalJson(identity) === value.requestCanonicalJson && identity.provider === value.provider && identity.modelId === value.model &&
+        identity.candidateId === value.candidateId && identity.request?.candidateId === value.candidateId &&
+        identity.settings?.aspectRatio === "16:9" && identity.settings?.imageSize === "2K" &&
+        Array.isArray(identity.referenceAssets) && identity.referenceAssets.length === 0 &&
+        Array.isArray(identity.request?.referenceAssets) && identity.request.referenceAssets.length === 0;
+    } catch { return false; }
+  }
   if (version === "plan-week-provider-render/v3") {
     return validateFalNanoBananaProReceipt(
       receipt as PlanWeekFalNanoBananaProProviderRenderReceipt,
@@ -608,6 +658,12 @@ export async function verifyPlanWeekProviderReceiptCryptography(
   receipt: PlanWeekProviderRenderReceipt,
 ): Promise<boolean> {
   if (!validatePlanWeekProviderRenderReceipt(receipt)) return false;
+  if (receipt.version === "plan-week-provider-render/v4") {
+    const scope:PlanWeekRenderScope={ownerId:receipt.ownerId,channelId:receipt.channelId,batchId:receipt.batchId,itemId:receipt.itemId,
+      attempt:receipt.attempt,requestKey:receipt.requestKey,checkpointKey:receipt.checkpointKey,destinationKey:receipt.destinationKey};
+    return await sha256(receipt.requestCanonicalJson) === receipt.requestSha256 &&
+      await sha256(planWeekHrsCandidateIdentity(scope)) === receipt.candidateId;
+  }
   if (receipt.version === "plan-week-provider-render/v3") {
     const [requestHash, metadataHash] = await Promise.all([
       sha256(`fal-nano-banana-pro-provider\0${receipt.requestCanonicalJson}`),
@@ -694,7 +750,7 @@ export function samePlanWeekArtifactReceipt(
 }
 
 export function planWeekProviderReceiptImageUsage(receipt: PlanWeekProviderRenderReceipt) {
-  if (receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3") {
+  if (receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3" || receipt.version === "plan-week-provider-render/v4") {
     return {
       provider: receipt.provider,
       model: receipt.model,
@@ -703,6 +759,7 @@ export function planWeekProviderReceiptImageUsage(receipt: PlanWeekProviderRende
       width: receipt.width,
       height: receipt.height,
       costUsd: receipt.costUsd,
+      ...(receipt.version === "plan-week-provider-render/v4" ? {accounting:"estimate" as const} : {}),
     };
   }
   return {
@@ -719,7 +776,7 @@ export function planWeekProviderReceiptImageUsage(receipt: PlanWeekProviderRende
 export function planWeekProviderEvidenceSha256(
   receipt: PlanWeekProviderRenderReceipt,
 ): string {
-  return receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3"
+  return receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3" || receipt.version === "plan-week-provider-render/v4"
     ? receipt.responseSha256
     : receipt.billingReceiptSha256;
 }
@@ -789,7 +846,7 @@ export function planWeekArtifactHeadMatches(args: {
 }): boolean {
   const { head, checkpointKey, provider, artifact } = args;
   const evidenceMetadataKey = provider.version === "plan-week-provider-render/v2" ||
-    provider.version === "plan-week-provider-render/v3"
+    provider.version === "plan-week-provider-render/v3" || provider.version === "plan-week-provider-render/v4"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   return Boolean(

@@ -21,6 +21,8 @@ export interface ImageUsageRecord {
   height?: number;
   /** Exact known charge for this successful provider response. */
   costUsd: number;
+  /** An estimate is not an observed provider charge. */
+  accounting?: "estimate" | "observed";
 }
 
 export interface ImageUsageSummary {
@@ -59,6 +61,7 @@ export function recordImageUsage(record: ImageUsageRecord): ImageUsageRecord {
     provider: record.provider.trim().toLowerCase(),
     model: record.model.trim().toLowerCase(),
     route: record.route.trim().toLowerCase(),
+    ...(record.accounting ? {accounting:record.accounting} : {}),
     images,
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),

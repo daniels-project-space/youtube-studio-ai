@@ -17,6 +17,22 @@ export const LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
   "lofi-thumbnail-current-candidate-evidence/v1" as const;
 export const ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
   "ernie-novita-thumbnail-current-candidate-evidence/v1" as const;
+export const HRS_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION = "hrs-thumbnail-current-candidate-evidence/v1" as const;
+export type HrsThumbnailCurrentCandidateEvidence = {
+  version:typeof HRS_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION;
+  ownerId:string;channelId:string;runId:string;r2Key:string;artifactSha256:string;
+  generatorModule:"thumbnail_gen";providerRoute:"hrs-gemini-nano-banana-pro";
+  providerRequestSha256:string;providerResponseSha256:string;candidateId:string;
+  sourceVideoKey?:string;sourceFrameSha256?:string;sourceFrameTimeSec?:number;sourceWidth?:number;sourceHeight?:number;
+  publishable:true;reviewState:"candidate_only";
+};
+export function createHrsThumbnailCurrentCandidateEvidence(value:Omit<HrsThumbnailCurrentCandidateEvidence,
+  "version"|"generatorModule"|"providerRoute"|"publishable"|"reviewState">):HrsThumbnailCurrentCandidateEvidence {
+  const evidence:HrsThumbnailCurrentCandidateEvidence = {...value,version:HRS_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION,
+    generatorModule:"thumbnail_gen",providerRoute:"hrs-gemini-nano-banana-pro",publishable:true,reviewState:"candidate_only"};
+  if (!parseEvidence(evidence)) throw new Error("Invalid HRS thumbnail provenance");
+  return evidence;
+}
 
 export type ThumbnailCurrentCandidateEvidence = {
   version: typeof THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION;
@@ -251,9 +267,20 @@ export function createErnieNovitaThumbnailCurrentCandidateEvidence(
 
 function parseEvidence(
   value: unknown,
-): ThumbnailCurrentCandidateEvidence | LofiThumbnailCurrentCandidateEvidence |
+): ThumbnailCurrentCandidateEvidence | LofiThumbnailCurrentCandidateEvidence | HrsThumbnailCurrentCandidateEvidence |
   ErnieNovitaThumbnailCurrentCandidateEvidence | null {
   if (!isRecord(value)) return null;
+  if (value.version === HRS_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION) {
+    const source = value.sourceFrameSha256 !== undefined;
+    if (!nonEmpty(value.ownerId) || !nonEmpty(value.channelId) || !nonEmpty(value.runId) || !nonEmpty(value.r2Key) ||
+      !sha256(value.artifactSha256) || value.generatorModule !== "thumbnail_gen" ||
+      value.providerRoute !== "hrs-gemini-nano-banana-pro" || !sha256(value.providerRequestSha256) ||
+      !sha256(value.providerResponseSha256) || !sha256(value.candidateId) || value.publishable !== true ||
+      value.reviewState !== "candidate_only" || (source && (!nonEmpty(value.sourceVideoKey) || !sha256(value.sourceFrameSha256) ||
+        !Number.isFinite(value.sourceFrameTimeSec) || !Number.isInteger(value.sourceWidth) || Number(value.sourceWidth)<3840 ||
+        !Number.isInteger(value.sourceHeight) || Number(value.sourceHeight)<2160))) return null;
+    return value as unknown as HrsThumbnailCurrentCandidateEvidence;
+  }
   if (value.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION) {
     if (
       !nonEmpty(value.ownerId) ||

@@ -19,11 +19,8 @@ import { channelPrefix, getObjectBytes, headObjectMetadata, putObject } from "@/
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups } from "@/lib/followups";
-import {
-  generateFalNanoBananaProThumbnailWithReceipt,
-  hasFalNanoBananaProThumbnail,
-} from "@/lib/falNanoBananaProThumbnail";
-import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
+import { configuredHyperThumbnailClient, hasConfiguredHyperThumbnailClient } from "@/lib/hyperThumbnailClient";
+import { persistHyperThumbnailIntent, recoverHyperThumbnailIntent } from "@/lib/hyperThumbnailRecovery";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import {
   renderCandidate,
@@ -70,6 +67,8 @@ import {
 } from "@/lib/planWeekThumbnailSource";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { PRICE } from "@/engine/pricing";
+import { rasterImageDimensions } from "@/lib/imageDimensions";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createModelUsageScope } from "@/lib/modelUsage";
@@ -77,8 +76,8 @@ import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
 import {
   PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
   makePlanWeekArtifactReceipt,
-  makePlanWeekFalNanoBananaProProviderRenderReceipt,
-  planWeekFalNanoBananaProRequestContext,
+  makePlanWeekHrsProviderRenderReceipt,
+  planWeekHrsCandidateIdentity,
   planWeekArtifactHeadMatches,
   planWeekProviderEvidenceSha256,
   planWeekProviderReceiptImageUsage,
@@ -336,7 +335,7 @@ export const planWeekAheadRecoveryPreflightTask = task({
       ok: true,
       guardVersion: PLAN_WEEK_RECOVERY_GUARD_VERSION,
       taskVersion: ctx.run.version,
-      providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.route,
+      providerRoute: "hrs-gemini-nano-banana-pro",
       batchId: invocation.recovery.batchId,
       itemIds: invocation.recovery.itemIds,
     };
@@ -492,7 +491,7 @@ async function runPlanWeekAhead(
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if ((!usesDocumentarySourceSeason && !hasCreativeTextKey()) || !hasFalNanoBananaProThumbnail()) {
+      if ((!usesDocumentarySourceSeason && !hasCreativeTextKey()) || !hasConfiguredHyperThumbnailClient()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -810,6 +809,27 @@ async function runPlanWeekAhead(
               providerReceipt,
             });
             log(`reattached Nano Banana source receipt for ${index + 1}/${batchItems.length}`);
+          }
+        }
+        if (!providerReceipt) {
+          const intentKey = `${sourceKey}.hrs-intent.json`;
+          let intentBytes:Uint8Array|undefined;
+          try { intentBytes = await getObjectBytes(intentKey); } catch (error) { if (!objectNotFound(error)) throw error; }
+          if (intentBytes) {
+            const candidateId = createHash("sha256").update(planWeekHrsCandidateIdentity(receiptScope)).digest("hex");
+            const recoveredHrs = await recoverHyperThumbnailIntent({key:intentKey,requestHash:candidateId,
+              client:configuredHyperThumbnailClient(),read:async()=>intentBytes!});
+            if (recoveredHrs.state !== "completed" || !recoveredHrs.result || !recoveredHrs.image)
+              throw new Error(`HRS plan thumbnail is ${recoveredHrs.state}; inspect the same candidate`);
+            if (recoveredHrs.intent.mode !== "native-scene-and-typography" || recoveredHrs.result.sourceSha256 !== null)
+              throw new InvalidPlanCheckpointError("HRS plan thumbnail recovery source mode mismatch");
+            const dimensions = rasterImageDimensions(recoveredHrs.image);
+            providerReceipt = makePlanWeekHrsProviderRenderReceipt(receiptScope,{result:recoveredHrs.result,sourceKey,
+              width:dimensions.width,height:dimensions.height,expectedWords:recoveredHrs.intent.expectedWords,estimatedCostUsd:recoveredHrs.intent.estimatedGenerationCostUsd});
+            await persistNanoBananaSourceCheckpoint({sourceKey,scope:receiptScope,providerReceipt,imageBytes:recoveredHrs.image});
+            await convex.mutation(api.planWeekRenderReceipts.recordProviderReceipt,{ownerId,channelId,batchId,itemId:item._id,
+              requestKey,checkpointKey:usageCheckpointKey,providerReceipt});
+            log(`reattached HRS thumbnail candidate for ${index + 1}/${batchItems.length}`);
           }
         }
         const recovered = await recoverThumbnailCheckpoint(
@@ -1484,7 +1504,7 @@ async function recoverThumbnailCheckpoint(
     PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256
   ]?.trim();
   const evidenceMetadataKey = providerReceipt.version === "plan-week-provider-render/v2" ||
-    providerReceipt.version === "plan-week-provider-render/v3"
+    providerReceipt.version === "plan-week-provider-render/v3" || providerReceipt.version === "plan-week-provider-render/v4"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   const providerEvidenceSha256 = head.metadata[evidenceMetadataKey]?.trim();
@@ -1692,7 +1712,7 @@ async function loadNanoBananaSourceCheckpoint(
     !/^[A-Za-z0-9+/]+={0,2}$/.test(parsed.imageBase64) ||
     !validatePlanWeekProviderRenderReceipt(parsed.providerReceipt, scope) ||
     (parsed.providerReceipt.version !== "plan-week-provider-render/v2" &&
-      parsed.providerReceipt.version !== "plan-week-provider-render/v3") ||
+      parsed.providerReceipt.version !== "plan-week-provider-render/v3" && parsed.providerReceipt.version !== "plan-week-provider-render/v4") ||
     parsed.providerReceipt.sourceKey !== sourceKey ||
     !(await verifyPlanWeekProviderReceiptCryptography(parsed.providerReceipt))
   ) {
@@ -1701,6 +1721,7 @@ async function loadNanoBananaSourceCheckpoint(
   const imageBytes = Buffer.from(parsed.imageBase64, "base64");
   if (
     !imageBytes.length ||
+    (parsed.providerReceipt.version === "plan-week-provider-render/v4" && imageBytes.length !== parsed.providerReceipt.outputBytes) ||
     imageBytes.length > 30 * 1024 * 1024 ||
     imageBytes.toString("base64") !== parsed.imageBase64 ||
     createHash("sha256").update(imageBytes).digest("hex") !== parsed.providerReceipt.responseSha256
@@ -1801,8 +1822,8 @@ async function genThumb(o: {
   artifactReceipt: PlanWeekArtifactReceipt;
   usageCheckpoint: PlanWeekUsageCheckpoint;
 }> {
-  if (!o.providerReceipt && !hasFalNanoBananaProThumbnail()) {
-    throw new Error("plan thumbnail Fal Nano Banana Pro provider is not configured");
+  if (!o.providerReceipt && !hasConfiguredHyperThumbnailClient()) {
+    throw new Error("plan thumbnail HRS project is not configured");
   }
   if (!hasCreativeTextKey()) {
     throw new Error("plan thumbnail Golden pattern instantiation provider is not configured");
@@ -1823,7 +1844,7 @@ async function genThumb(o: {
     if (!providerReceipt) throw new InvalidPlanCheckpointError("plan thumbnail provider receipt is missing");
     recordImageUsage(planWeekProviderReceiptImageUsage(providerReceipt));
     const bytes = providerReceipt.version === "plan-week-provider-render/v2" ||
-      providerReceipt.version === "plan-week-provider-render/v3"
+      providerReceipt.version === "plan-week-provider-render/v3" || providerReceipt.version === "plan-week-provider-render/v4"
       ? (await loadNanoBananaSourceCheckpoint(providerReceipt.sourceKey, o.receiptScope))?.imageBytes
       : Buffer.from(await getObjectBytes(providerReceipt.sourceKey));
     if (!bytes) {
@@ -1834,10 +1855,10 @@ async function genThumb(o: {
     }
     return bytes;
   };
-  const generateScene = providerReceipt && providerReceipt.version !== "plan-week-provider-render/v3"
+  const generateScene = providerReceipt && providerReceipt.version !== "plan-week-provider-render/v3" && providerReceipt.version !== "plan-week-provider-render/v4"
     ? async () => loadProviderBytes()
     : undefined;
-  const generateDesignedThumbnail = providerReceipt?.version === "plan-week-provider-render/v3"
+  const generateDesignedThumbnail = providerReceipt?.version === "plan-week-provider-render/v3" || providerReceipt?.version === "plan-week-provider-render/v4"
     ? async () => loadProviderBytes()
     : !providerReceipt
       ? async (request: import("@/lib/thumbnailLab").DesignedThumbnailRequest) => {
@@ -1845,15 +1866,20 @@ async function genThumb(o: {
           throw new Error("plan thumbnail provider receipt persistence is not configured");
         }
         await o.beforeProviderSpend();
-        const rendered = await generateFalNanoBananaProThumbnailWithReceipt({
-          prompt: request.prompt,
-          idempotencyContext: planWeekFalNanoBananaProRequestContext(o.receiptScope, o.sourceKey),
-        });
-        const receipt = makePlanWeekFalNanoBananaProProviderRenderReceipt(o.receiptScope, {
-          ...rendered.receipt,
-          sourceKey: o.sourceKey,
-          expectedWords: request.expectWords,
-        });
+        const client = configuredHyperThumbnailClient();
+        const candidateId = createHash("sha256").update(planWeekHrsCandidateIdentity(o.receiptScope)).digest("hex");
+        const input = {candidateId,videoId:`studio-${createHash("sha256").update(o.id).digest("hex").slice(0,32)}`,
+          revision:o.receiptScope.attempt,title:o.title.slice(0,240),hook:o.topic.slice(0,200) || o.title.slice(0,200),
+          heroSubject:scene.slice(0,300),visualDirection:scene.slice(0,2000),creativeDirection:request.prompt,referenceAssets:[]};
+        await persistHyperThumbnailIntent(`${o.sourceKey}.hrs-intent.json`,{version:"hrs-thumbnail-intent/v1",request:input,
+          expectedReferenceHashes:{},expectedWords:request.expectWords,mode:"native-scene-and-typography",estimatedGenerationCostUsd:PRICE.bananaProUsd,estimatedImageCostUsd:PRICE.bananaProUsd});
+        const result = await client.submit(input);
+        const imageBytes = await client.download(result,input);
+        const dimensions = rasterImageDimensions(imageBytes);
+        const receipt = makePlanWeekHrsProviderRenderReceipt(o.receiptScope,{result,sourceKey:o.sourceKey,
+          width:dimensions.width,height:dimensions.height,expectedWords:request.expectWords,estimatedCostUsd:PRICE.bananaProUsd});
+        recordImageUsage({provider:receipt.provider,model:receipt.model,route:receipt.route,images:1,width:receipt.width,
+          height:receipt.height,costUsd:receipt.costUsd,accounting:"estimate"});
         providerReceipt = receipt;
         let receiptError: unknown;
         let sourceError: unknown;
@@ -1867,7 +1893,7 @@ async function genThumb(o: {
             sourceKey: o.sourceKey,
             scope: o.receiptScope,
             providerReceipt: receipt,
-            imageBytes: rendered.bytes,
+            imageBytes,
           });
         } catch (error) {
           sourceError = error;
@@ -1879,7 +1905,7 @@ async function genThumb(o: {
             `source=${sourceError ? errorMessage(sourceError) : "durable"})`,
           );
         }
-        return rendered.bytes;
+        return imageBytes;
       }
       : undefined;
   const candidate = await renderCandidate({
@@ -1909,7 +1935,7 @@ async function genThumb(o: {
     throw new Error("plan thumbnail artifact is outside the 1B..30MiB contract");
   }
   const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
-  const expectedWords = providerReceipt.version === "plan-week-provider-render/v3"
+  const expectedWords = providerReceipt.version === "plan-week-provider-render/v3" || providerReceipt.version === "plan-week-provider-render/v4"
     ? providerReceipt.expectedWords
     : candidate.expectedWords;
   const qaRequestSha256 = thumbnailRequestHash({
@@ -1959,7 +1985,7 @@ async function genThumb(o: {
   const qaCheckpointSha256 = planWeekThumbnailQaCheckpointSha256(qaCheckpoint);
   const artifactCreatedAt = Math.max(Date.now(), providerReceipt.createdAt, qaCheckpoint.createdAt);
   const providerEvidenceKey = providerReceipt.version === "plan-week-provider-render/v2" ||
-    providerReceipt.version === "plan-week-provider-render/v3"
+    providerReceipt.version === "plan-week-provider-render/v3" || providerReceipt.version === "plan-week-provider-render/v4"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   try {
