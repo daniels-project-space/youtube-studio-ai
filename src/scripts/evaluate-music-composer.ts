@@ -23,7 +23,7 @@ const inputSchema = z.object({
   musicIntent: MusicArrangementIntentSchema,
   seed: z.number().int().nonnegative().max(2147483647),
   budgetUsd: z.number().finite().positive(),
-  seedStore: z.record(z.unknown()).refine(store =>
+  seedStore: z.record(z.string(), z.unknown()).refine(store =>
     typeof store.topic === "string" && store.topic.trim().length > 0 &&
     typeof store.channelSlug === "string" && store.channelSlug.trim().length > 0,
   "frozen topic and channel grounding are required; live channel fallback is forbidden"),

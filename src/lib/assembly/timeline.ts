@@ -85,7 +85,7 @@ export const AudioPlanSchema = z.object({
       bodyVol: z.number().min(0).max(2).default(0.1026),
       rampSec: z.number().nonnegative().default(4),
     })
-    .default({}),
+    .prefault({}),
   fadeOutSec: z.number().nonnegative().default(2),
   audioFadeOutSec: z.number().nonnegative().optional(),
   /** Integrated loudness target (e.g. -14 LUFS for YouTube). Renderer normalizes to this. */
@@ -126,9 +126,9 @@ export const TimelineSchema = z.object({
       maxSec: z.number().nonnegative().default(0),
       tolSec: z.number().nonnegative().default(30),
     })
-    .default({}),
+    .prefault({}),
   /** Declared heal point — overlay-class defects re-render from here, no regex on hints. */
-  checkpoints: z.object({ preOverlaySec: z.number().nonnegative().optional() }).default({}),
+  checkpoints: z.object({ preOverlaySec: z.number().nonnegative().optional() }).prefault({}),
   /** Optional vertical/social reframe. */
   reframe: z.object({ aspect: z.enum(["16:9", "9:16", "1:1"]), strategy: z.string().optional() }).optional(),
   /**

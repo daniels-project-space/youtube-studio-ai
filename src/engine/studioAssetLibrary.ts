@@ -1053,7 +1053,7 @@ const StudioLtxShotAdapterSelectionSchema = z.object({
   continuityCharacterRegistryIdentities: CharacterRegistryIdentitiesSchema,
   // z.unknown() would make this property optional in Zod. A missing decision
   // must fail: every rendered shot needs an explicit selected recipe or null.
-  selection: z.union([z.null(), z.record(z.unknown())]),
+  selection: z.union([z.null(), z.record(z.string(), z.unknown())]),
 }).strict();
 
 const StudioLtxShotAdapterSelectionsBaseSchema = z.object({

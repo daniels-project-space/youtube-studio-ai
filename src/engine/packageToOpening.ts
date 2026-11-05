@@ -378,7 +378,7 @@ export function createPackageToOpeningReceipt(input: {
   const openingLimitSec = Math.min(15, finalMaster.durationSec);
   const openingWitness = input.visualReview.evidenceFrameArtifacts
     .map((frame) => durableReviewFrameSchema.safeParse(frame))
-    .filter((frame): frame is z.SafeParseSuccess<z.infer<typeof durableReviewFrameSchema>> => frame.success)
+    .filter((frame): frame is z.ZodSafeParseSuccess<z.infer<typeof durableReviewFrameSchema>> => frame.success)
     .map((frame) => frame.data)
     .filter((frame) => frame.tSec <= openingLimitSec)
     .sort((a, b) => a.tSec - b.tSec || a.id.localeCompare(b.id))[0];
@@ -403,7 +403,7 @@ export function createPackageToOpeningReceipt(input: {
     );
     const evidenceFrames = input.visualReview.evidenceFrameArtifacts
       .map((frame) => durableReviewFrameSchema.safeParse(frame))
-      .filter((frame): frame is z.SafeParseSuccess<z.infer<typeof durableReviewFrameSchema>> => frame.success)
+      .filter((frame): frame is z.ZodSafeParseSuccess<z.infer<typeof durableReviewFrameSchema>> => frame.success)
       .map((frame) => frame.data)
       .filter((frame) => citedIds.has(frame.id) && frame.tSec <= openingLimitSec)
       .sort((a, b) => a.tSec - b.tSec || a.id.localeCompare(b.id));

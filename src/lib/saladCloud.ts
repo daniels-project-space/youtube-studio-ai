@@ -162,7 +162,7 @@ const createSchema = z.object({
     image_caching: z.literal(true),
     resources: resourceSchema,
     command: z.array(z.string()).optional(),
-    environment_variables: z.record(z.string()).optional(),
+    environment_variables: z.record(z.string(), z.string()).optional(),
     registry_authentication: z.object({
       basic: z.object({ username: z.string().min(1), password: z.string().min(1) }),
     }).optional(),
