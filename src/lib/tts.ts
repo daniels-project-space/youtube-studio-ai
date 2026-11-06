@@ -5,6 +5,8 @@ import {
   synthQwenNarration,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
+import { renderHyperYoutubeQwenTts, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTts";
+import type { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 
 export type TtsProvider = "fish" | "elevenlabs" | "qwen3";
 
@@ -288,11 +290,34 @@ export async function synthNarration(args: {
   qwenSeed?: number;
   qwenMaxCostUsd?: number;
   onQwenReceipt?: (receipt: QwenTtsReceipt) => void;
+  /** Route YouTube narration through its isolated Hyper Render Service project. */
+  qwenHrs?: {
+    requestScope: string;
+    wait: (jobId: string, check: number) => Promise<void>;
+    onReceipt?: (receipt: HrsQwenTtsReceipt) => void;
+    client?: ReturnType<typeof configuredHyperYoutubeStageClient>;
+  };
 }): Promise<Uint8Array> {
   const provider = normalizeTtsProvider(args.provider);
   if (provider === "elevenlabs") return synthElevenLabs(args);
   if (provider === "qwen3") {
     const text = stripAudioTags(args.text);
+    if (args.qwenHrs) {
+      const rendered = await renderHyperYoutubeQwenTts({
+        text,
+        speaker: args.qwenSpeaker ?? args.voiceId ?? "",
+        language: args.qwenLanguage,
+        instruction: args.qwenInstruction,
+        speed: args.speed,
+        seed: args.qwenSeed,
+        requestScope: args.qwenHrs.requestScope,
+        wait: args.qwenHrs.wait,
+        client: args.qwenHrs.client,
+        onReceipt: args.qwenHrs.onReceipt,
+      });
+      args.onBillableCharacters?.(text.length);
+      return rendered.audio;
+    }
     const audio = await synthQwenNarration({
       text,
       speaker: args.qwenSpeaker ?? args.voiceId ?? "",

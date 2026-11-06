@@ -81,3 +81,33 @@ export const qwenTtsReceiptValidator = v.object({
     }),
   ),
 });
+
+/** Project-scoped HRS output attestation used by the production YouTube lane. */
+export const hrsQwenTtsReceiptValidator = v.object({
+  version: v.literal("hrs-youtube-qwen3-tts-receipt/v1"),
+  provider: v.literal("hyper-render-service"),
+  modelId: v.literal("qwen3-tts"),
+  projectId: v.string(),
+  jobId: v.string(),
+  generation: v.number(),
+  idempotencyKey: v.string(),
+  inputSha256: v.string(),
+  textSha256: v.string(),
+  instructionSha256: v.string(),
+  speaker: v.union(
+    v.literal("Vivian"), v.literal("Serena"), v.literal("Uncle_Fu"), v.literal("Dylan"), v.literal("Eric"),
+    v.literal("Ryan"), v.literal("Aiden"), v.literal("Ono_Anna"), v.literal("Sohee"),
+  ),
+  language: v.union(
+    v.literal("Auto"), v.literal("Chinese"), v.literal("English"), v.literal("Japanese"), v.literal("Korean"),
+    v.literal("German"), v.literal("French"), v.literal("Russian"), v.literal("Portuguese"), v.literal("Spanish"),
+    v.literal("Italian"),
+  ),
+  seed: v.number(),
+  nativeOutput: v.object({
+    bucket: v.string(), key: v.string(), sha256: v.string(), bytes: v.number(), contentType: v.literal("audio/wav"),
+  }),
+  encodedAudio: v.object({
+    sha256: v.string(), bytes: v.number(), contentType: v.literal("audio/mpeg"), sampleRateHz: v.literal(24_000),
+  }),
+});

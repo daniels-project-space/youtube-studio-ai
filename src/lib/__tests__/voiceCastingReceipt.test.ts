@@ -189,7 +189,7 @@ for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   assert.match(source, /version:\s*v\.literal\("voice-provider-selection\/v1"\)/);
   assert.match(source, /localColdOpenReceipt:\s*v\.optional\(v\.object\(\{/);
   assert.match(source, /version:\s*v\.literal\("voice-local-cold-open\/v1"\)/);
-  assert.match(source, /providerRenderReceipt:\s*v\.optional\(qwenTtsReceiptValidator\)/);
+  assert.match(source, /providerRenderReceipt:\s*v\.optional\(v\.union\(qwenTtsReceiptValidator,\s*hrsQwenTtsReceiptValidator\)\)/);
 }
 
 const qwenValidatorSource = readFileSync(join(process.cwd(), "convex/voiceCastingValidators.ts"), "utf8");

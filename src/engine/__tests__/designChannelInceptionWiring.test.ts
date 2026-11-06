@@ -235,7 +235,9 @@ for (const executor of [
 assert.match(coordinator, /familyPolicy\.voiceOwnership === "family-engine"/);
 assert.match(coordinator, /makeVoiceProviderSelectionReceipt/);
 assert.match(coordinator, /makeVoiceLocalColdOpenReceipt/);
-assert.match(coordinator, /synthQwenNarration/);
+assert.match(coordinator, /hasConfiguredHyperYoutubeQwenTts/);
+assert.match(coordinator, /renderHyperYoutubeQwenTts\(\{/);
+assert.doesNotMatch(coordinator, /synthQwenNarration/);
 assert.match(coordinator, /providerRenderReceipt/);
 assert.match(coordinator, /localColdOpenReceipt \?\? qualifiedCast\.coldOpenReceipt/);
 assert.match(channelVoiceCasting, /runtime config must|configured\["ttsProvider"\] \?\? params\["ttsProvider"\]/);

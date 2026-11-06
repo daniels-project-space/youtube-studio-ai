@@ -827,6 +827,7 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
     createdAt,
   };
   const qwenSource = normalized.narrationPerformanceEvidence.qwenProviderEvidence?.source;
+  const hrsQwenSource = normalized.narrationPerformanceEvidence.hrsQwenProviderEvidence?.source;
   if (
     normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
     normalized.ownerId !== args.manifest.ownerId ||
@@ -841,6 +842,12 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
       qwenSource.sha256 !== normalized.audioSha256 ||
       qwenSource.byteLength !== normalized.audioByteLength ||
       Math.abs(qwenSource.durationSec - normalized.narrationDurationSec) > 0.001
+    )) ||
+    (hrsQwenSource !== undefined && (
+      hrsQwenSource.narrationKey !== normalized.narrationKey ||
+      hrsQwenSource.sha256 !== normalized.audioSha256 ||
+      hrsQwenSource.byteLength !== normalized.audioByteLength ||
+      Math.abs(hrsQwenSource.durationSec - normalized.narrationDurationSec) > 0.001
     ))
   ) {
     throw new Error("plan-week prepared narration binding mismatch");

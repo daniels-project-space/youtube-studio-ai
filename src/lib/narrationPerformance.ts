@@ -3,6 +3,10 @@ import {
   assertQwenNarrationSourceEvidence,
   type QwenNarrationSourceEvidence,
 } from "@/lib/qwenTts";
+import {
+  assertHrsQwenNarrationSourceEvidence,
+  type HrsQwenNarrationSourceEvidence,
+} from "@/lib/hyperYoutubeQwenTts";
 
 export const NARRATION_PERFORMANCE_EVIDENCE_VERSION = "narration-performance-evidence/v1" as const;
 
@@ -16,6 +20,8 @@ export interface NarrationPerformanceEvidence {
   windowMeanDb: number;
   /** Present only when the source was synthesized by the pinned Qwen worker. */
   qwenProviderEvidence?: QwenNarrationSourceEvidence;
+  /** HRS-backed Qwen route; distinct from the legacy worker attestation. */
+  hrsQwenProviderEvidence?: HrsQwenNarrationSourceEvidence;
 }
 
 /**
@@ -79,6 +85,12 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
   const qwenProviderEvidence = raw.qwenProviderEvidence === undefined
     ? undefined
     : assertQwenNarrationSourceEvidence(raw.qwenProviderEvidence);
+  const hrsQwenProviderEvidence = raw.hrsQwenProviderEvidence === undefined
+    ? undefined
+    : assertHrsQwenNarrationSourceEvidence(raw.hrsQwenProviderEvidence);
+  if (qwenProviderEvidence && hrsQwenProviderEvidence) {
+    throw new Error("narration performance evidence cannot claim two Qwen execution providers");
+  }
   return {
     version: NARRATION_PERFORMANCE_EVIDENCE_VERSION,
     source: "local_ffmpeg",
@@ -88,6 +100,7 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
     integratedLufs: number("integratedLufs", -36, -6),
     windowMeanDb: number("windowMeanDb", -48, -3),
     ...(qwenProviderEvidence === undefined ? {} : { qwenProviderEvidence }),
+    ...(hrsQwenProviderEvidence === undefined ? {} : { hrsQwenProviderEvidence }),
   };
 }
 

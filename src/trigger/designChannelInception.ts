@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { wait } from "@trigger.dev/sdk";
 
 import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -55,12 +56,12 @@ import {
   selectDeterministicQwenVoice,
 } from "@/lib/deterministicVoiceCast";
 import { renderNarration } from "@/lib/voicecraft";
+import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 import {
-  hasQualifiedQwenTts,
-  qwenTtsReadiness,
-  synthQwenNarration,
-  type QwenTtsReceipt,
-} from "@/lib/qwenTts";
+  hasConfiguredHyperYoutubeQwenTts,
+  renderHyperYoutubeQwenTts,
+  type HrsQwenTtsReceipt,
+} from "@/lib/hyperYoutubeQwenTts";
 import {
   channelVoiceCastingProvider,
   qwenChannelCastingReceiptMatches,
@@ -2935,6 +2936,11 @@ export async function executeDesignChannel(
       if (!requestedVoice) {
         throw new Error("channel-cast inception is missing its sealed voice-provider request");
       }
+      const hrsQwenClient = requestedVoice.provider === "qwen3" ? configuredHyperYoutubeStageClient() : undefined;
+      const hrsQwenReady = async () => {
+        if (!hrsQwenClient || !hasConfiguredHyperYoutubeQwenTts()) return false;
+        try { await hrsQwenClient.binding(); return true; } catch { return false; }
+      };
       const loadVoice = async () => {
         const cast = asIdentity((await currentChannel(convex, channelId)).identity).voiceCasting;
         const providerRenderReceipt = cast?.providerRenderReceipt;
@@ -2945,7 +2951,7 @@ export async function executeDesignChannel(
         };
         const providerMatches = Boolean(cast && channelVoiceCastingProvider(cast) === requestedVoice.provider);
         const qwenReceiptMatches = requestedVoice.provider !== "qwen3" || (
-          hasQualifiedQwenTts() &&
+          await hrsQwenReady() &&
           cast?.voiceId === requestedVoice.qwenSpeaker &&
           Boolean(cast && qwenChannelCastingReceiptMatches(cast))
         );
@@ -2976,12 +2982,12 @@ export async function executeDesignChannel(
           // masquerade as a listened Gemini audition: an actual provider take
           // is immediately measured below, and production narration still runs
           // its own local performance + final transcript evidence gates.
-          if (requestedVoice.provider === "qwen3" && !hasQualifiedQwenTts()) {
-            const readiness = qwenTtsReadiness();
+          if (requestedVoice.provider === "qwen3" && (!hrsQwenClient || !hasConfiguredHyperYoutubeQwenTts())) {
             throw new Error(
-              `channel inception: Qwen3 is selected but its worker qualification is not current (${readiness.blockers.join("; ")})`,
+              "channel inception: Qwen3 is selected but the YouTube HRS project is not configured",
             );
           }
+          if (hrsQwenClient) await hrsQwenClient.binding();
           const cast = requestedVoice.provider === "qwen3"
             ? selectDeterministicQwenVoice({
                 niche: seoIdentity.niche,
@@ -3011,24 +3017,30 @@ export async function executeDesignChannel(
           const coldOpenText =
             `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
             `Follow that detail carefully, because it reveals what most explanations leave out.`;
-          let providerRenderReceipt: QwenTtsReceipt | undefined;
-          const coldOpenBytes = cast.provider === "qwen3"
-            ? await synthQwenNarration({
-                text: coldOpenText,
-                speaker: cast.voiceId,
-                language: requestedVoice.qwenLanguage,
-                instruction: cast.character,
-                speed: cast.physics.speed,
-                seed: 4_242,
-                maxCostUsd: voiceStage.maximumCostUsd,
-                onReceipt: (receipt) => { providerRenderReceipt = receipt; },
-              })
-            : await renderNarration({
+          let providerRenderReceipt: HrsQwenTtsReceipt | undefined;
+          let coldOpenBytes: Uint8Array;
+          if (cast.provider === "qwen3") {
+            const rendered = await renderHyperYoutubeQwenTts({
+              text: coldOpenText,
+              speaker: cast.voiceId,
+              language: requestedVoice.qwenLanguage,
+              instruction: cast.character,
+              speed: cast.physics.speed,
+              seed: 4_242,
+              requestScope: `${ownerId}:${channelId}:${runtime.runId}:voice-audition:${cast.voiceId}`,
+              client: hrsQwenClient,
+              wait: async (jobId, check) => wait.for({ seconds: 10, idempotencyKey: `hrs-qwen-voice:${jobId}:${check}` }),
+              onReceipt: receipt => { providerRenderReceipt = receipt; },
+            });
+            coldOpenBytes = rendered.audio;
+          } else {
+            coldOpenBytes = await renderNarration({
                 text: coldOpenText,
                 elevenVoiceId: cast.voiceId,
                 physics: cast.physics,
                 seed: 4242,
               });
+          }
           const coldOpenDir = await makeRunTempDir(`${runtime.runId}_voice_inception`);
           const coldOpenPath = `${coldOpenDir}/cold_open.mp3`;
           await writeBytes(coldOpenPath, coldOpenBytes);

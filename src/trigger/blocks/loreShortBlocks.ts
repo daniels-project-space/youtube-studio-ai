@@ -25,7 +25,8 @@
  *    frozen into a content-addressed R2 checkpoint, so a rejected draft never
  *    costs a paid render and a replay never re-buys one.
  */
-import { fallbackVoiceKey } from "@/lib/tts";
+import { fallbackVoiceKey, synthNarration } from "@/lib/tts";
+import { wait } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
 import { createHash } from "node:crypto";
@@ -53,7 +54,7 @@ import {
   critiqueStoryboardText,
   unavailableStoryboardCriticVerdict,
 } from "@/lib/storyboardCritic";
-import { synthNarration } from "@/lib/tts";
+import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 import {
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -473,6 +474,8 @@ export const loreShort: Block = {
     // VOICE CASTING — the same params narration_tts and whiteboard_scribe read,
     // instead of the engine's hardcoded ElevenLabs id.
     const ttsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
+    const hrsQwenClient = ttsProvider === "qwen3" ? configuredHyperYoutubeStageClient() : undefined;
+    if (hrsQwenClient) await hrsQwenClient.binding();
     const elevenVoiceId = ctx.params["elevenVoiceId"] as string | undefined;
     // A hard-coded literal here gave every lore-short channel that never
     // declared a voice the same narrator. Seeded on the channel so the choice is
@@ -668,6 +671,11 @@ export const loreShort: Block = {
               voiceId: selectedVoiceId,
               elevenVoiceId: selectedVoiceId,
               speed: request.speed,
+              qwenHrs: ttsProvider === "qwen3" ? {
+                requestScope: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:lore-short:${sha256BytesHex(Buffer.from(request.text))}`,
+                client: hrsQwenClient,
+                wait: async (jobId, check) => wait.for({ seconds: 10, idempotencyKey: `hrs-lore-qwen:${jobId}:${check}` }),
+              } : undefined,
               onBillableCharacters: (characters) => { ttsCharacters += characters; },
             }),
           ),
