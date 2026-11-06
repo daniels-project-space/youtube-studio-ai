@@ -13,21 +13,34 @@ const originalLoad = loader._load;
 const motion = "Only the distant water visible through the window ripples gently.";
 let images = 0;
 const prompts: string[] = [];
+const storedOutputs = new Map<string, Uint8Array>();
 async function main() {
+  process.env.R2_BUCKET ??= "youtube-fixture-bucket";
   loader._load = function(id, ...args) {
     const actual = originalLoad.call(this, id, ...args);
     if (id === "@/lib/approvedYuE2AssemblySource") return { ...actual as object,
       verifyApprovedYuE2Source: async () => ({ arrangement: { arrangement: { role: "primary_music" } }, assertCurrent: async () => {} }) };
-    if (id === "@/lib/novitaMedia") return { ...actual as object, renderNovitaImage: async () => {
-      images++; return { url: "https://fixture.invalid/still", key: "fixture/accepted-still", jobId: "fixture", model: "fixture", costUsd: 0.01 };
+    if (id === "@/lib/hyperYoutubeStageClient") return { ...actual as object,
+      configuredHyperYoutubeStageClient: () => ({ binding: async () => ({ outputBucket: process.env.R2_BUCKET }) }) };
+    if (id === "@/lib/hyperYoutubeStill") return { ...actual as object, renderHyperYoutubeStill: async () => {
+      images++;
+      const bytes = Buffer.from("fixture-native-still");
+      return { bytes, jobId: `hrs-fixture-${images}`, projectId: "fixture-project", generation: 1,
+        idempotencyKey: `hrs-key-${images}`, output: { bucket: process.env.R2_BUCKET!, key: `projects/youtube/still-${images}.png`,
+          sha256: "a".repeat(64), bytes: bytes.length, contentType: "image/png" } };
     } };
+    if (id === "@/lib/hyperYoutubeStillComposition") return { ...actual as object,
+      composeHyperYoutubeStill16x9: async () => Buffer.from("fixture-composite") };
     if (id === "@/lib/minimaxH3") return { ...actual as object,
       minimaxH3Readiness: () => ({ admitted: true, blockers: [] }),
       renderMiniMaxH3: async (value: { prompt: string }) => { prompts.push(value.prompt); throw new Error("fixture transport stop"); } };
     if (id === "@/lib/files") return { ...actual as object, makeRunTempDir: async () => "/tmp/reviewed-motion-fixture",
       downloadTo: async (_url: string, path: string) => path };
     if (id === "./blockContext") return { ...actual as object, recordAsset: async () => {} };
-    if (id === "@/lib/storage") return { ...actual as object, getObjectBytes: async () => new Uint8Array([1, 2, 3]) };
+    if (id === "@/lib/storage") return { ...actual as object,
+      putObject: async (key: string, bytes: Uint8Array) => { storedOutputs.set(key, Buffer.from(bytes)); },
+      getObjectBytes: async (key: string) => storedOutputs.get(key) ?? Buffer.from([1, 2, 3]),
+      publicUrl: (key: string) => `https://fixture.invalid/${key}` };
     if (id === "@/lib/vision") return { ...actual as object, hasNonGoogleVisionKey: () => true,
       visionLocal: async (value: { prompt: string }) => {
         if (value.prompt.includes("art director")) return JSON.stringify({ score: 0.9, issues: [] });

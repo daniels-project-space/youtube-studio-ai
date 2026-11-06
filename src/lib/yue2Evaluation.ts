@@ -237,13 +237,13 @@ export function validateYuE2Endpoint(endpoint: string): string {
 const Artifact = z.object({ sha256: Hash, bytes: z.number().int().nonnegative().max(256 * 1024 * 1024) }).strict();
 type JsonValue = null | boolean | string | number | JsonValue[] | { [key: string]: JsonValue };
 const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
-  z.null(), z.boolean(), z.string(), z.number().finite(), z.array(JsonValueSchema), z.record(JsonValueSchema),
+  z.null(), z.boolean(), z.string(), z.number().finite(), z.array(JsonValueSchema), z.record(z.string(), JsonValueSchema),
 ]));
 const CompletedResult = z.object({
   status: z.literal("complete"), truncated: z.object({ abc: z.literal(false), semantic: z.literal(false) }).strict(),
   sample_rate: z.literal(48000), channels: z.literal(2), frames: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   audio_seconds: z.number().positive().finite(), official_identity: Hash,
-  timing: z.record(JsonValueSchema), native_audio: z.literal("audio-native.wav"),
+  timing: z.record(z.string(), JsonValueSchema), native_audio: z.literal("audio-native.wav"),
   official_result: z.literal("song/result.json"),
 }).strict();
 export type YuE2CompletedResult = z.infer<typeof CompletedResult>;
@@ -274,7 +274,7 @@ export function verifyYuE2Completion(requestValue: unknown, value: unknown): YuE
     contract: z.literal(YUE2_WORKER_CONTRACT), job_id: JobId, state: z.literal("completed"), job: YuE2JobSchema,
     job_sha256: Hash, config_sha256: Hash, accepted_sha256: Hash, qualification: z.unknown(),
     progress: z.object({ phase: z.string(), receipt: z.string(), data: JsonValueSchema.optional() }).strict(),
-    receipt: z.unknown(), error: z.null(), artifacts: z.record(z.string()),
+    receipt: z.unknown(), error: z.null(), artifacts: z.record(z.string(), z.string()),
     receipt_payloads: z.object({ job: YuE2SealedReceiptSchema, config: YuE2SealedReceiptSchema, started: YuE2SealedReceiptSchema, terminal: YuE2SealedReceiptSchema }).strict(),
   }).strict().parse(value);
   if (wire.job_id !== request.job.job_id || canonicalJson(wire.job) !== canonicalJson(request.job)) throw new Error("YuE2 completed job mismatch");
@@ -294,12 +294,12 @@ export function verifyYuE2Completion(requestValue: unknown, value: unknown): YuE
   assertYuE2Manifest(savedConfig.manifest);
   const savedStarted = z.object({
     schema_version: z.literal(1), job_id: JobId, attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), started_at: z.string().min(1),
-    pid: z.number().int().positive(), job_sha256: Hash, config_sha256: Hash, environment: z.record(z.unknown()),
+    pid: z.number().int().positive(), job_sha256: Hash, config_sha256: Hash, environment: z.record(z.string(), z.unknown()),
   }).strict().parse(started.payload);
   const savedTerminal = z.object({
     schema_version: z.literal(1), job_id: JobId, attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), finished_at: z.string().min(1),
     status: z.literal("completed"), started_sha256: Hash, result: CompletedResult, error: z.null(),
-    qualification: z.unknown(), artifacts: z.record(Artifact),
+    qualification: z.unknown(), artifacts: z.record(z.string(), Artifact),
   }).strict().parse(terminal.payload);
   if (savedStarted.job_id !== request.job.job_id || savedTerminal.job_id !== request.job.job_id ||
       savedStarted.attempt !== savedTerminal.attempt ||

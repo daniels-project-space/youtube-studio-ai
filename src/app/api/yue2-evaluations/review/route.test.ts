@@ -54,8 +54,8 @@ loader._load = function (id, ...args) {
         sourceApprovalFingerprint: input.sourceBasis ? "9".repeat(64) : null };
     }
   } };
-  if (id.endsWith("/yue2DurableEvaluation")) return {
-    readDurableYuE2Candidate: async (scope: unknown) => {
+  if (id.endsWith("/yue2CandidateReview")) return {
+    readYuE2CandidateForReview: async (scope: unknown) => {
       calls.push("material");
       assert.deepEqual(scope, { ownerId: "review-owner", channelId: "review-channel", runId: "review-run" });
       if (unavailable) throw new Error("private-worker credential private-binding-key");

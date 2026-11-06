@@ -263,7 +263,7 @@ assert.throws(
     baseRevision: OFFICIAL_RENDER_PINS.ltx.revision,
     runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
   }),
-  /less than or equal to 0.95/,
+  /less than or equal to 0.95|expected number to be <=0.95/,
 );
 
 assert.throws(

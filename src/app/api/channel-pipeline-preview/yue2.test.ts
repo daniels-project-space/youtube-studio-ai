@@ -22,11 +22,7 @@ async function main() {
   try {
     const { POST } = createRequire(import.meta.url)("./route");
     const { assertChannelPipelinePreviewSnapshot } = createRequire(import.meta.url)("@/engine/channelPipelinePreview.server");
-    const sourceParams = { seed: 42, personalCreatorAcknowledged: true, maxCostUsd: 0.04,
-      executionPolicy: { schema_version: 1, provider: "openrelay", allocation_basis: "supervised_dispatch_wall_time",
-        rate_source: "operator_configured", rate_reference: "synthetic preview fixture, not a current price",
-        runtime_id: "youtube-studio-fixture", hourly_rate_usd_micros: 180000, max_execution_seconds: 600,
-        termination_grace_seconds: 10, reserved_allocation_usd_micros: 30500 } };
+    const sourceParams = { seed: 42, personalCreatorAcknowledged: true, provider: "yue2" };
     const request = (body: unknown) => POST(new Request("https://fixture.invalid/api/channel-pipeline-preview", {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
     }));
@@ -45,8 +41,7 @@ async function main() {
       assert.notEqual(preview.pipelineFingerprint, legacy.pipelineFingerprint);
       assert.throws(() => assertChannelPipelinePreviewSnapshot(legacy, preview), /stale/u,
         "a legacy review snapshot cannot authorize the selected music route");
-      for (const patch of [{ maxCostUsd: 0.01 }, { personalCreatorAcknowledged: false }, { provider: "suno" },
-        { executionPolicy: { ...sourceParams.executionPolicy, reserved_allocation_usd_micros: 1 } }]) {
+      for (const patch of [{ personalCreatorAcknowledged: false }, { provider: "suno" }]) {
         const denied = await request({ ...body, yue2Music: { ...body.yue2Music, sourceParams: { ...sourceParams, ...patch } } });
         assert.equal(denied.status, 400);
         assert.match((await denied.json()).error, /yue2Music/u, "nested validation keeps its field path");

@@ -11,6 +11,7 @@ import {
   type ScenarioVisualTreatmentThumbnailBinding,
 } from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { createHyperThumbnailEvidence } from "@/lib/hyperThumbnailEvidence";
 import { FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaLofiThumbnailContract";
 import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import {
@@ -797,6 +798,32 @@ async function nativeLofiEvidenceBindsSingleReference(root: string): Promise<voi
   );
 }
 
+async function hrsRecoveryDoesNotOverwriteOrDoubleClaim(root:string):Promise<void> {
+  const io = new MemoryCheckpointIo(), requestHash="a".repeat(64), checkpointRoot="owner/o/channel/c/runs/r/hrs";
+  const request={candidateId:requestHash,videoId:"v",revision:0,title:"t",hook:"h",heroSubject:"hero",visualDirection:"scene",creativeDirection:'"HERO"',referenceAssets:[]};
+  const identity={provider:"google-gemini-api" as const,modelId:"gemini-3-pro-image" as const,settings:{aspectRatio:"16:9" as const,imageSize:"2K" as const},candidateId:requestHash,request,referenceAssets:[]};
+  const result={id:"candidate",projectId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",videoId:"v",revision:0,state:"completed" as const,completedAt:"2026-11-04T12:00:00.000Z",...identity,
+    requestSha256:createHash("sha256").update(canonicalJson(identity)).digest("hex"),sourceSha256:null,
+    output:{bucket:"studio",key:"projects/studio/a.png",sha256:"b".repeat(64),bytes:1,contentType:"image/png" as const,downloadUrl:"https://r2.example/a",expiresInSeconds:900}};
+  const requestContext=thumbnailNanoBananaRequestContext({keyPrefix:"owner/o/",runId:"r",requestHash});
+  const evidence=createHyperThumbnailEvidence({result,requestContext,mode:"native-scene-and-typography",expectedWords:["HERO"],estimatedCostUsd:0.135});
+  await mkdir(join(root,"hrs-original"),{recursive:true}); await mkdir(join(root,"hrs-recovery"),{recursive:true});
+  const originalPath=join(root,"hrs-original","thumbnail.jpg"), recoveryPath=join(root,"hrs-recovery","thumbnail.jpg");
+  let original=await openThumbnailCheckpoint({checkpointRoot,requestHash,localImagePath:originalPath},io);
+  original=await beginThumbnailPaidWork(original,io);
+  await writeFile(originalPath,"same image");
+  let recoveryCalled=0;
+  const recovered=await openThumbnailCheckpoint({checkpointRoot,requestHash,localImagePath:recoveryPath,recoverPaid:async session=>{
+    recoveryCalled++; await writeFile(recoveryPath,"same image"); return saveThumbnailGenerationCheckpoint(session,0.135,evidence,io);
+  }},io);
+  const originalSaved=await saveThumbnailGenerationCheckpoint(original,0.135,evidence,io);
+  assert.equal(recoveryCalled,1);
+  assert.equal(originalSaved.manifest?.generationCostReceiptId,`hrs-${requestHash}`);
+  assert.deepEqual(originalSaved.manifest,recovered.manifest);
+  await writeFile(originalPath,"different image");
+  await assert.rejects(saveThumbnailGenerationCheckpoint(original,0.135,evidence,io),/conflicts/);
+}
+
 async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "thumbnail-checkpoint-test-"));
   try {
@@ -810,6 +837,7 @@ async function main(): Promise<void> {
     await nativeProEvidenceBindsPromptAndCopy(root);
     await lofiReferenceEvidenceBindsInputFrame(root);
     await nativeLofiEvidenceBindsSingleReference(root);
+    await hrsRecoveryDoesNotOverwriteOrDoubleClaim(root);
     console.log("thumbnail checkpoint tests: ok");
   } finally {
     await rm(root, { recursive: true, force: true });

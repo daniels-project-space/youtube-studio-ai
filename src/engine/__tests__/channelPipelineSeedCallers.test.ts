@@ -203,7 +203,7 @@ try {
       ? { probeInvocationContext: { seedStore } }
       : { routeQualificationBenchmark: { invocationContext: { seedStore } } } });
     pass(`${kind}: selected context compiles`, () => assert.equal(fixture.boundary(context(seed)).compilation.fingerprint, fixture.fresh.compilation.fingerprint));
-    refuses(`${kind}: missing route is not supplied by current identity`, () => fixture.boundary(context({ contentLane: fixture.lane })), /route|Route|Required/);
+    refuses(`${kind}: missing route is not supplied by current identity`, () => fixture.boundary(context({ contentLane: fixture.lane })), /route|Route|Required|expected object, received undefined/i);
     refuses(`${kind}: foreign same-family route`, () => fixture.boundary(context({ ...seed, channelProgramRoute: alternateSeed })), /route|Route/);
     refuses(`${kind}: malformed route`, () => fixture.boundary(context({ ...seed, channelProgramRoute: {} })), /route|Route|version|Required/i);
   }
@@ -246,7 +246,7 @@ try {
   });
   refuses("route-dependent snapshot cannot invent a missing route", () => fixture.boundary({
     durableInvocation: routeLess(fixture.snapshot), programRoute: undefined, programBrief: undefined,
-  }), /channelProgramRoute.*not produced/);
+  }), /channelProgramRoute.*not produced|expected object, received undefined/i);
   pass("unadmitted arithmetic request is not carried by real seeding", () => {
     const output = fixture.boundary({ payload: { workedExampleRequest: { operations: ["add"] } } });
     assert.equal(output.seedStore.workedExampleRequest, undefined);

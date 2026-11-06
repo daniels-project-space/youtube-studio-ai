@@ -167,7 +167,7 @@ async function main(): Promise<void> {
       moduleId: "visual_matter",
       requiredKinds: ["not-an-asset-kind"],
     })),
-    /not-an-asset-kind|invalid_enum_value/i,
+    /not-an-asset-kind|invalid_enum_value|invalid_value/i,
     "invalid requested kinds must fail before a remote resolver can be constructed",
   );
 

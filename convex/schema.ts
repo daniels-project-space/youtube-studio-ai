@@ -74,6 +74,17 @@ const planWeekFalNanoBananaProProviderReceipt = v.object({
   createdAt: v.number(),
 });
 
+const planWeekHrsProviderReceipt = v.object({
+  version:v.literal("plan-week-provider-render/v4"),ownerId:v.string(),channelId:v.string(),batchId:v.string(),
+  itemId:v.string(),attempt:v.number(),requestKey:v.string(),checkpointKey:v.string(),destinationKey:v.string(),
+  provider:v.literal("google-gemini-api"),route:v.literal("hrs-gemini-nano-banana-pro"),sourceKey:v.string(),
+  sourceContentType:v.literal("image/png"),model:v.literal("gemini-3-pro-image"),apiVersion:v.literal("hrs/v1"),
+  profileId:v.literal("hrs-youtube-thumbnail-candidate/v1"),width:v.number(),height:v.number(),expectedWords:v.array(v.string()),
+  costUsd:v.number(),accounting:v.literal("estimate"),requestSha256:v.string(),requestCanonicalJson:v.string(),
+  responseSha256:v.string(),createdAt:v.number(),candidateId:v.string(),projectId:v.string(),outputBucket:v.string(),outputKey:v.string(),
+  outputBytes:v.number(),sourceSha256:v.null(),
+});
+
 /** Read-only compatibility for immutable receipts created before the migration. */
 const planWeekLegacyNovitaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v1"),
@@ -2374,6 +2385,7 @@ export default defineSchema({
     providerRequestSha256: v.string(),
     providerReceipt: v.union(
       planWeekFalNanoBananaProProviderReceipt,
+      planWeekHrsProviderReceipt,
       planWeekNanoBananaProviderReceipt,
       planWeekLegacyNovitaProviderReceipt,
     ),

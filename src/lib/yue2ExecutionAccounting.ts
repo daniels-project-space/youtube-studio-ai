@@ -82,18 +82,18 @@ const Accounting = z.object({ contract: z.literal(CONTRACT), status: z.literal("
 }).strict();
 const RunnerStarted = z.object({ schema_version: z.literal(1), job_id: JobId, attempt: PositiveInteger,
   started_at: z.string().min(1), pid: PositiveInteger, job_sha256: Hash, config_sha256: Hash,
-  environment: z.record(z.unknown()),
+  environment: z.record(z.string(), z.unknown()),
 }).strict();
 const Result = z.object({ status: z.literal("complete"),
   truncated: z.object({ abc: z.literal(false), semantic: z.literal(false) }).strict(),
   sample_rate: z.literal(48000), channels: z.literal(2), frames: PositiveInteger,
-  audio_seconds: z.number().positive().finite(), official_identity: Hash, timing: z.record(z.unknown()),
+  audio_seconds: z.number().positive().finite(), official_identity: Hash, timing: z.record(z.string(), z.unknown()),
   native_audio: z.literal("audio-native.wav"), official_result: z.literal("song/result.json"),
 }).strict();
 const RunnerTerminal = z.object({ schema_version: z.literal(1), job_id: JobId, attempt: PositiveInteger,
   finished_at: z.string().min(1), status: z.enum(["completed", "failed"]), started_sha256: Hash,
   result: Result.nullable(), error: z.object({ type: z.string(), message: z.string() }).strict().nullable(),
-  qualification: z.unknown(), artifacts: z.record(z.object({ sha256: Hash, bytes: SafeInteger }).strict()),
+  qualification: z.unknown(), artifacts: z.record(z.string(), z.object({ sha256: Hash, bytes: SafeInteger }).strict()),
 }).strict();
 const Wire = z.object({ contract: z.literal("yue2-execution-accounting/v1"), job_id: JobId,
   admission: Sealed, policy: Sealed, start: Sealed.nullable(), outcome: Sealed.nullable(), accounting: Sealed.nullable(),
@@ -104,7 +104,7 @@ const Status = z.object({ contract: z.literal("yue2-evaluation-worker/v1"), job_
   state: z.enum(["accepted", "running", "completed", "failed", "ambiguous", "refused"]), job: z.unknown(),
   job_sha256: Hash, config_sha256: Hash, accepted_sha256: Hash, qualification: z.unknown(),
   progress: z.object({ phase: z.string(), receipt: z.string(), data: z.unknown().optional() }).strict(),
-  receipt: z.unknown(), error: z.unknown(), artifacts: z.record(z.string()),
+  receipt: z.unknown(), error: z.unknown(), artifacts: z.record(z.string(), z.string()),
   receipt_payloads: z.object({ job: Sealed, config: Sealed, started: Sealed.optional(), terminal: Sealed.optional() }).strict(),
 }).strict();
 export interface YuE2VerifiedExecutionAccounting extends YuE2VerifiedExecutionPolicy {

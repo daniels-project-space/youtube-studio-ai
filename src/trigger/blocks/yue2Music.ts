@@ -1,4 +1,4 @@
-import { YuE2SourceConfigSchema as config } from "@/engine/yue2SourceConfig";
+import { YuE2SourceConfigSchema as config, YuE2HyperSourceConfigSchema } from "@/engine/yue2SourceConfig";
 import { wait } from "@trigger.dev/sdk/v3";
 import { AcceptedMusicArrangementSchema } from "@/engine/acceptedMusicArrangement";
 import { YuE2MusicCandidateSchema } from "@/engine/yue2MusicCandidate";
@@ -10,8 +10,10 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { createYuE2AcceptedArrangementRequest, YuE2EvaluationError } from "@/lib/yue2Evaluation";
 import { executeDurableYuE2Evaluation, readDurableYuE2Candidate, validateDurableYuE2Evaluation } from "@/lib/yue2DurableEvaluation";
 import { musicProgramForCurrentRoute } from "./blockContext";
+import { renderHyperYoutubeYue, readHyperYoutubeYue } from "@/lib/hyperYoutubeYue";
 
 export const YUE2_MUSIC_CANDIDATE_VERSION = "3.0.0-yue2-candidate";
+export const HRS_YUE2_MUSIC_CANDIDATE_VERSION = "4.0.0-yue2-hrs";
 
 function hold(reason: string, charge?: number): Error {
   return Object.assign(new ExecutionError(`PAID_STAGE_RECONCILIATION_REQUIRED: YuE2 ${reason}; recover the same job, never regenerate`,
@@ -101,4 +103,41 @@ export function createYuE2MusicManifest() {
     certificationEvidence: "Opt-in native source generation/recovery and private candidate handoff; not musical or production qualification.",
   });
   return { ...manifest, configSchema: config, retryAndResume: { retryable: false, durableCheckpoint: true } };
+}
+
+/** Project-scoped HRS source; the existing audition and assembly remain mandatory. */
+export function createHyperYuE2MusicManifest() {
+  const hyperConfig=YuE2HyperSourceConfigSchema;
+  const hyperBlock:Block & {version:string}={id:"music",version:HRS_YUE2_MUSIC_CANDIDATE_VERSION,
+    consumes:["topic","acceptedMusicArrangement"],produces:["yue2MusicCandidate"],paid:true,run:async ctx=>{
+      const params=hyperConfig.parse(ctx.params),arrangement=AcceptedMusicArrangementSchema.parse(ctx.store["acceptedMusicArrangement"]);
+      const program=musicProgramForCurrentRoute(ctx,String(ctx.store["topic"]));
+      if ((program && program.audio.providerPreference!=="yue2") || arrangement.ownerId!==ctx.ownerId ||
+          arrangement.channelId!==ctx.channelId || arrangement.runId!==ctx.runId || arrangement.topic!==ctx.store["topic"] ||
+          !arrangement.symbolicScore || !arrangement.reviewContext || !ctx.assertInlinePaidExecutionLease)
+        throw new Error("HRS YuE requires the current run's accepted YuE arrangement, score and execution authority");
+      await bootstrapSecrets(()=>undefined,{services:["cloudflare"],required:["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"]});
+      const rendered=await renderHyperYoutubeYue({ownerId:ctx.ownerId,channelId:String(ctx.channelId),runId:ctx.runId,
+        arrangement,seed:params.seed,authorize:ctx.assertInlinePaidExecutionLease,wait:async(jobId,index)=>{
+          await wait.for({seconds:10,idempotencyKey:`hrs-yue:${jobId}:${index}`});
+        }});
+      const material=await readHyperYoutubeYue({ownerId:ctx.ownerId,channelId:String(ctx.channelId),runId:ctx.runId});
+      if (!material || material.candidateSha256!==rendered.candidateSha256 ||
+          material.request.acceptedArrangement.fingerprint!==arrangement.fingerprint)
+        throw new Error("HRS YuE retained source evidence does not match the accepted arrangement");
+      return {yue2MusicCandidate:YuE2MusicCandidateSchema.parse({version:"shared-yue2-music-candidate/v2-hrs",
+        ownerId:ctx.ownerId,channelId:ctx.channelId,runId:ctx.runId,arrangementFingerprint:arrangement.fingerprint,
+        jobId:material.candidate.jobId,candidateSha256:material.candidateSha256,candidateKey:rendered.candidateKey,
+        listeningAudioKey:material.listeningAudioKey,listeningAudioSha256:material.candidate.audioSha256,
+        nativeFrames:material.candidate.nativeOutput.frames,sampleRateHz:48000,channels:2,technicalStatus:material.quality.status,
+        allocatedCostUsdMicros:null,costBasis:"unreported",providerBilledCostUsdMicros:null,productionApproved:false})};
+    }};
+  const manifest=manifestFromBlock(hyperBlock,{version:hyperBlock.version,capabilities:["audio.music_candidate"],
+    requiredCapabilities:["music.arrangement.accepted"],optionalConsumes:["channelProgramRoute","musicProgramPlan"],
+    providerProfiles:[{id:"yue2-native-v1",provider:"hyper",quality:"production",allowFallback:false}],
+    // The GPU is prepaid and HRS imposes no per-job allocation limit. This
+    // zero is the incremental reservation for the compiler, not a billed cost.
+    maxCostUsd:0,maxLatencySec:7200,certification:"contract",qualityRequired:true,
+    certificationEvidence:"HRS project-scoped source receipt; owner audition and native output verification remain required."});
+  return {...manifest,configSchema:hyperConfig,retryAndResume:{retryable:false,durableCheckpoint:true}};
 }

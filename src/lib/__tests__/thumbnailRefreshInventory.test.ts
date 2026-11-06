@@ -5,6 +5,7 @@ import {
   createErnieNovitaThumbnailCurrentCandidateEvidence,
   createLofiThumbnailCurrentCandidateEvidence,
   createThumbnailCurrentCandidateEvidence,
+  createHrsThumbnailCurrentCandidateEvidence,
   selectLatestCurrentGoldenThumbnail,
 } from "@/lib/thumbnailRefreshInventory";
 
@@ -22,6 +23,12 @@ const evidence = createThumbnailCurrentCandidateEvidence({
   providerRequestSha256: "b".repeat(64),
   providerResponseSha256: "c".repeat(64),
 });
+const hrsEvidence = createHrsThumbnailCurrentCandidateEvidence({ownerId,channelId,runId,r2Key,
+  artifactSha256:"a".repeat(64),providerRequestSha256:"b".repeat(64),providerResponseSha256:"c".repeat(64),candidateId:"d".repeat(64)});
+assert.equal(assessThumbnailRefreshEvidence({ownerId,channelId,runId,kind:"thumbnail",r2Key,
+  meta:{thumbnailCurrentCandidateEvidence:hrsEvidence}}).status,"current_golden_candidate");
+assert.equal(assessThumbnailRefreshEvidence({ownerId:"another",channelId,runId,kind:"thumbnail",r2Key,
+  meta:{thumbnailCurrentCandidateEvidence:hrsEvidence}}).status,"evidence_invalid");
 
 assert.deepEqual(
   assessThumbnailRefreshEvidence({

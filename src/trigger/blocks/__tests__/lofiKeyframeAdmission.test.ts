@@ -7,6 +7,7 @@ import { classifyExecutionError } from "@/engine/executionErrors";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 let renders = 0, reviews = 0, motions = 0, assets = 0;
+const storedOutputs = new Map<string, Uint8Array>();
 let replies: unknown[] = [];
 const prompts: string[] = [];
 const ctx = {
@@ -21,8 +22,25 @@ function reset(values: unknown[]) {
   replies = values; renders = 0; reviews = 0; motions = 0; assets = 0; prompts.length = 0;
 }
 async function main() {
+  process.env.R2_BUCKET ??= "youtube-fixture-bucket";
   loader._load = function(id, ...args) {
     const actual = originalLoad.call(this, id, ...args);
+    if (id === "@/lib/hyperYoutubeStageClient") return { ...actual as object,
+      configuredHyperYoutubeStageClient: () => ({ binding: async () => ({ outputBucket: process.env.R2_BUCKET }) }) };
+    if (id === "@/lib/hyperYoutubeStill") return { ...actual as object, renderHyperYoutubeStill: async (value: { scope: { prompt: string } }) => {
+      renders++; prompts.push(value.scope.prompt);
+      recordImageUsage({ provider: "fixture", model: "ernie-image-turbo", route: "hrs-fixture", images: 1, costUsd: 0.01 });
+      const bytes = Buffer.from("fixture-native-still");
+      return { bytes, jobId: `hrs-fixture-${renders}`, projectId: "fixture-project", generation: 1,
+        idempotencyKey: `hrs-key-${renders}`, output: { bucket: process.env.R2_BUCKET!, key: `projects/youtube/still-${renders}.png`,
+          sha256: "a".repeat(64), bytes: bytes.length, contentType: "image/png" } };
+    } };
+    if (id === "@/lib/hyperYoutubeStillComposition") return { ...actual as object,
+      composeHyperYoutubeStill16x9: async () => Buffer.from("fixture-composite") };
+    if (id === "@/lib/storage") return { ...actual as object,
+      putObject: async (key: string, bytes: Uint8Array) => { storedOutputs.set(key, Buffer.from(bytes)); },
+      getObjectBytes: async (key: string) => storedOutputs.get(key) ?? Buffer.from("fixture-missing"),
+      publicUrl: (key: string) => `https://fixture.invalid/${key}` };
     if (id === "@/lib/novitaMedia") return { ...actual as object, renderNovitaImage: async (args: { prompt: string }) => {
       renders++; prompts.push(args.prompt);
       recordImageUsage({ provider: "fixture", model: "fixture", route: "fixture", images: 1, costUsd: 0.01 });
@@ -79,12 +97,12 @@ async function main() {
       const count = verdicts.length;
       reset(verdicts);
       const patch = await block.run(ctx);
-      assert.equal(patch.f1Key, `still-${count}`);
-      assert.equal(patch.__costUsd, count * 0.01);
+      assert.equal(patch.f1Key, `fixture/runs/fixture/lofi-keyframe/hrs-fixture-${count}-1.png`);
       assert.equal(motions, 1); assert.equal(assets, 1); assert.equal(renders, count);
     }
     reset([{ score: 0.6, issues: ["Missing sea"] }, { score: 0.7, issues: ["Missing sea"] }]);
-    assert.equal((await block.run({ ...ctx, params: { qaProfile: "draft" } })).f1Key, "still-2");
+    assert.equal((await block.run({ ...ctx, params: { qaProfile: "draft" } })).f1Key,
+      "fixture/runs/fixture/lofi-keyframe/hrs-fixture-2-1.png");
     console.log("Keyframe admission passed: actual block rejects failed/malformed production reviews before asset admission or motion; accepted and explicit draft paths preserved; transport synthetic.");
   } finally { loader._load = originalLoad; }
 }

@@ -28,10 +28,11 @@ async function main(): Promise<void> {
   }
 
   const production = await source("src/trigger/blocks/intelligenceBlocks.ts");
-  assert.match(production, /thumbnail-gen-checkpoint-v[56]-fal-nano-banana-pro-native/);
+  assert.match(production, /thumbnail-gen-checkpoint-v[78]-hrs-nano-banana-pro-native/);
   assert.doesNotMatch(production, /verifiedSceneBase|isThumbnailBaseProvenance|baseArt/,
     "publishable thumbnail_gen must purchase its pixels from the pinned Nano route");
-  assert.match(production, /generateFalNanoBananaProThumbnailWithReceipt\s*\(/);
+  assert.match(production, /configuredHyperThumbnailClient\s*\(/);
+  assert.doesNotMatch(production, /generateFalNanoBananaProThumbnailWithReceipt\s*\(/);
   assert.match(production, /consumes:\s*\["title", "thumbnailDescription", "topic", "packageToOpeningPlan"\]/,
     "the universal thumbnail block must require a concrete visual brief and its package-to-opening binding");
   assert.match(production, /sceneSeed:\s*thumbnailSceneSeed/,

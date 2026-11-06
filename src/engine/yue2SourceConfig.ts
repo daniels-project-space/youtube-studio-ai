@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { YuE2ExecutionPolicySchema, maximumYuE2Allocation } from "@/lib/yue2ExecutionPolicy";
 
+/** HRS owns the GPU; the caller supplies no rental ceiling or provider policy. */
+export const YuE2HyperSourceConfigSchema = z.object({
+  seed:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  personalCreatorAcknowledged:z.literal(true).default(true),
+  provider:z.literal("yue2").optional(),
+}).passthrough();
+
 export const YuE2SourceConfigSchema = z.object({
   seed: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   personalCreatorAcknowledged: z.literal(true),

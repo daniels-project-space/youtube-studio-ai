@@ -57,6 +57,14 @@ jobs:
         run: |
           # Only Ubuntu supplies this dependency. Unrelated runner repositories
           # (for example Chrome) must not block the renderer quality gate.
+          # GitHub-hosted Ubuntu images commonly already include these tools;
+          # use them directly when present instead of refreshing every APT
+          # index on every run. The exact renderer check below always runs.
+          if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+            ffmpeg -version
+            ffprobe -version
+            exit 0
+          fi
           ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
           if [[ ! -s "$ubuntu_sources" ]]; then
             echo "::error::Expected Ubuntu APT sources at $ubuntu_sources"
@@ -67,8 +75,12 @@ jobs:
             -o "Dir::Etc::sourceparts=-"
           )
           # Keep other repositories' cached lists; retain APT signature/hash checks.
-          sudo apt-get "${apt_options[@]}" update --error-on=any --no-list-cleanup
-          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends ffmpeg
+          timeout 240s sudo apt-get "${apt_options[@]}" \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 \
+            update --error-on=any --no-list-cleanup
+          timeout 240s sudo apt-get "${apt_options[@]}" \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 \
+            install --yes --no-install-recommends ffmpeg
           ffmpeg -version
           ffprobe -version
       - name: Install

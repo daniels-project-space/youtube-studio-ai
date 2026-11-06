@@ -4,7 +4,7 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/u);
 
 /** A retained source for audition, never a release-ready music artifact. */
-export const YuE2MusicCandidateSchema = z.object({
+const LegacyYuE2MusicCandidateSchema = z.object({
   version: z.literal("shared-yue2-music-candidate/v1"),
   ownerId: id, channelId: id, runId: id,
   arrangementFingerprint: hash,
@@ -20,9 +20,16 @@ export const YuE2MusicCandidateSchema = z.object({
   costBasis: z.literal("supervised_dispatch_wall_time"),
   providerBilledCostUsdMicros: z.null(),
   productionApproved: z.literal(false),
-}).strict().superRefine((value, ctx) => {
+}).strict();
+const HyperYuE2MusicCandidateSchema = LegacyYuE2MusicCandidateSchema.extend({
+  version:z.literal("shared-yue2-music-candidate/v2-hrs"),jobId:z.string().uuid(),
+  allocatedCostUsdMicros:z.null(),costBasis:z.literal("unreported"),
+}).strict();
+export const YuE2MusicCandidateSchema = z.discriminatedUnion("version",[
+  LegacyYuE2MusicCandidateSchema,HyperYuE2MusicCandidateSchema,
+]).superRefine((value, ctx) => {
   const root = `owner/${value.ownerId}/runs/${value.runId}/music/yue2-evaluation/`;
-  if (value.candidateKey !== `${root}candidate.json` ||
+  if (value.candidateKey !== `${root}${value.version === "shared-yue2-music-candidate/v2-hrs" ? "candidate-hrs.json" : "candidate.json"}` ||
     ![`${root}audio-native-${value.listeningAudioSha256}.wav`,
       `${root}audio-headroom-${value.listeningAudioSha256}.wav`].includes(value.listeningAudioKey)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Candidate references must match the exact private run namespace and audio digest" });

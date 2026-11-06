@@ -1,7 +1,7 @@
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { FAMILY_KEYS, type FamilyKey } from "@/engine/families";
-import { hasNanoBanana } from "@/lib/banana";
 import { hasAnyFootageProvider } from "@/lib/footage";
+import { hasConfiguredHyperThumbnailClient } from "@/lib/hyperThumbnailClient";
 import { hasMusicProvider } from "@/lib/music";
 import { hasMotionComic } from "@/lib/motionComic";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
@@ -67,7 +67,7 @@ const LIVE_CAPABILITIES: AutomaticFamilyExecutionCapabilityReader = {
     ttsProvider: "elevenlabs",
   }) && hasNovitaRenderFarmConfig(),
   comicReady: () => hasMotionComic({ requiresStoryboard: true }),
-  thumbnailRouteReady: () => hasNanoBanana(),
+  thumbnailRouteReady: () => hasConfiguredHyperThumbnailClient(),
   nonGoogleVisionReady: () => hasNonGoogleVisionKey(),
   topicPlannerReady: () => hasTopicraft(),
   narrationReady: (provider) => {

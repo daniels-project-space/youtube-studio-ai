@@ -283,7 +283,7 @@ assert.throws(
     visualReviewFingerprint: review,
     finalMasterSha256: master,
   }),
-  /at least 1|story payoff receipt/i,
+  /at least 1|story payoff receipt|expected array to have >=1 items/i,
   "a final master cannot pass from attractive locks and cuts alone when its opening question has no cited payoff evidence",
 );
 

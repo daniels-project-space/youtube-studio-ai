@@ -8,10 +8,9 @@
  *   metadata_optimized  → base metadata + title optimised against the databank
  *                         + competitor titles + power words, plus an
  *                         overlap-weighted view estimate. Replaces `metadata`.
- *   thumbnail_gen       → one Style-DNA/playbook route: non-Lo-Fi uses a
- *                         native Fal Nano Banana Pro design; Lo-Fi alone uses its
- *                         exact rendered 4K scene and asks Nano Banana for its
- *                         minimal type. The production QA alarm gates both.
+ *   thumbnail_gen       → one Style-DNA/playbook route through the project's
+ *                         HRS Nano Banana Pro API; Lo-Fi keeps its exact rendered
+ *                         frame and requests only minimal type. Production QA gates both.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
@@ -31,6 +30,7 @@ import { fileExists, makeRunTempDir, readBytes, writeBytes } from "@/lib/files";
 import {
   createLofiThumbnailCurrentCandidateEvidence,
   createThumbnailCurrentCandidateEvidence,
+  createHrsThumbnailCurrentCandidateEvidence,
 } from "@/lib/thumbnailRefreshInventory";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { clampTags } from "@/lib/youtube";
@@ -51,18 +51,9 @@ import {
   thumbnailRequestHash,
   type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
-import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import { loadDefectLedger, loadRecentRenders, recordRecentRender } from "@/lib/thumbnailLearningStore";
 import { fingerprintThumbnail } from "@/lib/thumbnailSameness";
 import { readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
-import {
-  generateFalNanoBananaProThumbnailWithReceipt,
-  hasFalNanoBananaProThumbnail,
-} from "@/lib/falNanoBananaProThumbnail";
-import {
-  generateFalNanoBananaLofiThumbnailWithReceipt,
-  hasFalNanoBananaLofiThumbnail,
-} from "@/lib/falNanoBananaLofiThumbnail";
 import {
   craftMetadata,
   deterministicTitleFallback,
@@ -104,6 +95,10 @@ import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { loadOutlierBank } from "@/lib/topicraft";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { configuredHyperThumbnailClient } from "@/lib/hyperThumbnailClient";
+import { createHyperThumbnailEvidence } from "@/lib/hyperThumbnailEvidence";
+import { hyperThumbnailIntentKey, persistHyperThumbnailIntent, recoverHyperThumbnailIntent } from "@/lib/hyperThumbnailRecovery";
+import { imageToJpeg } from "@/lib/ffmpeg";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
 
 /* ----------------------------- helpers --------------------------------- */
@@ -780,7 +775,7 @@ export const thumbnailGen: Block = {
     const observedConceptCost = (): number =>
       accountedModelUsageCost(ctx, ["text"], PRICE.thumbnailConceptUsd);
     const observedImageCost = (): number =>
-      ctx.imageUsageAccounting?.().costUsd ?? nanoBananaImageCostUsd;
+      Math.max(ctx.imageUsageAccounting?.().costUsd ?? 0, nanoBananaImageCostUsd);
     const observedQaCost = (): number =>
       accountedModelUsageCost(ctx, ["vision"], PRICE.visionGraderUsd);
     const thumbnailCost = (extraCostUsd = 0): number =>
@@ -959,6 +954,7 @@ export const thumbnailGen: Block = {
           });
           const requestHash = thumbnailRequestHash({
             contract: LOFI_RENDER_THUMBNAIL_CONTRACT.version,
+            providerRoute: "hrs-gemini-nano-banana-pro",
             sourceVideoKey,
             sourceFrameSha256: reference.sourceFrameSha256,
             sourceFrameTimeSec: reference.sourceFrameTimeSec,
@@ -980,10 +976,22 @@ export const thumbnailGen: Block = {
             checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
             requestHash,
             localImagePath: outJpg,
+            recoverPaid: async session => {
+              const recovered = await recoverHyperThumbnailIntent({key:hyperThumbnailIntentKey(`${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,requestHash),
+                requestHash,client:configuredHyperThumbnailClient()});
+              if (recovered.state !== "completed" || !recovered.result || !recovered.image)
+                throw new ExecutionError(`HRS thumbnail is ${recovered.state}; inspect the same candidate`,
+                  {code:"HRS_THUMBNAIL_RECOVERY_PENDING",retryable:recovered.state === "generating",phase:"generation"});
+              if (recovered.intent.mode !== "lofi-render-frame-native" || recovered.result.sourceSha256 !== reference.sourceFrameSha256)
+                throw new Error("HRS recovered Lo-Fi frame does not match the current reference");
+              await writeBytes(outJpg,recovered.image);
+              const backgroundSsim = await measureLofiThumbnailBackgroundSsim({referenceFramePath:reference.referenceFramePath,candidatePath:outJpg});
+              const evidence = createHyperThumbnailEvidence({result:recovered.result,requestContext,mode:"lofi-render-frame-native",
+                expectedWords:recovered.intent.expectedWords,backgroundSsim,estimatedCostUsd:recovered.intent.estimatedImageCostUsd});
+              return saveThumbnailGenerationCheckpoint(session,recovered.intent.estimatedGenerationCostUsd,evidence);
+            },
             beforeClaim: () => {
-              if (!hasFalNanoBananaLofiThumbnail()) {
-                throw new Error("thumbnail_gen: Fal Nano Banana Lo-Fi edit is not configured");
-              }
+              configuredHyperThumbnailClient();
               if (quality === "production" && !hasVisionKey()) {
                 throw new Error("thumbnail_gen: no configured production QA provider");
               }
@@ -996,9 +1004,10 @@ export const thumbnailGen: Block = {
                 : undefined;
             if (
               (checkpoint.manifest.version !== 2 && checkpoint.manifest.version !== 3) ||
-              checkpointEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2" ||
+              (checkpointEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2" &&
+                checkpointEvidence?.version !== "thumbnail-hrs-pro-evidence/v1") ||
               checkpointEvidence.mode !== "lofi-render-frame-native" ||
-              checkpointEvidence.sourceFrameSha256 !== reference.sourceFrameSha256
+              (checkpointEvidence.version === "thumbnail-hrs-pro-evidence/v1" ? checkpointEvidence.sourceSha256 : checkpointEvidence.sourceFrameSha256) !== reference.sourceFrameSha256
             ) {
               throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks its exact Nano Banana reference evidence");
             }
@@ -1006,30 +1015,31 @@ export const thumbnailGen: Block = {
           } else {
             checkpoint = await beginThumbnailPaidWork(checkpoint);
             const spentBefore = observedImageCost();
-            const generated = await generateFalNanoBananaLofiThumbnailWithReceipt({
-              prompt,
-              referenceImage: reference.referenceImage,
-              referenceMimeType: "image/jpeg",
-              idempotencyContext: requestContext,
-            });
-            nanoBananaImageCostUsd += generated.receipt.costUsd;
+            const client = configuredHyperThumbnailClient();
+            const asset = await client.uploadReference({bytes:reference.referenceImage,name:"lofi-frame.jpg",contentType:"image/jpeg",
+              idempotencyKey:`thumbnail-frame:${reference.sourceFrameSha256}`});
+            if (asset.sha256 !== reference.sourceFrameSha256) throw new Error("thumbnail_gen: uploaded frame hash mismatch");
+            const input = {candidateId:requestHash,videoId:`studio-${createHash("sha256").update(ctx.runId).digest("hex").slice(0,32)}`,
+              revision:0,title:title.slice(0,240),hook:"Preserve this video frame",heroSubject:"The exact supplied video frame",
+              visualDirection:"Keep the source frame; add only the requested 4K emblem",creativeDirection:prompt,
+              referenceAssets:[{assetId:asset.assetId,role:"source-frame" as const}]};
+            await persistHyperThumbnailIntent(hyperThumbnailIntentKey(`${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,requestHash),
+              {version:"hrs-thumbnail-intent/v1",request:input,expectedReferenceHashes:{[asset.assetId]:reference.sourceFrameSha256},
+                expectedWords:[LOFI_RENDER_THUMBNAIL_CONTRACT.badge],mode:"lofi-render-frame-native",estimatedGenerationCostUsd:PRICE.bananaProUsd,estimatedImageCostUsd:PRICE.bananaProUsd});
+            const result = await client.submit(input,{[asset.assetId]:reference.sourceFrameSha256});
+            const generatedBytes = await client.download(result,input,{[asset.assetId]:reference.sourceFrameSha256});
+            nanoBananaImageCostUsd += PRICE.bananaProUsd;
             // Nano Banana owns the complete edit. Do not composite text or
             // redraw the frame locally; the preservation gate below rejects a
             // provider result that changes more than the small emblem zone.
-            await writeBytes(outJpg, generated.bytes);
+            await writeBytes(outJpg, generatedBytes);
             const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
               referenceFramePath: reference.referenceFramePath,
               candidatePath: outJpg,
             });
-            const providerEvidence: ThumbnailNanoBananaEvidence = {
-              version: "thumbnail-lofi-fal-nano-banana-evidence/v2",
-              requestContext,
-              receipt: generated.receipt,
-              mode: "lofi-render-frame-native",
-              sourceFrameSha256: reference.sourceFrameSha256,
-              backgroundSsim,
-              expectedText: [LOFI_RENDER_THUMBNAIL_CONTRACT.badge],
-            };
+            const providerEvidence: ThumbnailNanoBananaEvidence = createHyperThumbnailEvidence({result,requestContext,
+              mode:"lofi-render-frame-native",backgroundSsim,expectedWords:[LOFI_RENDER_THUMBNAIL_CONTRACT.badge],
+              estimatedCostUsd:PRICE.bananaProUsd});
             const iterationSpend = Math.max(0, observedImageCost() - spentBefore);
             checkpointGenerationCostUsd += iterationSpend;
             checkpoint = await saveThumbnailGenerationCheckpoint(
@@ -1043,14 +1053,14 @@ export const thumbnailGen: Block = {
             checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
               ? checkpoint.manifest.providerEvidence
               : undefined;
-          if (providerEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2") {
+          if (providerEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2" && providerEvidence?.version !== "thumbnail-hrs-pro-evidence/v1") {
             throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks native Fal reference-edit evidence");
           }
           const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
             referenceFramePath: reference.referenceFramePath,
             candidatePath: outJpg,
           });
-          if (Math.abs(backgroundSsim - providerEvidence.backgroundSsim) > 0.002) {
+          if (providerEvidence.backgroundSsim === undefined || Math.abs(backgroundSsim - providerEvidence.backgroundSsim) > 0.002) {
             throw new Error("thumbnail_gen: Lo-Fi checkpoint background-preservation evidence drifted");
           }
           if (backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim) {
@@ -1177,7 +1187,12 @@ export const thumbnailGen: Block = {
       const providerEvidence = winner.providerEvidence;
       if (!providerEvidence) throw new Error("thumbnail_gen: Lo-Fi winner lacks provider evidence");
       const thumbnailCurrentCandidateEvidence = publishable
-        ? createLofiThumbnailCurrentCandidateEvidence({
+        ? providerEvidence.version === "thumbnail-hrs-pro-evidence/v1" ? createHrsThumbnailCurrentCandidateEvidence({
+            ownerId:ctx.ownerId,channelId:ctx.channelId,runId:ctx.runId,r2Key:thumbnailKey,artifactSha256,
+            sourceVideoKey,sourceFrameSha256:reference.sourceFrameSha256,sourceFrameTimeSec:reference.sourceFrameTimeSec,
+            sourceWidth:reference.sourceWidth,sourceHeight:reference.sourceHeight,candidateId:providerEvidence.request.candidateId,
+            providerRequestSha256:providerEvidence.receipt.providerRequestSha256,providerResponseSha256:providerEvidence.receipt.responseSha256,
+          }) : createLofiThumbnailCurrentCandidateEvidence({
             ownerId: ctx.ownerId,
             channelId: ctx.channelId,
             runId: ctx.runId,
@@ -1286,8 +1301,8 @@ export const thumbnailGen: Block = {
       produce: async (priorIssues, iter): Promise<ThumbnailAttempt> => {
         const requestHash = thumbnailRequestHash({
           contract: thumbnailScenarioVisualTreatmentBinding
-            ? "thumbnail-gen-checkpoint-v6-fal-nano-banana-pro-native-scenario-treatment"
-            : "thumbnail-gen-checkpoint-v5-fal-nano-banana-pro-native",
+            ? "thumbnail-gen-checkpoint-v8-hrs-nano-banana-pro-native-scenario-treatment"
+            : "thumbnail-gen-checkpoint-v7-hrs-nano-banana-pro-native",
           title,
           thumbnailDescription: thumbnailSceneSeed,
           packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
@@ -1296,7 +1311,7 @@ export const thumbnailGen: Block = {
           pattern,
           playbook: effectivePlaybook,
           patternIndex: idx,
-          providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE,
+          providerRoute: "hrs-gemini-nano-banana-pro",
           ...(serializedEpisodeContext
             ? { serializedEpisodeContextFingerprint: serializedEpisodeContext.fingerprint }
             : {}),
@@ -1320,13 +1335,26 @@ export const thumbnailGen: Block = {
           checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
           requestHash,
           localImagePath: outJpg,
+          recoverPaid: async session => {
+            const recovered = await recoverHyperThumbnailIntent({key:hyperThumbnailIntentKey(`${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,requestHash),
+              requestHash,client:configuredHyperThumbnailClient()});
+            if (recovered.state !== "completed" || !recovered.result || !recovered.image)
+              throw new ExecutionError(`HRS thumbnail is ${recovered.state}; inspect the same candidate`,
+                {code:"HRS_THUMBNAIL_RECOVERY_PENDING",retryable:recovered.state === "generating",phase:"generation"});
+            if (recovered.intent.mode !== "native-scene-and-typography" || recovered.result.sourceSha256 !== null)
+              throw new Error("HRS recovered thumbnail has the wrong source mode");
+            const rawPath = join(tmp,"hrs-recovered-source.png");
+            await writeBytes(rawPath,recovered.image);
+            await imageToJpeg(rawPath,outJpg,1280,720);
+            const evidence = createHyperThumbnailEvidence({result:recovered.result,requestContext:nanoBananaRequestContext,
+              mode:"native-scene-and-typography",expectedWords:recovered.intent.expectedWords,estimatedCostUsd:recovered.intent.estimatedImageCostUsd});
+            return saveThumbnailGenerationCheckpoint(session,recovered.intent.estimatedGenerationCostUsd,evidence);
+          },
           ...(thumbnailScenarioVisualTreatmentBinding
             ? { scenarioVisualTreatmentBinding: thumbnailScenarioVisualTreatmentBinding }
             : {}),
           beforeClaim: () => {
-            if (!hasFalNanoBananaProThumbnail()) {
-              throw new Error("thumbnail_gen: Fal Nano Banana Pro is not configured");
-            }
+            configuredHyperThumbnailClient();
             if (quality === "production" && !hasVisionKey()) {
               throw new Error("thumbnail_gen: no configured production QA provider");
             }
@@ -1361,21 +1389,23 @@ export const thumbnailGen: Block = {
           const generateDesignedThumbnail = async (
             request: import("@/lib/thumbnailLab").DesignedThumbnailRequest,
           ): Promise<Uint8Array> => {
-            const generated = await generateFalNanoBananaProThumbnailWithReceipt({
-              prompt: request.prompt,
-              idempotencyContext: nanoBananaRequestContext,
-            });
-            nanoBananaImageCostUsd += generated.receipt.costUsd;
-            nanoBananaProviderEvidence = {
-              version: "thumbnail-fal-nano-banana-pro-evidence/v1",
-              requestContext: nanoBananaRequestContext,
-              receipt: generated.receipt,
-              mode: "native-scene-and-typography",
-              expectedWords: request.expectWords,
-            };
-            return generated.bytes;
+            const client = configuredHyperThumbnailClient();
+            const input = {candidateId:requestHash,videoId:`studio-${createHash("sha256").update(ctx.runId).digest("hex").slice(0,32)}`,
+              revision:0,title:title.slice(0,240),hook:scriptHint.slice(0,200) || title.slice(0,200),
+              heroSubject:(dnaThumb?.subject || title).slice(0,300),visualDirection:thumbnailSceneSeed.slice(0,2000),
+              creativeDirection:request.prompt,referenceAssets:[]};
+            await persistHyperThumbnailIntent(hyperThumbnailIntentKey(`${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,requestHash),
+              {version:"hrs-thumbnail-intent/v1",request:input,expectedReferenceHashes:{},expectedWords:request.expectWords,
+                mode:"native-scene-and-typography",estimatedGenerationCostUsd:PRICE.bananaProUsd + Math.max(0,observedConceptCost()-conceptBefore),estimatedImageCostUsd:PRICE.bananaProUsd});
+            const result = await client.submit(input);
+            const bytes = await client.download(result,input);
+            nanoBananaImageCostUsd += PRICE.bananaProUsd;
+            nanoBananaProviderEvidence = createHyperThumbnailEvidence({result,requestContext:nanoBananaRequestContext,
+              mode: "native-scene-and-typography",expectedWords:request.expectWords,estimatedCostUsd:PRICE.bananaProUsd});
+            return bytes;
           };
           const spentBefore = observedImageCost() + observedConceptCost();
+          const conceptBefore = observedConceptCost();
           await renderCandidate({
             pattern,
             title,
@@ -1428,7 +1458,7 @@ export const thumbnailGen: Block = {
           referenceThumbs,
           expectedWords:
             checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
-              ? checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
+              ? (checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1" || checkpoint.manifest.providerEvidence?.version === "thumbnail-hrs-pro-evidence/v1")
                 ? checkpoint.manifest.providerEvidence.expectedWords
                 : undefined
               : undefined,
@@ -1498,7 +1528,7 @@ export const thumbnailGen: Block = {
                 : {}),
               expectedWords:
                 checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
-                  ? checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
+                  ? (checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1" || checkpoint.manifest.providerEvidence?.version === "thumbnail-hrs-pro-evidence/v1")
                     ? checkpoint.manifest.providerEvidence.expectedWords
                     : undefined
                   : undefined,
@@ -1659,7 +1689,7 @@ export const thumbnailGen: Block = {
         // module can act on later. `strategy` is deliberately excluded: it is
         // not finalised until the gate below.
         traits: {
-          providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.route,
+          providerRoute: "hrs-gemini-nano-banana-pro",
           accepted: String(attemptLoop.accepted),
           iterations: String(attemptLoop.iterations),
         },
@@ -1704,7 +1734,11 @@ export const thumbnailGen: Block = {
     // an external replacement.
     const thumbnailCurrentCandidateEvidence =
       publishable && providerEvidence
-        ? createThumbnailCurrentCandidateEvidence({
+        ? providerEvidence.version === "thumbnail-hrs-pro-evidence/v1" ? createHrsThumbnailCurrentCandidateEvidence({
+            ownerId:ctx.ownerId,channelId:ctx.channelId,runId:ctx.runId,r2Key:thumbnailKey,artifactSha256:thumbnailArtifactSha256,
+            candidateId:providerEvidence.request.candidateId,providerRequestSha256:providerEvidence.receipt.providerRequestSha256,
+            providerResponseSha256:providerEvidence.receipt.responseSha256,
+          }) : createThumbnailCurrentCandidateEvidence({
             ownerId: ctx.ownerId,
             channelId: ctx.channelId,
             runId: ctx.runId,

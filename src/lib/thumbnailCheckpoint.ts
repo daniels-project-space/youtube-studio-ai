@@ -9,6 +9,7 @@ import {
   type ScenarioVisualTreatmentThumbnailBinding,
 } from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { validHyperThumbnailEvidence, type HyperThumbnailEvidence } from "@/lib/hyperThumbnailEvidence";
 import {
   FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE,
   type FalNanoBananaLofiThumbnailReceipt,
@@ -86,6 +87,7 @@ export interface ThumbnailFalNanoBananaProEvidence {
 }
 
 export type ThumbnailNanoBananaEvidence =
+  | HyperThumbnailEvidence
   | ThumbnailDirectNanoBananaEvidence
   | ThumbnailLofiFalNanoBananaEvidence
   | ThumbnailLofiFalNanoBananaNativeEvidence
@@ -248,6 +250,8 @@ function validNanoBananaEvidence(
   requestHash: string,
 ): value is ThumbnailNanoBananaEvidence {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if ((value as { version?: unknown }).version === "thumbnail-hrs-pro-evidence/v1")
+    return validHyperThumbnailEvidence(value, requestHash);
   if ((value as { version?: unknown }).version === "thumbnail-fal-nano-banana-pro-evidence/v1") {
     const evidence = value as ThumbnailFalNanoBananaProEvidence;
     const receipt = evidence.receipt;
@@ -865,6 +869,8 @@ export async function openThumbnailCheckpoint(
      * can be restored or provider work can be claimed.
      */
     scenarioVisualTreatmentBinding?: ScenarioVisualTreatmentThumbnailBinding;
+    /** Recover an already-submitted HRS candidate without issuing another paid request. */
+    recoverPaid?: (session:ThumbnailCheckpointSession) => Promise<ThumbnailCheckpointSession>;
     /** Free preflight that must pass before an irreversible paid-work claim. */
     beforeClaim?: () => void;
   },
@@ -918,6 +924,10 @@ export async function openThumbnailCheckpoint(
     if (completed) return completed;
     const spendRaw = await optionalObject(io, session.spendKey);
     if (spendRaw) {
+      const marker = parseJsonObject(spendRaw);
+      if (args.recoverPaid && marker?.version === 1 && marker.requestHash === session.requestHash &&
+          typeof marker.claimToken === "string" && marker.claimToken)
+        return args.recoverPaid({...session,spendStarted:true});
       throw new ExecutionError(
         `thumbnail_gen: paid request ${session.requestHash.slice(0, 12)} started but has no complete checkpoint; ` +
           "refusing regeneration",
@@ -1037,11 +1047,12 @@ export async function saveThumbnailGenerationCheckpoint(
   }
   const effectiveScenarioVisualTreatment = session.scenarioVisualTreatmentBinding;
   const imageBytes = await readFile(session.localImagePath);
+  const hrsEvidence = providerEvidence?.version === "thumbnail-hrs-pro-evidence/v1";
   const manifest: CurrentThumbnailCheckpointManifest = {
     version: effectiveScenarioVisualTreatment ? 3 : 2,
     requestHash: session.requestHash,
     generationCostUsd: cost,
-    generationCostReceiptId: randomUUID(),
+    generationCostReceiptId: hrsEvidence ? `hrs-${session.requestHash}` : randomUUID(),
     artifactSha256: createHash("sha256").update(imageBytes).digest("hex"),
     ...(providerEvidence ? { providerEvidence } : {}),
     ...(effectiveScenarioVisualTreatment
@@ -1052,13 +1063,32 @@ export async function saveThumbnailGenerationCheckpoint(
     id: checkpointCostReceiptId(session.manifestKey, `generation:${manifest.generationCostReceiptId}`),
     costUsd: cost,
   }, false);
-  await writeFile(session.localManifestPath, JSON.stringify(manifest));
-  await io.putObject(session.imageKey, imageBytes, {
-    contentType: thumbnailContentType(imageBytes),
-  });
-  await io.putObject(session.manifestKey, JSON.stringify(manifest), {
-    contentType: "application/json",
-  });
+  if (!hrsEvidence) await writeFile(session.localManifestPath, JSON.stringify(manifest));
+  try {
+    await io.putObject(session.imageKey, imageBytes, {
+      contentType: thumbnailContentType(imageBytes), ...(hrsEvidence ? {ifNoneMatch:"*" as const} : {}),
+    });
+  } catch (error) {
+    if (!hrsEvidence || !isAlreadyClaimed(error)) throw error;
+    const saved = await io.getObjectBytes(session.imageKey);
+    if (createHash("sha256").update(saved).digest("hex") !== manifest.artifactSha256)
+      throw new Error("HRS thumbnail checkpoint image conflicts with an existing candidate");
+  }
+  try {
+    await io.putObject(session.manifestKey, JSON.stringify(manifest), {
+      contentType: "application/json", ...(hrsEvidence ? {ifNoneMatch:"*" as const} : {}),
+    });
+  } catch (error) {
+    if (!hrsEvidence || !isAlreadyClaimed(error)) throw error;
+    const saved = await remoteCheckpoint(session,io);
+    if (!saved?.manifest || saved.manifest.version === 1 ||
+        saved.manifest.artifactSha256 !== manifest.artifactSha256 ||
+        saved.manifest.generationCostUsd !== manifest.generationCostUsd ||
+        canonicalJson(saved.manifest.providerEvidence) !== canonicalJson(manifest.providerEvidence))
+      throw new Error("HRS thumbnail checkpoint conflicts with an existing receipt");
+    return saved;
+  }
+  if (hrsEvidence) await writeFile(session.localManifestPath, JSON.stringify(manifest));
   return { ...session, source: "local", manifest };
 }
 

@@ -199,23 +199,23 @@ async function routingProof(): Promise<void> {
     // Week-ahead uses the sealed native Nano Banana Pro thumbnail adapter,
     // not the retired generic Nano helper. Its request and source receipt are
     // persisted before the Golden/mobile quality gate can accept an artifact.
-    "src/trigger/planWeekAhead.ts": /generateFalNanoBananaProThumbnailWithReceipt/,
-    "src/trigger/blocks/intelligenceBlocks.ts": /generateFalNanoBananaProThumbnailWithReceipt/,
+    "src/trigger/planWeekAhead.ts": /configuredHyperThumbnailClient/,
+    "src/trigger/blocks/intelligenceBlocks.ts": /configuredHyperThumbnailClient/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/whiteboardScribeBlocks.ts": /renderAttestedNovitaImageBytes/,
     "src/trigger/blocks/documentaryCollageShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/loreShortBlocks.ts": /createAttestedNovitaImageGenerator/,
-    "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
+    "src/trigger/blocks/lofiBlocks.ts": /renderHyperYoutubeStill/,
   };
   for (const [relative, expected] of Object.entries(explicitInjection)) {
     assert.match(await readFile(join(process.cwd(), relative), "utf8"), expected);
   }
   const planWeekSource = await readFile(join(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8");
-  assert.match(planWeekSource, /FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE/);
-  assert.match(planWeekSource, /makePlanWeekFalNanoBananaProProviderRenderReceipt/);
+  assert.match(planWeekSource, /configuredHyperThumbnailClient/);
+  assert.match(planWeekSource, /makePlanWeekHrsProviderRenderReceipt/);
   assert.match(planWeekSource, /persistNanoBananaSourceCheckpoint/);
   const intelligenceSource = await readFile(join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"), "utf8");
-  assert.match(intelligenceSource, /FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE/);
+  assert.match(intelligenceSource, /configuredHyperThumbnailClient/);
   assert.match(intelligenceSource, /mode: "native-scene-and-typography"/);
   const whiteboardSource = await readFile(
     join(process.cwd(), "src/trigger/blocks/whiteboardScribeBlocks.ts"),
@@ -260,7 +260,7 @@ async function main(): Promise<void> {
   await rejectedAttestationStillAccounts();
   await providerReceiptSurvivesDeliveryCrash();
   await routingProof();
-  console.log("PRODUCTION IMAGE ROUTING PASS: Nano is thumbnail-only; renderer art is attested Novita and fail-closed");
+  console.log("PRODUCTION IMAGE ROUTING PASS: Nano is thumbnail-only; lofi stills use HRS and other renderer routes retain their current checks");
 }
 
 main().catch((error) => {

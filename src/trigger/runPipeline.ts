@@ -2313,7 +2313,7 @@ export const runPipelineTask = task({
       // retained master rather than creating a second, run-local review gate.
       // The music block revalidates its bytes/program/receipts before use.
       const preparedWeeklyMusic = seedStore["preparedMusic"];
-      requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && entry.version === "3.0.0-yue2-candidate");
+      requiresYuE2AuditionCheckpoint = entries.some(entry => entry.block === "music" && ["3.0.0-yue2-candidate","4.0.0-yue2-hrs"].includes(entry.version ?? ""));
       requiresMusicAuditionCheckpoint = entries.some((entry) =>
         entry.block === "music" && entry.params?.provider === "minimax_music3" &&
         preparedWeeklyMusic === undefined && !requiresYuE2AuditionCheckpoint,
