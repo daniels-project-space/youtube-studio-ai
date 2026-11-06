@@ -1,0 +1,25 @@
+diff --git a/dist/commonjs/v3/types/tools.js b/dist/commonjs/v3/types/tools.js
+index 0353db7852c438a3f392f1e31befa19e1861b973..4bf85809000c9c48451113a1169cd345ef27f735 100644
+--- a/dist/commonjs/v3/types/tools.js
++++ b/dist/commonjs/v3/types/tools.js
+@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.convertToolParametersToSchema = convertToolParametersToSchema;
+ const zod_1 = require("zod");
+ function convertToolParametersToSchema(toolParameters) {
+-    return toolParameters instanceof zod_1.z.ZodSchema
++    return toolParameters instanceof zod_1.z.ZodType
+         ? toolParameters
+         : convertAISchemaToTaskSchema(toolParameters);
+ }
+diff --git a/dist/esm/v3/types/tools.js b/dist/esm/v3/types/tools.js
+index 04d2d61ccae0f978efdf4b97ee37c3cfafb7d584..9b5dacaa6a1f08172e896c396ab8bc8a8bf344ef 100644
+--- a/dist/esm/v3/types/tools.js
++++ b/dist/esm/v3/types/tools.js
+@@ -1,6 +1,6 @@
+ import { z } from "zod";
+ export function convertToolParametersToSchema(toolParameters) {
+-    return toolParameters instanceof z.ZodSchema
++    return toolParameters instanceof z.ZodType
+         ? toolParameters
+         : convertAISchemaToTaskSchema(toolParameters);
+ }

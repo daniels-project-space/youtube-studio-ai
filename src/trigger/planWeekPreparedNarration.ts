@@ -7,7 +7,7 @@
  * FFmpeg, and writes an immutable narration receipt. A replay first verifies
  * the retained audio and returns without another provider call.
  */
-import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks, wait } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -45,16 +45,14 @@ import {
 import { narrationTtsCost } from "@/engine/pricing";
 import { planStorySpine } from "@/engine/storySpine";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
+import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
+import { createHrsQwenNarrationSourceEvidence, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTts";
 import {
-  createQwenNarrationSourceEvidence,
   composeQwenNarrationInstruction,
   QWEN3_TTS_SPEAKERS,
-  qwenTtsInstruction,
   resolveQwenTtsLanguage,
-  type QwenNarrationSourceChunk,
   type QwenTtsLanguage,
   type QwenTtsSpeaker,
-  type QwenTtsReceipt,
 } from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
@@ -317,13 +315,13 @@ export const planWeekPreparedNarrationTask = task({
       ? (seed.styleDNA as { narrative?: { pacing?: unknown; delivery?: unknown } }).narrative
       : undefined;
     const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
-    const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
+    const instruction = composeQwenNarrationInstruction({
       explicit: config.qwenInstruction,
       editorialBrief: manifest.prompts.narration,
       delivery: dnaNarrative?.delivery,
       pacing: dnaNarrative?.pacing,
       archetype: physics.archetype,
-    }), speed);
+    });
     if (provider === "qwen3" && !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(String(speakerValue))) {
       throw new Error(`weekly prepared narration Qwen3 requires one pinned speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
     }
@@ -331,7 +329,7 @@ export const planWeekPreparedNarrationTask = task({
     if (!speaker && provider !== "qwen3") throw new Error("weekly prepared narration requires an explicit voice");
 
     const estimatedUpperCost = provider === "qwen3"
-      ? (text.length * 1) / 1_000
+      ? 0
       : narrationTtsCost(provider, text.length, 0, 0);
     if (estimatedUpperCost > payload.maxCostUsd) {
       throw new Error(`weekly prepared narration conservative cost ${estimatedUpperCost} exceeds its ${payload.maxCostUsd} USD ceiling`);
@@ -341,16 +339,18 @@ export const planWeekPreparedNarrationTask = task({
     if (provider === "fish") await bootstrapSecrets(() => undefined, { services: ["fish-audio"] });
     if (provider === "elevenlabs") await bootstrapSecrets(() => undefined, { services: ["elevenlabs"] });
 
+    const hrsQwenClient = provider === "qwen3" ? configuredHyperYoutubeStageClient() : undefined;
+    if (hrsQwenClient) await hrsQwenClient.binding();
     const workDir = await mkdtemp(join(tmpdir(), "plan-week-narration-"));
     const partPaths: string[] = [];
     const partDurations: number[] = [];
     const partByteLengths: number[] = [];
-    const qwenReceipts: QwenTtsReceipt[] = [];
+    const partAudioSha256s: string[] = [];
+    const hrsQwenReceipts: HrsQwenTtsReceipt[] = [];
     let billableCharacters = 0;
     try {
       await claimPreparedGeneration("narration", manifest, { payload, scriptSha256: preparedScript.scriptSha256,
         scriptReviewFingerprint: scriptReview.fingerprint, provider, speed, cadence, speaker, language, instruction });
-      let observedQwenCost = 0;
       for (const [index, sentence] of sentences.entries()) {
         const path = join(workDir, `sentence-${String(index).padStart(4, "0")}.mp3`);
         const audio = await synthNarration({
@@ -364,11 +364,16 @@ export const planWeekPreparedNarrationTask = task({
           qwenLanguage: provider === "qwen3" ? language : undefined,
           qwenInstruction: provider === "qwen3" ? instruction : undefined,
           qwenSeed: 4_242,
-          qwenMaxCostUsd: provider === "qwen3" ? Math.max(0.02, narrationAllowance - observedQwenCost) : undefined,
-          onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost += receipt.runtime.costUsd; },
+          qwenHrs: provider === "qwen3" ? {
+            requestScope: `${manifest.ownerId}:${manifest.channelSlug}:${manifest.batchId}:${manifest.itemId}:narration:${index}`,
+            client: hrsQwenClient,
+            wait: async (jobId, check) => wait.for({ seconds: 10, idempotencyKey: `hrs-week-qwen3:${jobId}:${check}` }),
+            onReceipt: receipt => hrsQwenReceipts.push(receipt),
+          } : undefined,
           onBillableCharacters: (characters) => { billableCharacters += characters; },
         });
         await writeBytes(path, audio);
+        partAudioSha256s.push(sha256BytesHex(audio));
         const measured = await probe(path);
         if (!measured.hasAudio || !Number.isFinite(measured.durationSec) || measured.durationSec < 0.05) {
           throw new Error(`weekly prepared narration sentence ${index + 1} has no measurable audio`);
@@ -394,17 +399,21 @@ export const planWeekPreparedNarrationTask = task({
       });
       let narrationPerformanceEvidence: NarrationPerformanceEvidence = baseEvidence;
       if (provider === "qwen3") {
-        if (qwenReceipts.length !== sentences.length) throw new Error("weekly prepared narration Qwen3 receipt count does not cover every sentence");
-        const chunks: QwenNarrationSourceChunk[] = qwenReceipts.map((receipt, index) => ({
+        if (hrsQwenReceipts.length !== sentences.length) throw new Error("weekly prepared narration HRS Qwen receipts do not cover every sentence");
+        const chunks = hrsQwenReceipts.map((receipt, index) => ({
           ordinal: index,
-          textSha256: sha256Hex(sentences[index]!),
-          audioSha256: receipt.audioSha256,
+          textSha256: receipt.textSha256,
+          audioSha256: partAudioSha256s[index]!,
           byteLength: partByteLengths[index]!,
           receipt,
         }));
+        if (chunks.some((chunk, index) => chunk.audioSha256 !== hrsQwenReceipts[index]!.encodedAudio.sha256 ||
+            chunk.byteLength !== hrsQwenReceipts[index]!.encodedAudio.bytes || chunk.textSha256 !== sha256Hex(sentences[index]!))) {
+          throw new Error("weekly prepared narration HRS Qwen receipts do not bind the source sentence audio");
+        }
         narrationPerformanceEvidence = {
           ...baseEvidence,
-          qwenProviderEvidence: createQwenNarrationSourceEvidence({
+          hrsQwenProviderEvidence: createHrsQwenNarrationSourceEvidence({
             speaker: speaker as QwenTtsSpeaker,
             language: language as QwenTtsLanguage,
             source: {
@@ -425,7 +434,7 @@ export const planWeekPreparedNarrationTask = task({
       }
       const audioSha256 = sha256BytesHex(finalBytes);
       const costUsd = provider === "qwen3"
-        ? qwenReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0)
+        ? 0
         : narrationTtsCost(provider, billableCharacters, 0, 0);
       if (!Number.isFinite(costUsd) || costUsd > narrationAllowance) {
         throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${narrationAllowance} USD allowance after script review`);

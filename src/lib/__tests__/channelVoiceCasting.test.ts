@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@/lib/canonicalJson";
 
 import {
   channelVoiceCastingProvider,
@@ -129,5 +131,42 @@ assert.equal(qwenChannelCastingReceiptMatches({
   ...qwenCast,
   localColdOpenReceipt: { ...qwenCast.localColdOpenReceipt, audioFingerprint: "9".repeat(64) },
 }), false, "the durable worker receipt and locally measured bytes must stay cryptographically bound");
+
+const hrsTextSha256 = "3".repeat(64);
+const hrsInstructionSha256 = "4".repeat(64);
+const hrsInputSha256 = createHash("sha256").update(canonicalJson({
+  textSha256: hrsTextSha256, instructionSha256: hrsInstructionSha256, speaker: "Aiden", language: "English", seed: 4_242,
+})).digest("hex");
+const hrsCast = {
+  ...qwenCast,
+  providerRenderReceipt: {
+    version: "hrs-youtube-qwen3-tts-receipt/v1",
+    provider: "hyper-render-service",
+    modelId: "qwen3-tts",
+    projectId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    jobId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    generation: 1,
+    idempotencyKey: `youtube-qwen3-tts:${"5".repeat(64)}`,
+    inputSha256: hrsInputSha256,
+    textSha256: hrsTextSha256,
+    instructionSha256: hrsInstructionSha256,
+    speaker: "Aiden",
+    language: "English",
+    seed: 4_242,
+    nativeOutput: {
+      bucket: "youtube",
+      key: "projects/youtube/jobs/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/1/output.wav",
+      sha256: "6".repeat(64),
+      bytes: 20_000,
+      contentType: "audio/wav",
+    },
+    encodedAudio: { sha256: audioSha256, bytes: 12_000, contentType: "audio/mpeg", sampleRateHz: 24_000 },
+  },
+} satisfies PersistedChannelVoiceCast;
+assert.equal(qwenChannelCastingReceiptMatches(hrsCast), true, "HRS voice receipt must bind to its locally measured MP3 bytes");
+assert.equal(qwenChannelCastingReceiptMatches({
+  ...hrsCast,
+  providerRenderReceipt: { ...hrsCast.providerRenderReceipt, encodedAudio: { ...hrsCast.providerRenderReceipt.encodedAudio, sha256: "9".repeat(64) } },
+}), false, "an HRS receipt with another MP3 hash must not satisfy the cast");
 
 console.log("channel voice casting boundary tests passed");

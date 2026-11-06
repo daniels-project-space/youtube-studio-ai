@@ -6,6 +6,7 @@ import {
   type QwenTtsLanguage,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
+import { assertHrsQwenTtsReceipt, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTts";
 import type {
   VoiceCastingAuditionReceipt,
   VoiceCastingProvider,
@@ -25,7 +26,7 @@ export interface PersistedChannelVoiceCast {
   coldOpenReceipt?: VoiceColdOpenReceipt;
   providerSelectionReceipt?: VoiceProviderSelectionReceipt;
   localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
-  providerRenderReceipt?: QwenTtsReceipt;
+  providerRenderReceipt?: QwenTtsReceipt | HrsQwenTtsReceipt;
 }
 
 export interface ChannelVoiceRequest {
@@ -80,7 +81,14 @@ export function resolveRequestedChannelVoice(args: {
 
 export function qwenChannelCastingReceiptMatches(cast: PersistedChannelVoiceCast): boolean {
   if (!cast.providerRenderReceipt || !cast.localColdOpenReceipt) return false;
-  return isPinnedQwenTtsReceipt(cast.providerRenderReceipt) &&
-    cast.providerRenderReceipt.speaker === cast.voiceId &&
-    cast.providerRenderReceipt.audioSha256 === cast.localColdOpenReceipt.audioFingerprint;
+  if (isPinnedQwenTtsReceipt(cast.providerRenderReceipt)) {
+    return cast.providerRenderReceipt.speaker === cast.voiceId &&
+      cast.providerRenderReceipt.audioSha256 === cast.localColdOpenReceipt.audioFingerprint;
+  }
+  try {
+    const receipt = assertHrsQwenTtsReceipt(cast.providerRenderReceipt);
+    return receipt.speaker === cast.voiceId && receipt.encodedAudio.sha256 === cast.localColdOpenReceipt.audioFingerprint;
+  } catch {
+    return false;
+  }
 }
