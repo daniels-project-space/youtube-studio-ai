@@ -14,7 +14,9 @@ const originalLoad = loader._load;
 let approved = false, verifies = 0, checks = 0, renders = 0;
 let revokeAt = Infinity;
 let images = 0;
+const storedOutputs = new Map<string, Uint8Array>();
 async function main() {
+  process.env.R2_BUCKET ??= "youtube-fixture-bucket";
   loader._load = function(id, ...args) {
     const actual = originalLoad.call(this, id, ...args);
     if (id === "@/lib/approvedYuE2AssemblySource") return { ...actual as object,
@@ -28,15 +30,25 @@ async function main() {
     if (id === "@/lib/minimaxH3") return { ...actual as object,
       minimaxH3Readiness: () => ({ admitted: true, blockers: [] }),
       renderMiniMaxH3: async () => { renders++; return { receipt: { runtime: { costUsd: 0.01 } }, outputBytes: new Uint8Array([1]) }; } };
-    if (id === "@/lib/storage") return { ...actual as object, getObjectBytes: async () => new Uint8Array([1, 2, 3]) };
+    if (id === "@/lib/hyperYoutubeStageClient") return { ...actual as object,
+      configuredHyperYoutubeStageClient: () => ({ binding: async () => ({ outputBucket: process.env.R2_BUCKET }) }) };
+    if (id === "@/lib/hyperYoutubeStill") return { ...actual as object, renderHyperYoutubeStill: async () => {
+      images++; recordImageUsage({ provider: "fixture", model: "ernie-image-turbo", route: "hrs-fixture", images: 1, costUsd: 0.01 });
+      const bytes = Buffer.from("fixture-native-still");
+      return { bytes, jobId: `hrs-fixture-${images}`, projectId: "fixture-project", generation: 1,
+        idempotencyKey: `hrs-key-${images}`, output: { bucket: process.env.R2_BUCKET!, key: `projects/youtube/still-${images}.png`,
+          sha256: "a".repeat(64), bytes: bytes.length, contentType: "image/png" } };
+    } };
+    if (id === "@/lib/hyperYoutubeStillComposition") return { ...actual as object,
+      composeHyperYoutubeStill16x9: async () => Buffer.from("fixture-composite") };
+    if (id === "@/lib/storage") return { ...actual as object,
+      putObject: async (key: string, bytes: Uint8Array) => { storedOutputs.set(key, Buffer.from(bytes)); },
+      getObjectBytes: async (key: string) => storedOutputs.get(key) ?? Buffer.from([1, 2, 3]),
+      publicUrl: (key: string) => `https://fixture.invalid/${key}` };
     if (id === "@/lib/files") return { ...actual as object, makeRunTempDir: async () => "/tmp/yue2-loop-fixture",
       writeBytes: async (path: string) => path, downloadTo: async (_url: string, path: string) => path };
     if (id === "@/lib/vision") return { ...actual as object, hasNonGoogleVisionKey: () => true,
       visionLocal: async () => JSON.stringify({ score: 0.4, issues: ["Missing the authorized subject"] }) };
-    if (id === "@/lib/novitaMedia") return { ...actual as object, renderNovitaImage: async () => {
-      images++; recordImageUsage({ provider: "fixture", model: "fixture", route: "fixture", images: 1, costUsd: 0.01 });
-      return { url: "https://fixture.invalid/still", key: "fixture/still", jobId: "fixture", model: "fixture", costUsd: 0.01 };
-    } };
     if (id === "@/lib/ffmpeg") return { ...actual as object, seamlessLoopUnit: async (_input: string, output: string) => output };
     return actual;
   };

@@ -127,13 +127,12 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
   assert.equal(DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS, 300_000,
     "five minutes protects the 1920×1088 still and direct Novita transfers without task-cap stalls");
   const lofi = await readFile(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
-  const keyframeDelivery = lofi.indexOf("const local = await downloadTo(rendered.url");
-  assert.ok(keyframeDelivery >= 0);
-  assert.match(
-    lofi.slice(keyframeDelivery, keyframeDelivery + 260),
-    /timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS/,
-    "the post-receipt Novita still delivery opts in without changing global downloads",
-  );
+  assert.match(lofi, /renderHyperYoutubeStill\(/,
+    "YouTube Lo-Fi stills use the project-scoped HRS stage rather than the retired direct image provider");
+  assert.match(lofi, /sourceKey:rendered\.output\.key/,
+    "the local composition records the native HRS output as its source");
+  assert.doesNotMatch(lofi, /downloadTo\(rendered\.url/,
+    "the HRS still is consumed from its verified bytes, not a second provider URL download");
   assert.match(lofi, /renderMiniMaxH3\(/, "Lo-Fi motion is delivered from the H3 receipt bytes, not a second URL download");
   assert.doesNotMatch(lofi, /downloadTo\(clip\.url/, "the Lo-Fi H3 path must not retain the legacy clip URL transfer");
   for (const relative of [

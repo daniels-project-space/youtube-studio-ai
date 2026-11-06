@@ -41,8 +41,18 @@ assert.match(compliance, /creativeTextJson/, "compliance review must use the per
 assert.match(metacraft, /creativeTextJson/, "metadata package must use the permitted text planner");
 assert.match(
   metadata,
-  /hasFalNanoBananaProThumbnail\(\)/,
-  "the sealed native-typography thumbnail capability remains explicit",
+  /configuredHyperThumbnailClient\(\)/,
+  "thumbnail generation must use the project-scoped Nano Banana API client",
+);
+assert.match(
+  metadata,
+  /providerRoute:\s*"hrs-gemini-nano-banana-pro"/,
+  "the sealed Nano Banana Pro route remains explicit in thumbnail identity",
+);
+assert.match(
+  source("src/lib/hyperThumbnailClient.ts"),
+  /modelId:\s*"gemini-3-pro-image"/,
+  "the project API pins thumbnails to the Nano Banana Pro model",
 );
 
 console.log("Non-Gemini planning route tests passed");

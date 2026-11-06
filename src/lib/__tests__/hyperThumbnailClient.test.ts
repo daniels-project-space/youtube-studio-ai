@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createHyperThumbnailClient } from "@/lib/hyperThumbnailClient";
+import { createHyperThumbnailClient, hasConfiguredHyperThumbnailClient } from "@/lib/hyperThumbnailClient";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { createHyperThumbnailEvidence, validHyperThumbnailEvidence } from "@/lib/hyperThumbnailEvidence";
 
 async function main() {
+  const oldBase = process.env.HRS_YOUTUBE_BASE_URL, oldToken = process.env.HRS_YOUTUBE_PROJECT_TOKEN;
+  const oldGemini = process.env.GEMINI_API_KEY, oldVault = process.env.VAULT_ACCESS_TOKEN;
+  process.env.HRS_YOUTUBE_BASE_URL = "https://hrs.example";
+  process.env.HRS_YOUTUBE_PROJECT_TOKEN = "fixture-token";
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.VAULT_ACCESS_TOKEN;
+  assert.equal(hasConfiguredHyperThumbnailClient(), true,
+    "the configured project HRS credential is the readiness signal for its Nano Banana API route");
+  if (oldBase === undefined) delete process.env.HRS_YOUTUBE_BASE_URL; else process.env.HRS_YOUTUBE_BASE_URL = oldBase;
+  if (oldToken === undefined) delete process.env.HRS_YOUTUBE_PROJECT_TOKEN; else process.env.HRS_YOUTUBE_PROJECT_TOKEN = oldToken;
+  if (oldGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = oldGemini;
+  if (oldVault === undefined) delete process.env.VAULT_ACCESS_TOKEN; else process.env.VAULT_ACCESS_TOKEN = oldVault;
   const projectId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", bytes = Buffer.from("fixture image bytes");
   const input = {candidateId:"a".repeat(64),videoId:"video-1",revision:2,title:"A title",hook:"A hook",heroSubject:"A hero",visualDirection:"A scene",creativeDirection:"Full Golden recipe with 4K",referenceAssets:[{assetId:"frame-1",role:"source-frame" as const}]};
   const identity = {provider:"google-gemini-api",modelId:"gemini-3-pro-image",settings:{aspectRatio:"16:9",imageSize:"2K"},candidateId:input.candidateId,request:input,referenceAssets:[{assetId:"frame-1",role:"source-frame",sha256:"2".repeat(64),bytes:100,contentType:"image/png"}]};

@@ -8,10 +8,9 @@
  *   metadata_optimized  → base metadata + title optimised against the databank
  *                         + competitor titles + power words, plus an
  *                         overlap-weighted view estimate. Replaces `metadata`.
- *   thumbnail_gen       → one Style-DNA/playbook route: non-Lo-Fi uses a
- *                         native Fal Nano Banana Pro design; Lo-Fi alone uses its
- *                         exact rendered 4K scene and asks Nano Banana for its
- *                         minimal type. The production QA alarm gates both.
+ *   thumbnail_gen       → one Style-DNA/playbook route through the project's
+ *                         HRS Nano Banana Pro API; Lo-Fi keeps its exact rendered
+ *                         frame and requests only minimal type. Production QA gates both.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";

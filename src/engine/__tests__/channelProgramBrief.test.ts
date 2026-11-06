@@ -139,7 +139,7 @@ assert.throws(
       seriesCount: 0,
     },
   }),
-  /greater than 0/,
+  /greater than 0|expected number to be >0/,
   "seriesCount is optional but, when declared, must be positive",
 );
 assert.throws(
