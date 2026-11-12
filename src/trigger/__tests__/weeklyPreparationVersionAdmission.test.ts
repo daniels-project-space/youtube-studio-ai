@@ -99,9 +99,24 @@ async function main(): Promise<void> {
       run: (payload: unknown, context: unknown) => Promise<unknown>;
     };
 
+    const {projectWeeklyHrsImagePipeline} = await import("@/lib/weeklyPreparationVersionAdmission");
+    assert.deepEqual(projectWeeklyHrsImagePipeline([{block:"novita_render_images"}]),
+      [{block:"novita_render_images",version:"2.0.0-hrs-ernie"}]);
+    assert.deepEqual(projectWeeklyHrsImagePipeline([{block:"novita_render_images",version:"historical"}]),
+      [{block:"novita_render_images",version:"historical"}]);
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported(projectWeeklyHrsImagePipeline([{block:"novita_render_images"}]),"test"));
     assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported([
       { block: "music" }, { block: "script_gen", version: undefined, params: { version: "provider-model" } },
     ], "test"));
+    const yue = [
+      { block: "composer_brief", version: "3.0.0-yue2-score" },
+      { block: "music_arrangement_plan" },
+      { block: "music", version: "4.0.0-yue2-hrs" },
+      { block: "timeline_assemble", version: "3.0.0-yue2-reviewed-loop" },
+    ];
+    assert.doesNotThrow(() => assertWeeklyPreparationVersionsSupported(yue, "test"));
+    assert.throws(() => assertWeeklyPreparationVersionsSupported(yue.filter(e => e.block !== "music_arrangement_plan"), "test"));
+    assert.throws(() => assertWeeklyPreparationVersionsSupported(yue.map(e => e.block === "music" ? { ...e, version: "3.0.0-yue2-candidate" } : e), "test"));
     assert.throws(() => assertWeeklyPreparationVersionsSupported([
       { block: "music", version: "1.0.0-migration" }, { block: "script_gen", version: "2.0.0" },
     ], "test"), (error: unknown) => {

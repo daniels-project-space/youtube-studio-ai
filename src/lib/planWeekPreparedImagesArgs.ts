@@ -13,6 +13,7 @@ export interface PlanWeekPreparedImageShot {
   lens?: string;
   seconds?: number;
   motion?: string;
+  referenceRequired?: boolean;
 }
 
 export interface PlanWeekPreparedImagesArgs {
@@ -70,6 +71,9 @@ export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPrepar
   const shots = raw.shots.map((candidate, index): PlanWeekPreparedImageShot => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`weekly prepared image shot ${index + 1} is invalid`);
     const shot = candidate as Record<string, unknown>;
+    const hasReferences = (value: Record<string, unknown>) => Object.entries(value).some(([key, item]) =>
+      /reference|inputrefs|conditioning/i.test(key) && item !== undefined && item !== null && item !== false &&
+      !(Array.isArray(item) && item.length === 0));
     const id = safePart(shot.id, `shot ${index + 1} id`);
     const prompt = typeof shot.prompt === "string" ? shot.prompt.trim() : "";
     if (!prompt || prompt.length > 12_000) throw new Error(`weekly prepared image shot ${id} prompt is invalid`);
@@ -99,6 +103,7 @@ export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPrepar
       ...(typeof shot.lens === "string" && shot.lens.trim() ? { lens: shot.lens.trim() } : {}),
       ...(shot.seconds === undefined ? {} : { seconds: Number(shot.seconds) }),
       ...(typeof shot.motion === "string" ? { motion: shot.motion } : {}),
+      ...(hasReferences(raw) || hasReferences(shot) ? { referenceRequired: true } : {}),
     };
   });
   if (new Set(shots.map((shot) => shot.id)).size !== shots.length) throw new Error("weekly prepared image shot ids must be unique");

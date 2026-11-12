@@ -1273,6 +1273,7 @@ export const runPipelineTask = task({
     let weeklyPreparedMusic: PlanWeekPreparedMusic | undefined;
     let weeklyPreparedFootage: PlanWeekPreparedFootage | undefined;
     let weeklyPreparedImages: PlanWeekPreparedImages | undefined;
+    let weeklyHyperImages: { receiptKey: string; manifestSha256: string } | undefined;
     let automaticProviderPlan: AutomaticProviderPlan | undefined;
     const recordProviderOutcome = async (provider: string, outcome: "success" | "failure") => {
       try {
@@ -1459,6 +1460,14 @@ export const runPipelineTask = task({
               prepared: rawPreparedImages,
               manifest: weeklyPreparation,
             });
+          } else {
+            const receiptKey = `${preparedImagesKey.replace(/\.json$/u, ".hrs-ernie")}/receipt.json`;
+            try {
+              await getObjectBytes(receiptKey, undefined, { maxBytes: 5_000_000, timeoutMs: 30_000 });
+              weeklyHyperImages = { receiptKey, manifestSha256: scheduledPlan.preparation.manifestSha256 };
+            } catch (error) {
+              if (!preparedObjectAbsent(error)) throw error;
+            }
           }
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
@@ -1471,7 +1480,7 @@ export const runPipelineTask = task({
               `${weeklyPreparedNarration ? "prepared narration admitted" : "narration pending"}; ` +
               `${weeklyPreparedMusic ? "prepared music admitted" : "music pending"}; ` +
               `${weeklyPreparedFootage ? "prepared footage admitted" : "footage pending"}; ` +
-              `${weeklyPreparedImages ? "prepared images admitted" : "images pending"})`,
+              `${weeklyPreparedImages ? "prepared images admitted" : weeklyHyperImages ? "ERNIE images pending validation" : "images pending"})`,
           );
         }
         log(
@@ -1961,6 +1970,7 @@ export const runPipelineTask = task({
             ...(typeof weeklyPreparedImages !== "undefined" && weeklyPreparedImages
               ? { preparedImages: structuredClone(weeklyPreparedImages) }
               : {}),
+            ...(weeklyHyperImages ? { preparedHyperImages: structuredClone(weeklyHyperImages) } : {}),
           };
         }
         if (payload.reuse) {

@@ -1,8 +1,5 @@
 import { measureAudio, probe } from "@/lib/ffmpeg";
-import {
-  assertQwenNarrationSourceEvidence,
-  type QwenNarrationSourceEvidence,
-} from "@/lib/qwenTts";
+import { assertAnyQwenNarrationSourceEvidence, type QwenNarrationProviderSourceEvidence } from "@/lib/hyperYoutubeQwenNarrationEvidence";
 
 export const NARRATION_PERFORMANCE_EVIDENCE_VERSION = "narration-performance-evidence/v1" as const;
 
@@ -15,7 +12,7 @@ export interface NarrationPerformanceEvidence {
   integratedLufs: number;
   windowMeanDb: number;
   /** Present only when the source was synthesized by the pinned Qwen worker. */
-  qwenProviderEvidence?: QwenNarrationSourceEvidence;
+  qwenProviderEvidence?: QwenNarrationProviderSourceEvidence;
 }
 
 /**
@@ -78,7 +75,7 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
   }
   const qwenProviderEvidence = raw.qwenProviderEvidence === undefined
     ? undefined
-    : assertQwenNarrationSourceEvidence(raw.qwenProviderEvidence);
+    : assertAnyQwenNarrationSourceEvidence(raw.qwenProviderEvidence);
   return {
     version: NARRATION_PERFORMANCE_EVIDENCE_VERSION,
     source: "local_ffmpeg",

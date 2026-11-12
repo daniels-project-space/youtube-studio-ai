@@ -2180,6 +2180,12 @@ export async function concatAudioWithGaps(
   return outPath;
 }
 
+/** Encode a single non-MP3 narration take as the MP3 master expected downstream. */
+export async function transcodeAudioToMp3(inputPath: string, outPath: string): Promise<string> {
+  await run(FFMPEG, ["-y", "-i", inputPath, "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100", outPath]);
+  return outPath;
+}
+
 /**
  * Crossfade-concat N audio tracks into one continuous mix (3s triangular
  * crossfades — the proven legacy-autostudio lofi-mix recipe). Single track
