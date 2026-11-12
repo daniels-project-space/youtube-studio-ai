@@ -26,7 +26,8 @@ import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
 import { insertBlocks } from "@/trigger/blocks/insertBlocks";
 import { genFootageBlocks } from "@/trigger/blocks/genFootageBlocks";
-import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
+import { novitaRenderBlocks, hyperWeeklyPreparedImages, HRS_WEEKLY_IMAGE_VERSION } from "@/trigger/blocks/novitaRenderBlocks";
+import { manifestFromBlock } from "./moduleManifest";
 import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
@@ -174,6 +175,14 @@ export function registerAllBlocks(): void {
   // novita_render_video): reviewed Z-Image stills feed the sealed MiniMax H3
   // route; Trigger child tasks own orchestration and byte-level QA.
   for (const b of novitaRenderBlocks) register(b);
+  registerManifestVersion(manifestFromBlock(hyperWeeklyPreparedImages, {
+    version:HRS_WEEKLY_IMAGE_VERSION, requiredConsumes:["shotList","dpVisualSpecs","visualMatterManifest"],
+    optionalConsumes:["preparedHyperImages","preparedImages","planWeekPreparation"],
+    capabilities:["visuals.keyframes_generated","render.profile_pinned"],
+    providerProfiles:[{id:"hrs-ernie-native",provider:"hyper",quality:"production",allowFallback:false}],
+    maxCostUsd:0,qualityRequired:true,certification:"contract",
+    certificationEvidence:"Project-scoped ERNIE receipt and HRS checkpoints; asset QA remains mandatory.",
+  }));
   // Bounded native-story planner → provider-free route/lane/topic seal. This
   // pair is latent until a future admitted route explicitly places it before a
   // matching self-contained renderer; registration cannot authorize a route.

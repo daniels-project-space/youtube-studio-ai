@@ -8,9 +8,12 @@ export type HyperYoutubeStage =
   | { modelId: "ernie-image-turbo"; inputs: { prompt:string }; seed?:number };
 
 export type HyperYoutubeJob = { id:string; projectId:string; modelId:string; state:string; generation:number;
-  idempotencyKey:string; outputDestination:{bucket:string;projectPrefix:string};
+  /** Caller-owned key; HRS accepts it on POST but does not echo it in publicJob(). */
+  idempotencyKey:string; environmentId:string; environmentSha256:string;
+  outputDestination:{bucket:string;projectPrefix:string};
   output?:{projectId:string;jobId:string;generation:number;bucket:string;key:string;sha256:string;
     bytes:number;contentType:string;available:boolean;downloadUrl:string|null}|null };
+export type HyperYoutubeEnvironment = {id:string;modelId:string;sha256:string};
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const mediaTypes:Record<HyperYoutubeStage["modelId"],string> = {
   "qwen3-tts":"audio/wav", "yue2":"audio/flac", "ernie-image-turbo":"image/png",
@@ -40,7 +43,8 @@ function parseJob(value:unknown):HyperYoutubeJob {
   const item=object(value,"job"),destination=object(item.outputDestination,"output destination");
   const result:HyperYoutubeJob={id:string(item.id,"job ID"),projectId:string(item.projectId,"project ID"),
     modelId:string(item.modelId,"model ID"),state:string(item.state,"job state"),
-    generation:item.generation as number,idempotencyKey:string(item.idempotencyKey,"idempotency key"),
+    generation:item.generation as number,idempotencyKey:"",environmentId:string(item.environmentId,"environment ID"),
+    environmentSha256:"",
     outputDestination:{bucket:string(destination.bucket,"destination bucket"),
       projectPrefix:string(destination.projectPrefix,"destination prefix")}};
   if (!Number.isSafeInteger(result.generation) || result.generation<0) throw new Error("Invalid HRS job generation");
@@ -69,26 +73,62 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
   function validate(value:unknown, stage:HyperYoutubeStage, key:string):HyperYoutubeJob {
     const job=parseJob(value);
     if (!job || !uuid.test(job.id) || job.projectId !== options.projectId || job.modelId !== stage.modelId ||
-        job.idempotencyKey !== key || !Number.isSafeInteger(job.generation) || job.generation < 0 ||
+        ("idempotencyKey" in object(value,"job") && object(value,"job").idempotencyKey !== undefined &&
+          object(value,"job").idempotencyKey !== key) || !Number.isSafeInteger(job.generation) || job.generation < 0 ||
         job.outputDestination?.bucket !== options.outputBucket || job.outputDestination.projectPrefix !== options.outputPrefix)
       throw new Error("HRS job does not match the YouTube project request");
+    job.idempotencyKey=key;
     return job;
   }
+  async function environment(id:string,modelId:string):Promise<HyperYoutubeEnvironment> {
+    if (!uuid.test(id)) throw new Error("Invalid HRS environment ID");
+    const value=object(await request(`/environments/${id}`,"GET"),"environment");
+    const sha256=string(value.sha256,"environment digest");
+    if (value.id!==id || value.modelId!==modelId || !/^[a-f0-9]{64}$/.test(sha256))
+      throw new Error("HRS environment does not match the requested model");
+    return {id,modelId,sha256};
+  }
+  async function validateEnvironmentJob(value:unknown,stage:HyperYoutubeStage,key:string,
+    expectedEnvironment?:HyperYoutubeEnvironment):Promise<HyperYoutubeJob> {
+    const job=validate(value,stage,key);
+    if (expectedEnvironment && (expectedEnvironment.modelId!==stage.modelId || !uuid.test(expectedEnvironment.id) ||
+        !/^[a-f0-9]{64}$/.test(expectedEnvironment.sha256)))
+      throw new Error("Invalid pinned HRS environment for the requested model");
+    const resolved=expectedEnvironment ?? await environment(job.environmentId,stage.modelId);
+    if (job.environmentId!==resolved.id) throw new Error("HRS job does not match its pinned environment");
+    job.environmentSha256=resolved.sha256;
+    return job;
+  }
+  async function createEnvironment(modelId:HyperYoutubeStage["modelId"]):Promise<HyperYoutubeEnvironment> {
+    const created=object(await request("/environments","POST",{modelId,spec:{}}),"environment");
+    const result={id:string(created.id,"environment ID"),modelId:string(created.modelId,"environment model ID"),
+      sha256:string(created.sha256,"environment digest")};
+    if (!uuid.test(result.id) || result.modelId!==modelId || !/^[a-f0-9]{64}$/.test(result.sha256))
+      throw new Error("HRS environment does not match the requested model");
+    return result;
+  }
   return {
-    async submit(stage:HyperYoutubeStage, idempotencyKey:string):Promise<HyperYoutubeJob> {
+    createEnvironment: (modelId:HyperYoutubeStage["modelId"])=>createEnvironment(modelId),
+    async getEnvironment(id:string,modelId:string):Promise<HyperYoutubeEnvironment> {
+      return environment(id,modelId);
+    },
+    async submit(stage:HyperYoutubeStage, idempotencyKey:string, preparedEnvironment?:HyperYoutubeEnvironment):Promise<HyperYoutubeJob> {
       if (!idempotencyKey || idempotencyKey.length > 160 ||
           (stage.seed !== undefined && (!Number.isSafeInteger(stage.seed) || stage.seed < 0)))
         throw new Error("Invalid HRS stage identity or seed");
-      const environment = object(await request("/environments","POST",{modelId:stage.modelId,spec:{}}),"environment");
-      if (!uuid.test(string(environment.id,"environment ID")) || environment.modelId !== stage.modelId)
+      const resolved=preparedEnvironment ?? await createEnvironment(stage.modelId);
+      if (!uuid.test(resolved.id) || resolved.modelId!==stage.modelId || !/^[a-f0-9]{64}$/.test(resolved.sha256))
         throw new Error("HRS environment does not match the requested model");
-      return validate(await request("/jobs","POST",{environmentId:environment.id,idempotencyKey,
+      const job=await validateEnvironmentJob(await request("/jobs","POST",{environmentId:resolved.id,idempotencyKey,
         outputKind:"intermediate",finalRetention:"project-default",inputs:stage.inputs,
-        settings:stage.seed === undefined ? {} : {seed:stage.seed},inputRefs:[]}),stage,idempotencyKey);
+        settings:stage.seed === undefined ? {} : {seed:stage.seed},inputRefs:[]}),stage,idempotencyKey,
+        resolved);
+      if (job.environmentId!==resolved.id) throw new Error("HRS submitted job does not use its submitted environment");
+      return job;
     },
-    async get(id:string,stage:HyperYoutubeStage,idempotencyKey:string):Promise<HyperYoutubeJob> {
+    async get(id:string,stage:HyperYoutubeStage,idempotencyKey:string,expectedEnvironment?:HyperYoutubeEnvironment):Promise<HyperYoutubeJob> {
       if (!uuid.test(id)) throw new Error("Invalid HRS job ID");
-      const job = validate(await request(`/jobs/${id}`,"GET"),stage,idempotencyKey);
+      const job = await validateEnvironmentJob(await request(`/jobs/${id}`,"GET"),stage,idempotencyKey,expectedEnvironment);
       if (job.id !== id) throw new Error("HRS returned a different job");
       return job;
     },
@@ -121,7 +161,9 @@ export function configuredHyperYoutubeStageClient() {
   let resolved:ReturnType<typeof resolveHyperYoutubeProject>|undefined;
   const binding=()=>resolved ??= resolveHyperYoutubeProject().catch(error=>{resolved=undefined;throw error;});
   const client=async()=>createHyperYoutubeStageClient(await binding());
-  return {binding,submit:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["submit"]>)=>(await client()).submit(...args),
+  return {binding,createEnvironment:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["createEnvironment"]>)=>(await client()).createEnvironment(...args),
+    getEnvironment:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["getEnvironment"]>)=>(await client()).getEnvironment(...args),
+    submit:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["submit"]>)=>(await client()).submit(...args),
     get:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["get"]>)=>(await client()).get(...args),
     download:async(...args:Parameters<ReturnType<typeof createHyperYoutubeStageClient>["download"]>)=>(await client()).download(...args)};
 }

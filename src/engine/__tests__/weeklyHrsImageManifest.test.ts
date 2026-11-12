@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { registerAllBlocks } from "@/engine/blocks";
+import { getManifest } from "@/engine/registry";
+import { projectWeeklyHrsImagePipeline } from "@/lib/weeklyPreparationVersionAdmission";
+registerAllBlocks();
+const [entry] = projectWeeklyHrsImagePipeline([{block:"novita_render_images"}]) as Array<{block:string;version:string}>;
+const manifest=getManifest(entry.block,entry.version);
+assert.ok(manifest);
+assert.equal(manifest.version,"2.0.0-hrs-ernie");
+assert.deepEqual(manifest.providerProfiles.map(profile=>profile.provider),["hyper"]);
+assert.ok(!manifest.capabilities.includes("render.spot_only"));
+assert.ok("preparedHyperImages" in manifest.optionalConsumes);
+assert.ok(!manifest.costAndLatency.paid);
+assert.equal(getManifest("novita_render_images")?.providerProfiles[0]?.provider,"novita");
+assert.doesNotMatch(manifest.execute.toString(), /renderImages\s*\(|novitaRender|toNovita/);
+console.log("Weekly still selection pins HRS and retains historical Novita manifest: ok");

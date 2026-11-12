@@ -44,18 +44,21 @@ import {
 } from "@/lib/narrationPerformance";
 import { narrationTtsCost } from "@/engine/pricing";
 import { planStorySpine } from "@/engine/storySpine";
+import { planVisualMatter, visualMatterDirectiveForShot } from "@/engine/visualMatter";
+import { studioAssetRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
+import { planVisualTreatment, visualTreatmentKeyFromUnknown } from "@/engine/visualTreatmentCatalog";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
-  createQwenNarrationSourceEvidence,
   composeQwenNarrationInstruction,
   QWEN3_TTS_SPEAKERS,
   qwenTtsInstruction,
   resolveQwenTtsLanguage,
-  type QwenNarrationSourceChunk,
   type QwenTtsLanguage,
   type QwenTtsSpeaker,
-  type QwenTtsReceipt,
 } from "@/lib/qwenTts";
+import { createHrsQwenNarrationSourceEvidence, type HrsQwenNarrationChunk } from "@/lib/hyperYoutubeQwenNarrationEvidence";
+import { prepareHrsQwenTtsEnvironment, synthesizeHrsQwenTts, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTts";
+import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 import { narrationPhysics } from "@/lib/voicecraft";
 import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
 import { prepareWeeklyScriptReview } from "./planWeekPreparedScriptReview";
@@ -101,6 +104,7 @@ export function buildPreparedImageShots(
     lens: string;
     seconds: number;
     motion: string;
+    referenceRequired?: boolean;
   }>;
   generationProfile: "production" | "hero";
   style?: string;
@@ -130,6 +134,23 @@ export function buildPreparedImageShots(
       : typeof imageConfig?.targetShotSec === "number" ? imageConfig.targetShotSec : 6,
   });
   const specs = new Map(spine.dpVisualSpecs.map((spec) => [spec.shotId, spec]));
+  const visualEntry = manifest.execution.pipeline.find((entry): entry is {block:string;params?:Record<string,unknown>} =>
+    !!entry && typeof entry === "object" && !Array.isArray(entry) && (entry as {block?:unknown}).block === "visual_matter");
+  const visualParams = { ...(manifest.execution.moduleConfig.visual_matter ?? {}), ...(visualEntry?.params ?? {}) };
+  const treatmentKey = visualParams.visualTreatment === undefined ? undefined : visualTreatmentKeyFromUnknown(visualParams.visualTreatment);
+  if (visualParams.visualTreatment !== undefined && !treatmentKey) throw new Error("weekly visual matter treatment is invalid");
+  const integer = (value:unknown,fallback:number,max:number) => {
+    const parsed=Number(value); return Math.max(0,Math.min(max,Number.isFinite(parsed)?Math.floor(parsed):fallback));
+  };
+  const visualMatter = visualEntry && visualParams.enabled !== false ? planVisualMatter({
+    topic: manifest.plan.topic, channelName:typeof seed.channelName === "string" ? seed.channelName : undefined,
+    styleDNA:styleDNA ?? null, visualBrief:seed.visualBrief && typeof seed.visualBrief === "object" && !Array.isArray(seed.visualBrief)
+      ? seed.visualBrief as Record<string,unknown> : null,
+    continuityLedger:spine.continuityLedger,narrativeBeats:spine.narrativeBeats,shotList:spine.shotList,dpVisualSpecs:spine.dpVisualSpecs,
+    studioAssetRecipeProjection:studioAssetRecipeProjectionFromUnknown(seed.studioAssetRecipeProjection),
+    ...(treatmentKey ? {visualTreatment:planVisualTreatment(treatmentKey)} : {}),
+    maxCharacters:integer(visualParams.maxCharacters,3,6),maxSettings:integer(visualParams.maxSettings,3,6),
+  }) : undefined;
   const profiles = new Set(spine.shotList.map((shot) => shot.generationProfile));
   const generationProfile = profiles.has("hero") ? "hero" : "production";
   const shots = spine.shotList.map((shot) => {
@@ -137,7 +158,8 @@ export function buildPreparedImageShots(
     if (!spec) throw new Error(`weekly prepared images lost DP visual spec for ${shot.id}`);
     return {
       id: shot.id,
-      prompt: [manifest.prompts.visual, spec.keyframePrompt, shot.prompt].filter(Boolean).join("\n\n"),
+      prompt: [manifest.prompts.visual, spec.keyframePrompt, visualMatterDirectiveForShot(visualMatter,shot.id)?.renderPrompt,
+        shot.prompt].filter(Boolean).join("\n\n"),
       negative: [shot.negative, spec.negativePrompt].filter(Boolean).join(", "),
       seed: shot.seed,
       candidateCount: shot.candidateCount,
@@ -146,6 +168,7 @@ export function buildPreparedImageShots(
       lens: shot.lens,
       seconds: shot.seconds,
       motion: shot.motion,
+      ...(visualParams.renderReferenceAssets === true ? { referenceRequired: true } : {}),
     };
   });
   const style = typeof seed.styleGrammar === "string" && seed.styleGrammar.trim()
@@ -189,29 +212,15 @@ async function dispatchPreparedImages(
 
 async function dispatchPreparedMusic(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedNarrationArgs): Promise<string | undefined> {
   if (!hasMusicStage(manifest)) return undefined;
-  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_MUSIC_MAX_COST_USD ?? "1");
-  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
-    throw new Error("weekly prepared music dispatch has an invalid cost ceiling");
+  const music = manifest.execution.pipeline.filter((entry): entry is { block: string; version?: string } =>
+    !!entry && typeof entry === "object" && !Array.isArray(entry) && (entry as { block?: unknown }).block === "music");
+  if (music.length !== 1 || music[0]?.version !== "4.0.0-yue2-hrs") {
+    throw new Error("weekly music requires the versioned HRS YuE2 pipeline; no legacy producer is dispatched");
   }
-  const musicPayload = {
-    ownerId: payload.ownerId,
-    channelId: payload.channelId,
-    channelSlug: payload.channelSlug,
-    batchId: payload.batchId,
-    itemId: payload.itemId,
-    manifestKey: payload.manifestKey,
-    manifestSha256: payload.manifestSha256,
-    maxCostUsd,
-  };
-  const idempotencyKey = await idempotencyKeys.create(
-    `plan-week-music:${payload.ownerId}:${payload.manifestSha256}`,
-    { scope: "global" },
-  );
-  const handle = await tasks.trigger("plan-week-prepared-music", musicPayload, {
-    concurrencyKey: `plan-week-music:${manifest.ownerId}:${manifest.channelId}`,
-    idempotencyKey,
-  });
-  return handle.id;
+  // The scheduled pipeline first creates the run-bound scored arrangement;
+  // its HRS YuE source and owner audition then execute in their own modules.
+  void payload;
+  return undefined;
 }
 
 async function readPreparationManifest(payload: PlanWeekPreparedNarrationArgs): Promise<PlanWeekPreparationManifest> {
@@ -298,6 +307,8 @@ export const planWeekPreparedNarrationTask = task({
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prior);
       return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd: 0, audioSha256: prior.audioSha256 };
     }
+    // Reject a legacy music selection before script review or narration spend.
+    await dispatchPreparedMusic(manifest, payload);
 
     const scriptKey = planWeekPreparedScriptKey(scope);
     const preparedScript = await readScript(scriptKey, manifest);
@@ -306,7 +317,7 @@ export const planWeekPreparedNarrationTask = task({
     const sentences = splitSentences(text);
     const config = moduleConfig(manifest);
     const seed = seedRecord(manifest);
-    const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "fish");
+    const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "qwen3");
     const speed = assertNarrationSpeed(payload.speed ?? numberOr(config.ttsSpeed, 1), "weekly prepared narration speed");
     const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, 0.85);
     const jitterSec = payload.jitterSec ?? numberOr(config.sentenceGapJitter, 0.2);
@@ -345,27 +356,40 @@ export const planWeekPreparedNarrationTask = task({
     const partPaths: string[] = [];
     const partDurations: number[] = [];
     const partByteLengths: number[] = [];
-    const qwenReceipts: QwenTtsReceipt[] = [];
+    const qwenReceipts: HrsQwenTtsReceipt[] = [];
     let billableCharacters = 0;
     try {
+      const hrsClient = provider === "qwen3" ? configuredHyperYoutubeStageClient() : undefined;
+      if (hrsClient) {
+        const binding = await hrsClient.binding();
+        if (!process.env.R2_BUCKET || binding.outputBucket !== process.env.R2_BUCKET) {
+          throw new Error("weekly narration HRS and YouTube project R2 buckets must match");
+        }
+      }
       await claimPreparedGeneration("narration", manifest, { payload, scriptSha256: preparedScript.scriptSha256,
         scriptReviewFingerprint: scriptReview.fingerprint, provider, speed, cadence, speaker, language, instruction });
-      let observedQwenCost = 0;
+      const authorize = async () => undefined; // The exclusive, read-back dispatch claim above admitted this task.
+      const environment = hrsClient ? await prepareHrsQwenTtsEnvironment({
+        scope: { ownerId: payload.ownerId, channelId: payload.channelId, batchId: payload.batchId, itemId: payload.itemId, stage: "weekly-narration" },
+        authorize, client: hrsClient,
+      }) : undefined;
       for (const [index, sentence] of sentences.entries()) {
         const path = join(workDir, `sentence-${String(index).padStart(4, "0")}.mp3`);
-        const audio = await synthNarration({
+        const audio = provider === "qwen3" ? await (async () => {
+          const result = await synthesizeHrsQwenTts({
+            scope: { ownerId: payload.ownerId, channelId: payload.channelId, batchId: payload.batchId, itemId: payload.itemId, stage: "weekly-narration", ordinal: index },
+            text: sentence, speaker: speaker as QwenTtsSpeaker, language: language as QwenTtsLanguage,
+            instruct: instruction, seed: 4_242, authorize, client: hrsClient, environment,
+          });
+          qwenReceipts.push(result.receipt);
+          return result.bytes;
+        })() : await synthNarration({
           text: sentence,
           provider,
           voiceId: speaker,
           niche: typeof seed.niche === "string" ? seed.niche : undefined,
           speed,
           elevenVoiceId: provider === "elevenlabs" ? speaker : undefined,
-          qwenSpeaker: provider === "qwen3" ? speaker : undefined,
-          qwenLanguage: provider === "qwen3" ? language : undefined,
-          qwenInstruction: provider === "qwen3" ? instruction : undefined,
-          qwenSeed: 4_242,
-          qwenMaxCostUsd: provider === "qwen3" ? Math.max(0.02, narrationAllowance - observedQwenCost) : undefined,
-          onQwenReceipt: (receipt) => { qwenReceipts.push(receipt); observedQwenCost += receipt.runtime.costUsd; },
           onBillableCharacters: (characters) => { billableCharacters += characters; },
         });
         await writeBytes(path, audio);
@@ -395,7 +419,7 @@ export const planWeekPreparedNarrationTask = task({
       let narrationPerformanceEvidence: NarrationPerformanceEvidence = baseEvidence;
       if (provider === "qwen3") {
         if (qwenReceipts.length !== sentences.length) throw new Error("weekly prepared narration Qwen3 receipt count does not cover every sentence");
-        const chunks: QwenNarrationSourceChunk[] = qwenReceipts.map((receipt, index) => ({
+        const chunks: HrsQwenNarrationChunk[] = qwenReceipts.map((receipt, index) => ({
           ordinal: index,
           textSha256: sha256Hex(sentences[index]!),
           audioSha256: receipt.audioSha256,
@@ -404,7 +428,7 @@ export const planWeekPreparedNarrationTask = task({
         }));
         narrationPerformanceEvidence = {
           ...baseEvidence,
-          qwenProviderEvidence: createQwenNarrationSourceEvidence({
+          qwenProviderEvidence: createHrsQwenNarrationSourceEvidence({
             speaker: speaker as QwenTtsSpeaker,
             language: language as QwenTtsLanguage,
             source: {
@@ -424,13 +448,15 @@ export const planWeekPreparedNarrationTask = task({
         };
       }
       const audioSha256 = sha256BytesHex(finalBytes);
-      const costUsd = provider === "qwen3"
-        ? qwenReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0)
-        : narrationTtsCost(provider, billableCharacters, 0, 0);
+      const costUsd = provider === "qwen3" ? 0 : narrationTtsCost(provider, billableCharacters, 0, 0);
       if (!Number.isFinite(costUsd) || costUsd > narrationAllowance) {
         throw new Error(`weekly prepared narration cost ${costUsd} exceeds its ${narrationAllowance} USD allowance after script review`);
       }
       await persistPreparedResult(audioKey, finalBytes, "audio/mpeg", { "plan-week-prepared-narration": "v1" });
+      const retainedAudio = await getObjectBytes(audioKey, undefined, { maxBytes: finalBytes.byteLength, timeoutMs: 300_000 });
+      if (retainedAudio.byteLength !== finalBytes.byteLength || sha256BytesHex(retainedAudio) !== audioSha256) {
+        throw new Error("weekly prepared narration project R2 readback does not match the final audio");
+      }
       const prepared: PlanWeekPreparedNarration = {
         version: "plan-week-prepared-narration/v1",
         manifestSha256: planWeekPreparationManifestSha256(manifest),
@@ -455,10 +481,16 @@ export const planWeekPreparedNarrationTask = task({
       assertPlanWeekPreparedNarrationBinding({ prepared, manifest });
       const body = new TextEncoder().encode(canonicalJson(prepared));
       await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-narration": "v1" });
+      const retainedSidecar = await getObjectBytes(sidecarKey, undefined, { maxBytes: body.byteLength, timeoutMs: 30_000 });
+      if (retainedSidecar.byteLength !== body.byteLength || sha256BytesHex(retainedSidecar) !== sha256BytesHex(body)) {
+        throw new Error("weekly prepared narration project R2 receipt readback mismatch");
+      }
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prepared);
       return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId,
-        costUsd: costUsd + scriptReview.costUsd, scriptReviewReceiptKey: scriptReview.receiptKey, audioSha256 };
+        costUsd: provider === "qwen3" ? null : costUsd + scriptReview.costUsd,
+        ...(provider === "qwen3" ? { narrationCostStatus: "unreported" as const, scriptReviewCostUsd: scriptReview.costUsd } : {}),
+        scriptReviewReceiptKey: scriptReview.receiptKey, audioSha256 };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }

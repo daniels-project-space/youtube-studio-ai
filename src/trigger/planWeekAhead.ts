@@ -48,7 +48,7 @@ import {
   documentarySourceSeasonCandidates,
 } from "@/engine/documentarySourceEpisodePlan";
 import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
-import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { assertWeeklyPreparationVersionsSupported, projectWeeklyHrsImagePipeline } from "@/lib/weeklyPreparationVersionAdmission";
 import type { PipelineEntry } from "@/engine/types";
 import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -236,7 +236,7 @@ export function assertPlanWeekChannelRouteAdmission(channel: {
   programDirective: string;
 } {
   if (Array.isArray(channel.pipeline)) {
-    assertWeeklyPreparationVersionsSupported(channel.pipeline, "plan-week-ahead");
+    assertWeeklyPreparationVersionsSupported(projectWeeklyHrsImagePipeline(channel.pipeline), "plan-week-ahead");
   }
   const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
     context: "plan-week-ahead channel identity",
@@ -1229,7 +1229,7 @@ function buildPlanWeekPreparationManifest(args: {
       thumbnailSource,
     },
     execution: {
-      pipeline: structuredClone(Array.isArray(channel.pipeline) ? channel.pipeline : []),
+      pipeline: structuredClone(projectWeeklyHrsImagePipeline(Array.isArray(channel.pipeline) ? channel.pipeline : [])),
       moduleConfig,
       seedStore,
     },

@@ -20,7 +20,7 @@ for (const [label, branch] of [
 }
 assert.match(
   qa,
-  /getObjectBytes\(narrationKey\)[\s\S]*assertQwenNarrationSourceBinding\(/u,
+  /getObjectBytes\(narrationKey\)[\s\S]*assertAnyQwenNarrationSourceBinding\(/u,
   "final QA must re-read the durable narration object and bind it to the typed Qwen source proof",
 );
 assert.match(

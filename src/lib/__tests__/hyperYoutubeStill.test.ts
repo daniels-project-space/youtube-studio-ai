@@ -12,13 +12,15 @@ import { rasterImageDimensions } from "@/lib/imageDimensions";
 async function main() {
   const scope={ownerId:"owner",channelId:"channel",runId:"run",attempt:1,prompt:"A cozy lakeside room"};
   const source=Buffer.from("native bytes"), states=["running","completed"], keys:string[]=[];
-  const jobId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",projectId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const jobId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",projectId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",environmentId="cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const makeJob=(state:string,key:string):HyperYoutubeJob=>({id:jobId,projectId,modelId:"ernie-image-turbo",state,generation:1,
-    idempotencyKey:key,outputDestination:{bucket:"youtube",projectPrefix:"projects/youtube/"},
+    idempotencyKey:key,environmentId,environmentSha256:"c".repeat(64),outputDestination:{bucket:"youtube",projectPrefix:"projects/youtube/"},
     output:{projectId,jobId,generation:1,bucket:"youtube",key:`projects/youtube/jobs/${jobId}/1/output.png`,
       sha256:"a".repeat(64),bytes:source.length,contentType:"image/png",available:true,downloadUrl:"https://example.com/output.png"}});
   const client:ReturnType<typeof configuredHyperYoutubeStageClient>={
     binding:async()=>({baseUrl:"https://hrs.example",projectId,projectToken:"test-token",outputBucket:"youtube",outputPrefix:"projects/youtube/"}),
+    createEnvironment:async(modelId)=>({id:environmentId,modelId,sha256:"c".repeat(64)}),
+    getEnvironment:async(id,modelId)=>({id,modelId,sha256:"c".repeat(64)}),
     submit:async(_stage,key)=>{keys.push(key);return makeJob("queued",key)},
     get:async(_id,_stage,key)=>makeJob(states.shift()??"completed",key),download:async()=>source};
   let waits=0;
