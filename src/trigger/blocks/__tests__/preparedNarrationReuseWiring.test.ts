@@ -21,7 +21,7 @@ for (const required of [
   "preparedNarration.audioSha256",
   "assertNarrationPerformanceEvidence(",
   "assertFinalDeliveryRate(narrationPerformanceEvidence)",
-  "assertQwenNarrationSourceBinding({",
+  "assertAnyQwenNarrationSourceBinding({",
   "no text-to-speech spend",
 ] as const) {
   assert.ok(narration.includes(required), `prepared narration must retain ${required}`);

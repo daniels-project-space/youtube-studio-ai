@@ -21,18 +21,59 @@ export async function renderHyperYoutubeYue(input:{ownerId:string;channelId:stri
     ...(source.abc ? {abc:source.abc} : {})},seed:source.seed};
   const idempotencyKey=`youtube-yue:${digest(canonicalJson({ownerId:input.ownerId,channelId:input.channelId,runId:input.runId}))}`;
   const client=input.client ?? configuredHyperYoutubeStageClient();
-  await input.authorize();
-  let job=await client.submit(stage,idempotencyKey);
+  const binding=await client.binding(), bucket=input.storage?.bucket ?? getStudioPrivateBucket();
+  const read=input.storage?.get ?? getObjectBytes, put=input.storage?.put ?? putObject;
+  const root=`owner/${input.ownerId}/runs/${input.runId}/music/yue2-evaluation/`;
+  const requestSha256=digest(canonicalJson(stage));
+  const envSchema=z.object({schema:z.literal("hrs-yue-environment/v1"),projectId:z.literal(binding.projectId),
+    requestSha256:z.literal(requestSha256),environment:z.object({id:z.string().uuid(),modelId:z.literal("yue2"),
+      sha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict()}).strict();
+  const envKey=`${root}environment.json`, jobKey=`${root}job.json`;
+  const readJson=async(key:string):Promise<unknown|null>=>{
+    try { return JSON.parse(Buffer.from(await read(key,bucket,{maxBytes:16_384})).toString("utf8")); }
+    catch(error) { const e=error as {name?:string;$metadata?:{httpStatusCode?:number}};
+      if (e.name==="NoSuchKey" && e.$metadata?.httpStatusCode===404) return null;
+      throw error; }
+  };
+  const createOrRead=async(key:string,value:unknown):Promise<unknown>=>{
+    const bytes=Buffer.from(canonicalJson(value));
+    try { await put(key,bytes,{bucket,contentType:"application/json",ifNoneMatch:"*"}); }
+    catch(error) { const existing=await readJson(key); if(existing===null) throw error; return existing; }
+    const saved=await readJson(key);
+    if(saved===null || canonicalJson(saved)!==bytes.toString("utf8")) throw new Error("HRS YuE checkpoint readback mismatch");
+    return saved;
+  };
+  let envRaw=await readJson(envKey);
+  if(envRaw===null) {
+    await input.authorize();
+    const environment=await client.createEnvironment("yue2");
+    envRaw=await createOrRead(envKey,{schema:"hrs-yue-environment/v1",projectId:binding.projectId,requestSha256,environment});
+  }
+  const pinned=envSchema.parse(envRaw).environment;
+  const resolved=await client.getEnvironment(pinned.id,"yue2");
+  if(resolved.sha256!==pinned.sha256) throw new Error("HRS YuE pinned environment changed");
+  const jobSchema=z.object({schema:z.literal("hrs-yue-job/v1"),projectId:z.literal(binding.projectId),
+    requestSha256:z.literal(requestSha256),environmentId:z.literal(pinned.id),jobId:z.string().uuid()}).strict();
+  let jobRaw=await readJson(jobKey);
+  let job;
+  if(jobRaw===null) {
+    await input.authorize();
+    job=await client.submit(stage,idempotencyKey,pinned);
+    jobRaw=await createOrRead(jobKey,{schema:"hrs-yue-job/v1",projectId:binding.projectId,requestSha256,
+      environmentId:pinned.id,jobId:job.id});
+    if(jobSchema.parse(jobRaw).jobId!==job.id) throw new Error("HRS YuE concurrent submission returned another job");
+  } else {
+    job=await client.get(jobSchema.parse(jobRaw).jobId,stage,idempotencyKey,pinned);
+  }
   for(let index=0;job.state!=="completed";index++) {
-    if (["failed","cancelled"].includes(job.state)) throw new Error(`HRS YuE job ${job.id} ended ${job.state}`);
+    if (["failed","cancelled","expired"].includes(job.state)) throw new Error(`HRS YuE job ${job.id} ended ${job.state}`);
     if (index>=720) throw new Error(`HRS YuE job ${job.id} is still ${job.state}; resume the same job`);
     await input.wait(job.id,index);
-    job=await client.get(job.id,stage,idempotencyKey);
+    job=await client.get(job.id,stage,idempotencyKey,pinned);
   }
   const flac=await client.download(job,stage,idempotencyKey);
   if (!job.output) throw new Error("HRS YuE has no verified output receipt");
   const decoded=await (input.decode ?? decodeHyperYueFlac)(flac), audioSha256=digest(decoded.wav);
-  const root=`owner/${input.ownerId}/runs/${input.runId}/music/yue2-evaluation/`,bucket=input.storage?.bucket ?? getStudioPrivateBucket();
   const audioKey=`${root}audio-native-${audioSha256}.wav`, candidateKey=`${root}candidate-hrs.json`;
   const evidence={version:"studio-yue2-hrs-candidate/v1" as const,ownerId:input.ownerId,channelId:input.channelId,
     runId:input.runId,jobId:job.id,projectId:job.projectId,generation:job.generation,idempotencyKey,

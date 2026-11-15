@@ -10,7 +10,8 @@ import { stageH3SceneBatchInRenderEngine } from "@/lib/renderEngineH3SceneBatchC
  * stills.  It is deliberately create-only and replayable: a retry reuses a
  * fully verified sidecar and never submits the same image wave twice.
  */
-import { task } from "@trigger.dev/sdk";
+import { task, wait } from "@trigger.dev/sdk";
+import { renderWeeklyHyperStills } from "@/lib/hyperYoutubeWeeklyStills";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
@@ -39,9 +40,6 @@ import { persistPreparedResult } from "@/lib/preparedResultStorage";
 import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { forEachPreparedMedia } from "@/lib/preparedMediaBatch";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-import { rejectNewNovitaGeneration } from "@/lib/novitaGenerationRetirement";
-import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
-import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
 import { bindStudioScenesInRenderEngine, provisionStudioH3WorkflowInRenderEngine, qualifyH3InputInRenderEngine, stageH3RequestInRenderEngine, uploadH3InputToRenderEngine } from "@/lib/renderEngineH3StageClient";
 
 const RENDER_ENGINE_SITE = "https://jovial-camel-68.convex.site";
@@ -424,79 +422,15 @@ export const planWeekPreparedImagesTask = task({
     const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
     const prior = await verifyStoredSidecar(sidecarKey, manifest);
     if (prior) {
-      const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prior);
-      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3StageJobIds, costUsd: 0, manifestSha256: prior.manifestSha256 };
+      // H3 is paused. Retained images are reusable without staging new video work.
+      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
-    rejectNewNovitaGeneration();
-    const profile = generationProfile(payload.generationProfile);
-    if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
-    const shots: Shot[] = payload.shots.map((shot) => ({
-      id: shot.id,
-      prompt: shot.prompt,
-      cameraMove: shot.cameraMove ?? "static",
-      shotScale: shot.shotScale ?? "medium",
-      lens: shot.lens ?? "50mm",
-      seconds: shot.seconds ?? 1,
-      motion: shot.motion ?? "",
-      ...(shot.negative ? { negative: shot.negative } : {}),
-      ...(shot.seed === undefined ? {} : { seed: shot.seed }),
-      ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
-    }));
-    await claimPreparedGeneration("images", manifest, { payload, shots, profile });
-    const result = await renderImages({
-      prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
-      shots,
-      profile: toNovitaPhaseProfile(profile, "image"),
-      ...(payload.style ? { style: payload.style } : {}),
-      ...(payload.negative ? { negative: payload.negative } : {}),
-      ...(payload.director ? { director: payload.director } : {}),
-      maxCostUsd: payload.maxCostUsd,
-      lifecycle: { ownerId: payload.ownerId, channelId: payload.channelId, runId: `plan-week-images-${payload.batchId}-${payload.itemId}`, blockId: "plan_week_prepared_images" },
-    });
-    const candidates = result.candidates ?? [];
-    const expected = payload.shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile.image.candidates), 0);
-    if (candidates.length !== expected) throw new Error(`weekly prepared images returned ${candidates.length} candidates; expected ${expected}`);
-    const shotOrder = new Map(payload.shots.map((shot, index) => [shot.id, index]));
-    const ordered = [...candidates].sort((a, b) => (shotOrder.get(a.shotId)! - shotOrder.get(b.shotId)!) || (a.candidateIndex - b.candidateIndex));
-    const seen = new Set<string>();
-    const items = [] as PlanWeekPreparedImages["items"];
-    const stillItems = [] as StillRenderManifest["items"];
-    for (const [index, candidate] of ordered.entries()) {
-      const identity = `${candidate.shotId}:${candidate.candidateIndex}`;
-      if (seen.has(identity)) throw new Error(`weekly prepared images returned duplicate candidate ${identity}`);
-      seen.add(identity);
-      const source = await getObjectBytes(candidate.key, undefined, { maxBytes: 50 * 1024 * 1024, timeoutMs: 300_000 });
-      const stillKey = planWeekPreparedImageKey({ ...canonicalScope(payload), index });
-      await persistMediaCreateOnly(stillKey, source);
-      const sha256 = sha256BytesHex(source);
-      items.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, stillKey, sha256, byteLength: source.byteLength });
-      stillItems.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, outputId: candidate.outputId, stillKey });
-    }
-    const expectedIdentities = new Set(
-      payload.shots.flatMap((shot) => Array.from({ length: shot.candidateCount ?? profile.image.candidates }, (_, candidateIndex) => `${shot.id}:${candidateIndex}`)),
-    );
-    if (seen.size !== expectedIdentities.size || [...expectedIdentities].some((identity) => !seen.has(identity))) {
-      throw new Error("weekly prepared images returned an incomplete shot/candidate mapping");
-    }
-    const stillRenderManifest = StillRenderManifestSchema.parse({ version: "1.0.0", generation: generationIdentity(profile), items: stillItems });
-    const prepared: PlanWeekPreparedImages = {
-      version: "plan-week-prepared-images/v1",
-      manifestSha256: planWeekPreparationManifestSha256(manifest),
-      ownerId: manifest.ownerId,
-      channelId: manifest.channelId,
-      batchId: manifest.batchId,
-      itemId: manifest.itemId,
-      requestKey: manifest.requestKey,
-      topic: manifest.plan.topic,
-      stillRenderManifest,
-      stillRenderManifestSha256: sha256Hex(canonicalJson(stillRenderManifest)),
-      items,
-      createdAt: Date.now(),
-    };
-    assertPlanWeekPreparedImagesBinding({ prepared, manifest });
-    const body = new TextEncoder().encode(canonicalJson(prepared));
-    await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-images": "v1" });
-    const h3StageJobIds = await dispatchPreparedFootage(manifest, payload, prepared);
-    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3StageJobIds, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+    const outputRoot = sidecarKey.replace(/\.json$/u, ".hrs-ernie");
+    const result = await renderWeeklyHyperStills({ payload, outputRoot, bucket: process.env.R2_BUCKET ?? "",
+      wait: async (jobId, check) => { await wait.for({ seconds: 10, idempotencyKey: `weekly-ernie:${jobId}:${check}` }); } });
+    const ready = result.receipt.items.filter(item => item.status === "ready").length;
+    return { ok: true, reused: result.reused, receiptKey: result.receiptKey, outputs: ready,
+      blocked: result.receipt.items.length - ready, costUsd: null, costStatus: "unreported" as const,
+      manifestSha256: result.receipt.manifestSha256 };
   },
 });

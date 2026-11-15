@@ -55,7 +55,7 @@ const sidecars = new Map<string, Buffer>([
 ]);
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load, originalFetch = globalThis.fetch;
-const savedEnv = new Map(["OPENROUTER_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"].map(key => [key, process.env[key]]));
+const savedEnv = new Map(["OPENROUTER_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"].map(key => [key, process.env[key]]));
 const vaultReads: string[] = [], events: string[] = [];
 let missingKey = "", mediaMode: "good" | "changed" | "short" | "timeout" = "good";
 let paidCalls = 0, writes = 0, mediaReads = 0, dispatches = 0;
@@ -134,8 +134,16 @@ async function main() {
       return script;
     } };
     if (id === "@/lib/novitaRenderFarm") return { ...actual as object, renderImages: stop };
+    if (id === "@/lib/hyperYoutubeWeeklyStills") return { ...actual as object, renderWeeklyHyperStills: stop };
     if (id === "@/lib/music") return { ...actual as object, generateMureka: stop, generateSuno: stop };
     if (id === "@/lib/tts") return { ...actual as object, synthNarration: stop };
+    if (id === "@/lib/hyperYoutubeStageClient") return { ...actual as object,
+      configuredHyperYoutubeStageClient: () => ({ binding: async () => ({ outputBucket: "youtube-fixture" }) }) };
+    if (id === "@/lib/hyperYoutubeQwenTts") return { ...actual as object,
+      prepareHrsQwenTtsEnvironment: async () => ({ id: "fixture-environment" }),
+      synthesizeHrsQwenTts: async (input: { speaker: string; text: string }) => {
+        assert.equal(input.speaker, "Vivian"); assert.ok(input.text); return stop();
+      } };
     return actual;
   };
   try {
@@ -190,23 +198,31 @@ async function main() {
     assert.equal(paidCalls, 1, "a lost script result cannot buy another attempt");
     missingKey = planWeekPreparedImagesKey(manifest); events.length = 0;
     for (let replay = 0; replay < 2; replay++) {
-      await assert.rejects(() => tasks[3].run(payload), /Direct Novita generation is retired/);
-      assert.equal(paidCalls, 1, "retired image generation never reaches paid provider work");
+      await assert.rejects(() => tasks[3].run(payload), /stubbed generation boundary/);
+      assert.equal(paidCalls, 2 + replay, "new image generation reaches the HRS handoff");
       assert.equal(writes, 0);
       assert.ok(!events.includes("vault:novita"));
-      assert.ok(!events.includes("generation"));
     }
-    assert.equal(claims.size, 1, "retirement happens before a paid image claim");
-    for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)], [2, planWeekPreparedMusicKey(manifest)]] as const) {
+    assert.equal(claims.size, 1, "HRS stills use their own resumable checkpoints");
+    for (const [index, key] of [[1, planWeekPreparedNarrationKey(manifest)]] as const) {
       missingKey = key;
-      const fresh = { ...payload, speaker: "fixture-voice" };
+      const fresh = { ...payload, provider: "fish", speaker: "fixture-voice" };
       const before: number = paidCalls;
       await assert.rejects(() => tasks[index].run(fresh), /stubbed generation boundary/);
       assert.equal(paidCalls, before + 1);
       await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
       assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
     }
-    assert.equal(claims.size, 3);
+    // Independent fixture attempt for the current default route.
+    claims.delete(`${planWeekPreparedNarrationKey(manifest)}.dispatch.json`);
+    process.env.R2_BUCKET = "youtube-fixture";
+    missingKey = planWeekPreparedNarrationKey(manifest);
+    const beforeHrs = paidCalls;
+    await assert.rejects(() => tasks[1].run({ ...payload, speaker: "Vivian" }), /stubbed generation boundary/);
+    assert.equal(paidCalls, beforeHrs + 1, "weekly Qwen reaches the HRS adapter");
+    missingKey = planWeekPreparedMusicKey(manifest);
+    await assert.rejects(() => tasks[2].run(payload), /scheduled HRS YuE2 modules/);
+    assert.equal(claims.size, 2, "legacy music never claims new generation");
     missingKey = "";
     for (const task of tasks) assert.equal((await task.run(payload)).reused, true,
       "a completed sidecar replays even when the dispatch claim exists");

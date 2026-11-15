@@ -95,6 +95,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
 import type { PlanWeekPreparedImages } from "@/lib/planWeekPreparation";
+import { loadWeeklyHyperStillsForConsumer } from "@/lib/hyperYoutubeWeeklyStillConsumer";
 import {
   createStoryboardAtlasRenderPlan,
   materializeStoryboardAtlasCrops,
@@ -1258,6 +1259,41 @@ function videoScore(grade: z.infer<typeof ShotGradeSchema>): number {
   return Number((grade.semanticAlignment * 0.35 + grade.continuity * 0.25 + grade.motionIntegrity * 0.25 + grade.artifactFree * 0.15).toFixed(4));
 }
 
+export const HRS_WEEKLY_IMAGE_VERSION = "2.0.0-hrs-ernie" as const;
+export const hyperWeeklyPreparedImages: Block = {
+  id: "novita_render_images",
+  consumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
+  produces: ["stillKeys", "stillRenderManifest"],
+  paid: false,
+  run: async ctx => {
+    const {shots, specsByShot} = requireStoryInputs(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store);
+    const profile = profileForShots(shots,ctx.params["generationProfile"]);
+    const preparedImages = ctx.store["preparedImages"];
+    const hyperPointer = ctx.store["preparedHyperImages"] as {receiptKey?:unknown;manifestSha256?:unknown} | undefined;
+    if (!hyperPointer) throw new Error("weekly HRS ERNIE still receipt is not ready");
+    {
+      const preparation = ctx.store["planWeekPreparation"] as {manifestKey?:unknown;manifestSha256?:unknown} | undefined;
+      if (preparedImages || typeof hyperPointer.receiptKey !== "string" || typeof hyperPointer.manifestSha256 !== "string" ||
+          !/^[a-f0-9]{64}$/.test(hyperPointer.manifestSha256) || preparation?.manifestSha256 !== hyperPointer.manifestSha256 ||
+          typeof preparation.manifestKey !== "string" || !preparation.manifestKey.endsWith("/inputs.json") ||
+          hyperPointer.receiptKey !== preparation.manifestKey.replace(/\/inputs\.json$/u,"/prepared/images.hrs-ernie/receipt.json") ||
+          (profile.id !== "production" && profile.id !== "hero"))
+        throw new Error("weekly ERNIE prepared-image pointer is invalid or ambiguous");
+      const reviewedVisualMatter = requireVisualMatter(ctx.store, { attachExternalReferenceAssets: true });
+      const manifest = await loadWeeklyHyperStillsForConsumer({ receiptKey:hyperPointer.receiptKey,
+        manifestSha256:hyperPointer.manifestSha256,ownerId:ctx.ownerId,channelId:String(ctx.channelId),keyPrefix:ctx.keyPrefix,
+        profileId:profile.id,shots:shots.map(shot=>({id:shot.id,candidateCount:shot.candidateCount,
+          requiredPrompt:specsByShot.get(shot.id)!.keyframePrompt,
+          visualDirective:visualMatterDirectiveForShot(visualMatter,shot.id)?.renderPrompt,
+          requiresReference:visualMatterReferenceAssetsForShot(reviewedVisualMatter,shot.id).length>0})) });
+      assertExactStillCandidates(shots,manifest);
+      ctx.log(`hrs_ernie_images: verified ${manifest.items.length} HRS ERNIE still candidate(s); no new provider spend`);
+      return {stillKeys:manifest.items.map(item=>item.stillKey),stillRenderManifest:manifest,[COST_PATCH_KEY]:0};
+    }
+  },
+};
+
 export const novitaRenderImages: Block = {
   id: "novita_render_images",
   consumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
@@ -1414,7 +1450,13 @@ export const qaAssets: Block = {
           const candidatePaths: string[] = [];
           for (const candidate of candidates) {
             const path = join(tmp, `${candidate.outputId.replace(/[^a-z0-9_-]/gi, "_")}.png`);
-            await writeBytes(path, await getObjectBytes(candidate.stillKey));
+            if (manifest.generation.contractVersion === "hrs-ernie/v1") {
+              if (!candidate.sourceSha256 || !candidate.sourceByteLength) throw new Error("qa_assets: HRS still lacks its source receipt");
+              const bytes = await getObjectBytes(candidate.stillKey, undefined, {maxBytes:candidate.sourceByteLength,timeoutMs:300_000});
+              if (bytes.byteLength !== candidate.sourceByteLength || sha256BytesHex(bytes) !== candidate.sourceSha256)
+                throw new Error("qa_assets: HRS still no longer matches its verified receipt");
+              await writeBytes(path,bytes);
+            } else await writeBytes(path, await getObjectBytes(candidate.stillKey));
             candidatePaths.push(path);
           }
           if (candidatePaths.length >= NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL) {
@@ -1502,7 +1544,7 @@ export const qaAssets: Block = {
             const ordinal = ++visualAttemptOrdinal;
             const token = stableVisualAttemptToken(shot.id);
             const record = createVisualArtifactAttempt({
-              adapterId: "standard_novita",
+              adapterId: manifest.generation.contractVersion === "hrs-ernie/v1" ? "hrs_ernie" : "standard_novita",
               scopeFingerprint: visualAttemptScopeFingerprint,
               attemptId: `standard-asset-${token}-${ordinal}`,
               ordinal,
@@ -1559,6 +1601,9 @@ export const qaAssets: Block = {
           const failure =
             `qa_assets FAILED ${shot.id}: best=${best.score.toFixed(3)} threshold=${thresholds.score.toFixed(3)} ` +
             `(semantic=${best.grade.semanticAlignment}, continuity=${best.grade.continuity}, artifact=${best.grade.artifactFree})`;
+          if (manifest.generation.contractVersion === "hrs-ernie/v1") {
+            throw qualityRecoveryFailure(`${failure}; HRS ERNIE repair requires a separately admitted request`, {repairRenderCostUsd,graderCalls});
+          }
           const rejectedBest = recordByCandidateIndex.get(best.candidate.candidateIndex);
           if (!rejectedBest || rejectedBest.review.verdict !== "rejected") {
             throw new Error(`qa_assets rejected best candidate ledger record is missing for ${shot.id}`);
@@ -1671,6 +1716,9 @@ export const novitaRenderVideo: Block = {
       selected: ctx.store["selectedStillManifest"],
       assetQaReport: ctx.store["assetQaReport"],
     });
+    if (selected.generation.contractVersion === "hrs-ernie/v1") {
+      throw new Error("H3 video is paused; ERNIE stills remain available for image review");
+    }
     const profile = profileForShots(shots, ctx.params["generationProfile"] ?? selected.generation.profileId);
     if (selected.generation.profileId !== profile.id) throw new Error("selected still profile does not match video profile");
     if (selected.items.length !== shots.length || new Set(selected.items.map((item) => item.shotId)).size !== shots.length) {

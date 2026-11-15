@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../novitaRenderBlocks.ts", import.meta.url), "utf8");
-const branch = source.indexOf('const preparedImages = ctx.store["preparedImages"]');
+const branch = source.indexOf('const preparedImages = ctx.store["preparedImages"]', source.indexOf("export const novitaRenderImages: Block"));
 const verify = source.indexOf("assertPreparedImagesForShots(shots, preparedImages,");
 const reread = source.indexOf("getObjectBytes(item.stillKey, undefined, { maxBytes: item.byteLength, timeoutMs: 300_000 })");
 const noSpend = source.indexOf("[COST_PATCH_KEY]: 0", branch);
@@ -13,5 +13,8 @@ assert.ok(verify > branch, "prepared stills must be validated against the exact 
 assert.ok(reread >= 0, "prepared still bytes must be re-read and hashed immediately before reuse");
 assert.ok(noSpend > reread, "prepared still reuse must report zero provider spend");
 assert.ok(provider > noSpend, "the normal paid renderer remains available when no prepared sidecar is present");
+const hrs = source.indexOf("loadWeeklyHyperStillsForConsumer({");
+assert.ok(hrs >= 0 && hrs < branch, "versioned HRS receipts reach the still manifest stage without the legacy provider");
+assert.match(source.slice(hrs, branch), /stillRenderManifest:manifest/);
 
 console.log("prepared image reuse wiring passed");

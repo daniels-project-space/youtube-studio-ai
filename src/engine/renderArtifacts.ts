@@ -16,14 +16,25 @@ export const GenerationIdentitySchema = z.object({
   allowFallback: z.literal(false),
 });
 
+// The profileId selects the existing QA thresholds; the native ERNIE model and
+// dimensions remain explicit and must never be presented as a Z-Image profile.
+export const HrsErnieStillGenerationSchema = z.object({
+  contractVersion: z.literal("hrs-ernie/v1"), profileId: z.enum(["production", "hero"]),
+  model: z.literal("ernie-image-turbo"), width: z.literal(1024), height: z.literal(1024),
+  expectedPrecision: z.literal("bf16"), expectedSteps: z.literal(50), allowFallback: z.literal(false),
+}).strict();
+const StillGenerationSchema = z.union([GenerationIdentitySchema, HrsErnieStillGenerationSchema]);
+
 export const StillRenderManifestSchema = z.object({
   version: z.literal("1.0.0"),
-  generation: GenerationIdentitySchema,
+  generation: StillGenerationSchema,
   items: z.array(z.object({
     shotId: z.string().min(1),
     candidateIndex: z.number().int().nonnegative(),
     outputId: z.string().min(1),
     stillKey: z.string().min(1),
+    sourceSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    sourceByteLength: z.number().int().positive().max(50 * 1024 * 1024).optional(),
     derivation: z.object({
       version: z.literal("storyboard-atlas-crop/v1"),
       planFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -48,7 +59,7 @@ export const StillRenderManifestSchema = z.object({
 
 export const SelectedStillManifestSchema = z.object({
   version: z.literal("1.0.0"),
-  generation: GenerationIdentitySchema,
+  generation: StillGenerationSchema,
   items: z.array(z.object({
     shotId: z.string().min(1),
     stillKey: z.string().min(1),

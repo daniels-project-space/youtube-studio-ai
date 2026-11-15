@@ -97,7 +97,7 @@ import {
   FinalMasterReleaseCertificateSchema,
 } from "@/lib/finalMasterReleaseCertificate";
 import { ThirdPartyStockEvidenceReferenceSchema } from "@/lib/thirdPartyStockEvidence";
-import { assertQwenNarrationSourceEvidence } from "@/lib/qwenTts";
+import { assertAnyQwenNarrationSourceEvidence } from "@/lib/hyperYoutubeQwenNarrationEvidence";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -202,7 +202,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
       qwenProviderEvidence: z.unknown().optional().superRefine((value, context) => {
         if (value === undefined) return;
         try {
-          assertQwenNarrationSourceEvidence(value);
+          assertAnyQwenNarrationSourceEvidence(value);
         } catch (error) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
