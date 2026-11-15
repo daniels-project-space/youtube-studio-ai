@@ -3,14 +3,12 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertQwenNarrationSourceEvidence,
   QWEN3_TTS_LANGUAGES,
-  QWEN3_TTS_MODEL,
-  QWEN3_TTS_MODEL_REVISION,
   QWEN3_TTS_SPEAKERS,
   type QwenNarrationSourceEvidence,
   type QwenTtsLanguage,
   type QwenTtsSpeaker,
 } from "@/lib/qwenTts";
-import { assertHrsQwenTtsReceipt, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTts";
+import { assertHrsQwenTtsReceipt, type HrsQwenTtsReceipt } from "@/lib/hyperYoutubeQwenTtsReceipt";
 
 export const HRS_QWEN_NARRATION_EVIDENCE_SCHEMA = "hrs-qwen3-tts-narration-source/v1" as const;
 export interface HrsQwenNarrationChunk {

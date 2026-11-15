@@ -5,7 +5,7 @@ const source = readFileSync(new URL("../runPipeline.ts", import.meta.url), "utf8
 const preparationReads = source.slice(source.indexOf("let rawManifest: unknown;"), source.indexOf("if (durableInvocation === undefined) {", source.indexOf("let rawManifest: unknown;")));
 assert.equal(preparationReads.match(/undefined, PREPARED_METADATA_READ/g)?.length, 6);
 assert.equal(preparationReads.match(/decodePreparedMetadata\(/g)?.length, 6);
-assert.equal(preparationReads.match(/if \(!preparedObjectAbsent\(error\)\)/g)?.length, 5);
+assert.equal(preparationReads.match(/if \(!preparedObjectAbsent\(error\)\)/g)?.length, 6);
 
 const manifestVerification = source.indexOf("weeklyPreparation = assertPlanWeekPreparationManifestBinding({");
 const sidecarKey = source.indexOf("const preparedScriptKey = planWeekPreparedScriptKey(weeklyPreparation);");

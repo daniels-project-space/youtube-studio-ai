@@ -174,6 +174,7 @@ try {
       frozenModuleConfig: undefined, narrativeSeriesAdmission: undefined, scheduledPlan: undefined,
       weeklyPreparation: undefined, durableInvocation: undefined, probeBudgetAdmission: undefined,
       routeQualificationBenchmarkAdmission: undefined, privateInvocationContext: undefined, log: () => {},
+      weeklyHyperImages: undefined,
       workerDeployment: { version: "worker-fixture", projectId: "project-fixture", environmentId: "environment-fixture" },
     };
     const boundary = (overrides: Scope = {}) => evaluate<BoundaryResult>(runtimeCode, { ...runtimeImports, ...scope, ...overrides });
