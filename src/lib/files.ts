@@ -105,6 +105,7 @@ export async function downloadTo(
     await pipeline(
       Readable.fromWeb(res.body as unknown as import("stream/web").ReadableStream),
       createWriteStream(stagedPath),
+      { signal: request?.signal },
     );
   });
 }

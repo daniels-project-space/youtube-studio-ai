@@ -2134,7 +2134,7 @@
     "src/lib/falNanoBananaLofiThumbnailContract.ts": "b106f79df2d61e1338f9ea3514276ecdba989af3",
     "src/lib/falNanoBananaProThumbnailContract.ts": "bba11d2e5876dc4b4da66de55dc9370455cc18cd",
     "src/lib/ffmpeg.ts": "645b5ca9eb74fd3f4f12510fbd6ee3ea1b0c8327",
-    "src/lib/files.ts": "a243e58eefb6db69241518e5ce21760f5571cf3b",
+    "src/lib/files.ts": "ec27698a96063c0b3e8ad6460f4ea11d9581588b",
     "src/lib/finalMasterNarratedStoryCoverage.ts": "2089e68143ba7620d05df5e7d9cd8a8c691e2ed1",
     "src/lib/finalMasterQualityEvidenceBinding.ts": "f172f5f489c5c4be36cfaf52cfc37df4f3cefddd",
     "src/lib/finalMasterReleaseCertificate.ts": "cb861228875d8847d0d97dd48846641f3965b7b7",
