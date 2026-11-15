@@ -219,8 +219,6 @@ const DEFECTS: Defect[] = [
       "NaN < 0.02 is false, so the 'no remaining envelope' refusal never fired and paid " +
       "synthesis proceeded with no budget test at all.",
     commit: "5053bf0",
-    file: "src/trigger/blocks/narratedBlocks.ts",
-    anchor: "Qwen3 stage budget is not a number",
     evidence: {
       kind: "executed",
       beforeSrc: `Math.max(0, Number("$5") - 0) < 0.02   // does the gate fire?`,
