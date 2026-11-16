@@ -342,7 +342,8 @@ async function availabilityControls(block: Block, goodAudit: Buffer) {
       const result = await runPipeline(validatePipeline([{ block: "qa_visual", params }], Object.keys(seed)), { ...scope, budgetUsd: 100, defaultRetries: 2, seedStore: seed,
         sink: { async getCompleted() { return []; }, async upsert(row) { rows.push(row); }, async upsertArtifacts(row) { persisted.push(...row.artifacts.map((artifact) => artifact.artifact.producerModule)); } }, log: (message) => retryLogs.push(message) });
       assert.equal(result.ok, false, "good recovery stops at the explicit post-audio sentinel, never a fabricated QA completion");
-      assert.equal(sourceDownloads, recover ? 2 : 3); assert.equal(transcriptCalls, recover ? 2 : 0); assert.equal(reviewerCalls, recover ? 1 : 0);
+      assert.equal(sourceDownloads, recover ? 2 : 3, JSON.stringify({ recover, error: result.error, failedBlock: result.failedBlock }));
+      assert.equal(transcriptCalls, recover ? 2 : 0); assert.equal(reviewerCalls, recover ? 1 : 0);
       assert.equal(retryLogs.filter((message) => message.includes("transient error (retry")).length, recover ? 1 : 2);
       assert.equal(sourceReadOutcomes.length, 0); assert.equal(result.costTotal, 0); assert.equal(result.visualRepair, undefined); assert.equal(result.retryDirective, undefined);
       assert.equal(persisted.includes("qa_visual"), false); assert.ok(rows.every((row) => row.block === "qa_visual"));

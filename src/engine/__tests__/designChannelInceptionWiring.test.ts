@@ -6,6 +6,7 @@ import { CHANNEL_INCEPTION_MODULE_KEYS } from "@/engine/channelInceptionContract
 const root = process.cwd();
 const entrypoint = readFileSync(join(root, "src/trigger/designChannel.ts"), "utf8");
 const coordinator = readFileSync(join(root, "src/trigger/designChannelInception.ts"), "utf8");
+const probePipeline = readFileSync(join(root, "src/engine/channelInceptionProbePipeline.ts"), "utf8");
 const adapter = readFileSync(join(root, "src/trigger/channelInceptionLedgerAdapter.ts"), "utf8");
 const mutations = readFileSync(join(root, "convex/channels.ts"), "utf8");
 const schema = readFileSync(join(root, "convex/schema.ts"), "utf8");
@@ -320,7 +321,9 @@ assert.match(coordinator, /current identity-bound avatar approval is missing/);
 assert.match(coordinator, /current identity-bound banner approval is missing/);
 assert(!coordinator.includes("nativeWatchRender"), "probe review must stay within admitted child QA spend");
 assert.match(coordinator, /dialInAttempted = true/);
-assert.match(coordinator, /"upload_draft"/);
+assert.match(coordinator, /buildChannelInceptionProbePipeline as buildProbePipeline/);
+assert.match(coordinator, /buildProbePipeline\(/);
+assert.match(probePipeline, /"upload_draft"/);
 assert.match(coordinator, /goldenQualified:\s*false/);
 assert(!coordinator.includes("payload.autoYoutube !== false"));
 assert.match(route, /approvedForYoutubeCreation = design\.autoYoutube === true/);

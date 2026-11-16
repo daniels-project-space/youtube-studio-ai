@@ -27,6 +27,7 @@ import {
   NARRATION_TTS_MODULE_COST_CEILING_USD,
   narrationTtsCostCeilingUsd,
 } from "./narrationTtsCost";
+import { PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY } from "../lib/channelInceptionProbeContract";
 import type {
   ModuleContractOverride,
   ModuleCostContext,
@@ -720,7 +721,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // New-channel private proofs may explicitly defer package art. The
       // runtime keeps this optional only for a signed no-thumbnail probe;
       // production QA still hard-fails when a publishable thumbnail is absent.
-      "thumbnailKey", "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
+      "thumbnailKey", PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY, "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
       "tags", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       // No overlaysDropped: qa_visual never reads it. The counter is surfaced in
