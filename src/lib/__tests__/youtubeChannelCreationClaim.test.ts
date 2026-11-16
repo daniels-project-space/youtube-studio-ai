@@ -691,8 +691,8 @@ async function main(): Promise<void> {
   assert.match(uiSource, /window\.confirm\(/);
   assert.match(uiSource, /confirmedCreateNewChannel: true/);
   const newChannelUiSource = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
-  assert.match(newChannelUiSource, /create exactly/);
-  assert.match(newChannelUiSource, /requestedYoutubeName, requestedYoutubeHandle/);
+  assert.match(newChannelUiSource, /cannot render, spend, create a YouTube channel, or publish/);
+  assert.match(newChannelUiSource, /autoYoutube: false/);
 
   console.log("YouTube channel creation exactly-once and recovery contract passed");
 }

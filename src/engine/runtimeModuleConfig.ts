@@ -1,5 +1,9 @@
 import { resolveKnobs } from "./customization";
-import { moduleSurface, type ModuleConfigurationScope } from "./moduleRegistry";
+import {
+  moduleSurface,
+  NEW_CHANNEL_NARRATION_DEFAULTS,
+  type ModuleConfigurationScope,
+} from "./moduleRegistry";
 import type { PipelineEntry } from "./types";
 import { materializeRuntimePipelineParams } from "./pipelineCompiler";
 import { snapshotParamsByBlock } from "@/lib/pipelineInvocationSnapshot";
@@ -208,7 +212,25 @@ export function resolvePipelineModuleConfig(input: {
   ) {
     throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
   }
-  for (const [blockId, rawConfig] of Object.entries((input.moduleConfig ?? {}) as Record<string, unknown>)) {
+  const suppliedModuleConfig = (input.moduleConfig ?? {}) as Record<string, unknown>;
+  const suppliedNarrationConfig = suppliedModuleConfig["narration_tts"];
+  if (
+    suppliedNarrationConfig !== undefined &&
+    (typeof suppliedNarrationConfig !== "object" || suppliedNarrationConfig === null || Array.isArray(suppliedNarrationConfig))
+  ) {
+    throw new Error("moduleConfig[narration_tts] must be an object");
+  }
+  const hasNarration = input.entries.some((entry) => entry.block === "narration_tts");
+  const moduleConfig = input.scope === "new_channel" && hasNarration
+    ? {
+      ...suppliedModuleConfig,
+      narration_tts: {
+        ...NEW_CHANNEL_NARRATION_DEFAULTS,
+        ...(suppliedNarrationConfig as Record<string, unknown> | undefined),
+      },
+    }
+    : suppliedModuleConfig;
+  for (const [blockId, rawConfig] of Object.entries(moduleConfig)) {
     const scopedSurface = moduleSurface(blockId, input.scope);
     if (!scopedSurface) {
       throw new Error(`moduleConfig[${blockId}] targets an unknown or non-configurable module`);
@@ -230,7 +252,7 @@ export function resolvePipelineModuleConfig(input: {
   const merged = mergeRuntimeModuleConfig({
     entries: input.entries,
     paramsByBlock: snapshotParamsByBlock(input.entries),
-    moduleConfig: input.moduleConfig,
+    moduleConfig,
   });
   return Object.freeze({
     effectivePipeline: Object.freeze(materializeRuntimePipelineParams(

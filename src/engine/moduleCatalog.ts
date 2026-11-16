@@ -428,15 +428,23 @@ export const NEW_CHANNEL_MODULE_CATALOG: ModuleSpec[] = MODULE_CATALOG.map((modu
   if (module.block !== "narration_tts") return module;
   return {
     ...module,
-    params: module.params
-      .filter((field) => field.key !== "qwenSpeaker")
-      .map((field) => field.key === "ttsProvider"
-        ? {
+    params: module.params.map((field) => {
+      if (field.key === "ttsProvider") {
+        return {
           ...field,
-          options: field.options?.filter((option) => option.value !== "qwen3"),
-          help: "New-channel casting uses ElevenLabs expressive narration.",
-        }
-        : field),
+          options: field.options?.filter((option) => option.value === "qwen3"),
+          help: "New-channel narration uses Qwen3-TTS; the currently qualified voice is English/Ryan.",
+        };
+      }
+      if (field.key === "qwenSpeaker") {
+        return {
+          ...field,
+          options: field.options?.filter((option) => option.value === "Ryan"),
+          help: "The current new-channel profile is English/Ryan; unsupported voice profiles fail closed.",
+        };
+      }
+      return field;
+    }),
   };
 });
 

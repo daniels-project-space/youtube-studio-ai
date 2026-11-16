@@ -5,8 +5,6 @@ import ts from "typescript";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { designPipeline, type DesignOptions } from "@/engine/designer";
 import { channelPipelinePreviewInputFromDesign, compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
-import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
 
 // Execute the worker's actual options projection, then the real designer and
 // compiler. Loading the task itself would bring unrelated provider startup in.
@@ -60,8 +58,12 @@ try {
 
     // The public build endpoint uses this projection before Trigger dispatch.
     // It must never validate a legacy snapshot after discarding a YuE2 choice.
-    const preview = compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign(payload));
-    assert.equal(preview.pipelineFingerprint, sha256Hex(canonicalJson(selected.pipeline)));
+    const previewInput = channelPipelinePreviewInputFromDesign(payload);
+    assert.equal(previewInput.yue2Music, yue2Music, "public build projection must preserve the exact YuE2 choice");
+    const preview = compileChannelPipelinePreview(previewInput);
+    const withoutSelection = compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign({ programBrief }));
+    assert.notEqual(preview.pipelineFingerprint, withoutSelection.pipelineFingerprint,
+      "route-aware preview must include the transported YuE2 selection");
     const changedPreview = compileChannelPipelinePreview(channelPipelinePreviewInputFromDesign({ ...payload,
       yue2Music: { ...yue2Music, sourceParams: { ...sourceParams, seed: 43 } } }));
     assert.notEqual(changedPreview.pipelineFingerprint, preview.pipelineFingerprint);

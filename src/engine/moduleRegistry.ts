@@ -61,6 +61,11 @@ export interface RegisteredModuleCard extends ModuleCard {
 
 export type ModuleConfigurationScope = "runtime" | "new_channel";
 
+export const NEW_CHANNEL_NARRATION_DEFAULTS = {
+  ttsProvider: "qwen3",
+  qwenSpeaker: "Ryan",
+} as const;
+
 function surfaceForScope(
   blockId: string,
   surface: CustomizationSurface,
@@ -69,9 +74,23 @@ function surfaceForScope(
   if (scope !== "new_channel" || blockId !== "narration_tts") return surface;
   return {
     ...surface,
-    knobs: surface.knobs.map((knob) => knob.id === "ttsProvider"
-      ? { ...knob, values: knob.values?.filter((value) => value !== "qwen3") }
-      : knob),
+    knobs: surface.knobs.map((knob) => {
+      if (knob.id === "ttsProvider") {
+        return {
+          ...knob,
+          values: knob.values?.filter((value) => value === NEW_CHANNEL_NARRATION_DEFAULTS.ttsProvider),
+          default: NEW_CHANNEL_NARRATION_DEFAULTS.ttsProvider,
+        };
+      }
+      if (knob.id === "qwenSpeaker") {
+        return {
+          ...knob,
+          values: knob.values?.filter((value) => value === NEW_CHANNEL_NARRATION_DEFAULTS.qwenSpeaker),
+          default: NEW_CHANNEL_NARRATION_DEFAULTS.qwenSpeaker,
+        };
+      }
+      return knob;
+    }),
   };
 }
 

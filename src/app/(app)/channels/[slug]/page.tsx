@@ -93,6 +93,7 @@ type ChannelDoc = {
   inception?: {
     status: "planned" | "running" | "complete" | "blocked";
     updatedAt: number;
+    requestSnapshot?: { thumbnailMode?: "generated" | "deferred_mvp" };
     stages: Record<
       string,
       {
@@ -577,10 +578,15 @@ function ChannelInceptionProgress({
 }: {
   inception: NonNullable<ChannelDoc["inception"]>;
 }) {
+  const thumbnailsDeferred = inception.requestSnapshot?.thumbnailMode === "deferred_mvp";
   const stages = INCEPTION_STAGE_LABELS.flatMap(([key, label]) => {
     const stage = inception.stages[key];
     return stage ? [{ key, label, ...stage }] : [];
   });
+  const privateProbeReady = stages.some((stage) =>
+    stage.key === "channel-inception-probe" &&
+    (stage.status === "complete" || stage.status === "accepted"),
+  );
   const complete = stages.filter(
     (stage) => stage.status === "complete" || stage.status === "accepted",
   ).length;
@@ -600,7 +606,9 @@ function ChannelInceptionProgress({
             <small>Channel build</small>
             <strong>
               {inception.status === "complete"
-                ? "Ready"
+                ? thumbnailsDeferred
+                  ? privateProbeReady ? "Private output ready · thumbnails deferred" : "Channel setup complete · no video generated"
+                  : "Ready"
                 : inception.status === "blocked"
                   ? "Needs attention"
                   : inception.status === "planned"
@@ -614,6 +622,13 @@ function ChannelInceptionProgress({
         <i className={styles.inceptionToggle} aria-hidden="true">+</i>
       </summary>
       <div className={styles.inceptionBody}>
+        {thumbnailsDeferred && (
+          <p role="note" style={{ margin: "0 0 1rem", color: "#9e7b3c", lineHeight: 1.5 }}>
+            {privateProbeReady
+              ? "Private validation output is ready to review. Thumbnail generation is deferred, so external publishing remains blocked."
+              : "Channel setup is complete, but no video has been generated. Run private validation to create a reviewable output; external publishing remains blocked until thumbnails are completed and admitted."}
+          </p>
+        )}
         <div className={styles.inceptionStages}>
           {stages.map((stage, index) => {
             const failure = stage.error ? failureReason(stage.error) : null;

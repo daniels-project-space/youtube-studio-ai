@@ -444,10 +444,13 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
       "channel-inception-seo",
       "channel-inception-avatar",
       "channel-inception-banner",
-      "channel-inception-thumbnails",
       "channel-inception-pipeline",
     ],
-    optionalDependencies: ["channel-inception-voice", "channel-inception-probe"],
+    optionalDependencies: [
+      "channel-inception-voice",
+      "channel-inception-probe",
+      "channel-inception-thumbnails",
+    ],
     supportedFamilies: ALL_FAMILIES,
     defaultExecutionOwner: "readiness-projector",
     costClass: "deterministic-local",
@@ -456,6 +459,7 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
       "projection consumes admitted receipts rather than raw success statuses",
       "source and effective pipeline are distinguished",
       "catalog-mapped and Golden-qualified states are distinguished",
+      "deferred thumbnail generation remains visible and blocks external publication",
     ],
   },
 ];

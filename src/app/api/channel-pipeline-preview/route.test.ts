@@ -8,9 +8,8 @@ import {
 import { resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
 import { deriveCreatorIntentDiagnosis } from "@/engine/creatorIntentDiagnosis";
 import { designPipeline, type DesignOptions } from "@/engine/designer";
+import { channelPipelinePreviewFromCompiledDesign } from "@/engine/channelPipelinePreview.server";
 import { syntheticScenarioContract } from "@/engine/syntheticScenario";
-import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
 import { POST } from "./route";
 
 const DEFAULT_TOGGLES = {
@@ -118,11 +117,16 @@ async function main(): Promise<void> {
     const { programRoute, design: expected } = directDesign(programBrief, {
       toggles: DEFAULT_TOGGLES,
     });
+    const expectedPreview = channelPipelinePreviewFromCompiledDesign({
+      programBrief,
+      programRoute,
+      design: expected,
+    });
     assert.equal(preview.version, "channel-pipeline-preview/v1");
     assert.equal(preview.routeKey, programRoute.routeKey);
     assert.equal(preview.routeFingerprint, programRoute.fingerprint);
     assert.deepEqual(preview.blocks, expected.pipeline.map((entry) => entry.block));
-    assert.equal(preview.pipelineFingerprint, sha256Hex(canonicalJson(expected.pipeline)));
+    assert.equal(preview.pipelineFingerprint, expectedPreview.pipelineFingerprint);
     assert.equal(preview.episodeLengthSeconds, expected.episodeLengthSeconds);
     assert.equal(preview.contentLane, expected.contentLane.key);
   }
@@ -166,7 +170,14 @@ async function main(): Promise<void> {
       assert.equal(response.status, 200, `${family} / ${variant.label} must compile`);
       const actual = await response.json() as { blocks: string[]; pipelineFingerprint: string };
       assert.deepEqual(actual.blocks, expected!.design.pipeline.map((entry) => entry.block));
-      assert.equal(actual.pipelineFingerprint, sha256Hex(canonicalJson(expected!.design.pipeline)));
+      assert.equal(
+        actual.pipelineFingerprint,
+        channelPipelinePreviewFromCompiledDesign({
+          programBrief,
+          programRoute: expected!.programRoute,
+          design: expected!.design,
+        }).pipelineFingerprint,
+      );
     }
   }
 

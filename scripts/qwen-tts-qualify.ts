@@ -72,23 +72,30 @@ const DOCUMENTARY_EN =
   "Every attempt cost more men than the last, and the maps in the command tent " +
   "no longer matched anything anyone could see from the escarpment itself.";
 
+// The admitted Studio Render Engine Qwen profile is English/Ryan. Keep this
+// qualification matrix on that exact contract and test editorial delivery
+// differences; other speakers/languages need their own Engine profiles before
+// they can be represented as qualified production routes.
 const TAKES: Take[] = [
-  { id: "en-aiden-documentary", speaker: "Aiden", language: "English", text: DOCUMENTARY_EN,
-    proves: "the primary English narration voice on a real documentary passage" },
   { id: "en-ryan-documentary", speaker: "Ryan", language: "English", text: DOCUMENTARY_EN,
-    proves: "the second English voice on the identical passage, for A/B casting" },
-  { id: "en-aiden-calm", speaker: "Aiden", language: "English",
+    proves: "the admitted English/Ryan route on a documentary passage" },
+  { id: "en-ryan-second-passage", speaker: "Ryan", language: "English",
+    text: "The report called it an ordinary crossing. The field notes describe a decision that changed the campaign.",
+    proves: "repeatable delivery on a second original English passage" },
+  { id: "en-ryan-calm", speaker: "Ryan", language: "English",
     instruction: "Speak slowly and calmly, with long, settled pauses between sentences.",
     text: DOCUMENTARY_EN, proves: "instruction following: a calm/slow read must differ measurably in pace" },
-  { id: "en-aiden-energetic", speaker: "Aiden", language: "English",
+  { id: "en-ryan-energetic", speaker: "Ryan", language: "English",
     instruction: "Speak with urgency and drive, quickly and with strong emphasis.",
     text: DOCUMENTARY_EN, proves: "instruction following: an energetic read must differ measurably the other way" },
-  { id: "es-aiden", speaker: "Aiden", language: "Spanish",
-    text: "En la primavera de 1945 la cresta ya había sido tomada y perdida seis veces, y cada intento costaba más que el anterior.",
-    proves: "Spanish, which two live channels publish in" },
-  { id: "de-aiden", speaker: "Aiden", language: "German",
-    text: "Im Frühjahr 1945 war der Bergrücken bereits sechsmal eingenommen und wieder verloren worden, und jeder Versuch kostete mehr als der letzte.",
-    proves: "German, which one live channel publishes in" },
+  { id: "en-ryan-meditation", speaker: "Ryan", language: "English",
+    instruction: "Speak gently and patiently. Let each sentence settle before continuing.",
+    text: "Notice the quiet around you. There is nothing you need to solve in this moment.",
+    proves: "quiet-listening delivery on original meditation copy" },
+  { id: "en-ryan-commentary", speaker: "Ryan", language: "English",
+    instruction: "Speak with warm, direct conversational clarity, without sounding hurried.",
+    text: "Here is the small detail that changes how we understand the whole story.",
+    proves: "channel-led conversational delivery on original commentary copy" },
 ];
 
 /** Thresholds. Any failure suppresses the receipt. */
@@ -257,7 +264,7 @@ async function main(): Promise<void> {
   const verdicts = offline ? loadVerdicts(verdictsPath!, measured) : {};
   if (!offline) {
     const readiness = qwenTtsReadiness();
-    if (!readiness.configured) throw new Error(`a worker URL and token are required before generation: ${readiness.blockers.join("; ")}`);
+    if (!readiness.configured) throw new Error(`Render Engine management credentials are required before generation: ${readiness.blockers.join("; ")}`);
     // This existing report is evidence, NOT permission to retry or buy anything.
     // Exclusive creation also refuses concurrent first passes in the same folder.
     saveReport(reportPath, reportFor(measured, verdicts, ["qualification incomplete"]), true);
@@ -331,8 +338,8 @@ async function main(): Promise<void> {
   }
 
   // ---- instruction following, measured as a RELATION not a vibe ------------
-  const calm = measured.find((m) => m.take.id === "en-aiden-calm");
-  const energetic = measured.find((m) => m.take.id === "en-aiden-energetic");
+  const calm = measured.find((m) => m.take.id.endsWith("-calm"));
+  const energetic = measured.find((m) => m.take.id.endsWith("-energetic"));
   const relational: string[] = [];
   if (calm && energetic && calm.durationSec > 0 && energetic.durationSec > 0) {
     const separation = (energetic.wordsPerSec - calm.wordsPerSec) / Math.max(calm.wordsPerSec, 0.001);

@@ -25,6 +25,16 @@ assert.doesNotMatch(page, /nicheBlocker\}>Held: \{defaultFamilyReadiness\.blocke
   "the initial territory grid must not expose raw worker/environment variable names");
 assert.match(page, /const attentionStages = stageRows\.filter/u,
   "live channel creation must foreground only active or actionable stages");
+assert.match(page, /Private validation output is ready to review\. It remains unpublished; publishing and scheduling are disabled\./u,
+  "a completed probe must be described as private and unpublished");
+assert.match(page, /Channel setup is complete, but no video has been generated yet\. Run private validation to create one; publishing and scheduling are disabled\./u,
+  "a setup-only receipt must not be mistaken for a video output");
+assert.doesNotMatch(page, /Thumbnail generation is deferred, so external publishing stays blocked\./u,
+  "channel-level thumbnail deferral must not be confused with the probe video’s graded thumbnail");
+assert.match(page, /probeOutputReady = progress\.stages\.some\(\(stage\) =>[\s\S]*moduleKey === "channel-inception-probe"[\s\S]*status === "complete" \|\| stage\.status === "accepted"/u,
+  "the completion route must be based on a successful private probe receipt");
+assert.match(page, /router\.push\(probeOutputReady[\s\S]*\?tab=library/u,
+  "a completed private probe must open the channel Library so its real video artifact is immediately reviewable");
 assert.match(page, /<details className=\{styles\.stageDetails\}>/u,
   "settled channel-creation receipts must remain available without permanently consuming the workspace");
 assert.match(css, /\.buildHero \{ min-height: 132px;/u,

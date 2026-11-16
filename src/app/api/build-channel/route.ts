@@ -132,6 +132,35 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (FAMILIES[programBrief.family].narrated) {
+      const locale = programBrief.locale.trim();
+      if (!/^(?:en(?:[-_][a-z0-9]+)*|english)$/i.test(locale)) {
+        return NextResponse.json({
+          error: "The current personal MVP Qwen profile is qualified for English/Ryan only; this language cannot start a channel build yet.",
+        }, { status: 400 });
+      }
+      const rawModuleConfig = design.moduleConfig && typeof design.moduleConfig === "object" && !Array.isArray(design.moduleConfig)
+        ? design.moduleConfig as Record<string, unknown>
+        : {};
+      const rawNarrationConfig = rawModuleConfig.narration_tts && typeof rawModuleConfig.narration_tts === "object" && !Array.isArray(rawModuleConfig.narration_tts)
+        ? rawModuleConfig.narration_tts as Record<string, unknown>
+        : {};
+      const requestedProvider = typeof rawNarrationConfig.ttsProvider === "string"
+        ? rawNarrationConfig.ttsProvider.trim().toLowerCase()
+        : "qwen3";
+      const requestedSpeaker = typeof rawNarrationConfig.qwenSpeaker === "string"
+        ? rawNarrationConfig.qwenSpeaker.trim()
+        : "Ryan";
+      const requestedVoiceLanguage = typeof rawNarrationConfig.language === "string"
+        ? rawNarrationConfig.language.trim()
+        : programBrief.locale;
+      if (requestedProvider !== "qwen3" || requestedSpeaker !== "Ryan" ||
+        !/^(?:en(?:[-_][a-z0-9]+)*|english)$/i.test(requestedVoiceLanguage)) {
+        return NextResponse.json({
+          error: "The current personal MVP supports Qwen3 English/Ryan narration only; no alternate provider or voice will be substituted.",
+        }, { status: 400 });
+      }
+    }
     if (design.programRoute !== undefined) {
       return NextResponse.json({
         error: "channel program routes are server-derived from the canonical programBrief and must not be submitted by the browser",
@@ -199,7 +228,7 @@ export async function POST(request: Request) {
       )
     ) {
       return NextResponse.json({
-        error: "New channel setup accepts ElevenLabs narration only.",
+        error: "New channel setup accepts Qwen3 through moduleConfig; legacy narration provider overrides are not accepted.",
       }, { status: 400 });
     }
     if (!validateChannelBuildRequestKey(requestKey, design)) {
@@ -208,6 +237,36 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (design.thumbnailMode !== undefined && design.thumbnailMode !== "deferred_mvp") {
+      return NextResponse.json(
+        { error: "new channel setup currently requires the explicit MVP thumbnail deferral" },
+        { status: 400 },
+      );
+    }
+    const submittedToggles = design.toggles && typeof design.toggles === "object"
+      ? design.toggles as Record<string, unknown>
+      : {};
+    if (
+      (design.publishMode !== undefined && design.publishMode !== "draft") ||
+      design.approvedForPublish === true ||
+      design.autoYoutube === true ||
+      submittedToggles.crosspost === true
+    ) {
+      return NextResponse.json(
+        { error: "the personal MVP creates private drafts only; YouTube creation, publishing and cross-posting are disabled" },
+        { status: 400 },
+      );
+    }
+    // Old browser journals may replay without this field. Apply the current
+    // release policy after validating their original request-key-bound intent.
+    design = {
+      ...design,
+      thumbnailMode: "deferred_mvp",
+      publishMode: "draft",
+      approvedForPublish: false,
+      autoYoutube: false,
+      toggles: { ...submittedToggles, crosspost: false },
+    };
     // Reject malformed legacy sibling fields before any broader preflight.
     // They are never route authority: the server later derives and overwrites
     // them from programBrief.programIntent before dispatch.

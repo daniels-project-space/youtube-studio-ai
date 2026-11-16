@@ -194,14 +194,46 @@ assert.throws(
   /unknown or non-configurable module/,
   "unknown creation controls must fail before channel writes or provider admission",
 );
+const newChannelNarration = resolvePipelineModuleConfig({
+  entries: [{ block: "narration_tts" }],
+  scope: "new_channel",
+});
+assert.equal(
+  newChannelNarration.frozenModuleConfig.narration_tts?.ttsProvider,
+  "qwen3",
+  "new-channel narration defaults to the currently qualified Qwen route",
+);
+assert.equal(
+  newChannelNarration.frozenModuleConfig.narration_tts?.qwenSpeaker,
+  "Ryan",
+  "the Qwen speaker default must be frozen so casting and later narration use the same voice",
+);
+assert.deepEqual(
+  resolvePipelineModuleConfig({
+    entries: [{ block: "narration_tts" }],
+    moduleConfig: { narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Ryan" } },
+    scope: "new_channel",
+  }).frozenModuleConfig.narration_tts,
+  { ttsProvider: "qwen3", qwenSpeaker: "Ryan" },
+  "the onboarding module controls must accept and freeze the qualified Qwen voice",
+);
 assert.throws(
   () => resolvePipelineModuleConfig({
     entries: [{ block: "narration_tts" }],
-    moduleConfig: { narration_tts: { ttsProvider: "qwen3" } },
+    moduleConfig: { narration_tts: { ttsProvider: "elevenlabs" } },
     scope: "new_channel",
   }),
   /invalid for new_channel.*ttsProvider/,
-  "new channels cannot forge the retired narration route through moduleConfig",
+  "new channels cannot select an unqualified narration provider",
+);
+assert.throws(
+  () => resolvePipelineModuleConfig({
+    entries: [{ block: "narration_tts" }],
+    moduleConfig: { narration_tts: { qwenSpeaker: "Aiden" } },
+    scope: "new_channel",
+  }),
+  /invalid for new_channel.*qwenSpeaker/,
+  "new-channel UI and backend must enforce the exact qualified speaker profile",
 );
 assert.equal(
   resolvePipelineModuleConfig({

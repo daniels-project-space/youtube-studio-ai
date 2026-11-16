@@ -6,7 +6,7 @@ export const voiceCastingProviderValidator = v.union(
 );
 
 /** Durable attestation emitted by the pinned private Qwen3-TTS worker. */
-export const qwenTtsReceiptValidator = v.object({
+const legacyQwenTtsReceiptValidator = v.object({
   schema: v.literal("qwen3-tts-worker/v2"),
   requestKey: v.string(),
   workerImageDigest: v.string(),
@@ -81,3 +81,19 @@ export const qwenTtsReceiptValidator = v.object({
     }),
   ),
 });
+
+export const qwenTtsReceiptValidator = v.union(legacyQwenTtsReceiptValidator, v.object({
+  schema: v.literal("studio-engine-qwen-receipt/v1"), requestKey: v.string(), requestScope: v.string(),
+  model: v.literal("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"), revision: v.literal("0c0e3051f131929182e2c023b9537f8b1c68adfe"),
+  textSha256: v.string(), instructionSha256: v.string(), speaker: v.literal("Ryan"), language: v.literal("English"),
+  seed: v.number(), audioSha256: v.string(), audioFormat: v.literal("mp3"), sampleRateHz: v.literal(24000), durationSec: v.number(),
+  engine: v.object({ projectName: v.literal("youtube-studio-render"), workflowId: v.literal("jn799fshgrnb2qkc2326zec5518g53q3"),
+    profileRevisionSha256: v.literal("0a78001cc82ccfd2e19fa2930c5ee174c5f46df997c5657082305bb671b49d2a"),
+    jobId: v.string(), requestSha256: v.string(),
+    nativeOutput: v.object({ bucket: v.literal("re-youtube-studio-render-p2w18g596q"), key: v.string(), bytes: v.number(),
+      sha256: v.string(), contentType: v.literal("audio/wav"), verifiedAt: v.number() }),
+    transformation: v.literal("ffmpeg-libmp3lame-160k-24khz-mono/v1"),
+  }),
+  runtime: v.object({ provider: v.literal("render-engine"), accounting: v.literal("engine-reported-usage"),
+    gpuSeconds: v.number(), costUsd: v.number(), complete: v.literal(true) }),
+}));

@@ -189,8 +189,12 @@ import {
   assertNarrationPerformanceEvidence,
   assertNarrationSpeed,
   assertNarrationTimingMeasurementIntegrity,
+  deriveNarrationSectionBoundaryIndices,
+  evaluateNarrationCadence,
   evaluateNarrationRate,
   planNarrationCadence,
+  isQuietListeningNarration,
+  quietListeningRestBudgetSec,
   preflightNarrationPerformance,
   reconcileNarrationCadenceAfterDurationMeasurement,
 } from "@/lib/narrationPerformance";
@@ -378,7 +382,14 @@ async function recordAsset(
       meta,
     });
   } catch (e) {
-    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    const detail = e instanceof Error ? e.message : String(e);
+    if (kind === "video") {
+      throw new ExecutionError(
+        `timeline_assemble: final video could not be indexed in the channel Library; refusing successful completion (${detail})`,
+        { code: "FINAL_VIDEO_LIBRARY_INDEX_FAILED", retryable: false },
+      );
+    }
+    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${detail}`);
   }
 }
 
@@ -801,6 +812,7 @@ export const scriptGen: Block = {
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
+      genre: ctx.params["genre"] as string | undefined,
       qualityProfile: ctx.params["qualityProfile"] === "draft" ? ("draft" as const) : ("production" as const),
       language: ctx.params["language"] as string | undefined,
       maxSeconds: ctx.params["maxSeconds"] as number | undefined,
@@ -1355,6 +1367,12 @@ export const narrationTts: Block = {
     const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
       ?.narrative;
     const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
+    const quietListeningProfile: "standard" | "quiet_listening" = isQuietListeningNarration(
+      niche, ctx.params["genre"], ctx.params["style"], dnaPacing?.pacing, dnaPacing?.delivery,
+    ) ? "quiet_listening" : "standard";
+    const quietRestBudgetSec = quietListeningProfile === "quiet_listening"
+      ? quietListeningRestBudgetSec(Number(ctx.params["maxSeconds"] ?? 240))
+      : 0;
     const dnaSpeed =
       /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
         : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
@@ -1501,11 +1519,24 @@ export const narrationTts: Block = {
       readinessStatus: ctx.params["voiceReadinessStatus"],
       readinessReason: ctx.params["voiceReadinessReason"],
     });
-    const assertFinalDeliveryRate = (evidence: { wordCount: number; durationSec: number }) => {
-      const rate = evaluateNarrationRate({ wordCount: evidence.wordCount, durationSec: evidence.durationSec, speed });
-      ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
+    const assertFinalDeliveryRate = (evidence: {
+      wordCount: number;
+      durationSec: number;
+      spokenDurationSec?: number;
+    }) => {
+      const spokenDurationSec = evidence.spokenDurationSec ?? evidence.durationSec;
+      const rate = evaluateNarrationRate({ wordCount: evidence.wordCount, durationSec: spokenDurationSec, speed });
+      ctx.log(
+        `narration_tts: spoken delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}; ` +
+        `${(evidence.wordCount / evidence.durationSec).toFixed(2)} words/s across the complete track including rests`,
+      );
       if (quality === "production" && !rate.ok) {
-        assertNarrationDeliveryRate({ ...evidence, speed, label: "narration_tts" });
+        assertNarrationDeliveryRate({
+          wordCount: evidence.wordCount,
+          durationSec: spokenDurationSec,
+          speed,
+          label: "narration_tts",
+        });
       }
       return rate;
     };
@@ -1638,7 +1669,7 @@ export const narrationTts: Block = {
     if (chapterMode && script?.sections) {
       const preSec = Number(ctx.params["chapterPreSec"] ?? 3); // silence as the card fades in, before the heading
       const postSec = Number(ctx.params["chapterPostSec"] ?? 3); // silence after the heading, as the card fades out
-      type Item = { kind: "narration" | "heading"; text: string; chap?: number };
+      type Item = { kind: "narration" | "heading"; text: string; chap?: number; sectionBoundaryAfter?: boolean };
       const items: Item[] = [];
       if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
       // Chapter cards belong to the BODY only: the INTRO (first section) flows
@@ -1659,10 +1690,16 @@ export const narrationTts: Block = {
           chap: chapterBySection.size + 1,
         });
       });
+      const sectionSentences = script.sections.map((section) => splitSentences(sanitizeSpoken(section.narration)));
       script.sections.forEach((sec, idx) => {
         const chapter = chapterBySection.get(idx);
         if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
-        for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
+        const sectionStart = items.length;
+        for (const sentence of sectionSentences[idx]!) items.push({ kind: "narration", text: sentence });
+        const hasLaterNarration = sectionSentences.slice(idx + 1).some((later) => later.length > 0);
+        if (hasLaterNarration && items.length > sectionStart) {
+          items[items.length - 1]!.sectionBoundaryAfter = true;
+        }
       });
 
       const partPaths: string[] = [];
@@ -1672,6 +1709,7 @@ export const narrationTts: Block = {
       let cursor = 0;
       let footAccum = 0;
       let chap = 0;
+      const itemTimings: { start: number; end: number }[] = [];
       const flush = () => { if (footAccum > 0.1) { chapterPlan.push({ kind: "footage", durSec: footAccum }); footAccum = 0; } };
       // PARALLEL synthesis (small pool — Fish concurrency limit; see sentence mode).
       const speakOf = (it: Item) =>
@@ -1680,6 +1718,9 @@ export const narrationTts: Block = {
         sentences: items.map(speakOf),
         baseGapSec: baseGap,
         jitterSec: jitter,
+        sectionBoundaryAfter: items.map((item) => item.sectionBoundaryAfter === true),
+        profile: quietListeningProfile,
+        maxQuietRestBudgetSec: quietRestBudgetSec,
       });
       const chPool = ttsConcurrency();
       // Probe-fallback counter: an ESTIMATED duration shifts every later
@@ -1720,6 +1761,7 @@ export const narrationTts: Block = {
         const nextIsHeading = items[i + 1]?.kind === "heading";
         partPaths.push(synthed[i].p);
         const dur = synthed[i].dur;
+        itemTimings.push({ start: cursor, end: cursor + dur });
         let gapAfter: number;
         if (it.kind === "heading") {
           // CARD window = preSec (pre-silence, already reserved as the previous
@@ -1732,9 +1774,14 @@ export const narrationTts: Block = {
         } else {
           sentenceTimings.push({ text: stripAudioTags(it.text), start: cursor, end: cursor + dur });
           if (nextIsHeading) {
-            // this gap is the upcoming card's PRE-silence — belongs to the card, not footage
-            gapAfter = preSec;
-            footAccum += dur;
+            // Keep the card's normal pre-roll. Any selected long rest stays on
+            // footage before the card fades in, so its title does not freeze
+            // on screen for 15–30 seconds.
+            const plannedRest = chapterCadencePlan.purposes[i] === "section"
+              ? chapterCadencePlan.gapsSec[i] ?? 0
+              : 0;
+            gapAfter = Math.max(preSec, plannedRest);
+            footAccum += dur + Math.max(0, gapAfter - preSec);
           } else {
             gapAfter = chapterCadencePlan.gapsSec[i] ?? baseGap;
             footAccum += dur + gapAfter;
@@ -1744,6 +1791,15 @@ export const narrationTts: Block = {
         cursor += dur + (i < items.length - 1 ? gapAfter : 0);
       }
       flush();
+      const chapterCadence = evaluateNarrationCadence({
+        sentences: items.map(speakOf),
+        sentenceTimings: itemTimings,
+        plan: { ...chapterCadencePlan, gapsSec: gaps },
+      });
+      ctx.log(
+        `narration_tts: chapter cadence verified (${chapterCadence.minGapSec.toFixed(2)}–${chapterCadence.maxGapSec.toFixed(2)}s pauses; ` +
+        `${chapterCadence.purposes.filter((purpose) => purpose === "section").length} intentional section rests)`,
+      );
 
       let local = join(tmp, "narration.mp3");
       if (ttsProvider === "qwen3" && partPaths.length === 1) await transcodeAudioToMp3(partPaths[0]!, local);
@@ -1756,6 +1812,7 @@ export const narrationTts: Block = {
         audioPath: local,
         text: narrationTranscriptText,
         speed,
+        spokenDurationSec: synthed.reduce((sum, part) => sum + part.dur, 0),
       });
       ctx.log(
         `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
@@ -1813,10 +1870,30 @@ export const narrationTts: Block = {
     // exact per-sentence timings (used to anchor quote overlays). Gaps are
     // jittered per sentence so the pacing feels human, not metronomic.
     const sentences = splitSentences(text);
+    const keepAudioTags = ttsProvider === "elevenlabs";
+    const openingSentences = script?.hook
+      ? splitSentences(sanitizeSpoken(script.hook, { keepAudioTags }))
+      : [];
+    const sectionSentences = script?.sections?.map((section) =>
+      splitSentences(sanitizeSpoken(section.narration, { keepAudioTags })),
+    );
+    const sectionBoundaryIndices = sectionSentences
+      ? deriveNarrationSectionBoundaryIndices({ sentences, openingSentences, sectionSentences })
+      : undefined;
+    if (quietListeningProfile === "quiet_listening" && sectionSentences && sectionBoundaryIndices === undefined) {
+      throw new Error("narration_tts: quiet-listening section boundaries do not match the approved spoken source");
+    }
+    if (quietListeningProfile === "quiet_listening" && !sectionSentences) {
+      throw new Error("narration_tts: quiet-listening narration is missing its approved section structure");
+    }
+    const sectionBoundarySet = new Set(sectionBoundaryIndices ?? []);
     const cadencePlan = planNarrationCadence({
       sentences,
       baseGapSec: baseGap,
       jitterSec: jitter,
+      sectionBoundaryAfter: sentences.map((_, index) => sectionBoundarySet.has(index)),
+      profile: quietListeningProfile,
+      maxQuietRestBudgetSec: quietRestBudgetSec,
     });
     const gaps = cadencePlan.gapsSec;
     ctx.log(
@@ -1905,7 +1982,12 @@ export const narrationTts: Block = {
     ctx.log(
       `narration_tts: cadence evidence PASSED (${cadence.minGapSec.toFixed(2)}–${cadence.maxGapSec.toFixed(2)}s pauses; ${cadence.distinctGapCount} distinct delivery beats)`,
     );
-    const narrationPerformanceEvidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
+    const narrationPerformanceEvidence = await preflightNarrationPerformance({
+      audioPath: local,
+      text,
+      speed,
+      spokenDurationSec: parts.reduce((sum, part) => sum + part.dur, 0),
+    });
     ctx.log(
       `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
     );

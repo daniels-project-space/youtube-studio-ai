@@ -45,10 +45,10 @@ export function resolveRequestedChannelVoice(args: {
   locale: string;
 }): ChannelVoiceRequest {
   const narration = args.pipeline.find((entry) => entry.block === "narration_tts");
-  if (!narration) return { provider: "elevenlabs" };
+  if (!narration) throw new Error("new-channel voice casting requires a narration_tts module");
   const configured = args.moduleConfig["narration_tts"] ?? {};
   const params = (narration.params ?? {}) as Record<string, unknown>;
-  const provider = String(configured["ttsProvider"] ?? params["ttsProvider"] ?? "elevenlabs")
+  const provider = String(configured["ttsProvider"] ?? params["ttsProvider"] ?? "qwen3")
     .trim()
     .toLowerCase();
   if (provider === "fish") {
@@ -57,12 +57,11 @@ export function resolveRequestedChannelVoice(args: {
       "use ElevenLabs, a qualified Qwen3 CustomVoice speaker, or attach separately reviewed Fish casting evidence",
     );
   }
-  if (provider !== "elevenlabs" && provider !== "qwen3") {
-    throw new Error(`channel inception does not recognize narration TTS provider ${provider || "missing"}`);
+  if (provider !== "qwen3") {
+    throw new Error(`new-channel narration requires Qwen3-TTS; ${provider || "missing"} is not an admitted provider`);
   }
-  if (provider === "elevenlabs") return { provider };
   if (args.pipeline.some((entry) => entry.block === "whiteboard_scribe")) {
-    throw new Error("Qwen3 channel casting cannot be mixed with the ElevenLabs-only whiteboard renderer in one inception pipeline");
+    throw new Error("new-channel Qwen3 narration is not qualified for the whiteboard_scribe renderer");
   }
   const qwenSpeaker = String(configured["qwenSpeaker"] ?? params["qwenSpeaker"] ?? "").trim();
   if (!qwenSpeaker) {
@@ -71,10 +70,14 @@ export function resolveRequestedChannelVoice(args: {
   if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(qwenSpeaker)) {
     throw new Error(`Qwen3 channel inception does not recognize CustomVoice speaker ${qwenSpeaker}`);
   }
+  const qwenLanguage = resolveQwenTtsLanguage(configured["language"] ?? params["language"] ?? args.locale);
+  if (qwenSpeaker !== "Ryan" || qwenLanguage !== "English") {
+    throw new Error("Render Engine Qwen channel casting currently supports English/Ryan; the requested channel voice requires another Engine profile");
+  }
   return {
     provider,
     qwenSpeaker,
-    qwenLanguage: resolveQwenTtsLanguage(configured["language"] ?? params["language"] ?? args.locale),
+    qwenLanguage,
   };
 }
 

@@ -433,17 +433,18 @@ assert(
   creatorSource.includes("Private-review intake only: no setup spend, validation render, YouTube creation, publishing, cross-posting, or production budget can be authorized here.") &&
     creatorSource.includes("setApproveSetupSpend(false)") &&
     creatorSource.includes("setRunProbe(false)") &&
-    creatorSource.includes("setAutoYoutube(false)") &&
-    creatorSource.includes('setPublishMode("draft")') &&
-    creatorSource.includes("setApprovedForPublish(false)") &&
+    creatorSource.includes('publishMode: "draft"') &&
+    creatorSource.includes("approvedForPublish: false") &&
+    creatorSource.includes("autoYoutube: false") &&
     creatorSource.includes("crosspost: false"),
-  "switching from an autonomous build to a supervised intake must clear retained spend, render, YouTube, publication, and cross-post authorities",
+  "switching to a supervised intake clears retained spend and render authority, while its submitted design remains draft-only with YouTube creation and cross-posting disabled",
 );
 assert(
   creatorSource.includes("Registered private-review stages") &&
     creatorSource.includes("supervisedAdmission ? activeReviewOnlyStages : preview") &&
-    creatorSource.includes('!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost)'),
-  "a private-review family must expose only its registered review stages and cannot present publishing approval as an executable build",
+    /supervisedAdmission\s*\?\s*reviewHandoffHref\s*\?\s*<Link href=\{reviewHandoffHref\}[^>]*>Open private review desk<\/Link>/.test(creatorSource) &&
+    /:\s*<button\s+onClick=\{\(\) => void create\(Date\.now\(\)\)\}/.test(creatorSource),
+  "a private-review family must expose only its registered review stages and hand off to its review desk instead of dispatching the automatic builder",
 );
 assert(
   creatorSource.includes("Certified automatic alternatives") &&

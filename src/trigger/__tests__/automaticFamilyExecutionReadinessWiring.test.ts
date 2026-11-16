@@ -12,6 +12,10 @@ assert.ok(
   capabilityGate < unavailableDesign,
   "renderer capability gate must stop automatic inception before any downstream design/provider work",
 );
+const creatorAdmission = source.slice(capabilityGate, unavailableDesign);
+assert.match(creatorAdmission, /narrationProvider:\s*"qwen3"/);
+assert.match(creatorAdmission, /thumbnailMode:\s*"deferred_mvp"/);
+assert.doesNotMatch(creatorAdmission, /narrationProvider:\s*"elevenlabs"/);
 
 const scheduler = readFileSync(new URL("../scheduler.ts", import.meta.url), "utf8");
 const schedulerBootstrap = scheduler.indexOf("await ensureSchedulerBootstrap();");

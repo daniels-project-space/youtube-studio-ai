@@ -8,7 +8,11 @@ assert.ok(start >= 0 && end > start, "narration_tts source boundary must remain 
 const route = source.slice(start, end);
 
 assert.match(route, /assertNarrationSpeed\([\s\S]*explicitSpeed === undefined/u);
-assert.match(route, /quality === "production" && !rate\.ok[\s\S]*assertNarrationDeliveryRate\(\{ \.\.\.evidence, speed, label: "narration_tts" \}\)/u);
+assert.match(
+  route,
+  /quality === "production" && !rate\.ok[\s\S]*assertNarrationDeliveryRate\(\{[\s\S]*wordCount:[\s\S]*durationSec: spokenDurationSec,[\s\S]*speed,[\s\S]*label: "narration_tts"[\s\S]*\}\)/u,
+  "production rate enforcement must use measured speech-only duration while preserving the full-track measurement",
+);
 
 const chapter = route.slice(route.indexOf("if (chapterMode"), route.indexOf("// Synth PER SENTENCE"));
 const sentence = route.slice(route.indexOf("// Synth PER SENTENCE"));

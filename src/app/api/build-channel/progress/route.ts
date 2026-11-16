@@ -54,6 +54,7 @@ export async function GET(request: Request) {
       updatedAt: inception.updatedAt,
       executionAuthorized: inception.admission.executionAuthorized,
       probeAuthorized: inception.admission.probeAuthorized,
+      thumbnailMode: inception.requestSnapshot.thumbnailMode ?? "generated",
       stages,
     });
   } catch (error) {
