@@ -22,6 +22,7 @@ const originalFetch = globalThis.fetch;
 const convexEnv = { public: process.env.NEXT_PUBLIC_CONVEX_URL, private: process.env.CONVEX_URL };
 delete process.env.NEXT_PUBLIC_CONVEX_URL;
 delete process.env.CONVEX_URL;
+process.env.NEXT_PUBLIC_CONVEX_URL = "https://convex.invalid";
 let networkCalls = 0;
 globalThis.fetch = async () => { networkCalls++; throw new Error("network forbidden in assembly evaluation"); };
 
@@ -32,8 +33,21 @@ async function encoded(path: string): Promise<string> {
 }
 
 // Keep the production blocks, adapter, planner, backend, and filesystem real.
-// Only durable storage and FFmpeg operations are replaced.
+// Replace only durable storage, Convex persistence, and FFmpeg operations.
 loader._load = function (id, ...args) {
+  if (id.includes("studioConvexHttpClient")) {
+    return {
+      StudioConvexHttpClient: class {
+        async mutation(_reference: unknown, record: Args) {
+          assert.equal(record.kind, "video");
+          assert.equal(record.ownerId, "owner-mix");
+          assert.equal(record.channelId, "mix-channel");
+          assert.equal(record.r2Key, "test/composer-mix/runs/composer-mix-evaluation/final.mp4");
+          return null;
+        }
+      },
+    };
+  }
   if (id.endsWith("/storage")) return {
     getObjectBytes: async (key: string) => {
       if (key === "test/music.mp3") return Buffer.from("mocked music bytes");
