@@ -117,7 +117,10 @@ function stub(handler: (path: string, init: RequestInit) => Response | Promise<R
     calls.push({ path, method: init.method ?? "GET", ...(init.body ? { body: JSON.parse(String(init.body)) } : {}) });
     return handler(path, init);
   };
-  return { calls, fetcher, client: new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token, fetch: fetcher, timeoutMs: 100 }) };
+  // Keep ordinary mocked round-trips independent of CI scheduler contention.
+  // Tests that exercise deadline behavior construct clients with explicit short
+  // timeouts below.
+  return { calls, fetcher, client: new YuE2EvaluationClient({ endpoint: "http://127.0.0.1:8787", bearerToken: token, fetch: fetcher, timeoutMs: 5_000 }) };
 }
 async function rejected(operation: Promise<unknown>, expectedJobId = request.job.job_id): Promise<void> {
   await assert.rejects(operation, (error: unknown) => {
