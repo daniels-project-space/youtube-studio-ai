@@ -167,14 +167,16 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
         run: node scripts/cloud-runtime-publications.mjs plan
+      - uses: pnpm/action-setup@v4
+        if: steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'
       - uses: actions/setup-node@v4
         if: steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
       - name: Install deploy tooling
         if: steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'
-        run: npm ci --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
       - name: Verify cloud release still matches main
         id: release_policy
         if: steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'
