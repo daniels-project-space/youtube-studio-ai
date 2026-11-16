@@ -382,7 +382,14 @@ async function recordAsset(
       meta,
     });
   } catch (e) {
-    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    const detail = e instanceof Error ? e.message : String(e);
+    if (kind === "video") {
+      throw new ExecutionError(
+        `timeline_assemble: final video could not be indexed in the channel Library; refusing successful completion (${detail})`,
+        { code: "FINAL_VIDEO_LIBRARY_INDEX_FAILED", retryable: false },
+      );
+    }
+    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${detail}`);
   }
 }
 

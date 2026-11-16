@@ -1071,6 +1071,7 @@ export default function NewChannelWizard() {
     if (pollRef.current) clearTimeout(pollRef.current);
     pollAbortRef.current?.abort();
     let lastTaskReadAt = 0;
+    let probeOutputReady = false;
 
     const finish = (slug: string) => {
       if (generation !== pollGenerationRef.current) return;
@@ -1079,7 +1080,9 @@ export default function NewChannelWizard() {
       setActiveBuild(null);
       setPendingBuild(null);
       pollSessionRef.current = null;
-      router.push(`/channels/${slug}`);
+      router.push(probeOutputReady
+        ? `/channels/${encodeURIComponent(slug)}?tab=library`
+        : `/channels/${encodeURIComponent(slug)}`);
     };
     const terminalError = (message: string) => {
       if (generation !== pollGenerationRef.current) return;
@@ -1120,6 +1123,10 @@ export default function NewChannelWizard() {
           hadSuccessfulRead = true;
           if (generation !== pollGenerationRef.current) return;
           setBuildProgress(progress);
+          probeOutputReady = progress.stages.some((stage) =>
+            stage.moduleKey === "channel-inception-probe" &&
+            (stage.status === "complete" || stage.status === "accepted"),
+          );
           if (progress.inceptionStatus === "complete" || progress.inceptionStatus === "planned") {
             finish(session.slug);
             return;
@@ -1292,8 +1299,8 @@ export default function NewChannelWizard() {
               <p role="status" style={{ marginTop: "0.9rem", color: "#9e7b3c", lineHeight: 1.5 }}>
                 {buildProgress.stages.some((stage) => stage.moduleKey === "channel-inception-probe" &&
                   (stage.status === "complete" || stage.status === "accepted"))
-                  ? "Private validation output is ready to review. Thumbnail generation is deferred, so external publishing stays blocked."
-                  : "Channel setup is complete, but no video has been generated yet. Run private validation to create one; external publishing stays blocked."}
+                  ? "Private validation output is ready to review. It remains unpublished; publishing and scheduling are disabled."
+                  : "Channel setup is complete, but no video has been generated yet. Run private validation to create one; publishing and scheduling are disabled."}
               </p>
             )}
           </aside>
