@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -8,6 +7,7 @@ import { join } from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
 import * as qwen from "@/lib/qwenTts";
+import { qwenEngineFixture } from "./fixtures/qwenEngineFixture";
 
 type Report = { takes: Array<Record<string, unknown> & { id: string; audioSha256: string; runtimeReceipt: qwen.QwenTtsReceipt | null }> };
 const repo = process.cwd(), requireLocal = createRequire(join(repo, "package.json"));
@@ -19,18 +19,23 @@ const executable = compiled.replace("main().catch(", "module.exports.completion 
 const root = fs.mkdtempSync(join(tmpdir(), "ysa-qwen-qualification-test-"));
 const savedEnv = { ...process.env }, savedFetch = globalThis.fetch;
 const digest = (bytes: string | Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const audio = Buffer.alloc(2048, 23); audio.set([0x49, 0x44, 0x33]);
 let requests: Record<string, unknown>[] = [], offline = false, failPost = -1;
 globalThis.fetch = async (_url, init) => {
   assert.equal(offline, false, "offline finalization must not contact a provider");
-  const request = JSON.parse(String(init?.body)) as Record<string, unknown>; requests.push(request);
-  assert.equal(new Headers(init?.headers).get("Idempotency-Key"), request.requestKey);
-  if (requests.length === failPost) throw new TypeError("guarded unknown outcome after submission");
-  const body = execFileSync("python3", [join(repo, "workers/qwen3-tts/contract.py"), "--fixture"], {
-    input: JSON.stringify({ payload: request, idempotencyKey: request.requestKey, audioBase64: audio.toString("base64"), durationSec: 20, requestGpuSeconds: 10, gpuRateUsdPerSecond: 0.00005 }), encoding: "utf8",
-  });
-  return Response.json(JSON.parse(body));
+  const fixture = activeEngineFixture;
+  assert.ok(fixture, "synthetic Render Engine fixture must be active during Qwen synthesis");
+  if (init?.method === "POST") {
+    const envelope = JSON.parse(String(init.body)) as { request?: Record<string, unknown> };
+    assert.ok(envelope.request && typeof envelope.request.idempotencyKey === "string");
+    requests.push(envelope.request);
+    if (requests.length === failPost) {
+      await fixture.fetchImpl(_url, init);
+      throw new TypeError("guarded unknown outcome after submission");
+    }
+  }
+  return fixture.fetchImpl(_url, init);
 };
+let activeEngineFixture: ReturnType<typeof qwenEngineFixture> | undefined;
 
 function readReport(out: string): Report { return JSON.parse(fs.readFileSync(join(out, "qualification.json"), "utf8")) as Report; }
 function verdictFile(out: string, mutate?: (value: Record<string, unknown>) => void): string {
@@ -48,12 +53,12 @@ function cloneEvidence(from: string, name: string): string {
 
 async function run(out: string, options: { verdicts?: string; offline?: boolean; measurementFailure?: number; measurementShape?: string; matrixMutation?: (source: string) => string; qualityFailure?: string; failPost?: number; beforePost?: () => void; beforeMeasure?: (path: string) => void } = {}) {
   requests = []; offline = options.offline ?? false; failPost = options.failPost ?? -1;
-  if (offline) { delete process.env.QWEN3_TTS_WORKER_URL; delete process.env.QWEN3_TTS_WORKER_TOKEN; delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST; }
-  else {
-    process.env.QWEN3_TTS_WORKER_URL = "https://guarded.invalid/synthesize";
-    process.env.QWEN3_TTS_WORKER_TOKEN = "local-synthetic-token-no-real-credential-0000";
-    process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST = "registry.example/ysa/qwen3-tts@sha256:" + "b".repeat(64);
-  }
+  activeEngineFixture = qwenEngineFixture();
+  if (offline) delete process.env.RENDER_MANAGEMENT_API_KEY;
+  else process.env.RENDER_MANAGEMENT_API_KEY = "f".repeat(64);
+  delete process.env.QWEN3_TTS_WORKER_URL;
+  delete process.env.QWEN3_TTS_WORKER_TOKEN;
+  delete process.env.QWEN3_TTS_WORKER_IMAGE_DIGEST;
   let measurements = 0, synthCalls = 0, readinessCalls = 0;
   const lines: string[] = [], exits: number[] = [];
   const mod = { exports: {} as { completion?: Promise<unknown> } };
@@ -95,11 +100,17 @@ async function run(out: string, options: { verdicts?: string; offline?: boolean;
 async function main() {
   const fresh = join(root, "fresh");
   const initial = await run(fresh);
-  assert.equal(initial.posts, 6); assert.equal(initial.measurements, 6); assert.equal(initial.code, 3);
+  assert.equal(initial.posts, 6,
+    `expected six distinct Engine jobs (synth=${initial.synthCalls}, measurements=${initial.measurements}): ${initial.lines.join("\n")}`);
+  assert.equal(initial.measurements, 6, initial.lines.join("\n"));
+  assert.equal(initial.code, 3, initial.lines.join("\n"));
   const original = readReport(fresh), originalAudio = original.takes.map((take) => digest(fs.readFileSync(join(fresh, `${take.id}.mp3`))));
+  assert.ok(original.takes.every((take) => take.speaker === "Ryan" && take.language === "English"),
+    "qualification evidence must match the currently admitted Engine profile");
   const verdicts = verdictFile(fresh);
   const configuredFinalization = await run(fresh, { verdicts });
-  assert.equal(configuredFinalization.posts, 0, "adding verdicts must not buy six more takes even when worker credentials are configured");
+  assert.equal(configuredFinalization.posts, 0,
+    `adding verdicts must not buy more takes even when Engine credentials are configured: ${configuredFinalization.lines.join("\n")}`);
   const finalized = await run(fresh, { verdicts, offline: true });
   assert.equal(finalized.code, 0, finalized.lines.join("\n"));
   assert.equal(finalized.posts, 0); assert.equal(finalized.synthCalls, 0); assert.equal(finalized.readinessCalls, 0);

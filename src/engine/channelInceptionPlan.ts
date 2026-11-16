@@ -112,6 +112,8 @@ export interface ChannelInceptionRequest {
   starter?: ChannelStarterIntent;
   /** Defaults true. False omits provider probes without weakening the other contracts. */
   includeProbe?: boolean;
+  /** Explicit MVP packaging deferral. The video workflow remains runnable; publishing stays blocked. */
+  thumbnailMode?: "generated" | "deferred_mvp";
 }
 
 export type ChannelIdentityAssetAction =
@@ -204,7 +206,7 @@ export interface ChannelInceptionStageParamsByKey {
   "channel-inception-readiness": {
     projectionVersion: "1.0.0";
     requireAdmittedArtwork: true;
-    requireAdmittedThumbnail: true;
+    requireAdmittedThumbnail: boolean;
     showEffectiveCompiledFlow: true;
     distinguishGoldenQualification: true;
   };
@@ -237,7 +239,7 @@ export type AnyChannelInceptionStagePlan = {
 
 export interface OmittedChannelInceptionModule {
   moduleKey: ChannelInceptionModuleKey;
-  reason: "not-required-for-family" | "probe-disabled";
+  reason: "not-required-for-family" | "probe-disabled" | "thumbnail-generation-deferred-mvp";
 }
 
 export interface ChannelInceptionPlan {
@@ -521,6 +523,13 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
       omittedModules.push({ moduleKey: contract.key, reason: "probe-disabled" });
       continue;
     }
+    if (
+      contract.key === "channel-inception-thumbnails" &&
+      request.thumbnailMode === "deferred_mvp"
+    ) {
+      omittedModules.push({ moduleKey: contract.key, reason: "thumbnail-generation-deferred-mvp" });
+      continue;
+    }
     includedKeys.add(contract.key);
   }
 
@@ -666,7 +675,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
   addStage("channel-inception-readiness", {
     projectionVersion: "1.0.0",
     requireAdmittedArtwork: true,
-    requireAdmittedThumbnail: true,
+    requireAdmittedThumbnail: request.thumbnailMode !== "deferred_mvp",
     showEffectiveCompiledFlow: true,
     distinguishGoldenQualification: true,
   });
@@ -700,6 +709,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
       : { existingCastFingerprint, protectExistingCast: request.voice?.protectExistingCast === true },
     starter: { topics, previews },
     includeProbe,
+    ...(request.thumbnailMode ? { thumbnailMode: request.thumbnailMode } : {}),
   });
   const inceptionKey = `channel-inception/plans/${channelRef}/${channelInceptionContentSha256({
     requestFingerprint,
@@ -756,6 +766,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
       acceptedPreviewFingerprints: [...acceptedPreviews],
     },
     includeProbe,
+    ...(request.thumbnailMode ? { thumbnailMode: request.thumbnailMode } : {}),
   };
   const executionCostCeilingUsd = stages
     .filter((stage) => stage.moduleKey !== "channel-inception-probe")

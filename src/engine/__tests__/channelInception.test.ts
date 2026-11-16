@@ -232,6 +232,24 @@ function starterSlateReusesAcceptedWork(): void {
   assert.equal(reordered.inceptionKey, plan.inceptionKey, "equivalent accepted work must dedupe to one plan");
 }
 
+function mvpThumbnailDeferralIsExplicit(): void {
+  const base = fixture("Grounded History", "grounded-history", "narrated_stock", "history");
+  const deferred = buildChannelInceptionPlan({ ...base, thumbnailMode: "deferred_mvp" });
+  const readiness = channelInceptionStage(deferred, "channel-inception-readiness")!;
+  assert.equal(channelInceptionStage(deferred, "channel-inception-thumbnails"), undefined);
+  assert(deferred.omittedModules.some((module) =>
+    module.moduleKey === "channel-inception-thumbnails" &&
+    module.reason === "thumbnail-generation-deferred-mvp",
+  ));
+  assert.equal(readiness.params.requireAdmittedThumbnail, false);
+  assert(!readiness.dependsOn.includes("channel-inception-thumbnails"));
+  assert.equal(deferred.requestSnapshot.thumbnailMode, "deferred_mvp");
+
+  const normal = buildChannelInceptionPlan(base);
+  assert(channelInceptionStage(normal, "channel-inception-thumbnails"));
+  assert.notEqual(deferred.inceptionKey, normal.inceptionKey);
+}
+
 function plansAndOutputKeysAreContentAddressed(): void {
   const request = fixture("Gratitude Springs", "gratitude-springs", "sleep", "lifestyle");
   const plan = buildChannelInceptionPlan(request);
@@ -393,6 +411,7 @@ function main(): void {
   comicOwnsItsConsumedCast();
   protectedArtIsIndependentAndNeverOverwritten();
   starterSlateReusesAcceptedWork();
+  mvpThumbnailDeferralIsExplicit();
   plansAndOutputKeysAreContentAddressed();
   showProfileIsDurableAndVersionsPipelineStage();
   optionalProbeAndInvalidIntentsFailSafely();

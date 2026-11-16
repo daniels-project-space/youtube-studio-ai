@@ -33,10 +33,7 @@ import {
   type PendingChannelBuildRequest,
 } from "@/lib/channelBuildRecovery";
 import { channelBuildCostAuthority } from "@/lib/channelBuildCostAuthority";
-import {
-  normalizeYoutubeChannelName,
-  suggestYoutubeHandle,
-} from "@/lib/youtubeChannelCreationClaim";
+import { normalizeYoutubeChannelName } from "@/lib/youtubeChannelCreationClaim";
 import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 import {
   createChannelProgramBrief,
@@ -120,6 +117,7 @@ interface BuildProgress {
   updatedAt: number;
   executionAuthorized: boolean;
   probeAuthorized: boolean;
+  thumbnailMode?: "generated" | "deferred_mvp";
   stages: Array<{
     moduleKey: string;
     status: string;
@@ -364,12 +362,9 @@ export default function NewChannelWizard() {
   const [cadence, setCadence] = useState("weekly");
   const [days, setDays] = useState<number[]>([1]);
   const [budget, setBudget] = useState(5);
-  const [publishMode, setPublishMode] = useState("draft");
-  const [approvedForPublish, setApprovedForPublish] = useState(false);
+  const publishMode = "draft";
+  const approvedForPublish = false;
   const [approveSetupSpend, setApproveSetupSpend] = useState(false);
-  // Creating a real external channel is consequential. Keep it opt-in even
-  // though the rest of Channel Inception can run autonomously and stay draft.
-  const [autoYoutube, setAutoYoutube] = useState(false);
   const [runProbe, setRunProbe] = useState(false);
   const createRequestKeyRef = useRef<{ intent: string; key: string } | null>(null);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
@@ -485,6 +480,7 @@ export default function NewChannelWizard() {
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
+  const supportedQwenLocale = /^(?:en(?:[-_][a-z0-9]+)*|english)$/i.test(locale.trim());
   const selectedQuizProfile = CERTIFIED_QUIZ_PROFILE_OPTIONS.find((profile) => profile.key === quizProfile)
     ?? CERTIFIED_QUIZ_PROFILE_OPTIONS[0];
   // This mirrors the server-owned Show Profile derivation for presentation
@@ -640,9 +636,6 @@ export default function NewChannelWizard() {
     if (supervised) {
       setApproveSetupSpend(false);
       setRunProbe(false);
-      setAutoYoutube(false);
-      setPublishMode("draft");
-      setApprovedForPublish(false);
       setToggles((current) => ({ ...current, crosspost: false }));
     }
     if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
@@ -953,20 +946,12 @@ export default function NewChannelWizard() {
         return;
       }
       const requestedYoutubeName = normalizeYoutubeChannelName(name);
-      if (autoYoutube && !requestedYoutubeName) {
-        setError("Enter the exact channel name before authorizing real YouTube creation.");
-        setPhase("error");
-        return;
-      }
-      const requestedYoutubeHandle = autoYoutube
-        ? suggestYoutubeHandle(requestedYoutubeName)
-        : undefined;
       const reviewedDataStoryIntake = family === "narrated_stock" && dataStory;
       if (
         reviewedDataStoryIntake &&
-        (autoYoutube || runProbe || approveSetupSpend || approvedForPublish || publishMode !== "draft")
+        (runProbe || approveSetupSpend)
       ) {
-        setError("Reviewed Data Story intake creates a draft shell only. Disable YouTube setup, rendering, and publication first.");
+        setError("Reviewed Data Story intake creates a draft shell only. Disable private validation and setup spend first.");
         setPhase("error");
         return;
       }
@@ -993,15 +978,16 @@ export default function NewChannelWizard() {
         lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,
         footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
-        cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
+        cadence, days, budget, publishMode: "draft", approvedForPublish: false,
+        toggles: { ...toggles, crosspost: false }, autoYoutube: false, runProbe,
         ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
         ...(reviewedDataStoryIntake
           ? { supervisedDataStoryIntake: "reviewed_data_story_intake/v1" }
           : {}),
-        ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
         moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
+        thumbnailMode: "deferred_mvp",
         exampleClipUrl: clipUrl.trim() || undefined,
       };
       const intent = canonicalJson(design);
@@ -1302,6 +1288,14 @@ export default function NewChannelWizard() {
               <span><small>Build ID</small><strong>{activeBuild?.runId?.slice(0, 10) ?? "Pending"}</strong></span>
               <span><small>Recovery</small><strong>Safe to reconnect</strong></span>
             </div>
+            {buildProgress?.thumbnailMode === "deferred_mvp" && (
+              <p role="status" style={{ marginTop: "0.9rem", color: "#9e7b3c", lineHeight: 1.5 }}>
+                {buildProgress.stages.some((stage) => stage.moduleKey === "channel-inception-probe" &&
+                  (stage.status === "complete" || stage.status === "accepted"))
+                  ? "Private validation output is ready to review. Thumbnail generation is deferred, so external publishing stays blocked."
+                  : "Channel setup is complete, but no video has been generated yet. Run private validation to create one; external publishing stays blocked."}
+              </p>
+            )}
           </aside>
 
           <div>
@@ -1313,7 +1307,7 @@ export default function NewChannelWizard() {
                 return <div className={styles.buildPhase} data-state={complete ? "complete" : active ? "active" : "queued"} key={phaseRow.label}>
                   <small>{complete ? "Complete" : active ? "In progress" : "Queued"}</small>
                   <strong>{phaseRow.label}</strong>
-                  <span>{rows.filter((stage) => stage.status === "complete" || stage.status === "accepted").length}/{phaseRow.keys.length} receipts</span>
+                <span>{rows.filter((stage) => stage.status === "complete" || stage.status === "accepted").length}/{rows.length} receipts</span>
                 </div>;
               })}
             </div>
@@ -1386,6 +1380,7 @@ export default function NewChannelWizard() {
         family
           && fam?.available
           && programBrief
+          && (!fam.narrated || supportedQwenLocale)
           && (supervisedAdmission || (
             automaticFamilyCreatorReadiness(family).ready
             && selectedAutomaticRuntimeReady
@@ -1393,12 +1388,13 @@ export default function NewChannelWizard() {
           )),
       )
       : step === 2
-        ? Boolean(programBrief && (supervisedAdmission || exactAutomaticPreviewReady))
+        ? Boolean(programBrief && (!fam?.narrated || supportedQwenLocale) && (supervisedAdmission || exactAutomaticPreviewReady))
         : true;
   const automaticCreateDisabled = !supervisedAdmission && (
     !programBrief
     || !exactAutomaticPreviewReady
-    || ((publishMode !== "draft" || toggles.crosspost) && !approvedForPublish)
+    || (Boolean(fam?.narrated) && !supportedQwenLocale)
+    || (publishMode !== "draft" && !approvedForPublish)
   );
   const reviewHandoffHref = supervisedAdmission?.reviewHref === "/children-review"
     ? `/children-review?channelName=${encodeURIComponent(name)}`
@@ -1615,7 +1611,6 @@ export default function NewChannelWizard() {
           <label style={lblStyle}><span style={capStyle}>Channel name · optional</span>
             <input value={name} onChange={(e) => {
               setName(e.target.value);
-              if (!normalizeYoutubeChannelName(e.target.value)) setAutoYoutube(false);
             }} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
           <label style={lblStyle}><span style={capStyle}>Reference video · optional</span>
             <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link whose qualities you want to discuss" style={inpStyle} />
@@ -1766,7 +1761,18 @@ export default function NewChannelWizard() {
                 </Row>
               );
             })()}
-            <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}><option value="en">English</option><option value="es">Spanish</option><option value="de">German</option></select></Row>
+            {fam?.narrated && (
+              <>
+                <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}>
+                  <option value="en">English · Qwen Ryan</option>
+                  <option value="es" disabled>Spanish · voice profile not qualified</option>
+                  <option value="de" disabled>German · voice profile not qualified</option>
+                </select></Row>
+                <p role={!supportedQwenLocale ? "alert" : undefined} style={{ color: !supportedQwenLocale ? "var(--color-failed)" : "var(--color-muted)", fontSize: "0.74rem", margin: "-0.25rem 0 0.4rem" }}>
+                  The current private MVP route supports Qwen3 English/Ryan. Other voice profiles stay unavailable until their Engine routes pass qualification.
+                </p>
+              </>
+            )}
             {family === "narrated_stock" && (
               <Row label="Footage theme"><select value={footageTheme} onChange={(e) => setFootageTheme(e.target.value)} style={selStyle}><option value="">Topic-matched (channel DNA)</option><option value="nature">Nature / landscapes / ruins</option></select></Row>
             )}
@@ -1796,11 +1802,8 @@ export default function NewChannelWizard() {
                                 return next;
                               });
                               if (checked) {
-                                setAutoYoutube(false);
                                 setRunProbe(false);
                                 setApproveSetupSpend(false);
-                                setApprovedForPublish(false);
-                                setPublishMode("draft");
                               }
                             }}
                           />
@@ -1906,7 +1909,7 @@ export default function NewChannelWizard() {
                 </>}
               </div>
             </Row>
-            <Row label="Cadence"><select value={cadence} onChange={(e) => setCadence(e.target.value)} style={selStyle}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></Row>
+            <Row label="Planned cadence"><select value={cadence} onChange={(e) => setCadence(e.target.value)} style={selStyle}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></Row>
             {(cadence === "weekly" || cadence === "biweekly") && (
               <Row label="Upload days">
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -1922,7 +1925,7 @@ export default function NewChannelWizard() {
               </div>
             ) : (
               <>
-                <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
+                <Row label="Release mode"><span style={muted}>Private draft only · channel stays paused · no uploads are scheduled</span></Row>
                 <Row label="One-time setup">
                   <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
                     <input
@@ -1934,27 +1937,12 @@ export default function NewChannelWizard() {
                         // proof. Unchecking setup returns the request to
                         // plan-only and clears every paid authority.
                         setRunProbe(e.target.checked);
-                        if (!e.target.checked) setAutoYoutube(false);
                       }}
                     />
-                    <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
+                    <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, channel identity and private setup</span>
                   </label>
                 </Row>
-                <Row label="Auto-create YouTube channel">
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
-                      checked={autoYoutube}
-                      onChange={(e) => setAutoYoutube(e.target.checked)}
-                    />
-                    <span style={muted}>
-                      {normalizeYoutubeChannelName(name)
-                        ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
-                        : "enter a channel name first so the exact external identity can be approved"}
-                    </span>
-                  </label>
-                </Row>
+                <Row label="YouTube destination"><span style={muted}>External channel creation is disabled for this private MVP.</span></Row>
                 <Row label="Paid validation render">
                   <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: approveSetupSpend ? "default" : "not-allowed" }}>
                     <input type="checkbox" disabled={!approveSetupSpend} checked={approveSetupSpend && runProbe} readOnly />
@@ -1974,7 +1962,7 @@ export default function NewChannelWizard() {
             <div className={styles.room}>
               <header className={styles.roomHeader}><div><small>03B / tools</small><strong>Optional modules</strong></div><span>Editable later</span></header>
               <div className={styles.moduleToggleGrid}>
-              {([["quotes", "Quote cards", "quote_overlays"], ["captions", "Burned captions", "captions"], ["chapters", "Chapter cards", ""], ["notify", "Telegram notify", "notify"], ["crosspost", "Cross-post (TikTok/Reels)", ""], ["shorts", "Companion Short when eligible (9:16, private)", ""], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)", ""]] as [keyof Toggles, string, string][]).map(([k, lbl, block]) => {
+              {([["quotes", "Quote cards", "quote_overlays"], ["captions", "Burned captions", "captions"], ["chapters", "Chapter cards", ""], ["notify", "Telegram notify", ""], ["shorts", "Companion Short when eligible (9:16, private)", ""], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)", ""]] as [keyof Toggles, string, string][]).map(([k, lbl, block]) => {
                 const required = Boolean(block && requiredPlannerBlocks.has(block));
                 return <label key={k} className={styles.moduleToggle} data-required={required ? "true" : undefined} title={required ? "Required by this route's certified planner" : undefined}>
                   <input type="checkbox" checked={toggles[k]} disabled={required} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}{required ? " · required" : ""}
@@ -2031,6 +2019,7 @@ export default function NewChannelWizard() {
             <SummaryRow k="Format" v={fam.label} />
             {family === "quizyear" && <SummaryRow k="Quiz identity" v={selectedQuizProfile.label} />}
             <SummaryRow k="Visual engine" v={fam.visualEngine} />
+            <SummaryRow k="Thumbnail" v="Deferred for MVP · private video output remains available" />
             {duration && <SummaryRow k="Episode unit" v={duration.inputUnit === "fixed"
               ? formatFamilyDurationContract(family as FamilyKey)
               : duration.inputUnit === "hours"
@@ -2043,7 +2032,7 @@ export default function NewChannelWizard() {
             {dataStory && <SummaryRow k="Data story" v="Source-attributed charts only · 3+ named-source numeric sentences required" />}
             {syntheticScenarioProfile && <SummaryRow k="Fictional AI format" v={`${syntheticScenarioProfile === "ai_town" ? "AI runs a fictional town" : syntheticScenarioProfile === "ai_decision" ? "What would AI do?" : "AI POV story"} · disclosure gate + local scenario visuals`} />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
-            <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
+            <SummaryRow k="Planned cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · inactive while paused`} />
             {supervisedAdmission ? (
               <SummaryRow k="Authority" v="Private review only · $0 provider spend · no render, YouTube creation, or publishing" />
             ) : (
@@ -2055,12 +2044,6 @@ export default function NewChannelWizard() {
               </>
             )}
           </div>
-          {!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost) && (
-            <label className="glass" style={{ padding: "0.9rem 1rem", display: "flex", alignItems: "flex-start", gap: "0.65rem", fontSize: "0.82rem", cursor: "pointer", border: "1px solid rgba(245,158,11,0.45)" }}>
-              <input type="checkbox" checked={approvedForPublish} onChange={(e) => setApprovedForPublish(e.target.checked)} />
-              <span>I explicitly approve automatic external publishing for this channel. This includes scheduled/public YouTube uploads and any enabled cross-posting.</span>
-            </label>
-          )}
           <div className={styles.room}>
             <header className={styles.roomHeader}><div><small>04A / route manifest</small><strong>
               {supervisedAdmission

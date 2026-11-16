@@ -76,6 +76,11 @@ assert.match(programBriefArgs, /\{ sampleTopics \}/);
 assert.match(programBriefArgs, /\{ programIntent \}/);
 assert.match(programBriefArgs, /\{ serializedProgram \}/);
 assert.match(wizard, /fetch\("\/api\/channel-pipeline-preview"/);
+assert.match(wizard, /thumbnailMode: "deferred_mvp"/);
+assert.match(wizard, /no uploads are scheduled/);
+assert.match(wizard, /no video has been generated yet/i);
+assert.match(detail, /Thumbnail generation is deferred/);
+assert.match(detail, /no video has been generated/i);
 assert.doesNotMatch(wizard, /function previewBlocks/);
 assert.match(wizard, /pipelinePreview\.status !== "ready"/);
 assert.match(wizard, /const serializedProgram = seriesTitle\.trim\(\)/);
@@ -184,11 +189,13 @@ assert.match(wizard, /proofOrbit/);
 assert.match(wizard, /STAGE_DESCRIPTIONS/);
 assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
 assert.match(wizard, /href="\/api\/operations\/authorize"[\s\S]*Verify owner to save/);
-// New creation must not revive the retired Qwen path. Historic records retain
-// their module receipts in channel Settings, while controlled onboarding uses
-// the registry's new-channel projection.
+// New creation exposes only the currently qualified Qwen profile. Historic
+// records retain their module receipts in channel Settings.
 assert.match(moduleConfigSection, /channelId \? "runtime" : "new_channel"/);
-assert.doesNotMatch(wizard, /Qwen|qwen3|qwenSpeaker/);
+assert.match(wizard, /English · Qwen Ryan/);
+assert.match(wizard, /Spanish · voice profile not qualified/);
+assert.match(wizard, /Other voice profiles stay unavailable until their Engine routes pass qualification/);
+assert.doesNotMatch(wizard, /Cross-post \(TikTok\/Reels\)/);
 assert.match(wizardCss, /\.nicheGrid/);
 assert.match(wizardCss, /\.showMoreNiches/);
 assert.match(wizardCss, /\.buildWorkspace/);

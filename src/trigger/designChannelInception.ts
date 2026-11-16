@@ -256,6 +256,8 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family" | "progr
   moduleConfig?: Record<string, Record<string, unknown>>;
   /** Operator-reviewed compiler snapshot; recompiled before any new channel write. */
   pipelinePreviewSnapshot?: ChannelPipelinePreviewSnapshot;
+  /** Explicit personal-MVP packaging deferral; never authorizes thumbnail provider calls. */
+  thumbnailMode?: "deferred_mvp";
   /**
    * A narrowly-scoped, zero-spend shell for the reviewed Data Story desk.
    * It is never an automatic channel-creation or publication authority.
@@ -410,6 +412,7 @@ interface ReadinessProjection {
   avatarKey?: string;
   bannerKey?: string;
   acceptedThumbnailCount: number;
+  thumbnailStatus: "accepted" | "deferred_mvp";
   probe: ProbeOutcome;
   goldenQualified: false;
 }
@@ -1485,6 +1488,9 @@ export async function executeDesignChannel(
     console.log(`[design-channel] ${message}`, extra ?? "");
   const family = FAMILIES[payload.family];
   if (!family) throw new Error(`unknown family: ${payload.family}`);
+  if (payload.thumbnailMode !== undefined && payload.thumbnailMode !== "deferred_mvp") {
+    throw new Error("new channel setup currently requires the explicit MVP thumbnail deferral");
+  }
   // The creator route must provide the already-canonical program. Do this
   // before creating a resumable shell, loading providers, or reserving spend;
   // no legacy/implicit brief may silently receive a new execution.
@@ -2366,11 +2372,13 @@ export async function executeDesignChannel(
       acceptedPreviewFingerprints,
     },
     includeProbe: probeApproved,
+    thumbnailMode: "deferred_mvp",
   };
+  const immutableRequest = canResumeSnapshot
+    ? { ...(previousSnapshot as ChannelInceptionRequest), thumbnailMode: "deferred_mvp" as const }
+    : currentRequest;
   const plan = buildChannelInceptionPlan(
-    canResumeSnapshot
-      ? previousSnapshot as ChannelInceptionRequest
-      : currentRequest,
+    immutableRequest,
   );
   if (canResumeSnapshot) log("restored immutable inception request snapshot for retry");
   if (!canResumeSnapshot && !plan.requestSnapshot.programRoute) {
@@ -3205,7 +3213,9 @@ export async function executeDesignChannel(
     },
   });
 
-  const thumbnailStage = channelInceptionStage(plan, "channel-inception-thumbnails")!;
+  const thumbnailStage = channelInceptionStage(plan, "channel-inception-thumbnails");
+  const thumbnailDeferred = plan.requestSnapshot.thumbnailMode === "deferred_mvp";
+  if (thumbnailStage) {
   const loadThumbnails = async () => {
     const channel = await currentChannel(convex, channelId);
     const rows = await readyPlanRows(convex, ownerId, channelId);
@@ -3373,6 +3383,9 @@ export async function executeDesignChannel(
       return dispatchStarterPlan(playbook, controls, _checkpoint);
     },
   });
+  } else if (!thumbnailDeferred) {
+    throw new Error("channel thumbnail stage was omitted without an explicit MVP deferral");
+  }
 
   const loadPipeline = async () => {
     const channel = await currentChannel(convex, channelId);
@@ -3990,8 +4003,13 @@ export async function executeDesignChannel(
       });
       if (!avatarFreshness.current) blockers.push("current identity-bound avatar approval is missing");
       if (!bannerFreshness.current) blockers.push("current identity-bound banner approval is missing");
-      if (!channel.thumbnailPlaybook) blockers.push("thumbnail playbook is missing");
-      if (acceptedThumbnailCount < thumbnailStage.params.previews.targetCount) {
+      if (!thumbnailDeferred && !thumbnailStage) blockers.push("thumbnail stage was not planned");
+      if (!thumbnailDeferred && !channel.thumbnailPlaybook) blockers.push("thumbnail playbook is missing");
+      if (
+        !thumbnailDeferred &&
+        thumbnailStage &&
+        acceptedThumbnailCount < thumbnailStage.params.previews.targetCount
+      ) {
         blockers.push(`starter thumbnails incomplete (${acceptedThumbnailCount}/${thumbnailStage.params.previews.targetCount})`);
       }
       if (
@@ -4038,6 +4056,7 @@ export async function executeDesignChannel(
         avatarKey: identity.imageKey,
         bannerKey: identity.bannerKey,
         acceptedThumbnailCount,
+        thumbnailStatus: thumbnailDeferred ? "deferred_mvp" : "accepted",
         probe: probeOutcome,
         // Catalog mapping remains distinct from immutable Golden promotion.
         goldenQualified: false,
@@ -4068,7 +4087,7 @@ export async function executeDesignChannel(
     }
   }
 
-  if (readiness.status === "paused" && youtubeCreationApproved) {
+  if (readiness.status === "paused" && !thumbnailDeferred && youtubeCreationApproved) {
     try {
       const { idempotencyKeys, tasks } = await import("@trigger.dev/sdk");
       const creationRequestKey = youtubeChannelCreationRequestKey({
@@ -4117,6 +4136,7 @@ export async function executeDesignChannel(
   const publishConfiguration = channelPublishConfiguration(finalChannel.pipeline);
   if (
     readiness.status === "paused" &&
+    !thumbnailDeferred &&
     publishConfiguration.actions.length &&
     publishingApproved
   ) {
@@ -4147,8 +4167,12 @@ export async function executeDesignChannel(
     inceptionKey: plan.inceptionKey,
     resumed: Boolean(existingAtStart),
     blockers: readiness.blockers,
-    warnings: publishPolicyWarning
-      ? [...design.warnings, publishPolicyWarning]
-      : design.warnings,
+    warnings: [
+      ...design.warnings,
+      ...(thumbnailDeferred
+        ? ["Thumbnail generation is deferred for the personal MVP; external publishing remains blocked."]
+        : []),
+      ...(publishPolicyWarning ? [publishPolicyWarning] : []),
+    ],
   };
 }

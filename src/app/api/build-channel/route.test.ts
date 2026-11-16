@@ -53,6 +53,43 @@ async function main() {
     });
     const design = designFor(brief);
 
+    const unsupportedLocaleBrief = createChannelProgramBrief({
+      family: "whiteboard",
+      nicheKey: "educational",
+      locale: "es",
+      concept: "Explain a hard science mechanism with a causal whiteboard story.",
+    });
+    const unsupportedLocaleDesign = designFor(unsupportedLocaleBrief);
+    const unsupportedLocale = await POST(request({
+      requestKey: requestKey(unsupportedLocaleDesign),
+      design: unsupportedLocaleDesign,
+    }));
+    assert.equal(unsupportedLocale.status, 400);
+    assert.match((await unsupportedLocale.json() as { error: string }).error, /English\/Ryan only/);
+
+    const unsupportedVoiceDesign = {
+      ...design,
+      moduleConfig: { narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Aiden" } },
+    };
+    const unsupportedVoice = await POST(request({
+      requestKey: requestKey(unsupportedVoiceDesign),
+      design: unsupportedVoiceDesign,
+    }));
+    assert.equal(unsupportedVoice.status, 400);
+    assert.match((await unsupportedVoice.json() as { error: string }).error, /English\/Ryan narration only/);
+
+    const publicReleaseDesign = { ...design, publishMode: "public" };
+    const publicRelease = await POST(request({
+      requestKey: requestKey(publicReleaseDesign),
+      design: publicReleaseDesign,
+    }));
+    assert.equal(publicRelease.status, 400);
+    assert.match(
+      (await publicRelease.json() as { error: string }).error,
+      /private drafts only/,
+      "the MVP creation endpoint must keep publishing and external destinations disabled",
+    );
+
     const retiredNarrationProviderDesign = {
       ...design,
       paramOverrides: { narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Aiden" } },
@@ -64,7 +101,7 @@ async function main() {
     assert.equal(retiredNarrationProvider.status, 400);
     assert.match(
       (await retiredNarrationProvider.json() as { error: string }).error,
-      /ElevenLabs narration only/,
+      /Qwen3 through moduleConfig/,
       "new-channel builds must refuse retired narration settings before any capability or provider work",
     );
 
