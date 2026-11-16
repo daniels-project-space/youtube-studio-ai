@@ -8,15 +8,18 @@ export const dynamic = "force-dynamic";
  * deployment check into billable traffic and expose infrastructure state.
  */
 export async function GET(): Promise<NextResponse> {
+  const buildRevision = process.env.RELEASE_SHA?.trim();
+  const runtimeRevision = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
   return NextResponse.json(
     {
       ok: true,
       service: "youtube-studio-ai",
-      revision:
-        process.env.RELEASE_SHA?.trim() ||
-        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
-        "unknown",
-      deploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || null,
+      revision: buildRevision || runtimeRevision || "unknown",
+      revisionSource: buildRevision ? "build" : runtimeRevision ? "runtime" : "unknown",
+      deploymentId:
+        process.env.RELEASE_DEPLOYMENT_ID?.trim() ||
+        process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
+        null,
     },
     {
       headers: {
