@@ -3,7 +3,13 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 import { OWNER_ID } from "@/lib/config";
 import type { ChannelInceptionLedgerState } from "@/engine/channelInceptionLedger";
+import {
+  channelInceptionProbeArtifactCandidate,
+  channelInceptionProbeArtifactReceipt,
+} from "@/engine/channelInceptionProbeArtifact";
+import { headObjectMetadata } from "@/lib/storage";
 import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 
 export const runtime = "nodejs";
 
@@ -25,7 +31,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const channel = await convexClient().query(api.channels.getChannelBySlug, {
+    const convex = convexClient();
+    const channel = await convex.query(api.channels.getChannelBySlug, {
       ownerId: OWNER_ID,
       slug,
     });
@@ -45,6 +52,31 @@ export async function GET(request: Request) {
       finishedAt: stage.finishedAt,
       error: stage.error,
     }));
+    let probeArtifact: ReturnType<typeof channelInceptionProbeArtifactReceipt> = null;
+    const probeStage = inception.stages["channel-inception-probe"];
+    const probe = (probeStage?.outputs as { probe?: { ok?: unknown; runId?: unknown } } | undefined)?.probe;
+    if (
+      inception.status === "complete" &&
+      inception.admission.executionAuthorized &&
+      inception.admission.probeAuthorized &&
+      (probeStage?.status === "complete" || probeStage?.status === "accepted") &&
+      probe?.ok === true &&
+      typeof probe.runId === "string" && probe.runId.trim().length > 0
+    ) {
+      const probeRunId = probe.runId;
+      const assets = await convex.query(api.assets.listForRun, {
+        runId: probeRunId as Id<"runs">,
+      });
+      const candidate = channelInceptionProbeArtifactCandidate(assets, {
+        ownerId: OWNER_ID,
+        channelId: String(channel._id),
+        runId: probeRunId,
+      });
+      if (candidate) {
+        const objectMetadata = await headObjectMetadata(candidate.r2Key);
+        probeArtifact = channelInceptionProbeArtifactReceipt(candidate, objectMetadata);
+      }
+    }
     return NextResponse.json({
       found: true,
       channelId: channel._id,
@@ -55,6 +87,7 @@ export async function GET(request: Request) {
       executionAuthorized: inception.admission.executionAuthorized,
       probeAuthorized: inception.admission.probeAuthorized,
       thumbnailMode: inception.requestSnapshot.thumbnailMode ?? "generated",
+      probeArtifact,
       stages,
     });
   } catch (error) {

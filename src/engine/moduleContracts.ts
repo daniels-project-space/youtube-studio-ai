@@ -13,10 +13,6 @@ import { novitaCinematicQaMaxGraderCallsPerShot } from "./novitaVisualQaBudget";
 import { cinematicFinalMasterQaVisualReviewPlanFromStore } from "./cinematicFinalMasterQaAdmission";
 import { whiteboardRenderScheduleRequiredEvidenceFrameCount } from "./selfContainedStoryQualityEvidence";
 import {
-  NARRATION_COLD_OPEN_MAX_CHARS,
-  narrationChapterHeadingCharacterCeiling,
-} from "../lib/narrationBounds";
-import {
   motionComicImageCallCeiling,
   motionComicPanelCount,
   motionComicTtsBillableCharacterCeiling,
@@ -27,6 +23,10 @@ import {
   whiteboardNarrationCharacterCeiling,
   whiteboardPanelsForTargetSeconds,
 } from "../lib/whiteboardSyncBounds";
+import {
+  NARRATION_TTS_MODULE_COST_CEILING_USD,
+  narrationTtsCostCeilingUsd,
+} from "./narrationTtsCost";
 import type {
   ModuleContractOverride,
   ModuleCostContext,
@@ -630,28 +630,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Grounds the cold-open take judge in this channel's own voice standard.
           ],
     providerProfiles: [managed],
-    maxCostUsd: 10,
+    maxCostUsd: NARRATION_TTS_MODULE_COST_CEILING_USD,
     maxCostUsdFor: (params, context) => {
       const seconds = targetSeconds(params, context, 300);
-      // 20 chars/sec covers the current script pacing plus punctuation and
-      // optional voice tags. Add both bounded cold-open purchases/judges and
-      // the exact maximum spoken chapter-heading overhead when enabled.
-      const maxCharacters =
-        Math.ceil(seconds * 20) +
-        2 * NARRATION_COLD_OPEN_MAX_CHARS +
-        (params["chapterCards"] === true
-          ? narrationChapterHeadingCharacterCeiling()
-          : 0);
-      const provider = String(params["ttsProvider"] ?? "fish").toLowerCase();
-      const rate = provider === "elevenlabs"
-        ? PRICE.ttsElevenPerKCharUsd
-        : provider === "qwen3"
-          ? PRICE.ttsQwenMaxPerKCharUsd
-          : PRICE.ttsPerKCharUsd;
-      return (
-        (maxCharacters * rate) / 1_000 +
-        2 * PRICE.visionGraderUsd
-      );
+      return narrationTtsCostCeilingUsd({
+        durationSeconds: seconds,
+        provider: String(params["ttsProvider"] ?? "fish").toLowerCase(),
+        chapterCards: params["chapterCards"] === true,
+      });
     },
     qualityRequired: true,
   }),
@@ -731,7 +717,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
-      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
+      // New-channel private proofs may explicitly defer package art. The
+      // runtime keeps this optional only for a signed no-thumbnail probe;
+      // production QA still hard-fails when a publishable thumbnail is absent.
+      "thumbnailKey", "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
       "tags", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       // No overlaysDropped: qa_visual never reads it. The counter is surfaced in

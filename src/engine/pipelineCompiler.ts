@@ -124,6 +124,20 @@ export const PRIVATE_PROBE_CONTRACT_POLICY: PipelinePolicy = {
   ),
 };
 
+/**
+ * Personal MVP proof that is explicitly unpublishable while thumbnail work is
+ * deferred. Every production capability except package art remains required;
+ * the production and ordinary private-probe policies stay unchanged.
+ */
+export const PRIVATE_PROBE_DEFERRED_THUMBNAIL_CONTRACT_POLICY: PipelinePolicy = {
+  ...PRIVATE_PROBE_CONTRACT_POLICY,
+  id: "private-probe-deferred-thumbnail-contract",
+  version: "1.0.0",
+  requiredCapabilities: PRIVATE_PROBE_CONTRACT_POLICY.requiredCapabilities.filter(
+    (capability) => capability !== "package.thumbnail",
+  ),
+};
+
 const certificationRank = { revoked: -1, legacy: 0, contract: 1, golden: 2 } as const;
 
 type PolicyManifestSource = "runtime" | "structural";

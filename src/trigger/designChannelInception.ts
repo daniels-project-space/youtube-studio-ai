@@ -132,6 +132,7 @@ import {
   type ChannelInceptionProbeAttemptReference,
   type ChannelInceptionProbeQualityEvidence,
 } from "@/lib/channelInceptionProbe";
+import { buildChannelInceptionProbePipeline as buildProbePipeline } from "@/engine/channelInceptionProbePipeline";
 import {
   makeVoicecraftAuditionEvidence,
   makeProviderMetadataSelectionEvidence,
@@ -1267,49 +1268,6 @@ function validatePipelineVoiceWiring(
   return { ok: true };
 }
 
-function buildProbePipeline(source: readonly PipelineEntry[]): PipelineEntry[] {
-  const dropped = new Set([
-    "upload_draft",
-    "notify",
-    "cleanup",
-    "shorts_spinoff",
-    "crosspost",
-    "emit_bundle",
-  ]);
-  return source
-    .filter((entry) => !dropped.has(entry.block))
-    .map((entry) => {
-      const params: Record<string, unknown> = { ...(entry.params ?? {}) };
-      if (entry.block === "topic_select") {
-        params.dryRun = true;
-        params.targetSeconds = 60;
-      }
-      if (entry.block === "script_gen") {
-        params.maxSeconds = 60;
-        params.endWithSummary = false;
-      }
-      if (entry.block === "length_check") {
-        params.minSeconds = 20;
-        params.maxSeconds = 220;
-      }
-      if (entry.block === "music") params.trackCount = 1;
-      if (entry.block === "gen_footage") params.maxClips = 6;
-      if (entry.block === "stock_footage") params.signatureGenClips = 0;
-      if (entry.block === "visual_inserts") params.maxInserts = 1;
-      if (entry.block === "quote_overlays") params.maxQuotes = 1;
-      if (entry.block === "assemble") params.durationSec = 120;
-      if (entry.block === "whiteboard_scribe") {
-        params.targetSeconds = 60;
-        params.width = 1280;
-      }
-      if (entry.block === "motion_comic") {
-        params.panels = 4;
-        params.width = 1280;
-      }
-      return { ...entry, params: Object.keys(params).length ? params : undefined };
-    });
-}
-
 function effectivePipelineFingerprint(channel: {
   pipeline?: unknown;
   moduleConfig?: unknown;
@@ -1491,6 +1449,7 @@ export async function executeDesignChannel(
   if (payload.thumbnailMode !== undefined && payload.thumbnailMode !== "deferred_mvp") {
     throw new Error("new channel setup currently requires the explicit MVP thumbnail deferral");
   }
+  const probeThumbnailMode = payload.thumbnailMode ?? "deferred_mvp";
   // The creator route must provide the already-canonical program. Do this
   // before creating a resumable shell, loading providers, or reserving spend;
   // no legacy/implicit brief may silently receive a new execution.
@@ -3704,6 +3663,7 @@ export async function executeDesignChannel(
             const channelSnapshot = await currentChannel(convex, channelId);
             const pipelineOverride = buildProbePipeline(
               (channelSnapshot.pipeline ?? effectivePipeline) as PipelineEntry[],
+              { thumbnailMode: probeThumbnailMode },
             );
             const moduleConfigOverride = structuredClone(
               (channelSnapshot as {
@@ -3717,6 +3677,7 @@ export async function executeDesignChannel(
                 ownerId,
                 family: payload.family,
                 channel: channelSnapshot,
+                thumbnailMode: probeThumbnailMode,
               }),
               productionFingerprint: effectivePipelineFingerprint(channelSnapshot),
             });
@@ -3865,7 +3826,9 @@ export async function executeDesignChannel(
           const qaStage = spendStages.find(
             (stage) => stage.block === "qa_visual" && stage.status === "ok",
           );
-          quality = assessChannelInceptionProbeQuality(qaStage?.outputs);
+          quality = assessChannelInceptionProbeQuality(qaStage?.outputs, {
+            thumbnailMode: probeThumbnailMode,
+          });
           review = reviewProbeArtifacts(spendStages);
           outcome = {
             ok: quality.status === "accepted",

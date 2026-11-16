@@ -6,9 +6,15 @@ export const CHANNEL_INCEPTION_PROBE_CHECKPOINT_VERSION =
 export const MAX_CHANNEL_INCEPTION_PROBE_ATTEMPTS = 2;
 /** Absolute ceiling; each frozen context further narrows this by family. */
 export const MAX_CHANNEL_INCEPTION_PROBE_COST_USD = 55;
+export const PRIVATE_PROBE_THUMBNAIL_MODE_PARAM =
+  "channelInceptionProbeThumbnailMode" as const;
+export const PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY =
+  "channelInceptionProbeThumbnailMode" as const;
 
 export interface ChannelInceptionProbeInvocationContext {
   channelBudgetUsd: number;
+  /** Exact private proof exception, frozen with the signed pipeline override. */
+  thumbnailMode?: "deferred_mvp";
   /**
    * Family-specific signed ceiling, fingerprinted with new child invocations.
    * Undefined is a legacy v1 envelope and remains bounded by the global cap.
@@ -82,6 +88,8 @@ export function assertChannelInceptionProbeEnvelopeStructure(
     !Array.isArray(envelope.input?.pipelineOverride) ||
     !envelope.input?.moduleConfigOverride ||
     !envelope.input?.invocationContext ||
+    (envelope.input.invocationContext.thumbnailMode !== undefined &&
+      envelope.input.invocationContext.thumbnailMode !== "deferred_mvp") ||
     (envelope.input.invocationContext.probeMaximumCostUsd !== undefined &&
       (!Number.isFinite(envelope.input.invocationContext.probeMaximumCostUsd) ||
         envelope.input.invocationContext.probeMaximumCostUsd <= 0 ||

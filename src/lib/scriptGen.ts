@@ -188,7 +188,11 @@ export interface ScriptRequest {
 
 /** Per-request sanitize that PRESERVES audio tags on v3-voiced channels. */
 function spoken(req: ScriptRequest, text: string): string {
-  return sanitizeSpoken(text, { keepAudioTags: req.voiceTags === true });
+  const cleaned = sanitizeSpoken(text, { keepAudioTags: req.voiceTags === true });
+  if (!isQuietListeningRequest(req)) return cleaned;
+  // Quiet rests are scheduled by narrationPerformance; model-inserted ellipses
+  // must not create extra, unmeasured pauses in the spoken track.
+  return cleaned.replace(/(?:\.{2,}|…+)/gu, ".");
 }
 
 /**
@@ -262,16 +266,6 @@ function bindProgramRoute(req: ScriptRequest, script: Script): Script {
       ? { serializedProgramEpisodeContextFingerprint }
       : {}),
   };
-}
-
-/** The hookcraft cold open is LAW for the script writer — continue, never repeat. */
-function hookMandate(crafted: CraftedHook): string {
-  return (
-    `THE COLD OPEN IS ALREADY WRITTEN (device: ${crafted.device}) and will be SPOKEN before your first ` +
-    `section — do NOT repeat, rephrase, or re-introduce it:\n"${crafted.coldOpen}"\n` +
-    `Your FIRST section must continue seamlessly from where it leaves off, and the script MUST explicitly ` +
-    `pay off this promise the cold open made: "${crafted.loop}".`
-  );
 }
 
 /** Slim slice for per-section calls (voice + never — the hook is already set). */
@@ -397,6 +391,106 @@ function styleGuidance(req: ScriptRequest): string {
   return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 
+const QUIET_LISTENING_CRAFT_RULES = [
+  "QUIET-LISTENING CRAFT (follow the channel's purpose, not generic retention tactics):",
+  "- OPEN GENTLY: continue the approved calm invitation or scene. Do not use shock, urgency, a curiosity gap, or a forced direct-address hook.",
+  "- KEEP THE CHANNEL DISTINCT: use concrete details that belong to this topic and the channel's own register. Each beat must add a different observation or reflection; do not repeat the same reassurance, image, or sensory adjective to fill time.",
+  "- INVITE, DO NOT ASSUME: make body, breath, emotion, and environment observations optional. Never assert what the listener feels, where they are, or that they are safe, relaxed, or falling asleep.",
+  "- PACE WITH SPACE: preserve a small, coherent progression of meaningful beats. Let an image, reflection, or guided attention settle before moving on; do not add rapid re-hooks or pattern interrupts.",
+  "- RESPECT SILENCE: leave the planned room for quiet rests. Never add spoken filler or repeated ellipses to imitate those rests; use natural spoken punctuation and let the timing module create silence.",
+  "- STAY CAREFUL: do not moralize, add a call to action, or promise a therapeutic result unless the channel brief explicitly requests it and the evidence supports it.",
+].join("\n");
+
+function isQuietListeningRequest(req: ScriptRequest): boolean {
+  return isQuietListeningNarration(
+    req.niche,
+    req.genre,
+    req.style,
+    req.narrative?.scriptStyle,
+    req.narrative?.hookStyle,
+    req.narrative?.pacing,
+    req.narrative?.delivery,
+  );
+}
+
+function scriptCraftRules(req: ScriptRequest): string {
+  return isQuietListeningRequest(req) ? QUIET_LISTENING_CRAFT_RULES : CRAFT_RULES;
+}
+
+function scriptArcRules(req: ScriptRequest): string {
+  if (!isQuietListeningRequest(req)) return ARC_RULES;
+  return [
+    "STRUCTURE — a gentle, low-pressure journey for quiet listening:",
+    "- ARRIVAL: orient the listener softly after the approved opening; avoid a loud recap or an urgent promise.",
+    "- MOVEMENTS: follow the channel's ordered beats when supplied. Build connected moments through distinct observations, reflection, or the requested practice; do not repeat reassurance or force a lesson or new reveal into every movement.",
+    "- SPACE: let each movement settle. The timing plan owns silence, so do not narrate over a planned rest or add filler to reach the target.",
+    "- LANDING: end with a natural, complete thought that lets the listener settle. Do not force an integration exercise, moral, recap, CTA, or unresolved curiosity loop unless the channel brief explicitly requests it.",
+  ].join("\n");
+}
+
+function hookMandate(crafted: CraftedHook, req: ScriptRequest): string {
+  if (isQuietListeningRequest(req)) {
+    return (
+      `THE APPROVED CALM OPENING (device: ${crafted.device}) is spoken before your first section — do not ` +
+      `repeat or reintroduce it:\n"${crafted.coldOpen}"\n` +
+      "Continue with a soft transition and honor its invitation naturally. Do not turn it into urgency, a " +
+      "cliffhanger, or a new curiosity gap."
+    );
+  }
+  return (
+    `THE COLD OPEN IS ALREADY WRITTEN (device: ${crafted.device}) and will be SPOKEN before your first ` +
+    `section — do NOT repeat, rephrase, or re-introduce it:\n"${crafted.coldOpen}"\n` +
+    `Your FIRST section must continue seamlessly from where it leaves off, and the script MUST explicitly ` +
+    `pay off this promise the cold open made: "${crafted.loop}".`
+  );
+}
+
+function endingDirective(req: ScriptRequest): string {
+  if (isQuietListeningRequest(req)) {
+    return "ENDING: close gently with one complete sentence that fits the channel's calm purpose. Do not force a lesson, recap, CTA, or cliffhanger.";
+  }
+  return "End on a SINGLE short, resonant, definitive final sentence that lands with weight. Never trail off mid-idea.";
+}
+
+function longClosingDirective(req: ScriptRequest): string {
+  if (!isQuietListeningRequest(req)) {
+    return "End with a CONCLUSION section that lands on a single, definitive closing sentence.";
+  }
+  return req.endWithSummary === true
+    ? "End with a gentle closing section and the brief reflection explicitly requested by the channel; do not moralize or add a CTA."
+    : "End with a gentle closing section that lets the listener settle; do not force a lesson or recap.";
+}
+
+function closingLineDirective(req: ScriptRequest): string {
+  if (isQuietListeningRequest(req)) {
+    return "Provide closing_line: a gentle end-card phrase of no more than 12 words that settles the scene; do not turn it into a lesson, promise, or CTA.";
+  }
+  return "Provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 12 words) that distills today's lesson, shown on the outro card as the takeaway the viewer carries.";
+}
+
+function closingLineSchema(req: ScriptRequest): string {
+  return isQuietListeningRequest(req)
+    ? '"closing_line": string (<= 12 words; a gentle phrase that settles the scene)'
+    : '"closing_line": string (<= 12 words; the episode lesson distilled as a quotable line)';
+}
+
+function summaryDirective(req: ScriptRequest): string {
+  const quiet = isQuietListeningRequest(req);
+  if (req.endWithSummary === false || (quiet && req.endWithSummary !== true)) return "";
+  if (quiet) {
+    return "The channel explicitly requests a recap: include a brief, gentle reflection on the path just taken, without adding a moral or call to action.";
+  }
+  return 'End with a FINAL section (heading like "In Summary") that recaps the key takeaway in 2-3 sentences.';
+}
+
+function closingSectionName(req: ScriptRequest): string {
+  return isQuietListeningRequest(req) ? "gentle landing" : "conclusion";
+}
+
+function estimateScriptSeconds(req: ScriptRequest, text: string): number {
+  return estSeconds(text, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+}
+
 function directorStructureClause(req: ScriptRequest): string {
   const beats = req.structure?.beats?.filter((beat) => beat.name?.trim()) ?? [];
   if (beats.length === 0) return "";
@@ -504,19 +598,20 @@ async function synthFullScriptOneShot(
         req.persona ? `Channel voice/persona: ${req.persona}` : "",
         req.niche ? `Niche: ${req.niche}.` : "",
         programRouteClause(req),
-        hookMandate(crafted),
+        hookMandate(crafted, req),
         seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         playbookFull(req),
         voiceTagClause(req),
-        CRAFT_RULES,
-        ARC_RULES,
+        scriptCraftRules(req),
+        scriptArcRules(req),
         directorStructureClause(req),
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
           `TOTAL (between ${minWords} and ${Math.round(wordBudget * 1.1)} words — do NOT exceed the upper bound; an ` +
           `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
           `a distinct idea in depth (about 250-450 words each). Do NOT pad or stop short.`,
-        `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
+        longClosingDirective(req),
+        closingLineDirective(req),
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
           `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
         ].filter(Boolean).join("\n\n"),
@@ -554,10 +649,11 @@ async function synthFullScriptOneShot(
             programRouteClause(req),
             styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
             voiceTagClause(req),
-            CRAFT_RULES,
+            scriptCraftRules(req),
+            scriptArcRules(req),
             `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
             `Write ${Math.max(2, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) that fit ` +
-              `BEFORE the conclusion, each developing a distinct new idea in depth.`,
+              `BEFORE the ${closingSectionName(req)}, each developing a distinct idea in the channel's register.`,
             `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
               `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
           ].filter(Boolean).join("\n\n"),
@@ -594,8 +690,9 @@ async function synthFullScriptOneShot(
     const hook = spoken(req, crafted.coldOpen);
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
     const narrationText = assemble(hook, sections);
-    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+    const estDurationSec = estimateScriptSeconds(req, narrationText);
+    log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estDurationSec}s) ✓`);
+    return { hook, sections: assignRoles(sections), narrationText, estDurationSec, closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
     const detail = oneShotTimedOut
       ? `timed out after ${ONE_SHOT_TIMEOUT_MS}ms (provider request aborted)`
@@ -617,6 +714,10 @@ async function synthLongScript(
   wordBudget: number,
   log: Logger,
 ): Promise<Script> {
+  const quietListening = isQuietListeningRequest(req);
+  const quietLandingWordTarget = quietListening
+    ? Math.min(110, Math.max(55, Math.round(wordBudget * 0.1)))
+    : 0;
   // PRIMARY: one capable-model call writes the whole script reliably.
   const oneShot = await synthFullScriptOneShot(req, crafted, maxSeconds, wordBudget, log);
   if (oneShot) return oneShot;
@@ -637,9 +738,9 @@ async function synthLongScript(
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           exclude.length
             ? `Already covered (do NOT repeat): ${exclude.join("; ")}`
-            : `The FIRST planned section is the INTRO (orients the viewer and lays out the map after the ` +
-              `cold open); the rest are BODY movements that build in a deliberate order. (The outro/` +
-              `conclusion is written separately.)`,
+            : `The FIRST planned section is the INTRO (orients the listener after the approved opening); ` +
+              `the rest are BODY movements that build in a deliberate order. (The ${closingSectionName(req)} ` +
+              `is written separately.)`,
           `Each: a heading + a 1-2 sentence brief. Return STRICT JSON {"sections":[{"heading":string,"brief":string}]}.`,
         ].filter(Boolean).join("\n\n"),
         maxTokens: 2000,
@@ -657,33 +758,24 @@ async function synthLongScript(
   // honored INSIDE hookcraft as the directorIdea.
   const hookRaw = crafted.coldOpen;
   let closingRaw = "";
-  try {
-    const head = await creativeTextJson<{ closing_line?: string }>({
-      prompt:
-        `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
-        `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
-        `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
-        `Return STRICT JSON {"closing_line":string}.`,
-      // MEASURED: this exact prompt returns nothing at 300 or 500 (0/3 each),
-      // 2/3 at 700, 3/3 at 1200. Reasoning is mandatory on this route and is
-      // billed out of max_tokens before any answer exists, so at the old 300
-      // THE QUOTE was never once produced. Its floor is HIGHER than the hook's,
-      // which is why the audit now uses the worse of the two measurements.
-      maxTokens: 2500,
-      temperature: 0.85,
-    });
-    closingRaw = typeof head.closing_line === "string" ? head.closing_line : "";
-  } catch (e) {
-    // An empty catch is the purest silent degradation: the episode simply loses
-    // its distilled quote, and the ending is written without it, and the run
-    // reads exactly like one that had it.
-    log(
-      `scriptGen: NO CLOSING QUOTE — the ending will be written without one ` +
-        `(${e instanceof Error ? e.message : e})`,
-    );
+  if (!quietListening) {
+    try {
+      const head = await creativeTextJson<{ closing_line?: string }>({
+        prompt:
+          `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
+          `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
+          `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
+          `Return STRICT JSON {"closing_line":string}.`,
+        maxTokens: 2500,
+        temperature: 0.85,
+      });
+      closingRaw = typeof head.closing_line === "string" ? head.closing_line : "";
+    } catch (e) {
+      log(`scriptGen: NO CLOSING QUOTE — ${e instanceof Error ? e.message : e}`);
+    }
   }
 
-  const targetWords = Math.round(wordBudget * 0.95);
+  const targetWords = Math.round((wordBudget - quietLandingWordTarget) * 0.95);
   const beats = req.structure?.beats?.filter((b) => b.name?.trim()) ?? [];
   let queue = beats.length
     ? beats.map((b) => ({ heading: b.name.trim(), brief: (b.note ?? "").trim() || b.name.trim() }))
@@ -720,14 +812,15 @@ async function synthLongScript(
       styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
-      CRAFT_RULES,
+      scriptCraftRules(req),
+      scriptArcRules(req),
       "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
       `Return STRICT JSON {"narration":string}.`,
       `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
-      sections.length === 0 ? hookMandate(crafted) : "",
+      sections.length === 0 ? hookMandate(crafted, req) : "",
       `Write ${perSection}-${Math.min(400, perSection + 80)} words of SPOKEN narration in 2-3 FULL paragraphs for ` +
         `THIS section only — substantive and specific, no heading label, do not repeat earlier sections.`,
-      reachingEnd ? "This is the FINAL section: end on a single, definitive closing sentence." : "",
+      reachingEnd ? endingDirective(req) : "",
     ].filter(Boolean).join("\n\n");
     // RETRY transient failures — a dropped section used to permanently lose ~300
     // words, which is the main reason long videos came out short under model load.
@@ -752,47 +845,64 @@ async function synthLongScript(
   }
   if (sections.length === 0) throw new Error("scriptGen: long-form produced no narration");
 
-  // Always finish with a dedicated CONCLUSION that rounds off the topic and brings
-  // the most important points back. narration_tts renders the LAST section WITHOUT
-  // a chapter card, so this flows as the spoken ending (no "Chapter N:" separation).
+  // Always finish with a dedicated closing section. Quiet-listening scripts
+  // request a shorter gentle landing and its end-card phrase in this same call;
+  // other genres retain their separately judged quote and fuller conclusion.
   try {
     const covered = sections.map((s) => s.heading).filter(Boolean).slice(0, 12).join("; ");
-    const c = await creativeTextJson<{ narration?: string }>({
+    const endingPrompt = quietListening
+      ? [
+          `Write a gentle final landing of about ${quietLandingWordTarget} words for a quiet-listening video about "${req.topic}".`,
+          programRouteClause(req),
+          seriesClause(req.series),
+          styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
+          scriptCraftRules(req),
+          scriptArcRules(req),
+          covered ? `Let the ending settle naturally after these movements: ${covered}.` : "Let the ending settle naturally after the narration.",
+          summaryDirective(req) || "Do not force a recap.",
+          "Do not add a moral, CTA, cliffhanger, or promised therapeutic result. Do not introduce a new fact or concept.",
+          "Also provide a closing_line of no more than 12 words: a calm phrase supported by this ending, not a lesson or promise.",
+          'Return STRICT JSON {"narration":string,"closing_line":string}.',
+        ]
+      : [
+          `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
+          programRouteClause(req),
+          seriesClause(req.series),
+          styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
+          `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
+          `1) A soft signal that we are arriving at the end (a reflective turn, NOT the words "in conclusion" / "to sum up" / "in summary").`,
+          covered
+            ? `2) Briefly draw the 2-3 MOST IMPORTANT threads back together so the listener feels the journey resolve: ${covered}.`
+            : `2) Briefly draw the most important threads of the video back together so the listener feels the journey resolve.`,
+          `3) Distill it all into ONE clear central takeaway, stated plainly and memorably.`,
+          `4) Turn outward to the listener with a warm, forward-looking thought they carry away — what to do, feel, or remember.`,
+          closingRaw
+            ? `5) End on a SINGLE short, resonant, definitive final sentence that lands with weight (in the spirit of: "${closingRaw}"). Never trail off mid-idea.`
+            : `5) End on a SINGLE short, resonant, definitive final sentence that lands with weight. Never trail off mid-idea.`,
+          `Do NOT introduce any brand-new concept, statistic, or chapter label. No questions in the final sentence.`,
+          "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
+          `Return STRICT JSON {"narration":string}.`,
+        ];
+    const c = await creativeTextJson<{ narration?: string; closing_line?: string }>({
       tier: "pro",
       log,
-      prompt: [
-        `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
-        programRouteClause(req),
-        seriesClause(req.series),
-        styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
-        `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
-        `1) A soft signal that we are arriving at the end (a reflective turn, NOT the words "in conclusion" / "to sum up" / "in summary").`,
-        covered
-          ? `2) Briefly draw the 2-3 MOST IMPORTANT threads back together so the listener feels the journey resolve: ${covered}.`
-          : `2) Briefly draw the most important threads of the video back together so the listener feels the journey resolve.`,
-        `3) Distill it all into ONE clear central takeaway, stated plainly and memorably.`,
-        `4) Turn outward to the listener with a warm, forward-looking thought they carry away — what to do, feel, or remember.`,
-        closingRaw
-          ? `5) End on a SINGLE short, resonant, definitive final sentence that lands with weight (in the spirit of: "${closingRaw}"). Never trail off mid-idea.`
-          : `5) End on a SINGLE short, resonant, definitive final sentence that lands with weight. Never trail off mid-idea.`,
-        `Do NOT introduce any brand-new concept, statistic, or chapter label. No questions in the final sentence.`,
-        "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
-        `Return STRICT JSON {"narration":string}.`,
-      ].filter(Boolean).join("\n\n"),
+      prompt: endingPrompt.filter(Boolean).join("\n\n"),
       maxTokens: 1500,
       temperature: 0.78,
     });
+    if (quietListening && typeof c.closing_line === "string") closingRaw = c.closing_line;
     const cn = spoken(req, typeof c.narration === "string" ? c.narration : "");
-    if (cn.length > 0) sections.push({ heading: "Conclusion", narration: cn });
+    if (cn.length > 0) sections.push({ heading: quietListening ? "Gentle Landing" : "Conclusion", narration: cn });
   } catch (e) {
-    log(`scriptGen long: conclusion failed (${e instanceof Error ? e.message : e})`);
+    log(`scriptGen long: ${quietListening ? "gentle landing" : "conclusion"} failed (${e instanceof Error ? e.message : e})`);
   }
 
   const hook = spoken(req, hookRaw);
   const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
   const narrationText = assemble(hook, sections);
-  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
+  const estDurationSec = estimateScriptSeconds(req, narrationText);
+  log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estDurationSec });
+  return { hook, sections: assignRoles(sections), narrationText, estDurationSec, closingLine, hookLoop: crafted.loop, crafted };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -943,10 +1053,8 @@ export async function synthScript(
 ): Promise<Script> {
   const maxSeconds = req.maxSeconds ?? 240;
   const gapSec = req.sentenceGapSec ?? 0;
-  const quietRestBudgetSec = isQuietListeningNarration(
-    req.niche, req.genre, req.style, req.narrative?.scriptStyle, req.narrative?.hookStyle,
-    req.narrative?.pacing, req.narrative?.delivery,
-  ) ? quietListeningRestBudgetSec(maxSeconds) : 0;
+  const quietListening = isQuietListeningRequest(req);
+  const quietRestBudgetSec = quietListening ? quietListeningRestBudgetSec(maxSeconds) : 0;
   const spokenTargetSeconds = Math.max(0, maxSeconds - quietRestBudgetSec);
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget
   // overshot the slot ~15% (render #6: 848s actual vs 660s target).
@@ -998,32 +1106,29 @@ export async function synthScript(
     req.persona ? `Channel voice/persona: ${req.persona}` : "",
     req.niche ? `Niche: ${req.niche}.` : "",
     programRouteClause(req),
-    hookMandate(crafted),
+    hookMandate(crafted, req),
     seriesClause(req.series),
     styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
     playbookFull(req),
     voiceTagClause(req),
-    ARC_RULES,
     structureClause,
     req.priorIssues?.length
       ? `A previous draft was REJECTED by the channel's critic for these issues — this draft MUST fix every one:\n` +
         req.priorIssues.map((i) => `- ${i}`).join("\n")
       : "",
-    CRAFT_RULES,
+    scriptCraftRules(req),
+    scriptArcRules(req),
     `Target spoken length: about ${spokenTargetSeconds} seconds, with up to ${quietRestBudgetSec} seconds ` +
       `reserved for intentional quiet section rests — write roughly ${wordBudget} words of ` +
       `narration total (do NOT stop short; aim for at least ${Math.round(wordBudget * 0.9)} words across the sections).`,
-    req.endWithSummary === false
-      ? ""
-      : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences.",
-    "ENDING AWARENESS: the video holds a brief OUTRO card after the narration, so the narration must land on a " +
-      "single DEFINITIVE closing sentence — a clean, conclusive final thought, never trailing off mid-idea. Then " +
-      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 12 words) that distills " +
-      "today's lesson, shown on the outro card as the takeaway the viewer carries.",
+    summaryDirective(req),
+    endingDirective(req),
+    closingLineDirective(req),
+    `closing_line field requirement: ${closingLineSchema(req)}.`,
     "Return STRICT JSON only:",
     `{
   "sections": [ { "heading": string (short label), "narration": string (the spoken words for this section) } ],
-  "closing_line": string (<= 12 words — THE QUOTE: the episode's lesson distilled, quotable)
+  "closing_line": string
 }`,
     "CRITICAL: the narration is fed directly to a text-to-speech voice. Output PLAIN SPOKEN text ONLY. " +
       "Do NOT use asterisks, slashes, underscores, hashes, backticks, bullet points, markdown, emphasis " +
@@ -1085,10 +1190,11 @@ export async function synthScript(
           programRouteClause(req),
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           voiceTagClause(req),
-          CRAFT_RULES,
+          scriptCraftRules(req),
+          scriptArcRules(req),
           `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
           `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) ` +
-            `that fit BEFORE the final summary/outro section, each developing a distinct new idea in depth.`,
+            `that fit BEFORE the closing section, each developing a distinct idea in the channel's register.`,
           `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
             `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
         ].filter(Boolean).join("\n\n"),
@@ -1118,7 +1224,7 @@ export async function synthScript(
     hook,
     sections: assignRoles(sections),
     narrationText,
-    estDurationSec: estSeconds(narrationText, gapSec),
+    estDurationSec: estimateScriptSeconds(req, narrationText),
     closingLine,
     hookLoop: crafted.loop,
     crafted,

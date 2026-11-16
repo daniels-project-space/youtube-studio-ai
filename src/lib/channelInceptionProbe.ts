@@ -23,6 +23,7 @@ import { channelPrefix } from "@/lib/storage";
 import {
   MAX_CHANNEL_INCEPTION_PROBE_ATTEMPTS,
   MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+  PRIVATE_PROBE_THUMBNAIL_MODE_PARAM,
   assertChannelInceptionProbeEnvelopeStructure,
   type ChannelInceptionProbeAttemptCheckpoint,
   type ChannelInceptionProbeAttemptReference,
@@ -129,6 +130,7 @@ export function resolveChannelInceptionProbeHolisticReview(
  */
 export function assessChannelInceptionProbeQuality(
   qaOutputs: unknown,
+  options: { thumbnailMode?: "deferred_mvp" } = {},
 ): ChannelInceptionProbeQualityEvidence {
   const outputs = objectRecord(qaOutputs);
   const report = objectRecord(outputs?.qaReport);
@@ -171,7 +173,14 @@ export function assessChannelInceptionProbeQuality(
   } else if (videoScore < 6) {
     reasons.push(`video quality score ${videoScore} is below the production minimum 6`);
   }
-  if (thumbnail?.skipped === true || thumbnailScore === undefined) {
+  if (options.thumbnailMode === "deferred_mvp") {
+    if (
+      thumbnail?.skipped !== true ||
+      report?.thumbnailDisposition !== "deferred_private_mvp"
+    ) {
+      reasons.push("private thumbnail deferral is missing its explicit QA disposition");
+    }
+  } else if (thumbnail?.skipped === true || thumbnailScore === undefined) {
     reasons.push("required thumbnail grader evidence is missing");
   } else if (thumbnailScore < 5) {
     reasons.push(`thumbnail quality score ${thumbnailScore} is below the production minimum 5`);
@@ -224,6 +233,7 @@ export function freezeChannelInceptionProbeContext(args: {
   ownerId: string;
   family: FamilyKey;
   channel: ProbeChannelSnapshot;
+  thumbnailMode?: "deferred_mvp";
 }): ChannelInceptionProbeInvocationContext {
   const identity = args.channel.identity ?? {};
   const programBrief = identity.programBrief === undefined
@@ -265,6 +275,7 @@ export function freezeChannelInceptionProbeContext(args: {
   };
   return {
     channelBudgetUsd: finiteUsd(args.channel.budget ?? 0, "probe channel budget"),
+    ...(args.thumbnailMode ? { thumbnailMode: args.thumbnailMode } : {}),
     probeMaximumCostUsd: channelInceptionProbeCostCeilingUsd(args.family),
     keyPrefix: channelPrefix(args.ownerId, args.channel.slug),
     seedStore,
@@ -425,6 +436,19 @@ export function assertChannelInceptionProbeAttempt(
   attempt: ChannelInceptionProbeAttemptCheckpoint,
 ): void {
   assertChannelInceptionProbeEnvelopeStructure(attempt);
+  const thumbnailMode = attempt.input.invocationContext.thumbnailMode;
+  const qaEntry = attempt.input.pipelineOverride.find((entry) => entry.block === "qa_visual");
+  const qaThumbnailMode = qaEntry?.params?.[PRIVATE_PROBE_THUMBNAIL_MODE_PARAM];
+  const hasThumbnailGenerator = attempt.input.pipelineOverride.some(
+    (entry) => entry.block === "thumbnail_gen",
+  );
+  if (
+    (thumbnailMode === "deferred_mvp" &&
+      (qaThumbnailMode !== "deferred_mvp" || hasThumbnailGenerator)) ||
+    (thumbnailMode !== "deferred_mvp" && qaThumbnailMode !== undefined)
+  ) {
+    throw new Error("probe thumbnail mode is not bound to its exact private pipeline");
+  }
   if (
     !Number.isInteger(attempt.attempt) ||
     attempt.attempt < 1 ||

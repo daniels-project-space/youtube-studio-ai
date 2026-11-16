@@ -31,10 +31,19 @@ assert.match(page, /Channel setup is complete, but no video has been generated y
   "a setup-only receipt must not be mistaken for a video output");
 assert.doesNotMatch(page, /Thumbnail generation is deferred, so external publishing stays blocked\./u,
   "channel-level thumbnail deferral must not be confused with the probe video’s graded thumbnail");
-assert.match(page, /probeOutputReady = progress\.stages\.some\(\(stage\) =>[\s\S]*moduleKey === "channel-inception-probe"[\s\S]*status === "complete" \|\| stage\.status === "accepted"/u,
-  "the completion route must be based on a successful private probe receipt");
-assert.match(page, /router\.push\(probeOutputReady[\s\S]*\?tab=library/u,
+assert.match(page, /channelBuildCompletionDisposition\(progress\)/u,
+  "completion must use the explicit plan/output/blocked disposition");
+assert.match(page, /disposition === "output-ready"[\s\S]*finish\(session\.slug, true\)/u,
+  "a completed build may open the Library only with an indexed video asset receipt");
+assert.match(page, /disposition === "output-missing"[\s\S]*Output is not ready/u,
+  "missing video assets must remain visible as an incomplete build");
+assert.match(page, /Trigger completed, but durable channel progress and its video asset were not verified/u,
+  "Trigger completion alone must not be reported as output readiness");
+assert.match(page, /router\.push\(outputReady[\s\S]*\?tab=library/u,
   "a completed private probe must open the channel Library so its real video artifact is immediately reviewable");
+assert.match(page, /maxQwenNarrationDurationSeconds/u);
+assert.match(page, /Use \{qwenMaximumDurationSeconds \/ 60\} min at this budget/u,
+  "an over-budget duration must offer an explicit, budget-admitted alternative");
 assert.match(page, /<details className=\{styles\.stageDetails\}>/u,
   "settled channel-creation receipts must remain available without permanently consuming the workspace");
 assert.match(css, /\.buildHero \{ min-height: 132px;/u,
