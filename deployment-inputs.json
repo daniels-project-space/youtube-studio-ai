@@ -1782,7 +1782,7 @@
     "src/app/api/channel-settings/route.ts": "16556027457e95392bc7cca8b4de8c222a7911a7",
     "src/app/api/editorial-evidence-packets/route.ts": "a8a737ceb60b9389642c558d7cf6c6ee5aa4710d",
     "src/app/api/factual-review-checkpoints/route.ts": "d0a3a654b3b422a6ed60828231f4bbe032dfc8e1",
-    "src/app/api/health/route.ts": "20a80d373c78bc1e64a6b673a765b3f8ea3a1cc3",
+    "src/app/api/health/route.ts": "2d0094af7e787dc3dd98cfdbad15b819267bbcb7",
     "src/app/api/learning-recommendations/route.ts": "541a9561bd9852b989093a7539307dbd6f3d1bff",
     "src/app/api/make-multilingual/route.ts": "2f45d8bcb3735ba623577e0e255629f328306e8a",
     "src/app/api/music-audition-checkpoints/route.ts": "7fe6c74ab444764fd57272a6bc759e413e69a531",
