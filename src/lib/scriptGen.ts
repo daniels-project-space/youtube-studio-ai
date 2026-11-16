@@ -394,6 +394,32 @@ function styleGuidance(req: ScriptRequest): string {
   return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 
+function directorStructureClause(req: ScriptRequest): string {
+  const beats = req.structure?.beats?.filter((beat) => beat.name?.trim()) ?? [];
+  if (beats.length === 0) return "";
+  return [
+    "FOLLOW THIS DIRECTOR'S ORDERED BEAT PLAN:",
+    ...beats.map((beat, index) =>
+      `Beat ${index + 1}: ${beat.name.trim()}${beat.note?.trim() ? ` — ${beat.note.trim()}` : ""}`,
+    ),
+    "Preserve every named beat in this order and include a section with each beat name as its heading. Additional adjacent sections may deepen a beat, but do not drop, reorder, merge, or replace beats.",
+  ].join("\n");
+}
+
+function directorBeatOrderError(req: ScriptRequest, sections: readonly ScriptSection[]): string | undefined {
+  const beats = req.structure?.beats?.filter((beat) => beat.name?.trim()) ?? [];
+  let nextSection = 0;
+  for (const beat of beats) {
+    const expected = cleanHeading(beat.name).toLocaleLowerCase().replace(/\s+/gu, " ");
+    const found = sections.findIndex((section, index) =>
+      index >= nextSection && cleanHeading(section.heading).toLocaleLowerCase().replace(/\s+/gu, " ") === expected,
+    );
+    if (found < 0) return `director beat sequence is missing or out of order at "${beat.name.trim()}"`;
+    nextSection = found + 1;
+  }
+  return undefined;
+}
+
 /**
  * Channels with a data-viz layer must SPEAK numbers — vague "studies show"
  * hedging gives the on-screen charts nothing to render (and reads as filler).
@@ -482,6 +508,7 @@ async function synthFullScriptOneShot(
         voiceTagClause(req),
         CRAFT_RULES,
         ARC_RULES,
+        directorStructureClause(req),
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
           `TOTAL (between ${minWords} and ${Math.round(wordBudget * 1.1)} words — do NOT exceed the upper bound; an ` +
           `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
@@ -501,6 +528,11 @@ async function synthFullScriptOneShot(
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
+    const structureError = directorBeatOrderError(req, sections);
+    if (structureError) {
+      log(`scriptGen one-shot: ${structureError}; falling back to beat-seeded section writing`);
+      return null;
+    }
     let wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
     // TOP-UP before surrendering to the chunked path: the chunked fallback costs
     // 10-25 MORE Pro calls. If the one-shot under-delivered but got most of the
@@ -950,14 +982,7 @@ export async function synthScript(
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook
   // idea already went through hookcraft above).
-  const structureClause = req.structure?.beats?.length
-    ? [
-        "FOLLOW THIS DIRECTOR'S STRUCTURE:",
-        ...(req.structure?.beats ?? [])
-          .filter((b) => b.name?.trim())
-          .map((b, i) => `Beat ${i + 1}: ${b.name.trim()}${b.note?.trim() ? ` — ${b.note.trim()}` : ""}`),
-      ].filter(Boolean).join("\n")
-    : "";
+  const structureClause = directorStructureClause(req);
 
   const prompt = [
     `Write a YouTube narration script about: "${req.topic}".`,
@@ -1028,6 +1053,8 @@ export async function synthScript(
   if (sections.length === 0) {
     throw new Error("scriptGen: model returned no usable narration sections");
   }
+  const structureError = directorBeatOrderError(req, sections);
+  if (structureError) throw new Error(`scriptGen: ${structureError}`);
 
   // WORD-BUDGET ENFORCEMENT (parity with the long path): the short path used to
   // accept ANY non-empty sections, so a "3-minute" video could ship with 90
