@@ -100,7 +100,11 @@ assert.deepEqual(job.steps.slice(planIndex + 1, guardIndex + 1).map(step => step
   "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
   "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
   "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
-], "setup, install and final main guard run only for a required runtime publication");
+  "steps.release_admission.outputs.deploy == 'true' && steps.publication_plan.outputs.any == 'true'",
+], "package-manager setup, Node setup, install and final main guard run only for a required runtime publication");
+assert.equal(job.steps[planIndex + 1].uses, "pnpm/action-setup@v4");
+assert.equal(job.steps[planIndex + 2].with.cache, "pnpm");
+assert.equal(job.steps[planIndex + 3].run, "pnpm install --frozen-lockfile");
 assert.equal(job.steps[guardIndex-1].name,"Install deploy tooling");
 assert.equal(job.needs, "typecheck", "the full quality gate precedes runtime planning and writes");
 assert.equal(job.environment, "Production");
@@ -126,7 +130,7 @@ const deployment = workflow.slice(workflow.indexOf("  deploy-cloud-runtimes:"));
 assert.match(deployment,/group: youtube-studio-cloud-runtimes[\s\S]*?queue: max\s+cancel-in-progress: false/,
   "a late stale job must not cancel the latest pending revision");
 assert.match(deployment,/id: release_policy[\s\S]*run: node scripts\/cloud-runtime-release-policy\.mjs/);
-assert.ok(deployment.indexOf("id: release_policy") > deployment.indexOf("npm ci"), "check directly before cloud writes, after tooling install");
+assert.ok(deployment.indexOf("id: release_policy") > deployment.indexOf("pnpm install --frozen-lockfile"), "check directly before cloud writes, after tooling install");
 assert.match(deployment,/convex dev --once --typecheck=disable/);
 assert.match(deployment,/--skip-sync-env-vars/);
 assert.match(workflow,/needs: typecheck/);
