@@ -442,8 +442,8 @@ assert(
 assert(
   creatorSource.includes("Registered private-review stages") &&
     creatorSource.includes("supervisedAdmission ? activeReviewOnlyStages : preview") &&
-    /supervisedAdmission\s*\?\s*reviewHandoffHref\s*\?\s*<Link href=\{reviewHandoffHref\}[^>]*>Open private review desk<\/Link>/s.test(creatorSource) &&
-    /:\s*<button\s+onClick=\{\(\) => void create\(Date\.now\(\)\)\}/s.test(creatorSource),
+    /supervisedAdmission\s*\?\s*reviewHandoffHref\s*\?\s*<Link href=\{reviewHandoffHref\}[^>]*>Open private review desk<\/Link>/.test(creatorSource) &&
+    /:\s*<button\s+onClick=\{\(\) => void create\(Date\.now\(\)\)\}/.test(creatorSource),
   "a private-review family must expose only its registered review stages and hand off to its review desk instead of dispatching the automatic builder",
 );
 assert(
