@@ -54,18 +54,18 @@ assert.deepEqual(
 assert.equal(
   assessAutomaticFamilyExecutionReadiness("narrated_stock", {
     ...allReady,
-    narrationReady: (provider) => provider === "elevenlabs",
-  }, { narrationProvider: "elevenlabs" }).ready,
+    narrationReady: (provider) => provider === "qwen3",
+  }, { narrationProvider: "qwen3" }).ready,
   true,
-  "a newly created ElevenLabs channel must not be rejected for lacking a legacy Fish key",
+  "a new channel must be admitted using its selected Qwen3 narration route",
 );
 assert.equal(
   assessAutomaticFamilyExecutionReadiness("narrated_stock", {
     ...allReady,
-    narrationReady: (provider) => provider === "elevenlabs",
-  }, { narrationProvider: "qwen3" }).ready,
+    narrationReady: (provider) => provider === "qwen3",
+  }, { narrationProvider: "elevenlabs" }).ready,
   false,
-  "a channel pinned to Qwen must prove Qwen, not merely an unrelated TTS provider",
+  "a channel pinned to ElevenLabs must prove that provider rather than borrowing Qwen readiness",
 );
 assert.ok(
   assessAutomaticFamilyExecutionReadiness("narrated_stock", {
@@ -81,6 +81,14 @@ assert.equal(
   }).ready,
   false,
   "every automatic family must stop before setup when its universal thumbnail foundation is unavailable",
+);
+assert.equal(
+  assessAutomaticFamilyExecutionReadiness("narrated_stock", {
+    ...allReady,
+    thumbnailRouteReady: () => false,
+  }, { narrationProvider: "qwen3", thumbnailMode: "deferred_mvp" }).ready,
+  true,
+  "the MVP setup must not require thumbnail infrastructure when thumbnail generation is explicitly deferred",
 );
 assert.equal(
   assessAutomaticFamilyExecutionReadiness("quizyear", {

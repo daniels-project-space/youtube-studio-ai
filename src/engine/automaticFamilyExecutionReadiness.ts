@@ -96,6 +96,11 @@ export interface AutomaticFamilyExecutionReadinessOptions {
    * old records with no explicit narration setting.
    */
   readonly narrationProvider?: unknown;
+  /**
+   * Channel inception may deliberately defer thumbnails for its MVP proof.
+   * Normal automatic production readiness still requires the qualified route.
+   */
+  readonly thumbnailMode?: "required" | "deferred_mvp";
 }
 
 function narrationProviderForReadiness(value: unknown): TtsProvider | undefined {
@@ -130,7 +135,7 @@ export function assessAutomaticFamilyExecutionReadiness(
   options: AutomaticFamilyExecutionReadinessOptions = {},
 ): AutomaticFamilyExecutionReadiness {
   const blockers: string[] = [];
-  if (!capabilities.thumbnailRouteReady()) {
+  if (options.thumbnailMode !== "deferred_mvp" && !capabilities.thumbnailRouteReady()) {
     blockers.push(
       "automatic release requires the sealed Nano Banana thumbnail route to be eligible",
     );
