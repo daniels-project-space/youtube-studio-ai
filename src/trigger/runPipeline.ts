@@ -58,6 +58,7 @@ import {
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
   PRIVATE_PROBE_CONTRACT_POLICY,
+  PRIVATE_PROBE_DEFERRED_THUMBNAIL_CONTRACT_POLICY,
 } from "@/engine/pipelineCompiler";
 import { assertFrozenUploadQaEvidence } from "@/engine/frozenPipelineQaAdmission";
 import {
@@ -153,6 +154,10 @@ import {
   type ChannelInceptionProbeAttemptCheckpoint,
   type ChannelInceptionProbeInvocationContext,
 } from "@/lib/channelInceptionProbe";
+import {
+  PRIVATE_PROBE_THUMBNAIL_MODE_PARAM,
+  PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY,
+} from "@/lib/channelInceptionProbeContract";
 import {
   assertRouteQualificationBenchmarkAdmission,
   assertRouteQualificationBenchmarkDispatchEnvelope,
@@ -1986,6 +1991,28 @@ export const runPipelineTask = task({
         }
       }
 
+      // Only an owner-approved, write-once channel-inception envelope may
+      // authorize private thumbnail deferral. Never trust a marker from a
+      // mutable channel seed or a caller-provided pipeline by itself.
+      delete seedStore[PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY];
+      const probeThumbnailMode = durableProbeEnvelope?.input.invocationContext.thumbnailMode;
+      const qaThumbnailMode = entries.find((entry) => entry.block === "qa_visual")?.params?.[
+        PRIVATE_PROBE_THUMBNAIL_MODE_PARAM
+      ];
+      const hasThumbnailGenerator = entries.some((entry) => entry.block === "thumbnail_gen");
+      if (
+        (probeThumbnailMode === "deferred_mvp" &&
+          (!probeBudgetAdmission || qaThumbnailMode !== "deferred_mvp" || hasThumbnailGenerator)) ||
+        (probeThumbnailMode !== "deferred_mvp" && qaThumbnailMode !== undefined)
+      ) {
+        throwForTaskRetryPolicy(
+          new Error("run-pipeline thumbnail deferral does not match the signed private probe"),
+        );
+      }
+      if (probeThumbnailMode === "deferred_mvp") {
+        seedStore[PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY] = "deferred_mvp";
+      }
+
       // A children lane is intentionally executable only with a fresh,
       // operator-supplied editorial packet. This happens before preflight and
       // snapshotting, so a missing packet cannot reach a paid provider stage.
@@ -2033,11 +2060,15 @@ export const runPipelineTask = task({
         seedStore["channelProgramRoute"],
         entries,
       ));
-      // Private probes keep their existing no-upload policy; ordinary runs
-      // retain the full production contract and exact frozen compilation guard.
+      // A no-thumbnail private MVP probe has a distinct fingerprinted policy;
+      // ordinary private probes and production retain their stricter contracts.
       const compilation = compilePipeline(
         resolved,
-        probeBudgetAdmission ? PRIVATE_PROBE_CONTRACT_POLICY : undefined,
+        probeBudgetAdmission
+          ? probeThumbnailMode === "deferred_mvp"
+            ? PRIVATE_PROBE_DEFERRED_THUMBNAIL_CONTRACT_POLICY
+            : PRIVATE_PROBE_CONTRACT_POLICY
+          : undefined,
       );
       if (durableInvocation) {
         assertPipelineInvocationCompilation(durableInvocation, compilation);

@@ -33,6 +33,12 @@ import {
   type PendingChannelBuildRequest,
 } from "@/lib/channelBuildRecovery";
 import { channelBuildCostAuthority } from "@/lib/channelBuildCostAuthority";
+import { channelBuildCompletionDisposition } from "@/engine/channelInceptionProbeArtifact";
+import {
+  maxQwenNarrationDurationSeconds,
+  narrationChapterCardsRequested,
+  qwenNarrationBudgetAdmission,
+} from "@/engine/narrationTtsCost";
 import { normalizeYoutubeChannelName } from "@/lib/youtubeChannelCreationClaim";
 import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 import {
@@ -117,6 +123,7 @@ interface BuildProgress {
   updatedAt: number;
   executionAuthorized: boolean;
   probeAuthorized: boolean;
+  probeArtifact?: { assetId: string; runId: string; byteLength: number } | null;
   thumbnailMode?: "generated" | "deferred_mvp";
   stages: Array<{
     moduleKey: string;
@@ -594,6 +601,35 @@ export default function NewChannelWizard() {
     perVideoBudgetUsd: budget,
     family: family || undefined,
   });
+  const narrationChapterCards = narrationChapterCardsRequested({ moduleConfig });
+  const narrationDurationSeconds = family && duration
+    ? Number.isFinite(lengthMinutes) && lengthMinutes > 0
+      ? Math.round(lengthMinutes * 60)
+      : duration.defaultSeconds
+    : undefined;
+  const qwenNarrationAdmission = fam?.narrated && narrationDurationSeconds !== undefined
+    ? qwenNarrationBudgetAdmission({
+        durationSeconds: narrationDurationSeconds,
+        chapterCards: narrationChapterCards,
+        perVideoBudgetUsd: budget,
+      })
+    : undefined;
+  const qwenMaximumDurationSeconds = fam?.narrated && duration
+    ? maxQwenNarrationDurationSeconds({
+        minimumSeconds: duration.minimumSeconds,
+        maximumSeconds: duration.maximumSeconds,
+        stepSeconds: duration.stepSeconds,
+        chapterCards: narrationChapterCards,
+        perVideoBudgetUsd: budget,
+      })
+    : undefined;
+  const qwenProbeAdmission = fam?.narrated && runProbe
+    ? qwenNarrationBudgetAdmission({
+        durationSeconds: 60,
+        chapterCards: narrationChapterCards,
+        perVideoBudgetUsd: costAuthority.validationCapUsd,
+      })
+    : undefined;
 
   const selectFamily = (
     next: FamilyKey,
@@ -1071,16 +1107,14 @@ export default function NewChannelWizard() {
     if (pollRef.current) clearTimeout(pollRef.current);
     pollAbortRef.current?.abort();
     let lastTaskReadAt = 0;
-    let probeOutputReady = false;
-
-    const finish = (slug: string) => {
+    const finish = (slug: string, outputReady: boolean) => {
       if (generation !== pollGenerationRef.current) return;
       sessionStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY);
       sessionStorage.removeItem(PENDING_BUILD_STORAGE_KEY);
       setActiveBuild(null);
       setPendingBuild(null);
       pollSessionRef.current = null;
-      router.push(probeOutputReady
+      router.push(outputReady
         ? `/channels/${encodeURIComponent(slug)}?tab=library`
         : `/channels/${encodeURIComponent(slug)}`);
     };
@@ -1123,15 +1157,20 @@ export default function NewChannelWizard() {
           hadSuccessfulRead = true;
           if (generation !== pollGenerationRef.current) return;
           setBuildProgress(progress);
-          probeOutputReady = progress.stages.some((stage) =>
-            stage.moduleKey === "channel-inception-probe" &&
-            (stage.status === "complete" || stage.status === "accepted"),
-          );
-          if (progress.inceptionStatus === "complete" || progress.inceptionStatus === "planned") {
-            finish(session.slug);
+          const disposition = channelBuildCompletionDisposition(progress);
+          if (disposition === "plan-saved") {
+            finish(session.slug, false);
             return;
           }
-          if (progress.inceptionStatus === "blocked") {
+          if (disposition === "output-ready") {
+            finish(session.slug, true);
+            return;
+          }
+          if (disposition === "output-missing") {
+            terminalError("Channel setup finished, but its video is missing from the Library or storage. Output is not ready; resume monitoring or inspect the failed build.");
+            return;
+          }
+          if (disposition === "blocked") {
             const blocker = progress.stages.find((stage) => stage.status === "blocked" || stage.status === "failed");
             terminalError(blocker?.error ?? "Channel setup stopped at a blocked readiness gate.");
             return;
@@ -1154,12 +1193,11 @@ export default function NewChannelWizard() {
           if (taskResponse.ok) {
             const taskState = await taskResponse.json() as {
             status?: string;
-            output?: { slug?: string };
             error?: { message?: string } | string;
             };
             hadSuccessfulRead = true;
             if (taskState.status === "COMPLETED") {
-              finish(taskState.output?.slug ?? session.slug);
+              terminalError("Trigger completed, but durable channel progress and its video asset were not verified. Output is not marked ready; resume monitoring.");
               return;
             }
             if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(taskState.status ?? "")) {
@@ -2035,6 +2073,48 @@ export default function NewChannelWizard() {
                 ? `${lengthMinutes} min · ${formatFamilyDurationContract(family as FamilyKey)} contract`
                 : `${Math.round(lengthMinutes * 60)} sec · ${formatFamilyDurationContract(family as FamilyKey)} contract`} />}
             {fam.narrated && <SummaryRow k="Language" v={locale.toUpperCase()} />}
+            {qwenNarrationAdmission && (
+              <SummaryRow
+                k="Qwen narration reserve"
+                v={`$${qwenNarrationAdmission.estimatedCostUsd.toFixed(3)} estimated · $${qwenNarrationAdmission.availableBudgetUsd.toFixed(2)} available per video`}
+              />
+            )}
+            {qwenNarrationAdmission && !qwenNarrationAdmission.allowed && (
+              <div role="alert" style={{ color: "var(--color-error, #b42318)", fontSize: "0.82rem" }}>
+                <p>
+                  {qwenNarrationAdmission.reason === "module-ceiling"
+                    ? `This duration exceeds the $${qwenNarrationAdmission.moduleCeilingUsd.toFixed(2)} Qwen narration ceiling. A larger video budget cannot change this module cap.`
+                    : "The estimated narration reserve exceeds the current per-video budget."}
+                </p>
+                {qwenMaximumDurationSeconds !== undefined && qwenMaximumDurationSeconds !== null &&
+                  narrationDurationSeconds !== undefined &&
+                  qwenMaximumDurationSeconds < narrationDurationSeconds && (
+                    <p role="status">
+                      The current budget admits a maximum estimated duration of {qwenMaximumDurationSeconds / 60} min.
+                      {" "}
+                      <button
+                        type="button"
+                        onClick={() => setLengthMinutes(clampFamilyEpisodeLengthMinutes(
+                          family as FamilyKey,
+                          qwenMaximumDurationSeconds / 60,
+                        ))}
+                      >
+                        Use {qwenMaximumDurationSeconds / 60} min at this budget
+                      </button>
+                    </p>
+                  )}
+                {qwenMaximumDurationSeconds === null && (
+                  <p role="status">
+                    Even the family minimum exceeds the current per-video budget. Increase that budget within the Qwen module ceiling to start this channel.
+                  </p>
+                )}
+              </div>
+            )}
+            {qwenProbeAdmission && !qwenProbeAdmission.allowed && (
+              <p role="alert" style={{ color: "var(--color-error, #b42318)", fontSize: "0.82rem" }}>
+                The 60-second private proof would reserve ${qwenProbeAdmission.estimatedCostUsd.toFixed(3)} for narration, above its ${qwenProbeAdmission.availableBudgetUsd.toFixed(2)} validation cap. Adjust the narration options before approving setup.
+              </p>
+            )}
             {fam.narrated && voiceFx !== "none" && <SummaryRow k="Voice effect" v={voiceFx === "radio" ? "Old radio" : voiceFx} />}
             {dataStory && <SummaryRow k="Data story" v="Source-attributed charts only · 3+ named-source numeric sentences required" />}
             {syntheticScenarioProfile && <SummaryRow k="Fictional AI format" v={`${syntheticScenarioProfile === "ai_town" ? "AI runs a fictional town" : syntheticScenarioProfile === "ai_decision" ? "What would AI do?" : "AI POV story"} · disclosure gate + local scenario visuals`} />}

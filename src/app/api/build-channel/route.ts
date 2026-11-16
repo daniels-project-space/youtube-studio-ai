@@ -12,7 +12,12 @@ import {
   familyEpisodeLengthError,
   familyProductionReadiness,
   productionReadyFamilyFallback,
+  resolveFamilyEpisodeLengthSeconds,
 } from "@/engine/families";
+import {
+  narrationChapterCardsRequested,
+  qwenNarrationBudgetAdmission,
+} from "@/engine/narrationTtsCost";
 import { getNiche } from "@/lib/nicheCatalog";
 import {
   assertCanonicalChannelProgramBrief,
@@ -562,6 +567,14 @@ export async function POST(request: Request) {
           // Dispatch only the server-recompiled snapshot. The browser copy is
           // an operator acknowledgment, not execution authority.
           design = { ...design, pipelinePreviewSnapshot: currentPipelinePreview };
+          if (
+            family.narrated &&
+            currentPipelinePreview.blocks.includes("whiteboard_scribe")
+          ) {
+            return NextResponse.json({
+              error: "This route combines Qwen3 narration with whiteboard_scribe, which has no attested Qwen audio path. Choose a compatible visual route before authorizing setup spend.",
+            }, { status: 409 });
+          }
         } catch (error) {
           return NextResponse.json({
             error: error instanceof Error
@@ -610,6 +623,40 @@ export async function POST(request: Request) {
         perVideoBudgetUsd,
         family: family.key,
       });
+      if (approvedForSetupSpend && family.narrated) {
+        const chapterCards = narrationChapterCardsRequested(design);
+        const durationSeconds = resolveFamilyEpisodeLengthSeconds(
+          family.key,
+          design.lengthMinutes,
+        );
+        const productionAdmission = qwenNarrationBudgetAdmission({
+          durationSeconds,
+          chapterCards,
+          perVideoBudgetUsd,
+        });
+        if (!productionAdmission.allowed) {
+          const detail = productionAdmission.reason === "module-ceiling"
+            ? `The requested ${durationSeconds}-second episode reserves $${productionAdmission.estimatedCostUsd.toFixed(3)} for Qwen narration, above the module's $${productionAdmission.moduleCeilingUsd.toFixed(2)} ceiling. Reduce the episode duration; increasing the video budget cannot raise the module ceiling.`
+            : `The requested ${durationSeconds}-second episode reserves $${productionAdmission.estimatedCostUsd.toFixed(3)} for Qwen narration, above the $${perVideoBudgetUsd.toFixed(2)} per-video budget. Increase that budget within the existing module ceiling or reduce the episode duration.`;
+          return NextResponse.json({
+            error: detail,
+            costAdmission: productionAdmission,
+          }, { status: 409 });
+        }
+        if (approvedForProbe) {
+          const probeAdmission = qwenNarrationBudgetAdmission({
+            durationSeconds: 60,
+            chapterCards,
+            perVideoBudgetUsd: costAuthority.validationCapUsd,
+          });
+          if (!probeAdmission.allowed) {
+            return NextResponse.json({
+              error: `The 60-second private proof reserves $${probeAdmission.estimatedCostUsd.toFixed(3)} for Qwen narration, above the $${costAuthority.validationCapUsd.toFixed(2)} validation cap. Adjust the requested narration options before authorizing setup.`,
+              costAdmission: probeAdmission,
+            }, { status: 409 });
+          }
+        }
+      }
       const submittedName = normalizeYoutubeChannelName(
         typeof design.name === "string" ? design.name : "",
       );

@@ -173,6 +173,7 @@ try {
       showProfile: profile, showProfileFingerprint: channelShowProfileFingerprint(profile), ownerId: "owner-fixture",
       frozenModuleConfig: undefined, narrativeSeriesAdmission: undefined, scheduledPlan: undefined,
       weeklyPreparation: undefined, durableInvocation: undefined, probeBudgetAdmission: undefined,
+      durableProbeEnvelope: undefined,
       routeQualificationBenchmarkAdmission: undefined, privateInvocationContext: undefined, log: () => {},
       weeklyHyperImages: undefined,
       workerDeployment: { version: "worker-fixture", projectId: "project-fixture", environmentId: "environment-fixture" },

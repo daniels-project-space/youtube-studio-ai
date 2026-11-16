@@ -274,6 +274,47 @@ async function main() {
       /per-video budget must be at least/,
       "an exact preview must clear the binding gate and continue to the next independent validation",
     );
+
+    const qwenNarrationBrief = createChannelProgramBrief({
+      family: "narrated_stock",
+      nicheKey: "technology",
+      locale: "en",
+      concept: "Practical AI workflow lessons grounded in clear, sourceable examples.",
+    });
+    const qwenNarrationModuleConfig = {
+      narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Ryan" },
+    };
+    const qwenNarrationDesign = {
+      ...designFor(qwenNarrationBrief),
+      lengthMinutes: 10,
+      budget: 100,
+      approveSetupSpend: true,
+      runProbe: true,
+      moduleConfig: qwenNarrationModuleConfig,
+      pipelinePreviewSnapshot: compileChannelPipelinePreview({
+        programBrief: qwenNarrationBrief,
+        lengthMinutes: 10,
+        moduleConfig: qwenNarrationModuleConfig,
+      }),
+    };
+    const originalQwenFetch = globalThis.fetch;
+    let qwenDispatchAttempts = 0;
+    globalThis.fetch = async () => {
+      qwenDispatchAttempts += 1;
+      throw new Error("over-ceiling narration must stop before Trigger dispatch");
+    };
+    let overBudgetNarration: Response;
+    try {
+      overBudgetNarration = await POST(request({
+        requestKey: requestKey(qwenNarrationDesign),
+        design: qwenNarrationDesign,
+      }));
+    } finally {
+      globalThis.fetch = originalQwenFetch;
+    }
+    assert.equal(overBudgetNarration!.status, 409);
+    assert.match((await overBudgetNarration!.json() as { error: string }).error, /13\.006.*module's \$10\.00 ceiling/);
+    assert.equal(qwenDispatchAttempts, 0, "an unsupported Qwen duration must be rejected before Trigger dispatch");
   } finally {
     restoreEnv("STUDIO_INTERNAL_API_TOKEN", originalToken);
     restoreEnv("TRIGGER_SECRET_KEY", originalTriggerKey);

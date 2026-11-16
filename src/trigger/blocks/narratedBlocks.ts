@@ -101,6 +101,10 @@ import {
   VALIDATED_STORY_SPINE_SOURCE,
 } from "@/engine/qualityEvidence";
 import {
+  PRIVATE_PROBE_THUMBNAIL_MODE_PARAM,
+  PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY,
+} from "@/lib/channelInceptionProbeContract";
+import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
   parseScriptCritique,
@@ -4495,7 +4499,7 @@ export function persistQaVisualStageOutputs(patch: Readonly<BlockPatch>): BlockP
 
 export const qaVisual: Block = {
   id: "qa_visual",
-  consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
+  consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "title"],
   produces: [
     "qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing",
     "reviewEvidence", "reviewResult", "reviewFingerprint", "reviewReceiptVersion",
@@ -4507,6 +4511,16 @@ export const qaVisual: Block = {
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
   run: async (ctx) => {
+    const deferredPrivateProbeThumbnail =
+      ctx.store[PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY] === "deferred_mvp" &&
+      ctx.params[PRIVATE_PROBE_THUMBNAIL_MODE_PARAM] === "deferred_mvp";
+    if (
+      (ctx.store[PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY] !== undefined ||
+        ctx.params[PRIVATE_PROBE_THUMBNAIL_MODE_PARAM] !== undefined) &&
+      !deferredPrivateProbeThumbnail
+    ) {
+      throw new Error("qa_visual: thumbnail deferral requires the exact signed private channel probe");
+    }
     // A legacy fictional route remains readable for audit, but must not mint
     // a new QA/certificate path without the sealed visual treatment that
     // binds its independently publishable thumbnail.
@@ -5651,7 +5665,7 @@ export const qaVisual: Block = {
       }
       ctx.log(`qa_visual: thumbnail check skipped (${e instanceof Error ? e.message : e})`);
     }
-    if (productionQa && thumbnail.skipped) {
+    if (productionQa && thumbnail.skipped && !deferredPrivateProbeThumbnail) {
       throw new Error("qa_visual FAILED: required thumbnail grader did not run");
     }
 
@@ -5693,6 +5707,11 @@ export const qaVisual: Block = {
         broadBatchCount: visualReview.broadQualityScore?.broadBatchCount,
       },
       thumbnail,
+      thumbnailDisposition: deferredPrivateProbeThumbnail && thumbnail.skipped
+        ? "deferred_private_mvp"
+        : thumbnail.skipped
+          ? "missing"
+          : "graded",
       footage,
       seo,
       identity,
@@ -5920,7 +5939,7 @@ export const qaVisual: Block = {
     // FEATURE-PRESENCE gate — fail loud when an intended feature silently didn't
     // land (these were the "no thumbnail" / "no quotes" bugs). Assert the
     // artifacts we meant to ship actually exist.
-    if (!opt(ctx, "thumbnailKey")) {
+    if (!opt(ctx, "thumbnailKey") && !deferredPrivateProbeThumbnail) {
       critical.push("thumbnail missing: no thumbnailKey produced");
     }
     const quotesExpected = (ctx.store["quoteOverlays"] as unknown[] | undefined)?.length ?? 0;
