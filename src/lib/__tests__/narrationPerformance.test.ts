@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   assertNarrationPerformanceEvidence,
   assertNarrationTimingMeasurementIntegrity,
+  deriveNarrationSectionBoundaryIndices,
   evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
@@ -27,6 +28,8 @@ async function main(): Promise<void> {
   assert.equal(evidence.source, "local_ffmpeg");
   assert.equal(evidence.wordCount, 12);
   assert.ok(evidence.durationSec >= 3.9);
+  assert.equal(evidence.spokenDurationSec, evidence.durationSec);
+  assert.equal(evidence.spokenWordsPerSec, evidence.wordsPerSec);
   assert.ok(evidence.integratedLufs >= -36 && evidence.integratedLufs <= -6);
   assert.deepEqual(assertNarrationPerformanceEvidence(evidence), evidence);
   assert.throws(
@@ -41,7 +44,7 @@ async function main(): Promise<void> {
 
   await assert.rejects(
     preflightNarrationPerformance({ audioPath, text: "word ".repeat(180), speed: 1 }),
-    /implausible delivery duration/,
+    /implausible spoken duration/,
   );
 
   const silentAudioPath = join(directory, "silent-take.wav");
@@ -53,6 +56,16 @@ async function main(): Promise<void> {
     preflightNarrationPerformance({ audioPath: silentAudioPath, text, speed: 1 }),
     /integrated loudness|speech-window mean/,
     "a final narration with an audio stream but no audible content must fail closed",
+  );
+
+  const speechClockEvidence = await preflightNarrationPerformance({ audioPath, text, speed: 1, spokenDurationSec: 3 });
+  assert.ok(speechClockEvidence.durationSec >= 3.9, "the performance receipt retains the complete track duration");
+  assert.equal(speechClockEvidence.spokenDurationSec, 3, "planned silence is excluded from the speech-only clock");
+  assert.equal(speechClockEvidence.spokenWordsPerSec, 4, "voice pace is measured without counting intentional rests");
+  assert.equal(assertNarrationPerformanceEvidence(speechClockEvidence).spokenDurationSec, 3);
+  assert.throws(
+    () => assertNarrationPerformanceEvidence({ ...speechClockEvidence, spokenWordsPerSec: undefined }),
+    /both speech-only timing fields/,
   );
 
   const sentences = [
@@ -67,6 +80,57 @@ async function main(): Promise<void> {
     "narration cadence must survive a retry without changing the edit timeline",
   );
   assert.equal(cadence.purposes[0], "turn");
+  assert.throws(
+    () => planNarrationCadence({ sentences, baseGapSec: 0.8, jitterSec: 0.2, sectionBoundaryAfter: [true] }),
+    /section-boundary count must match sentence count/,
+  );
+
+  const sectionSentences = [["The room is still.", "Let the first thought settle."], ["Now notice the breath."], ["Stay with the quiet."]];
+  const openingSentences = ["Settle into the moment."];
+  const completeSentences = [...openingSentences, ...sectionSentences.flat()];
+  const sectionBoundaries = deriveNarrationSectionBoundaryIndices({
+    sentences: completeSentences,
+    openingSentences,
+    sectionSentences,
+  });
+  assert.deepEqual(sectionBoundaries, [2, 3], "only the end of a non-final script section is a long-rest boundary");
+  assert.equal(
+    deriveNarrationSectionBoundaryIndices({
+      sentences: [...completeSentences, "An unbound sentence."],
+      openingSentences,
+      sectionSentences,
+    }),
+    undefined,
+    "a structurally mismatched narration must not guess long-rest locations",
+  );
+  const quietCadence = planNarrationCadence({
+    sentences: completeSentences,
+    baseGapSec: 0.8,
+    jitterSec: 0.2,
+    sectionBoundaryAfter: [false, false, true, true, false],
+    profile: "quiet_listening",
+  });
+  assert.ok([15, 20, 25, 30].includes(quietCadence.gapsSec[2]!), "a selected quiet-listening section boundary gets a 15–30s rest");
+  assert.equal(quietCadence.purposes[2], "section");
+  assert.ok(quietCadence.gapsSec[3]! <= 2.4, "long rests are occasional rather than added at every section");
+  assert.deepEqual(
+    quietCadence,
+    planNarrationCadence({
+      sentences: completeSentences,
+      baseGapSec: 0.8,
+      jitterSec: 0.2,
+      sectionBoundaryAfter: [false, false, true, true, false],
+      profile: "quiet_listening",
+    }),
+    "section-rest timing remains stable across retries",
+  );
+  const ordinaryCadence = planNarrationCadence({
+    sentences: completeSentences,
+    baseGapSec: 0.8,
+    jitterSec: 0.2,
+    sectionBoundaryAfter: [false, false, true, true, false],
+  });
+  assert.ok(ordinaryCadence.gapsSec.every((gap) => gap <= 2.4), "ordinary channels retain short sentence cadence");
   const timings = [
     { start: 0, end: 1 },
     { start: 1 + cadence.gapsSec[0]!, end: 2 + cadence.gapsSec[0]! },
@@ -87,18 +151,19 @@ async function main(): Promise<void> {
     measuredDurationSec: timings.at(-1)!.end + 0.4,
   });
   assert.equal(stableReconciliation.scale, 1, "minor encoder variance must preserve the certified cue timeline");
-  assert.throws(
-    () => reconcileNarrationCadenceAfterDurationMeasurement({
+  const plannedPauseTotal = cadence.gapsSec.slice(0, -1).reduce((sum, gap) => sum + gap, 0);
+  const estimatedSpeechTotal = timings.at(-1)!.end - plannedPauseTotal;
+  const reconciledAfterLargeProbeMiss = reconcileNarrationCadenceAfterDurationMeasurement({
       sentences,
       sentenceTimings: timings,
       plan: cadence,
-      estimatedDurationSec: timings.at(-1)!.end,
-      measuredDurationSec: timings.at(-1)!.end * 2,
+      estimatedDurationSec: estimatedSpeechTotal + plannedPauseTotal,
+      measuredDurationSec: estimatedSpeechTotal * 2 + plannedPauseTotal,
       reconcileThresholdSec: 0,
-    }),
-    /pause .* does not match its planned/,
-    "a post-probe timing scale that changes semantic pause rhythm must fail instead of being silently accepted",
-  );
+    });
+  assert.equal(reconciledAfterLargeProbeMiss.scale, 2, "duration reconciliation scales speech while leaving pauses fixed");
+  assert.deepEqual(reconciledAfterLargeProbeMiss.cadence.gapsSec, cadence.gapsSec);
+  assert.equal(reconciledAfterLargeProbeMiss.cadence.maxGapSec, cadenceEvidence.maxGapSec);
 
   assert.doesNotThrow(
     () => assertNarrationTimingMeasurementIntegrity({ sentenceCount: 12, estimatedDurationCount: 2 }),

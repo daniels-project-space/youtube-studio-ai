@@ -9,6 +9,9 @@ export interface NarrationPerformanceEvidence {
   durationSec: number;
   wordCount: number;
   wordsPerSec: number;
+  /** Speech-only clock, excluding measured inter-sentence silence when supplied. */
+  spokenDurationSec?: number;
+  spokenWordsPerSec?: number;
   integratedLufs: number;
   windowMeanDb: number;
   /** Present only when the source was synthesized by the pinned Qwen worker. */
@@ -73,6 +76,24 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
   if (Math.abs(wordsPerSec - expectedWordsPerSec) > Math.max(0.02, expectedWordsPerSec * 0.02)) {
     throw new Error("narration performance evidence wordsPerSec does not bind its wordCount and durationSec");
   }
+  const spokenDurationSec = raw.spokenDurationSec === undefined
+    ? undefined
+    : number("spokenDurationSec", 1.5, 86_400);
+  const spokenWordsPerSec = raw.spokenWordsPerSec === undefined
+    ? undefined
+    : number("spokenWordsPerSec", 0.05, 20);
+  if ((spokenDurationSec === undefined) !== (spokenWordsPerSec === undefined)) {
+    throw new Error("narration performance evidence must include both speech-only timing fields");
+  }
+  if (
+    spokenDurationSec !== undefined && spokenWordsPerSec !== undefined &&
+    Math.abs(spokenWordsPerSec - wordCount / spokenDurationSec) > Math.max(0.02, (wordCount / spokenDurationSec) * 0.02)
+  ) {
+    throw new Error("narration performance evidence spokenWordsPerSec does not bind its wordCount and spokenDurationSec");
+  }
+  if (spokenDurationSec !== undefined && spokenDurationSec > durationSec + 5) {
+    throw new Error("narration performance evidence spokenDurationSec exceeds the measured track duration");
+  }
   const qwenProviderEvidence = raw.qwenProviderEvidence === undefined
     ? undefined
     : assertAnyQwenNarrationSourceEvidence(raw.qwenProviderEvidence);
@@ -82,6 +103,8 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
     durationSec,
     wordCount,
     wordsPerSec,
+    ...(spokenDurationSec === undefined ? {} : { spokenDurationSec }),
+    ...(spokenWordsPerSec === undefined ? {} : { spokenWordsPerSec }),
     integratedLufs: number("integratedLufs", -36, -6),
     windowMeanDb: number("windowMeanDb", -48, -3),
     ...(qwenProviderEvidence === undefined ? {} : { qwenProviderEvidence }),
@@ -90,7 +113,8 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
 
 export const NARRATION_CADENCE_EVIDENCE_VERSION = "narration-cadence-evidence/v1" as const;
 
-export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" | "continuation";
+export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" | "section" | "continuation";
+export type NarrationCadenceProfile = "standard" | "quiet_listening";
 
 /**
  * DELIVERY RATE — the pacing axis nothing was checking.
@@ -209,6 +233,39 @@ export interface NarrationCadenceEvidence extends NarrationCadencePlan {
   distinctGapCount: number;
 }
 
+/**
+ * Locate section boundaries only when the script structure reconstructs the
+ * exact narration sentence sequence. A mismatch returns undefined so callers
+ * can fail closed for a requested quiet-listening profile instead of guessing
+ * where a 15–30 second pause belongs.
+ */
+export function deriveNarrationSectionBoundaryIndices(args: {
+  sentences: readonly string[];
+  openingSentences?: readonly string[];
+  sectionSentences: readonly (readonly string[])[];
+}): number[] | undefined {
+  const expected = [
+    ...(args.openingSentences ?? []),
+    ...args.sectionSentences.flatMap((section) => [...section]),
+  ];
+  const normalize = (sentence: string) => sentence.trim().replace(/\s+/gu, " ");
+  if (
+    expected.length !== args.sentences.length ||
+    expected.some((sentence, index) => normalize(sentence) !== normalize(args.sentences[index] ?? ""))
+  ) {
+    return undefined;
+  }
+  const boundaries: number[] = [];
+  let cursor = args.openingSentences?.length ?? 0;
+  for (let index = 0; index < args.sectionSentences.length; index++) {
+    const section = args.sectionSentences[index]!;
+    cursor += section.length;
+    const hasLaterNarration = args.sectionSentences.slice(index + 1).some((later) => later.length > 0);
+    if (section.length > 0 && hasLaterNarration) boundaries.push(cursor - 1);
+  }
+  return boundaries;
+}
+
 function stableUnit(text: string): number {
   let value = 2166136261;
   for (let index = 0; index < text.length; index++) {
@@ -232,20 +289,39 @@ function pausePurpose(sentence: string, next: string | undefined): NarrationPaus
  * Semantic pauses replace `Math.random()` timing. A reveal gets space, a
  * contradiction arrives with momentum, and otherwise a small deterministic
  * variation keeps repeated automated episodes from sounding metronomic while
- * preserving exact timing on retry.
+ * preserving exact timing on retry. Quiet-listening profiles may place an
+ * occasional longer rest only at a verified script-section boundary.
  */
 export function planNarrationCadence(args: {
   sentences: readonly string[];
   baseGapSec: number;
   jitterSec: number;
+  sectionBoundaryAfter?: readonly boolean[];
+  profile?: NarrationCadenceProfile;
 }): NarrationCadencePlan {
+  if (args.sectionBoundaryAfter && args.sectionBoundaryAfter.length !== args.sentences.length) {
+    throw new Error("narration cadence: section-boundary count must match sentence count");
+  }
   const base = Number.isFinite(args.baseGapSec) ? Math.max(0.2, Math.min(2.1, args.baseGapSec)) : 0.85;
   const jitter = Number.isFinite(args.jitterSec) ? Math.max(0, Math.min(0.35, args.jitterSec)) : 0.2;
   const purposes: NarrationPausePurpose[] = [];
+  let sectionBoundaryOrdinal = 0;
   const gapsSec = args.sentences.map((sentence, index) => {
     if (index === args.sentences.length - 1) {
       purposes.push("continuation");
       return 0;
+    }
+    if (args.profile === "quiet_listening" && args.sectionBoundaryAfter?.[index]) {
+      const boundaryOrdinal = sectionBoundaryOrdinal++;
+      if (boundaryOrdinal % 3 === 0) {
+        purposes.push("section");
+        const restDurations = [15, 20, 25, 30] as const;
+        const restIndex = Math.min(
+          restDurations.length - 1,
+          Math.floor(stableUnit(`quiet-rest\n${sentence}\n${args.sentences[index + 1] ?? ""}`) * restDurations.length),
+        );
+        return restDurations[restIndex]!;
+      }
     }
     const purpose = pausePurpose(sentence, args.sentences[index + 1]);
     purposes.push(purpose);
@@ -305,9 +381,8 @@ export function evaluateNarrationCadence(args: {
 
 /**
  * Reconcile timestamp estimates with the measured rendered narration only when
- * a probe failed, then prove that the correction did not erase the semantic
- * pause plan. A linear timing scale also scales every pause; accepting it after
- * cadence was checked would turn a declared reveal/turn rhythm into fiction.
+ * a probe failed. Scale speech intervals while retaining each planned pause,
+ * then prove that the corrected cue map still matches the cadence plan.
  */
 export function reconcileNarrationCadenceAfterDurationMeasurement(args: {
   sentences: readonly string[];
@@ -332,13 +407,23 @@ export function reconcileNarrationCadenceAfterDurationMeasurement(args: {
   const threshold = Number.isFinite(args.reconcileThresholdSec)
     ? Math.max(0, args.reconcileThresholdSec!)
     : 1.5;
+  const plannedGapDurationSec = args.plan.gapsSec.slice(0, -1).reduce((sum, gap) => sum + gap, 0);
+  const firstStartSec = args.sentenceTimings[0]?.start ?? 0;
+  const estimatedSpeechDurationSec = estimatedDurationSec - plannedGapDurationSec - firstStartSec;
+  const measuredSpeechDurationSec = measuredDurationSec - plannedGapDurationSec - firstStartSec;
+  if (estimatedSpeechDurationSec <= 0 || measuredSpeechDurationSec <= 0) {
+    throw new Error("narration cadence reconciliation: measured speech duration is invalid after preserving planned pauses");
+  }
   const scale = Math.abs(measuredDurationSec - estimatedDurationSec) > threshold
-    ? measuredDurationSec / estimatedDurationSec
+    ? measuredSpeechDurationSec / estimatedSpeechDurationSec
     : 1;
-  const sentenceTimings = args.sentenceTimings.map((timing) => ({
-    start: timing.start * scale,
-    end: timing.end * scale,
-  }));
+  let cursor = firstStartSec;
+  const sentenceTimings = args.sentenceTimings.map((timing, index) => {
+    const duration = (timing.end - timing.start) * scale;
+    const adjusted = { start: cursor, end: cursor + duration };
+    cursor = adjusted.end + (index < args.sentenceTimings.length - 1 ? (args.plan.gapsSec[index] ?? 0) : 0);
+    return adjusted;
+  });
   const cadence = evaluateNarrationCadence({
     sentences: args.sentences,
     sentenceTimings,
@@ -366,6 +451,8 @@ export async function preflightNarrationPerformance(args: {
   audioPath: string;
   text: string;
   speed: number;
+  /** Sum of individually measured spoken clips; excludes planned pauses. */
+  spokenDurationSec?: number;
 }): Promise<NarrationPerformanceEvidence> {
   const media = await probe(args.audioPath);
   if (!media.hasAudio || !Number.isFinite(media.durationSec) || media.durationSec < 1.5) {
@@ -376,11 +463,18 @@ export async function preflightNarrationPerformance(args: {
     throw new Error("narration performance preflight: spoken text is too short for a production narration check");
   }
   const speed = Number.isFinite(args.speed) && args.speed > 0 ? args.speed : 1;
+  const spokenDurationSec = args.spokenDurationSec ?? media.durationSec;
+  if (
+    !Number.isFinite(spokenDurationSec) || spokenDurationSec < 1.5 ||
+    spokenDurationSec > media.durationSec + 5
+  ) {
+    throw new Error("narration performance preflight: speech-only duration is invalid for the measured audio");
+  }
   const explicitPauses = (args.text.match(/\[(?:long )?pause\]/gi) ?? []).length;
   const expectedSec = words.length / (3.1 * Math.max(0.7, speed)) + explicitPauses * 1.5;
-  if (media.durationSec < expectedSec * 0.3 || media.durationSec > expectedSec * 2.5 + 12) {
+  if (spokenDurationSec < expectedSec * 0.3 || spokenDurationSec > expectedSec * 2.5 + 12) {
     throw new Error(
-      `narration performance preflight: implausible delivery duration ${media.durationSec.toFixed(2)}s for ${words.length} spoken words (expected ~${expectedSec.toFixed(2)}s)`,
+      `narration performance preflight: implausible spoken duration ${spokenDurationSec.toFixed(2)}s for ${words.length} spoken words (expected ~${expectedSec.toFixed(2)}s)`,
     );
   }
   const measured = await measureAudio(args.audioPath, {
@@ -402,6 +496,8 @@ export async function preflightNarrationPerformance(args: {
     durationSec: media.durationSec,
     wordCount: words.length,
     wordsPerSec: words.length / media.durationSec,
+    spokenDurationSec,
+    spokenWordsPerSec: words.length / spokenDurationSec,
     integratedLufs: measured.integratedLufs,
     windowMeanDb: measured.windowMeanDb,
   };
