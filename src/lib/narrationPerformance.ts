@@ -116,6 +116,18 @@ export const NARRATION_CADENCE_EVIDENCE_VERSION = "narration-cadence-evidence/v1
 export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" | "section" | "continuation";
 export type NarrationCadenceProfile = "standard" | "quiet_listening";
 
+/** Shared genre detection and conservative timing allowance for long rests. */
+export function isQuietListeningNarration(...hints: readonly unknown[]): boolean {
+  const text = hints.filter((hint): hint is string => typeof hint === "string").join(" ");
+  return /sleep|meditat|hypnot|drowsy|ambient|lo[\s-]?fi|mindful|breathwork|restful|relaxation/i.test(text);
+}
+
+/** Reserve up to 30 seconds of long-rest time per five minutes of requested runtime. */
+export function quietListeningRestBudgetSec(targetDurationSec: number): number {
+  if (!Number.isFinite(targetDurationSec) || targetDurationSec < 180) return 0;
+  return Math.max(1, Math.floor(targetDurationSec / 300)) * 30;
+}
+
 /**
  * DELIVERY RATE — the pacing axis nothing was checking.
  *
@@ -298,6 +310,7 @@ export function planNarrationCadence(args: {
   jitterSec: number;
   sectionBoundaryAfter?: readonly boolean[];
   profile?: NarrationCadenceProfile;
+  maxQuietRestBudgetSec?: number;
 }): NarrationCadencePlan {
   if (args.sectionBoundaryAfter && args.sectionBoundaryAfter.length !== args.sentences.length) {
     throw new Error("narration cadence: section-boundary count must match sentence count");
@@ -306,6 +319,12 @@ export function planNarrationCadence(args: {
   const jitter = Number.isFinite(args.jitterSec) ? Math.max(0, Math.min(0.35, args.jitterSec)) : 0.2;
   const purposes: NarrationPausePurpose[] = [];
   let sectionBoundaryOrdinal = 0;
+  let plannedQuietRestSec = 0;
+  const quietRestBudgetSec = args.maxQuietRestBudgetSec === undefined
+    ? Number.POSITIVE_INFINITY
+    : Number.isFinite(args.maxQuietRestBudgetSec)
+      ? Math.max(0, args.maxQuietRestBudgetSec)
+      : 0;
   const gapsSec = args.sentences.map((sentence, index) => {
     if (index === args.sentences.length - 1) {
       purposes.push("continuation");
@@ -320,7 +339,12 @@ export function planNarrationCadence(args: {
           restDurations.length - 1,
           Math.floor(stableUnit(`quiet-rest\n${sentence}\n${args.sentences[index + 1] ?? ""}`) * restDurations.length),
         );
-        return restDurations[restIndex]!;
+        const restSec = restDurations[restIndex]!;
+        if (plannedQuietRestSec + restSec <= quietRestBudgetSec) {
+          plannedQuietRestSec += restSec;
+          return restSec;
+        }
+        purposes.pop();
       }
     }
     const purpose = pausePurpose(sentence, args.sentences[index + 1]);

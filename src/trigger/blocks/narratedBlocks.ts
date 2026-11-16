@@ -193,6 +193,8 @@ import {
   evaluateNarrationCadence,
   evaluateNarrationRate,
   planNarrationCadence,
+  isQuietListeningNarration,
+  quietListeningRestBudgetSec,
   preflightNarrationPerformance,
   reconcileNarrationCadenceAfterDurationMeasurement,
 } from "@/lib/narrationPerformance";
@@ -803,6 +805,7 @@ export const scriptGen: Block = {
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
+      genre: ctx.params["genre"] as string | undefined,
       qualityProfile: ctx.params["qualityProfile"] === "draft" ? ("draft" as const) : ("production" as const),
       language: ctx.params["language"] as string | undefined,
       maxSeconds: ctx.params["maxSeconds"] as number | undefined,
@@ -1357,11 +1360,12 @@ export const narrationTts: Block = {
     const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
       ?.narrative;
     const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
-    const quietListeningProfile: "standard" | "quiet_listening" =
-      /sleep|meditat|hypnot|drowsy|ambient|lo[\s-]?fi|mindful|breathwork|restful|relaxation/i
-        .test(`${niche ?? ""} ${String(ctx.params["genre"] ?? "")} ${pacingText}`)
-        ? "quiet_listening"
-        : "standard";
+    const quietListeningProfile: "standard" | "quiet_listening" = isQuietListeningNarration(
+      niche, ctx.params["genre"], ctx.params["style"], dnaPacing?.pacing, dnaPacing?.delivery,
+    ) ? "quiet_listening" : "standard";
+    const quietRestBudgetSec = quietListeningProfile === "quiet_listening"
+      ? quietListeningRestBudgetSec(Number(ctx.params["maxSeconds"] ?? 240))
+      : 0;
     const dnaSpeed =
       /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
         : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
@@ -1709,6 +1713,7 @@ export const narrationTts: Block = {
         jitterSec: jitter,
         sectionBoundaryAfter: items.map((item) => item.sectionBoundaryAfter === true),
         profile: quietListeningProfile,
+        maxQuietRestBudgetSec: quietRestBudgetSec,
       });
       const chPool = ttsConcurrency();
       // Probe-fallback counter: an ESTIMATED duration shifts every later
@@ -1881,6 +1886,7 @@ export const narrationTts: Block = {
       jitterSec: jitter,
       sectionBoundaryAfter: sentences.map((_, index) => sectionBoundarySet.has(index)),
       profile: quietListeningProfile,
+      maxQuietRestBudgetSec: quietRestBudgetSec,
     });
     const gaps = cadencePlan.gapsSec;
     ctx.log(

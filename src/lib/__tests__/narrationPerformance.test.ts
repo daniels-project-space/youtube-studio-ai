@@ -8,9 +8,11 @@ import {
   assertNarrationTimingMeasurementIntegrity,
   deriveNarrationSectionBoundaryIndices,
   evaluateNarrationCadence,
+  isQuietListeningNarration,
   planNarrationCadence,
   preflightNarrationPerformance,
   reconcileNarrationCadenceAfterDurationMeasurement,
+  quietListeningRestBudgetSec,
 } from "@/lib/narrationPerformance";
 
 async function main(): Promise<void> {
@@ -124,6 +126,31 @@ async function main(): Promise<void> {
     }),
     "section-rest timing remains stable across retries",
   );
+  assert.equal(isQuietListeningNarration("Stoic reflections", "meditation", "gentle"), true);
+  assert.equal(isQuietListeningNarration("history", "documentary", "measured"), false);
+  assert.equal(quietListeningRestBudgetSec(600), 60, "a ten-minute target reserves at most two 30-second rests");
+  assert.equal(quietListeningRestBudgetSec(179), 0, "short clips do not reserve a long rest");
+  const boundedQuietCadence = planNarrationCadence({
+    sentences: completeSentences,
+    baseGapSec: 0.8,
+    jitterSec: 0.2,
+    sectionBoundaryAfter: [false, false, true, true, false],
+    profile: "quiet_listening",
+    maxQuietRestBudgetSec: 15,
+  });
+  assert.ok(
+    boundedQuietCadence.gapsSec.reduce((sum, gap) => sum + (gap >= 15 ? gap : 0), 0) <= 15,
+    "planned long rests must stay within the time reserved by ScriptGen",
+  );
+  const invalidBudgetCadence = planNarrationCadence({
+    sentences: completeSentences,
+    baseGapSec: 0.8,
+    jitterSec: 0.2,
+    sectionBoundaryAfter: [false, false, true, true, false],
+    profile: "quiet_listening",
+    maxQuietRestBudgetSec: Number.NaN,
+  });
+  assert.ok(invalidBudgetCadence.gapsSec.every((gap) => gap < 15), "invalid rest budgets fail closed");
   const ordinaryCadence = planNarrationCadence({
     sentences: completeSentences,
     baseGapSec: 0.8,

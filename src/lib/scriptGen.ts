@@ -9,6 +9,7 @@ import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/gol
 import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
+import { isQuietListeningNarration, quietListeningRestBudgetSec } from "@/lib/narrationPerformance";
 
 export interface ScriptSection {
   heading: string;
@@ -122,11 +123,13 @@ export interface ScriptRequest {
   niche?: string;
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
   style?: string;
+  /** Genre selector used by the narration voice and quiet-listening timing. */
+  genre?: string;
   /** Passed to Hookcraft; absent defaults conservatively to production. */
   qualityProfile?: HookCraftArgs["qualityProfile"];
   /** Spoken language (BCP-47-ish: en | es | de | …). Default English. */
   language?: string;
-  /** Target spoken length; drives word budget (~2.5 words/sec). */
+  /** Requested runtime; quiet-listening rests are separately reserved in the word budget. */
   maxSeconds?: number;
   /** End the narration with a concise recap/summary section (default true). */
   endWithSummary?: boolean;
@@ -940,9 +943,14 @@ export async function synthScript(
 ): Promise<Script> {
   const maxSeconds = req.maxSeconds ?? 240;
   const gapSec = req.sentenceGapSec ?? 0;
+  const quietRestBudgetSec = isQuietListeningNarration(
+    req.niche, req.genre, req.style, req.narrative?.scriptStyle, req.narrative?.hookStyle,
+    req.narrative?.pacing, req.narrative?.delivery,
+  ) ? quietListeningRestBudgetSec(maxSeconds) : 0;
+  const spokenTargetSeconds = Math.max(0, maxSeconds - quietRestBudgetSec);
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget
   // overshot the slot ~15% (render #6: 848s actual vs 660s target).
-  const wordBudget = Math.round(maxSeconds * effectiveWps(gapSec, req.ttsSpeed ?? 1));
+  const wordBudget = Math.round(spokenTargetSeconds * effectiveWps(gapSec, req.ttsSpeed ?? 1));
 
   if (!hasCreativeTextKey()) {
     // NO silent thin-fallback: a one-sentence "script" used to ship as a full
@@ -977,7 +985,7 @@ export async function synthScript(
 
   // Long-form (>~7 min) needs chunked generation — one call can't write it.
   if (maxSeconds > 420) {
-    return bindProgramRoute(req, await synthLongScript(req, crafted, maxSeconds, wordBudget, log));
+    return bindProgramRoute(req, await synthLongScript(req, crafted, spokenTargetSeconds, wordBudget, log));
   }
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook
@@ -1002,7 +1010,8 @@ export async function synthScript(
         req.priorIssues.map((i) => `- ${i}`).join("\n")
       : "",
     CRAFT_RULES,
-    `Target length: about ${maxSeconds} seconds — write the FULL length, roughly ${wordBudget} words of ` +
+    `Target spoken length: about ${spokenTargetSeconds} seconds, with up to ${quietRestBudgetSec} seconds ` +
+      `reserved for intentional quiet section rests — write roughly ${wordBudget} words of ` +
       `narration total (do NOT stop short; aim for at least ${Math.round(wordBudget * 0.9)} words across the sections).`,
     req.endWithSummary === false
       ? ""
