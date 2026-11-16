@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { EngineQwenReceiptSchema, type EngineQwenReceipt } from "@/engine/qwenEngineReceipt";
+import { QWEN3_TTS_SPEAKERS } from "@/engine/qwenTtsProfiles";
+
+export { QWEN3_TTS_SPEAKERS } from "@/engine/qwenTtsProfiles";
 
 export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
@@ -41,18 +44,6 @@ export function qwenTtsRuntimeProfile(): QwenTtsRuntimeProfile {
   }
   throw new QwenTtsError("QWEN3_TTS_RUNTIME_PROFILE must select an admitted exact worker profile");
 }
-
-export const QWEN3_TTS_SPEAKERS = [
-  "Vivian",
-  "Serena",
-  "Uncle_Fu",
-  "Dylan",
-  "Eric",
-  "Ryan",
-  "Aiden",
-  "Ono_Anna",
-  "Sohee",
-] as const;
 
 /**
  * Provider-declared CustomVoice metadata from the pinned Qwen3-TTS model card.

@@ -15,6 +15,7 @@
  * free-text params (music `prompt`, topic_select `seriesTitle`) need the Knob type
  * to gain a "text" variant first — tracked as a follow-up.
  */
+import { QWEN3_TTS_SPEAKERS } from "./qwenTtsProfiles";
 import type { ModuleCard } from "./moduleRegistry";
 
 const SCRIPT_MODULE: ModuleCard = {
@@ -53,6 +54,7 @@ const NARRATION_MODULE: ModuleCard = {
       // default because changing it would re-voice every channel that never
       // set one, which a listener notices faster than any visual change.
       { id: "ttsProvider", type: "enum", values: ["fish", "elevenlabs", "qwen3"], default: "fish", describes: "narration engine; Qwen3 uses a qualified cloud worker and refuses until its receipt is current", servesStyles: ["documentary", "meditation", "commentary"] },
+      { id: "qwenSpeaker", type: "enum", values: QWEN3_TTS_SPEAKERS, default: "Ryan", describes: "Qwen3 CustomVoice speaker for the channel narration", servesStyles: ["documentary", "meditation", "commentary"] },
       { id: "voiceFx", type: "enum", values: ["none", "radio"], default: "none", describes: "stylized filter on the finished narration", servesStyles: ["vintage", "crime"] },
       { id: "chapterCards", type: "boolean", default: false, describes: "read each section heading on a fading card", servesStyles: ["documentary", "essay"] },
     ],

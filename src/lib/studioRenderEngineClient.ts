@@ -151,7 +151,7 @@ export class StudioRenderEngineClient {
     const bytes = Buffer.from(JSON.stringify(input.graph));
     if (bytes.length > 1_000_000) throw new Error("Comfy graph exceeds the Engine upload limit");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const upload = z.object({ key: z.string(), url: z.string().url(), headers: z.record(z.string()) }).parse(
+    const upload = z.object({ key: z.string(), url: z.string().url(), headers: z.record(z.string(), z.string()) }).parse(
       await this.request("comfy-source-uploads", { kind: "workflow", sha256, bytes: bytes.length }),
     );
     const url = new URL(upload.url);

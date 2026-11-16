@@ -24,7 +24,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { CORE_MODULE_SURFACES } from "@/engine/moduleSurfaces";
-import { MODULE_REGISTRY } from "@/engine/moduleRegistry";
+import { configurableModules } from "@/engine/moduleRegistry";
 import { NEW_CHANNEL_MODULE_CATALOG } from "@/engine/moduleCatalog";
 
 const ROOT = process.cwd();
@@ -101,8 +101,14 @@ function main(): void {
   // caption burn-in.
   {
     const orphaned: string[] = [];
+    const onboardingKnobs = new Map(
+      configurableModules(undefined, "new_channel").map(({ blockId, surface }) => [
+        blockId,
+        new Set(surface.knobs.map((knob) => knob.id)),
+      ]),
+    );
     for (const entry of NEW_CHANNEL_MODULE_CATALOG as { block: string; params?: { key: string }[] }[]) {
-      const knobs = new Set((MODULE_REGISTRY[entry.block]?.customization?.knobs ?? []).map((knob) => knob.id));
+      const knobs = onboardingKnobs.get(entry.block) ?? new Set<string>();
       for (const param of entry.params ?? []) {
         if (!knobs.has(param.key)) orphaned.push(`${entry.block}.${param.key}`);
       }

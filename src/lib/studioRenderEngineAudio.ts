@@ -6,7 +6,7 @@ import { sha256Hex } from "./sha256";
 export const StudioEngineAudioInput = z.object({
   model: z.enum(["yue2", "qwen3-tts", "fish-audio-s2-pro", "minimax-music3"]),
   workflowId: z.string().regex(/^[a-z0-9]{32}$/),
-  request: z.record(z.unknown()).superRefine((request, ctx) => {
+  request: z.record(z.string(), z.unknown()).superRefine((request, ctx) => {
     if (typeof request.idempotencyKey !== "string" || !/^[A-Za-z0-9:_-]{16,200}$/.test(request.idempotencyKey) ||
       typeof request.profileRevisionSha256 !== "string" || !/^[a-f0-9]{64}$/.test(request.profileRevisionSha256)) {
       ctx.addIssue({ code: "custom", message: "An immutable request key and profile revision are required" });

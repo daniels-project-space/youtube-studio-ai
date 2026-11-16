@@ -19,6 +19,21 @@ assert.deepEqual(qwenFromPipeline, {
   qwenLanguage: "English",
 });
 
+assert.deepEqual(
+  resolveRequestedChannelVoice({
+    pipeline: [{ block: "narration_tts", params: { qwenSpeaker: "Ryan" } }],
+    moduleConfig: {},
+    locale: "en",
+  }),
+  { provider: "qwen3", qwenSpeaker: "Ryan", qwenLanguage: "English" },
+  "new-channel voice casting defaults to Qwen without silently selecting ElevenLabs",
+);
+assert.throws(() => resolveRequestedChannelVoice({
+  pipeline: [{ block: "narration_tts", params: { ttsProvider: "elevenlabs" } }],
+  moduleConfig: {},
+  locale: "en",
+}), /requires Qwen3-TTS/);
+
 const qwenFromRuntimeConfig = resolveRequestedChannelVoice({
   pipeline: [{ block: "narration_tts", params: { ttsProvider: "elevenlabs" } }],
   moduleConfig: { narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Ryan", language: "en-US" } },
@@ -43,13 +58,13 @@ assert.throws(
 assert.throws(
   () => resolveRequestedChannelVoice({
     pipeline: [
-      { block: "narration_tts", params: { ttsProvider: "qwen3", qwenSpeaker: "Aiden" } },
+      { block: "narration_tts", params: { ttsProvider: "qwen3", qwenSpeaker: "Ryan" } },
       { block: "whiteboard_scribe" },
     ],
     moduleConfig: {},
     locale: "en",
   }),
-  /cannot be mixed/,
+  /not qualified for the whiteboard_scribe renderer/,
 );
 assert.throws(
   () => resolveRequestedChannelVoice({
