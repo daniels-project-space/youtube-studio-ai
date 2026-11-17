@@ -4,12 +4,14 @@ import { channelPipelineValidationSeedKeys } from "./channelPipelineSeedKeys";
 import { compilePipeline } from "./pipelineCompiler";
 import { validatePipeline } from "./validate";
 import type { PipelineEntry } from "./types";
+import { assertAutomationNarrationPolicy } from "./automationNarrationPolicy";
 
 /** Structural and policy checks only: no provider, trial or release admission. */
 export function checkWorkshopPipeline(family: string, entries: PipelineEntry[]) {
   const lane = contentLaneForFamily(family);
   if (!lane) throw new Error("Choose a supported video format before checking compatibility");
   registerAllBlocks();
+  assertAutomationNarrationPolicy(entries, {}, { YOUTUBE_STUDIO_WORKSHOP_PRIVATE: "1" });
   const resolved = validatePipeline(entries, channelPipelineValidationSeedKeys(lane, undefined, entries));
   assertPipelineMatchesContentLane(lane, entries);
   const compiled = compilePipeline(resolved);

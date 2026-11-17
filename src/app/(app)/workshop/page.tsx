@@ -5,12 +5,48 @@ import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { MODULE_CATALOG } from "@/engine/moduleCatalog";
+import { MODULE_CATALOG, getModuleSpec } from "@/engine/moduleCatalog";
 import { CONTENT_LANE_BY_FAMILY } from "@/engine/contentLane";
 import { useOwnerId } from "@/lib/owner-context";
 import styles from "./workshop.module.css";
 
 type Entry = { block: string; version?: string; params?: Record<string, unknown> };
+
+function ModuleParameters({ entry, onChange }: { entry: Entry; onChange: (params: Record<string, unknown>) => void }) {
+  const fields = getModuleSpec(entry.block)?.params ?? [];
+  if (!fields.length) return null;
+  const params = entry.params ?? {};
+  const update = (key: string, value: unknown) => {
+    const next = { ...params };
+    if (value === undefined || value === "") delete next[key]; else next[key] = value;
+    onChange(next);
+  };
+  return <details className={styles.parameters}>
+    <summary>Configure {getModuleSpec(entry.block)?.label ?? entry.block}</summary>
+    {fields.map(field => {
+      const value = params[field.key];
+      const options = entry.block === "narration_tts" && field.key === "ttsProvider"
+        ? field.options?.filter(option => option.value === "qwen3") : field.options;
+      const displayed = value === undefined || value === null ? "" : String(value);
+      return <label key={field.key} className={styles.parameter}>
+        <span>{field.label}</span>
+        {field.type === "select" || field.type === "toggle" ? <select value={displayed} onChange={event => {
+          const next = event.target.value;
+          update(field.key, field.type === "toggle" && next ? next === "true" : next);
+        }}>
+          <option value="">Use default</option>
+          {field.type === "toggle" ? <><option value="true">Enabled</option><option value="false">Disabled</option></> : <>
+            {displayed && !options?.some(option => option.value === displayed) && <option value={displayed} disabled>Previously saved: {displayed} (unsupported)</option>}
+            {options?.map(option => <option key={option.value} value={option.value}>{entry.block === "narration_tts" && field.key === "ttsProvider" && option.value === "qwen3" ? "Qwen3-TTS" : option.label}</option>)}
+          </>}
+        </select> : <input type={field.type === "number" ? "number" : "text"} value={displayed}
+          min={field.min} max={field.max} step={field.step} maxLength={field.type === "text" ? 500 : undefined}
+          onChange={event => { const next = event.target.value; update(field.key, field.type === "number" && next ? Number(next) : next); }} />}
+        {field.help && !(entry.block === "narration_tts" && field.key === "ttsProvider") && <small>{field.help}</small>}
+      </label>;
+    })}
+  </details>;
+}
 
 export default function WorkshopPage() {
   const ownerId = useOwnerId();
@@ -80,6 +116,7 @@ export default function WorkshopPage() {
             <button type="button" disabled={index === 0} onClick={() => move(index, -1)} aria-label={`Move ${entry.block} up`}>↑</button>{" "}
             <button type="button" disabled={index === entries.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${entry.block} down`}>↓</button>{" "}
             <button type="button" onClick={() => setEntries(entries.filter((_, i) => i !== index))} aria-label={`Remove ${entry.block}`}>Remove</button>
+            <ModuleParameters entry={entry} onChange={params => setEntries(current => current.map((item, i) => i === index ? { ...item, params } : item))} />
           </li>)}
         </ol>}
         <button type="button" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save draft"}</button>

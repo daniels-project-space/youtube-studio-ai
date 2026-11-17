@@ -10,3 +10,7 @@
 .workshop button:disabled { cursor: not-allowed; opacity: .45; }
 .workshop button:focus-visible, .workshop input:focus-visible, .workshop select:focus-visible, .workshop a:focus-visible { outline: 2px solid #80d6bd; outline-offset: 2px; }
 .workshop ul, .workshop ol { display: grid; gap: .55rem; margin: .8rem 0; padding-left: 1.3rem; }
+.parameters { margin: .45rem 0 .8rem; }
+.parameters summary { cursor: pointer; color: var(--color-accent, #86ddc0); }
+.workshop .parameter { display: grid; gap: .35rem; margin: .8rem 0; }
+.parameter small { color: var(--color-muted, #b6becb); line-height: 1.4; }

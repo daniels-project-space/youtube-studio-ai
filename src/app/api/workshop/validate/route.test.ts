@@ -9,7 +9,7 @@ async function main() {
   process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE = "1";
   process.env.YTS_LOCAL_WEB_ORIGIN = "http://127.0.0.1:39462";
   const session = await createOperatorSessionToken();
-  const pipeline = designPipeline({ family: "narrated_stock", nicheKey: "history", lengthMinutes: 5, publishMode: "draft" }).pipeline;
+  const pipeline = designPipeline({ family: "narrated_stock", nicheKey: "history", lengthMinutes: 5, publishMode: "draft" }).pipeline.map(entry => entry.block === "narration_tts" ? { ...entry, params: { ...entry.params, ttsProvider: "qwen3", qwenSpeaker: "Serena" } } : entry);
   const request = (body: unknown, cookie?: string, origin = "http://127.0.0.1:39462") => new Request("http://127.0.0.1:39462/api/workshop/validate", {
     method: "POST", headers: { "content-type": "application/json", origin, host: "127.0.0.1:39462", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
   });
