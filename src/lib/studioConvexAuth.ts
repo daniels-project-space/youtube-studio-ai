@@ -6,9 +6,10 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
+import { DEFAULT_STUDIO_CONVEX_AUDIENCE, DEFAULT_STUDIO_CONVEX_ISSUER, studioConvexIdentityConfig } from "./studioConvexIdentityConfig";
 
-export const STUDIO_CONVEX_ISSUER = "https://youtube-studio-ai.vercel.app";
-export const STUDIO_CONVEX_AUDIENCE = "youtube-studio-ai-convex";
+export const STUDIO_CONVEX_ISSUER = DEFAULT_STUDIO_CONVEX_ISSUER;
+export const STUDIO_CONVEX_AUDIENCE = DEFAULT_STUDIO_CONVEX_AUDIENCE;
 
 export type StudioConvexRole = "viewer" | "owner" | "service";
 
@@ -156,9 +157,10 @@ export function issueStudioConvexToken(options: {
         : "service:youtube-studio-ai";
 
   const header = base64UrlJson({ alg: "ES256", typ: "JWT", kid: publicJwk.kid });
+  const identity = studioConvexIdentityConfig(process.env);
   const payload = base64UrlJson({
-    iss: STUDIO_CONVEX_ISSUER,
-    aud: STUDIO_CONVEX_AUDIENCE,
+    iss: identity.issuer,
+    aud: identity.audience,
     sub: subject,
     role: options.role,
     owner_id: ownerId,

@@ -27,6 +27,23 @@ child tasks, idempotency, version pinning and recovery need real qualification
 under this app's long-running workload before choosing it. Measure VPS memory,
 disk and concurrency; do not share or disturb another project's database.
 
+On 17 November 2026 the cached official Convex backend binary
+`precompiled-2026-10-22-1447815` passed a disposable localhost qualification:
+a synthetic function was deployed, a record was written and read, and the
+same record survived a backend restart. Run `scripts/qualify-local-convex.py`
+with `--backend` pointing to the binary to repeat it. This does not prove the
+Studio schema, real authentication, import, production recovery, backup or
+capacity. The official GHCR image registry returned HTTP 403 from this VPS;
+the binary is an evaluated alternative, not an image deployment.
+
+Studio's signing code and Convex authentication configuration now accept
+deployment-specific `STUDIO_CONVEX_ISSUER`, `STUDIO_CONVEX_JWKS_URL`, and
+`STUDIO_CONVEX_AUDIENCE` values, while retaining the existing production
+defaults. Use distinct issuer, audience and signing keys for each project and
+set matching values in its app and backend. Never expose the private key.
+The local configuration and signed-token behavior have unit evidence only;
+real backend verification and private owner authentication remain required.
+
 The two apps need independent state and service credentials. Import a verified
 snapshot to the Automation instance only after establishing an idempotent,
 reversible mapping and checking channel, run, connector and artifact counts.
