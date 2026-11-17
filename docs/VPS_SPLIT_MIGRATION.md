@@ -197,7 +197,7 @@ On 17 November 2026 the private
 `youtube-automation-web.service` was installed and enabled at
 `http://127.0.0.1:39362`, running as `youtubeautomation`. The previous build
 `ad60301eb4cb3967bc4c11519ee25db4223eb6aa` is retained for rollback. On 17
-November 2026 the live build was updated to `1e9641740484bd05f5f2b1f9de5ba6fde9dc0061`.
+November 2026 the live build was updated to `863e3a4730b563c950b2cc6ab03791af756c34de`.
 A browser using the actual
 Vault-backed owner password verified anonymous token denial, wrong-password
 rejection, owner login, all 13 channels and the local backend WebSocket. The
@@ -310,6 +310,9 @@ While private review mode is in effect, the channel-settings API also refuses
 new public/scheduled or cross-post approvals before modifying channel policy or
 pipeline settings, so the interface cannot report an approval the worker will
 reject.
+The actual private interface rejected same-owner public, scheduled and
+cross-post approval requests with HTTP 409, rejected a cross-origin request,
+and left the tested channel's pipeline and publishing policy unchanged.
 
 Private Automation can load a curated secret snapshot from the root-only
 `/etc/youtube-automation/local-vault.json` through `YTA_LOCAL_VAULT_JSON`.
