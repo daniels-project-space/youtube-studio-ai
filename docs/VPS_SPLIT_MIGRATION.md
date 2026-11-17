@@ -223,6 +223,14 @@ adding or removing blocks; policy completion left their stored entries and
 parameters unchanged. This does not verify runtime configuration, worker
 availability, duration, audio quality or actual video output.
 
+The private route-qualification request now wakes a dispatcher for that exact
+owner/channel/run rather than relying on a disabled recurring schedule. A
+failed enqueue leaves the approved request durable and tells the operator to
+retry. A retry may recover only its own expired queued delivery, with the
+existing bounded attempts and immutable envelope. The dispatcher still requires
+the channel's sealed route and supporting evidence; this is not a claim that
+all legacy channels satisfy those admissions or have produced a video.
+
 The read-only `scripts/audit-channel-narration.ts` check materializes the
 saved channel module controls and applies Automation's new preflight. Six
 channels with `narration_tts` require an explicit Qwen provider. Chalk &

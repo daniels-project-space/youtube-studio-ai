@@ -1197,7 +1197,9 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
       }
       setRunId(data.runId);
       setMessage(
-        data.state === "reused"
+        data.state === "dispatch_pending"
+          ? "The private request was saved, but the job service did not accept it. Try again; the same request will be reused."
+          : data.state === "reused"
           ? "The exact private benchmark request is already recorded. Its durable dispatcher will continue from the existing run."
           : "Private benchmark request recorded. The system will re-check the sealed route before any render and will never upload this run.",
       );

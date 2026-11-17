@@ -7,6 +7,7 @@ function source(path: string): string {
 }
 
 const endpoint = source("src/app/api/route-qualification-benchmarks/route.ts");
+const manualDispatch = source("src/lib/routeQualificationManualDispatch.ts");
 const dispatcher = source("src/trigger/routeQualificationBenchmarkDispatcher.ts");
 const runner = source("src/trigger/runPipeline.ts");
 const runs = source("convex/runs.ts");
@@ -20,9 +21,12 @@ assert.match(
 );
 assert.doesNotMatch(
   endpoint,
-  /tasks\.trigger|pipelineOverride:\s*body|prompt:\s*body/i,
+  /tasks\.trigger\(\s*["']run-pipeline|pipelineOverride:\s*body|prompt:\s*body/i,
   "the browser cannot provide pipeline/prompt inputs or directly trigger a benchmark",
 );
+assert.match(endpoint, /claimRequestApproval[\s\S]*requestRouteQualificationDispatch\(/,
+  "a saved owner approval wakes the scoped dispatcher without needing a schedule");
+assert.match(manualDispatch, /tasks\.trigger\("route-qualification-benchmark-dispatcher", input\)/);
 assert.match(
   dispatcher,
   /verifyStudioActionApproval[\s\S]*routePreflightQualificationEvidence[\s\S]*freezeChannelInceptionProbeContext[\s\S]*prepareRouteQualificationBenchmarkDispatchEnvelope/,

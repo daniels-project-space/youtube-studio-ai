@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import {
   assertRouteQualificationBenchmarkRequestApproval,
@@ -290,6 +291,30 @@ export const claimDispatchEnvelope = mutation({
   },
 });
 
+function pendingDispatch(run: BenchmarkRun) {
+  if (run.status !== "awaiting_route_qualification_benchmark_dispatch" || run.routeQualificationBenchmarkDispatchState !== "pending") return null;
+  const request = requestApproval(run);
+  const envelope = run.routeQualificationBenchmarkDispatchEnvelope === undefined ? undefined : dispatchEnvelope(run);
+  const attempt = run.routeQualificationBenchmarkDispatchAttempts ?? 0;
+  if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt >= MAX_ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_ATTEMPTS) {
+    throw new Error("route qualification benchmark dispatch is exhausted");
+  }
+  return { runId: run._id, channelId: run.channelId,
+    dispatchKey: required(run.routeQualificationBenchmarkDispatchKey, "route qualification benchmark dispatch key"),
+    envelope, approval: request.approval, approvalFingerprint: request.approvalFingerprint,
+    maximumCostUsd: request.maximumCostUsd, attempt };
+}
+
+/** Fetch one owner-approved request without waking unrelated channels. */
+export const getPendingForRun = query({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "route qualification benchmark targeted dispatch");
+    return pendingDispatch(ownedRun(await ctx.db.get(args.runId), args));
+  },
+});
+
 export const listPending = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
   returns: v.any(),
@@ -313,25 +338,8 @@ export const listPending = query({
     }> = [];
     for (const run of rows) {
       try {
-        if (run.status !== "awaiting_route_qualification_benchmark_dispatch") continue;
-        const request = requestApproval(run);
-        const envelope = run.routeQualificationBenchmarkDispatchEnvelope === undefined
-          ? undefined
-          : dispatchEnvelope(run);
-        const attempt = run.routeQualificationBenchmarkDispatchAttempts ?? 0;
-        if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt >= MAX_ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_ATTEMPTS) {
-          throw new Error("route qualification benchmark dispatch is exhausted");
-        }
-        pending.push({
-          runId: run._id,
-          channelId: run.channelId,
-          dispatchKey: required(run.routeQualificationBenchmarkDispatchKey, "route qualification benchmark dispatch key"),
-          envelope,
-          approval: request.approval,
-          approvalFingerprint: request.approvalFingerprint,
-          maximumCostUsd: request.maximumCostUsd,
-          attempt,
-        });
+        const receipt = pendingDispatch(run);
+        if (receipt) pending.push(receipt);
       } catch {
         // The next explicit owner action/reaper surfaces a malformed receipt;
         // never turn a corrupted row into an executable task payload.
@@ -455,6 +463,55 @@ export const recordPreparationFailure = mutation({
   },
 });
 
+async function recoverExpiredQueued(ctx: MutationCtx, run: BenchmarkRun, now: number): Promise<"requeued" | "blocked"> {
+  try {
+    dispatchEnvelope(run);
+    const attempts = run.routeQualificationBenchmarkDispatchAttempts;
+    if (run.status !== "awaiting_route_qualification_benchmark_dispatch" || !Number.isSafeInteger(attempts) ||
+        (attempts ?? 0) < 1 || (attempts ?? 0) >= MAX_ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_ATTEMPTS) {
+      throw new Error("route qualification benchmark queued dispatch is invalid or exhausted");
+    }
+    await ctx.db.patch(run._id, {
+      routeQualificationBenchmarkDispatchState: "pending",
+      routeQualificationBenchmarkDispatchQueuedAt: undefined,
+      routeQualificationBenchmarkDispatchQueueDeadlineAt: undefined,
+      routeQualificationBenchmarkDispatchTriggerRunId: undefined,
+      routeQualificationBenchmarkDispatchLastError:
+        "accepted Trigger delivery expired before the private benchmark execution claim; reissuing exact immutable envelope",
+      heartbeatAt: now,
+    });
+    return "requeued";
+  } catch (error) {
+    await ctx.db.patch(run._id, {
+      status: "route_qualification_benchmark_blocked",
+      routeQualificationBenchmarkDispatchState: "blocked",
+      routeQualificationBenchmarkDispatchQueueDeadlineAt: undefined,
+      routeQualificationBenchmarkDispatchLastError:
+        error instanceof Error ? error.message.slice(0, 1_000) : "route qualification benchmark queue recovery failed",
+      error: "route qualification benchmark dispatch is corrupt or exhausted; manual reconciliation is required",
+      finishedAt: now,
+      heartbeatAt: now,
+    });
+    return "blocked";
+  }
+}
+
+/** A manual retry can recover only its own expired delivery. */
+export const reapExpiredQueuedForRun = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), now: v.number() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "targeted route qualification benchmark recovery");
+    if (!Number.isSafeInteger(args.now) || args.now < 0) throw new Error("route qualification benchmark queue recovery time is invalid");
+    const run = ownedRun(await ctx.db.get(args.runId), args);
+    const deadline = run.routeQualificationBenchmarkDispatchQueueDeadlineAt;
+    if (run.routeQualificationBenchmarkDispatchState !== "queued" || !Number.isSafeInteger(deadline) || deadline! > args.now) {
+      return { state: "unchanged" as const };
+    }
+    return { state: await recoverExpiredQueued(ctx, run, args.now) };
+  },
+});
+
 export const reapExpiredQueued = mutation({
   args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
   returns: v.any(),
@@ -474,40 +531,9 @@ export const reapExpiredQueued = mutation({
     let requeued = 0;
     let blocked = 0;
     for (const run of rows) {
-      try {
-        dispatchEnvelope(run);
-        const attempts = run.routeQualificationBenchmarkDispatchAttempts;
-        if (
-          run.status !== "awaiting_route_qualification_benchmark_dispatch" ||
-          !Number.isSafeInteger(attempts) ||
-          (attempts ?? 0) < 1 ||
-          (attempts ?? 0) >= MAX_ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_ATTEMPTS
-        ) {
-          throw new Error("route qualification benchmark queued dispatch is invalid or exhausted");
-        }
-        await ctx.db.patch(run._id, {
-          routeQualificationBenchmarkDispatchState: "pending",
-          routeQualificationBenchmarkDispatchQueuedAt: undefined,
-          routeQualificationBenchmarkDispatchQueueDeadlineAt: undefined,
-          routeQualificationBenchmarkDispatchTriggerRunId: undefined,
-          routeQualificationBenchmarkDispatchLastError:
-            "accepted Trigger delivery expired before the private benchmark execution claim; reissuing exact immutable envelope",
-          heartbeatAt: args.now,
-        });
-        requeued++;
-      } catch (error) {
-        await ctx.db.patch(run._id, {
-          status: "route_qualification_benchmark_blocked",
-          routeQualificationBenchmarkDispatchState: "blocked",
-          routeQualificationBenchmarkDispatchQueueDeadlineAt: undefined,
-          routeQualificationBenchmarkDispatchLastError:
-            error instanceof Error ? error.message.slice(0, 1_000) : "route qualification benchmark queue recovery failed",
-          error: "route qualification benchmark dispatch is corrupt or exhausted; manual reconciliation is required",
-          finishedAt: args.now,
-          heartbeatAt: args.now,
-        });
-        blocked++;
-      }
+      const state = await recoverExpiredQueued(ctx, run, args.now);
+      if (state === "requeued") requeued++;
+      else blocked++;
     }
     return { checked: rows.length, requeued, blocked };
   },

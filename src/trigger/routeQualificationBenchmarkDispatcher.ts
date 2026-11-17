@@ -30,6 +30,8 @@ const ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT = 10;
 const routeQualificationBenchmarkRunsApi = (api as unknown as {
   readonly routeQualificationBenchmarkRuns: {
     readonly listPending: never;
+    readonly getPendingForRun: never;
+    readonly reapExpiredQueuedForRun: never;
     readonly reapExpiredQueued: never;
     readonly claimDispatchEnvelope: never;
     readonly markQueued: never;
@@ -194,24 +196,33 @@ export async function dispatchPendingRouteQualificationBenchmarks(input?: {
   readonly ownerId?: string;
   readonly convex?: ConvexHttpClient;
   readonly log?: (message: string) => void;
+  readonly target?: { readonly channelId: string; readonly runId: string };
 }): Promise<{ readonly pending: number; readonly triggered: number }> {
   const ownerId = input?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const log = input?.log ?? ((message: string) => console.log(`[route-qualification-benchmark-dispatcher] ${message}`));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url && !input?.convex) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = input?.convex ?? new ConvexHttpClient(url!, { requestTimeoutMs: 30_000 });
-  const recovery = await convex.mutation(routeQualificationBenchmarkRunsApi.reapExpiredQueued, {
-    ownerId,
-    now: Date.now(),
-    limit: ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT,
-  } as never) as unknown as { checked: number; requeued: number; blocked: number };
-  if (recovery.requeued || recovery.blocked) {
-    log(`route qualification benchmark queued delivery recovery: ${recovery.requeued} reissued, ${recovery.blocked} manual-blocked`);
+  let pending: PendingRouteQualificationBenchmarkDispatch[];
+  if (input?.target) {
+    await convex.mutation(routeQualificationBenchmarkRunsApi.reapExpiredQueuedForRun, {
+      ownerId, channelId: input.target.channelId, runId: input.target.runId, now: Date.now(),
+    } as never);
+    const receipt = await convex.query(routeQualificationBenchmarkRunsApi.getPendingForRun, {
+      ownerId, channelId: input.target.channelId, runId: input.target.runId,
+    } as never) as unknown as PendingRouteQualificationBenchmarkDispatch | null;
+    pending = receipt ? [receipt] : [];
+  } else {
+    const recovery = await convex.mutation(routeQualificationBenchmarkRunsApi.reapExpiredQueued, {
+      ownerId, now: Date.now(), limit: ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT,
+    } as never) as unknown as { checked: number; requeued: number; blocked: number };
+    if (recovery.requeued || recovery.blocked) {
+      log(`route qualification benchmark queued delivery recovery: ${recovery.requeued} reissued, ${recovery.blocked} manual-blocked`);
+    }
+    pending = await convex.query(routeQualificationBenchmarkRunsApi.listPending, {
+      ownerId, limit: ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT,
+    } as never) as unknown as PendingRouteQualificationBenchmarkDispatch[];
   }
-  const pending = await convex.query(routeQualificationBenchmarkRunsApi.listPending, {
-    ownerId,
-    limit: ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT,
-  } as never) as unknown as PendingRouteQualificationBenchmarkDispatch[];
   let triggered = 0;
   for (const receipt of pending.slice(0, ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_LIMIT)) {
     let envelope = receipt.envelope;
@@ -302,8 +313,15 @@ export const routeQualificationBenchmarkDispatcher = task({
   id: "route-qualification-benchmark-dispatcher",
   maxDuration: 120,
   retry: { maxAttempts: 1 },
-  run: async () => {
-    if (deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
-    return dispatchPendingRouteQualificationBenchmarks();
+  run: async (payload?: { channelId?: string; runId?: string }) => {
+    if (payload !== undefined && (!payload || Array.isArray(payload) || typeof payload !== "object")) throw new Error("Invalid benchmark dispatch");
+    const keys = Object.keys(payload ?? {});
+    const targeted = keys.length > 0;
+    if (targeted && (typeof payload?.channelId !== "string" || !payload.channelId.trim() ||
+      typeof payload.runId !== "string" || !payload.runId.trim() || keys.some(key => !["channelId", "runId"].includes(key)))) {
+      throw new Error("Invalid targeted benchmark dispatch");
+    }
+    if (!targeted && deliveryRecoveryMode() !== "individual") return { skipped: "shared-delivery-recovery" };
+    return dispatchPendingRouteQualificationBenchmarks(targeted ? { target: { channelId: payload!.channelId!, runId: payload!.runId! } } : undefined);
   },
 });

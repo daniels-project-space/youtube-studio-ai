@@ -9,6 +9,7 @@ import {
 import { issueStudioActionApproval } from "@/lib/studioActionApproval";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
+import { requestRouteQualificationDispatch } from "@/lib/routeQualificationManualDispatch";
 
 export const runtime = "nodejs";
 
@@ -150,11 +151,22 @@ export async function POST(request: Request) {
         "this requestKey is already bound to a different private benchmark cost ceiling",
       );
     }
+    let dispatcherRunId: string | undefined;
+    try {
+      dispatcherRunId = await requestRouteQualificationDispatch({
+        channelId: body.channelId,
+        runId: String(provisional.runId),
+      });
+    } catch {
+      // The owner-approved request remains durable. A repeated click can retry
+      // dispatch; do not claim that preparation started or create a new run.
+    }
     return NextResponse.json(
       {
         ok: true,
-        state: provisional.state === "reused" ? "reused" : "queued_for_preparation",
+        state: dispatcherRunId ? (provisional.state === "reused" ? "reused" : "queued_for_preparation") : "dispatch_pending",
         runId: String(provisional.runId),
+        ...(dispatcherRunId ? { dispatcherRunId } : {}),
         privateOnly: true,
         publishAuthority: false,
         maximumCostUsd: body.maximumCostUsd,
