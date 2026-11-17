@@ -61,6 +61,23 @@ Never copy cloud credentials into a client bundle or source repository. Keep
 the original system authoritative until private local end-to-end evidence and
 the transition have been reviewed.
 
+On 17 November 2026 an owner-scoped read-only capture retrieved 13 channels
+and four connector status records, using the production Trigger environment's
+service identity and cross-checking the deployment URL against the Hub Vault.
+The protected local snapshot is
+`/var/lib/youtube-automation/baselines/channels-2026-11-17T13-28-06-834Z.json`
+(root-owned, mode 0600; SHA-256
+`4183f97434de9ae89fcef1e89e20d735df3c1c895fb9ee67368c3af8dda7464e`).
+Independent readback matched the source channel and connector status records.
+Every channel was paused, and every stored pipeline entry was unversioned.
+The two source queries are separate, not an atomic database snapshot. This is
+configuration and connector metadata only: it does not contain connector
+secrets, run history or media, and it does not freeze executable worker builds.
+Use `scripts/capture-channel-baselines.ts --capture` with the Vault-injected
+production Trigger key, project ref and expected Convex URL to capture again.
+The production Trigger schedules API returned zero schedules at the same
+inspection. This is not proof about other scheduling systems or future state.
+
 ## Release handoff
 
 Studio AI creates a candidate containing its ordered modules, exact executable
