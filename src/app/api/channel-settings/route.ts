@@ -13,6 +13,7 @@ import {
   StudioAuthError,
 } from "@/lib/operatorSession";
 import { hydrateEnv } from "@/lib/vault";
+import { assertLocalCrosspostAllowed, assertLocalPublicationAllowed, LocalPublicationDisabledError } from "@/lib/localPublicationPolicy";
 import {
   assertCasefileAutoResearchLaneEligible,
   SettingsValidationError,
@@ -28,6 +29,9 @@ function convexClient(): ConvexHttpClient {
 }
 
 function errorResponse(error: unknown) {
+  if (error instanceof LocalPublicationDisabledError) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
+  }
   if (error instanceof StudioAuthError) {
     return NextResponse.json(
       { ok: false, error: error.message },
@@ -96,6 +100,9 @@ export async function POST(request: Request) {
         );
       }
       const mode = body.mode;
+      if (mode === "public" || mode === "scheduled") {
+        assertLocalPublicationAllowed({ privacyStatus: mode === "public" ? "public" : "private", ...(mode === "scheduled" ? { publishAt: "scheduled" } : {}) });
+      }
       const currentPolicy = await getChannelPublishPolicy({
         ownerId: actor.ownerId,
         channelId,
@@ -190,6 +197,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "crosspost_policy") {
+      if (body.approved === true) assertLocalCrosspostAllowed();
       const configuration = channelPublishConfiguration(channel.pipeline);
       if (body.approved === true && !configuration.actions.includes("crosspost")) {
         return NextResponse.json(

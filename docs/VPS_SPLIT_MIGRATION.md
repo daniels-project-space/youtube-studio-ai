@@ -189,10 +189,16 @@ only its scrypt verifier. The proof used a separate disposable password.
 
 `scripts/provision-local-web-auth.py` creates the private local web identity;
 `scripts/install-local-automation-web.py` installs a clean standalone build as
-a non-root, loopback-only systemd service. On 17 November 2026 the private
+a non-root, loopback-only systemd service. After a clean standalone build,
+`scripts/release-local-automation-web.py --release` installs a separate,
+root-owned release and restores the predecessor if its startup checks fail.
+The authenticated browser flow must still be checked after a release.
+On 17 November 2026 the private
 `youtube-automation-web.service` was installed and enabled at
-`http://127.0.0.1:39362`, running as `youtubeautomation` from build revision
-`ad60301eb4cb3967bc4c11519ee25db4223eb6aa`. A browser using the actual
+`http://127.0.0.1:39362`, running as `youtubeautomation`. The previous build
+`ad60301eb4cb3967bc4c11519ee25db4223eb6aa` is retained for rollback. On 17
+November 2026 the live build was updated to `1e9641740484bd05f5f2b1f9de5ba6fde9dc0061`.
+A browser using the actual
 Vault-backed owner password verified anonymous token denial, wrong-password
 rejection, owner login, all 13 channels and the local backend WebSocket. The
 same proof passed after restarting both web and database services. This is a
@@ -201,7 +207,13 @@ backend address and is not a remotely usable release. Before any public routing,
 configure TLS and a trusted reverse proxy, provide an external backend address,
 add durable proxy-level login throttling, and verify every route's authorization.
 The in-process login throttle alone is not a public deployment boundary.
-Google/YouTube sign-in and the actual production worker remain unqualified.
+The interface now has the local Automation job-project credentials. An
+authenticated browser retrieved a completed local worker safety-probe run
+through `/api/build-channel`; anonymous token access remained denied. This is
+not yet proof of a video generation flow. An authenticated read of the local
+publish-intent list also succeeded using the local vault snapshot and local
+database secret. Google/YouTube sign-in remains
+unqualified.
 
 The saved pipelines passed the current structural flow compiler without
 adding or removing blocks; policy completion left their stored entries and
@@ -276,9 +288,9 @@ tasks. Its `convex-auth-probe` task verified signed local database access and
 unsigned denial. The local job service had zero schedules at that point. This
 project's credentials could read the probe run, while the Studio AI project's
 credentials received a not-found response for that same run. This does not
-prove video generation or publishing readiness. The web app is not yet
-connected to this worker: first gate the legacy controls and qualify their
-individual actions. Do not copy credentials into the repository or use
+prove video generation or publishing readiness. The web app is connected to
+the local worker, but individual legacy controls still require qualification.
+Do not copy credentials into the repository or use
 the legacy cloud project as a fallback. Trigger's local deploy defaults to a
 builder named `trigger`; explicitly select the dedicated
 `youtube-automation-trigger` builder to avoid using another project's builder.
@@ -291,6 +303,10 @@ verified these decisions without opening a file or contacting a provider; both
 the generation and publishing scheduler tasks also returned disabled, and the
 local service had no schedules. This does not cover arbitrary direct calls to
 external APIs or prove the rest of the publishing approval flow.
+While private review mode is in effect, the channel-settings API also refuses
+new public/scheduled or cross-post approvals before modifying channel policy or
+pipeline settings, so the interface cannot report an approval the worker will
+reject.
 
 Private Automation can load a curated secret snapshot from the root-only
 `/etc/youtube-automation/local-vault.json` through `YTA_LOCAL_VAULT_JSON`.
