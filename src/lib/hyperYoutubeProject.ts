@@ -11,7 +11,13 @@ export async function resolveHyperYoutubeProject(options?:{baseUrl?:string;proje
   const body=await response.json() as {project?:{id?:unknown;output?:{bucket?:unknown;prefix?:unknown}};
     applicationGuidance?:{application?:unknown}};
   const p=body?.project, output=p?.output;
-  if (body?.applicationGuidance?.application!=="youtube-studio" || typeof p?.id!=="string" ||
+  const privateAutomation = process.env.YOUTUBE_AUTOMATION_PRIVATE === "1";
+  const identityMatches = privateAutomation
+    ? Boolean(process.env.HRS_AUTOMATION_PROJECT_ID && process.env.HRS_AUTOMATION_OUTPUT_PREFIX &&
+        p?.id === process.env.HRS_AUTOMATION_PROJECT_ID && output?.bucket === "youtube-automation" &&
+        output?.prefix === process.env.HRS_AUTOMATION_OUTPUT_PREFIX)
+    : body?.applicationGuidance?.application === "youtube-studio";
+  if (!identityMatches || typeof p?.id!=="string" ||
       !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(p.id) ||
       typeof output?.bucket!=="string" || !output.bucket || typeof output.prefix!=="string" ||
       !output.prefix.startsWith("projects/") || !output.prefix.endsWith("/") || output.prefix.includes("\\") ||

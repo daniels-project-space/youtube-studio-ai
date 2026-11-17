@@ -20,6 +20,7 @@ import {
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
 import { hydrateSealedNanoBananaThumbnailCredential } from "@/lib/nanoBananaVault";
+import { assertAutomationModelAllowed } from "@/lib/automationModelPolicy";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
@@ -472,6 +473,7 @@ async function generateGeminiImage(
     sealedNanoBanana?: SealedNanoBananaGeneration;
   },
 ): Promise<GeminiImageResult> {
+  for (const model of options.models) assertAutomationModelAllowed(model);
   // Generic `generateBananaImage()` callers must take their FAL route. Only an
   // explicit sealed asset profile can spend through this direct boundary.
   const sealed = options.sealedNanoBanana;

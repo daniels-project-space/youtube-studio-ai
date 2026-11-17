@@ -197,7 +197,7 @@ On 17 November 2026 the private
 `youtube-automation-web.service` was installed and enabled at
 `http://127.0.0.1:39362`, running as `youtubeautomation`. The previous build
 `ad60301eb4cb3967bc4c11519ee25db4223eb6aa` is retained for rollback. On 17
-November 2026 the live build was updated to `e583b6bcc6b2d0b91f62f8ceb0570b754bf0b5ad`.
+November 2026 the live build was updated to `886392d8171987f51f992118e296a6768bd413b6`.
 A browser using the actual
 Vault-backed owner password verified anonymous token denial, wrong-password
 rejection, owner login, all 13 channels and the local backend WebSocket. The
@@ -327,9 +327,10 @@ Private Automation can load a curated secret snapshot from the root-only
 The runtime files carry it as `uri:` followed by URI-encoded JSON, and the
 worker marks it secret. In private mode a missing or malformed service fails
 locally rather than contacting the managed Hub database. On this VPS the
-snapshot currently covers the independent local internal-query secret and
-selected OpenRouter, Pexels and Pixabay credentials. It does not yet configure
-Qwen, YouTube OAuth or all other pipeline providers. A Hub
+snapshot currently covers the independent local internal-query secret,
+Automation R2 account/bucket metadata, and selected OpenRouter, Pexels and
+Pixabay credentials. It does not yet configure YouTube OAuth or all other
+pipeline providers. A Hub
 credential rotation must be followed by a deliberate snapshot refresh and
 runtime update; a vault connection alone does not update this copy. The
 deployed Automation safety probe confirmed local access to the internal and
@@ -369,3 +370,20 @@ The bucket currently contains only small disposable qualification objects;
 their actual billed usage has not been measured. No subscription or spending
 limit was changed. The account-wide parent credential is not readable by the
 web service account and is not forwarded to the worker.
+
+The existing Studio render project still targets `youtube-studio-ai-private`.
+A separate Automation project was registered with its own credential and an
+explicit `youtube-automation` output bucket; a read-only identity lookup
+verified its exact project ID, bucket and output prefix. Private Automation
+accepts generic render-project guidance only when all three match its pinned
+configuration. Qwen's R2 preflight accepts verified broker credentials without
+placing a parent key in the worker. No render job or GPU lifecycle operation
+was performed in this setup, and actual Qwen audio remains unverified.
+The private runtime rejects non-Qwen narration and Nano Banana Pro before a
+provider call. This is a safety boundary, not a substitute for selecting and
+auditioning each channel's Qwen voice. The imported legacy narration selections
+still require that later review; no voice was silently replaced.
+The project-scoped Qwen handoff is wired for the main narration and prepared
+narration paths. The legacy generic Qwen seam is refused in private Automation
+until its callers are migrated; it must not silently submit to the old Render
+Engine project.

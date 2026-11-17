@@ -14,6 +14,7 @@ import {
 } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
 import { hydrateEnv } from "@/lib/vault";
+import { assertAutomationModelAllowed } from "@/lib/automationModelPolicy";
 
 const PROFILE = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
 const ENDPOINT = `https://fal.run/${PROFILE.model}`;
@@ -118,6 +119,7 @@ export async function generateFalNanoBananaProThumbnailWithReceipt(args: {
   prompt: string;
   idempotencyContext: string;
 }): Promise<FalNanoBananaProThumbnailResult> {
+  assertAutomationModelAllowed(PROFILE.model);
   await hydrateFalCredential();
   const context = boundedContext(args.idempotencyContext);
   const prompt = args.prompt.trim();

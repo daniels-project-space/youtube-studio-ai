@@ -41,6 +41,7 @@
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import { synthNarration, stripAudioTags, type ElevenSettings, type TtsStitch } from "@/lib/tts";
+import { assertAutomationNarrationProviderAllowed } from "@/lib/automationModelPolicy";
 import {
   type NarrationPhysics,
 } from "@/engine/golden";
@@ -52,6 +53,7 @@ const ELEVEN = "https://api.elevenlabs.io/v1";
 
 
 function elevenKey(): string {
+  assertAutomationNarrationProviderAllowed("elevenlabs");
   const k = process.env.ELEVENLABS_API_KEY;
   if (!k) throw new Error("voicecraft: ELEVENLABS_API_KEY is not configured");
   return k;

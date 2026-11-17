@@ -1,6 +1,7 @@
 /** Shared managed/open narration seam. Every provider returns MP3 bytes and
  * must preserve at-most-once paid submission semantics. */
 import { spreadDefault } from "@/lib/identitySpread";
+import { assertAutomationNarrationProviderAllowed } from "@/lib/automationModelPolicy";
 import {
   synthQwenNarration,
   type QwenTtsReceipt,
@@ -292,6 +293,10 @@ export async function synthNarration(args: {
   onQwenReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
   const provider = normalizeTtsProvider(args.provider);
+  assertAutomationNarrationProviderAllowed(provider);
+  if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1" && provider === "qwen3") {
+    throw new TtsError("Private Automation Qwen narration requires the project-scoped render handoff");
+  }
   if (provider === "elevenlabs") return synthElevenLabs(args);
   if (provider === "qwen3") {
     const text = stripAudioTags(args.text);

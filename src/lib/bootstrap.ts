@@ -113,6 +113,26 @@ export async function bootstrapSecrets(
   // provider credentials; otherwise a future SDK import could silently bypass
   // the sealed-thumbnail admission boundary.
   if (loaded.length) log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
-  if (opts?.required) requireKeys(opts.required);
+  if (opts?.required) {
+    let required = opts.required;
+    if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1" &&
+        required.some(key => key === "R2_ACCESS_KEY_ID" || key === "R2_SECRET_ACCESS_KEY")) {
+      if (process.env.R2_ACCESS_KEY_ID || process.env.R2_SECRET_ACCESS_KEY) {
+        throw new Error("bootstrap: private Automation must use scoped R2 broker credentials");
+      }
+      const account = process.env.R2_ACCOUNT_ID;
+      if (!account || !/^[a-f0-9]{32}$/i.test(account)) throw new Error("bootstrap: local R2 account is not configured");
+      if (required.includes("R2_ENDPOINT") && !process.env.R2_ENDPOINT) {
+        process.env.R2_ENDPOINT = `https://${account}.r2.cloudflarestorage.com`;
+      }
+      const { getBucket, getR2Client } = await import("@/lib/storage");
+      if (getBucket() !== "youtube-automation") throw new Error("bootstrap: local R2 bucket does not match Automation");
+      // Resolve an actual short-lived credential before paid work is admitted;
+      // never materialize the account-wide parent key in this process.
+      await getR2Client().config.credentials();
+      required = required.filter(key => key !== "R2_ACCESS_KEY_ID" && key !== "R2_SECRET_ACCESS_KEY");
+    }
+    requireKeys(required);
+  }
   return loaded;
 }
