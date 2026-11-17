@@ -7,6 +7,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { MODULE_CATALOG } from "@/engine/moduleCatalog";
 import { useOwnerId } from "@/lib/owner-context";
+import styles from "./workshop.module.css";
 
 type Entry = { block: string; version?: string; params?: Record<string, unknown> };
 
@@ -39,7 +40,7 @@ export default function WorkshopPage() {
     [next[index], next[target]] = [next[target]!, next[index]!]; setEntries(next);
   }
   const box = { padding: "1rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" };
-  return <section style={{ display: "grid", gap: "1rem" }}>
+  return <section className={styles.workshop}>
     <header><h1>Pipeline workshop</h1><p>Build a private draft from the module catalog. Saving does not change a channel.</p>
       <Link href="/golden">Explore module responsibilities</Link></header>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 20rem), 1fr))", gap: "1rem" }}>
