@@ -134,13 +134,38 @@ The disposable real-backend qualification imported all 13 captured channel
 records, compared all fields and translated groups, restarted the backend,
 and verified both persistence and import-command replay. It also tested
 cross-owner rejection and conflicting-baseline rejection using synthetic
-records. The temporary backend was removed after testing: no persistent app
-database has yet been imported. Connector secrets, history, media and retained
-executable pipeline releases still need separate migration and verification.
+records. The temporary qualification backend was removed after testing.
+Connector secrets, history, media and retained executable pipeline releases
+still need separate migration and verification.
 Use `scripts/capture-channel-baselines.ts --capture` with the Vault-injected
 production Trigger key, project ref and expected Convex URL to capture again.
 The production Trigger schedules API returned zero schedules at the same
 inspection. This is not proof about other scheduling systems or future state.
+
+On 17 November 2026 a dedicated, supervised Automation Convex backend and
+loopback-only signing-key endpoint were installed as
+`youtube-automation-convex.service` and `youtube-automation-jwks.service`.
+Their data is in `/var/lib/youtube-automation/backend`; private configuration
+is under `/etc/youtube-automation` and runtime binaries under
+`/opt/youtube-automation`. The backend listens on 127.0.0.1:39320, HTTP
+actions on 39321, and the public-key endpoint on 39340. The pinned Convex
+binary SHA-256 is `044eedfe569b1550d5003683aec7fceb4dcee3f82abf00ab9baf1c10d3ca0b4c`.
+The qualified startup shim keeps the instance secret out of the process command
+line and removes the shim and secret from the application environment. It
+depends on the pinned binary and libc; requalify startup, authentication and
+restart before changing either. Its source and install/deploy instructions are
+`scripts/convex-secret-launch.c`, `scripts/provision-local-automation.py` and
+`scripts/deploy-local-automation-backend.py`. Secrets are root-only.
+
+A fresh read-only source capture at 14:40 UTC matched all prior channel and
+connector metadata records. Its protected snapshot is
+`/var/lib/youtube-automation/baselines/channels-2026-11-17T14-40-59-294Z.json`
+(SHA-256 `4dd8fe9684a24e01ec9466a9a34ffc1e9266d1445a33c35aced225b6b4556ef2`).
+All 13 channels were imported into the dedicated local database, with every
+setting verified against the paused copy and group IDs translated. The local
+records remained unchanged after a backend restart; the import switch was
+removed afterward. This is a private data migration, not a working UI, worker,
+upload connection or active release. The source remains authoritative.
 
 The saved pipelines passed the current structural flow compiler without
 adding or removing blocks; policy completion left their stored entries and

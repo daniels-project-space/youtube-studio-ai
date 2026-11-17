@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--backend',required=True,help='path to official convex-local-backend')
+parser.add_argument('--secure-launcher',help='compiled instance-secret argument protection library')
 parser.add_argument('--baseline',help='optional private channel baseline for disposable import qualification')
 parser.add_argument('--baseline-sha256',help='expected SHA-256 of the optional baseline')
 options=parser.parse_args()
@@ -58,18 +59,26 @@ with tempfile.TemporaryDirectory(prefix='yt-real-convex-') as path:
         shutil.copy2(repo/filename,app/filename)
     (app/'node_modules').symlink_to(repo/'node_modules',target_is_directory=True)
     command=[binary,'--interface','127.0.0.1','--port',str(api),'--site-proxy-port',str(site),'--instance-name',instance,'--instance-secret',secret,'--disable-beacon','--redact-logs-to-client']
+    server_env=os.environ.copy()
+    if options.secure_launcher:
+        command.remove('--instance-secret');command.remove(secret)
+        server_env.update(LD_PRELOAD=str(Path(options.secure_launcher).resolve(strict=True)),YTA_CONVEX_INSTANCE_SECRET=secret)
     def start():
-        process=subprocess.Popen(command,cwd=path,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        process=subprocess.Popen(command,cwd=path,env=server_env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         for _ in range(80):
             if process.poll() is not None: raise RuntimeError('backend exited during startup')
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{api}/version',timeout=1) as r:
-                    if r.status==200: return process
+                    if r.status==200:
+                        if options.secure_launcher and secret.encode() in Path(f'/proc/{process.pid}/cmdline').read_bytes(): raise RuntimeError('instance secret appeared in backend command line')
+                        return process
             except Exception: time.sleep(.25)
         process.terminate(); process.wait(timeout=15); raise RuntimeError('backend did not start')
     process=start()
     try:
-        admin=subprocess.check_output([binary,'keygen','admin-key','--instance-name',instance,'--instance-secret',secret],text=True).strip()
+        keygen=[binary,'keygen','admin-key','--instance-name',instance]
+        if not options.secure_launcher:keygen.extend(['--instance-secret',secret])
+        admin=subprocess.check_output(keygen,env=server_env,text=True).strip()
         env=os.environ.copy()
         for name in ['CONVEX_DEPLOYMENT','CONVEX_DEPLOY_KEY','CONVEX_SELF_HOSTED_URL','CONVEX_SELF_HOSTED_ADMIN_KEY','NEXT_PUBLIC_CONVEX_URL','NEXT_PUBLIC_CONVEX_SITE_URL','STUDIO_CONVEX_ISSUER','STUDIO_CONVEX_JWKS_URL','STUDIO_CONVEX_AUDIENCE'] : env.pop(name,None)
         env.update({'CONVEX_SELF_HOSTED_URL':f'http://127.0.0.1:{api}','CONVEX_SELF_HOSTED_ADMIN_KEY':admin,'CI':'1','DISABLE_TELEMETRY':'1'})
