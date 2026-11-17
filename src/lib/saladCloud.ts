@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { SALAD_BULK_PRIORITY, SALAD_HIGH_FALLBACK_PRIORITY } from "@/lib/saladPriorityPolicy";
+export { SALAD_BULK_PRIORITY, SALAD_HIGH_FALLBACK_PRIORITY, saladPriorityPolicyFromEnv } from "@/lib/saladPriorityPolicy";
+export type { SaladPriorityPolicy } from "@/lib/saladPriorityPolicy";
 
 /** Public API fields verified against Salad's current schema and live discovery. */
 export const SALAD_API_BASE = "https://api.salad.com/api/public";
-export const SALAD_BULK_PRIORITY = "medium" as const;
-/** Explicit, costlier fallback when the medium tier has no matching slots. */
-export const SALAD_HIGH_FALLBACK_PRIORITY = "high" as const;
 export const SALAD_BULK_MAX_GPUS = 3;
 /**
  * A country-scoped market snapshot can be unavailable or stale. Both paid
@@ -43,27 +43,6 @@ export function selectSaladCapacityPriority(input: {
     input.highAvailable >= input.requiredWorkers
   ) return SALAD_HIGH_FALLBACK_PRIORITY;
   return null;
-}
-
-export interface SaladPriorityPolicy {
-  /** Medium is the cost-safe default and can be disabled for maintenance. */
-  mediumEnabled: boolean;
-  /** High is an explicit escape hatch, never a request-controlled override. */
-  highFallbackEnabled: boolean;
-}
-
-/**
- * One source of truth for the paid Salad tier policy.  Capacity previews,
- * Trigger admission, and replay readiness must all interpret missing flags
- * identically; only the literal value "0" disables a tier.
- */
-export function saladPriorityPolicyFromEnv(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): SaladPriorityPolicy {
-  return {
-    mediumEnabled: env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
-    highFallbackEnabled: env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
-  };
 }
 
 const resourceName = z.string().regex(/^[a-z][a-z0-9-]{0,61}[a-z0-9]$/);
