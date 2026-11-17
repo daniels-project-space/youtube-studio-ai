@@ -1,4 +1,5 @@
 import type { PipelineEntry } from "@/engine/types";
+import { assertPrivateVideoHasNoDelivery } from "@/engine/privateVideoDelivery";
 import type { StudioActionApprovalReceipt } from "@/lib/studioActionApprovalContract";
 
 export const CHANNEL_INCEPTION_PROBE_CHECKPOINT_VERSION =
@@ -103,4 +104,5 @@ export function assertChannelInceptionProbeEnvelopeStructure(
   ) {
     throw new Error("probe dispatch envelope structure is invalid");
   }
+  assertPrivateVideoHasNoDelivery(envelope.input.pipelineOverride);
 }

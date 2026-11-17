@@ -1,14 +1,6 @@
 import type { PipelineEntry } from "./types";
 import { PRIVATE_PROBE_THUMBNAIL_MODE_PARAM } from "@/lib/channelInceptionProbeContract";
-
-const PROBE_DROPPED_BLOCKS = new Set([
-  "upload_draft",
-  "notify",
-  "cleanup",
-  "shorts_spinoff",
-  "crosspost",
-  "emit_bundle",
-]);
+import { isPrivateVideoDeliveryBlock } from "./privateVideoDelivery";
 
 /** Build the bounded private proof pipeline without external publishing. */
 export function buildChannelInceptionProbePipeline(
@@ -17,7 +9,7 @@ export function buildChannelInceptionProbePipeline(
 ): PipelineEntry[] {
   return source
     .filter((entry) =>
-      !PROBE_DROPPED_BLOCKS.has(entry.block) &&
+      !isPrivateVideoDeliveryBlock(entry.block) &&
       !(options.thumbnailMode === "deferred_mvp" && entry.block === "thumbnail_gen"),
     )
     .map((entry) => {

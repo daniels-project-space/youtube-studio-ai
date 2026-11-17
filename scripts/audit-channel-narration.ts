@@ -28,7 +28,7 @@ async function main() {
       const completed = completePipelineForPolicy(channel.pipeline);
       const merged = mergeRuntimeModuleConfig({ entries: completed.entries, paramsByBlock: snapshotParamsByBlock(completed.entries), moduleConfig: channel.moduleConfig });
       const effective = materializeRuntimePipelineParams(completed.entries, merged.paramsByBlock);
-      assertAutomationNarrationPolicy(effective, { voiceId: channel.identity?.voiceId });
+      assertAutomationNarrationPolicy(effective, { voiceId: channel.identity?.voiceId }, { YOUTUBE_AUTOMATION_PRIVATE: "1" });
       return { name: channel.name, status: effective.some((entry) => entry.block === "narration_tts") ? "qwen_configured" : "no_inspected_narration_block" };
     } catch (error) {
       return { name: channel.name, status: error instanceof ExecutionError ? error.code : "configuration_error" };

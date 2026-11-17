@@ -2,6 +2,7 @@ import type { PipelineEntry } from "@/engine/types";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import type { StudioActionApprovalReceipt } from "@/lib/studioActionApprovalContract";
+import { isPrivateVideoDeliveryBlock } from "@/engine/privateVideoDelivery";
 
 /**
  * This is deliberately not a shortened inception probe. A qualification
@@ -18,15 +19,6 @@ export const ROUTE_QUALIFICATION_BENCHMARK_VERSION =
  * can never be prepared but impossible to issue.
  */
 export const MAX_ROUTE_QUALIFICATION_BENCHMARK_COST_USD = 100;
-
-const DELIVERY_ONLY_BLOCKS = new Set([
-  "upload_draft",
-  "notify",
-  "cleanup",
-  "shorts_spinoff",
-  "crosspost",
-  "emit_bundle",
-]);
 
 export interface RouteQualificationBenchmarkInvocationContext {
   keyPrefix: string;
@@ -99,13 +91,13 @@ export function buildRouteQualificationBenchmarkPipeline(
     );
   }
   const benchmark = productionPipeline
-    .filter((entry) => !DELIVERY_ONLY_BLOCKS.has(entry.block))
+    .filter((entry) => !isPrivateVideoDeliveryBlock(entry.block))
     .map((entry) => ({
       block: entry.block,
       ...(entry.version === undefined ? {} : { version: entry.version }),
       ...(entry.params === undefined ? {} : { params: structuredClone(entry.params) }),
     }));
-  if (benchmark.some((entry) => DELIVERY_ONLY_BLOCKS.has(entry.block))) {
+  if (benchmark.some((entry) => isPrivateVideoDeliveryBlock(entry.block))) {
     throw new Error("route qualification benchmark retained a delivery-only block");
   }
   if (benchmark.filter((entry) => entry.block === "qa_visual").length !== 1) {

@@ -23,8 +23,8 @@ assert.match(
 );
 assert.match(
   page,
-  /requestKeyRef\.current \?\? window\.crypto\.randomUUID\(\)[\s\S]*requestKeyRef\.current = requestKey[\s\S]*requestKey,[\s\S]*confirmPrivateBenchmark: true/,
-  "network retries reuse one owner-confirmed request key instead of allocating a second benchmark",
+  /preparePrivateBenchmark\(window\.localStorage[\s\S]*requestKey,[\s\S]*confirmPrivateBenchmark: true[\s\S]*clearAcceptedPrivateBenchmark/,
+  "network retries persist one owner-confirmed request key until dispatch is confirmed",
 );
 assert.match(
   page,

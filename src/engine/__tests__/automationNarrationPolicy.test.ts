@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import { assertAutomationNarrationPolicy } from "../automationNarrationPolicy";
 import { ExecutionError } from "../executionErrors";
 
+process.env.YOUTUBE_AUTOMATION_PRIVATE = "1";
+
 const narration = (params: Record<string, unknown> = {}) => [{ block: "narration_tts", params }];
 const rejected = (fn: () => void, code: string) => assert.throws(fn, (error: unknown) =>
   error instanceof ExecutionError && error.code === code && error.retryable === false);
 
 assert.doesNotThrow(() => assertAutomationNarrationPolicy([{ block: "assemble" }], {}));
-for (const block of ["whiteboard_scribe", "motion_comic"]) {
+assert.doesNotThrow(() => assertAutomationNarrationPolicy([{ block: "whiteboard_scribe" }, ...narration({ ttsProvider: "fish" })], {}, {}), "other projects retain their own narration policy");
+for (const block of ["whiteboard_scribe", "motion_comic", "lore_short", "documotion_short"]) {
   rejected(() => assertAutomationNarrationPolicy([{ block, params: { ttsProvider: "qwen3", qwenSpeaker: "Ryan" } }], {}), "AUTOMATION_QWEN_MODULE_UNSUPPORTED");
 }
 for (const params of [{}, { ttsProvider: "fish" }, { ttsProvider: "elevenlabs" }, { ttsProvider: "unknown" }]) {

@@ -13,6 +13,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
+import { clearAcceptedPrivateBenchmark, preparePrivateBenchmark, readPendingPrivateBenchmark } from "@/lib/privateBenchmarkRequest";
 import type { ChannelIdentity, VideoRow } from "@/lib/types";
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
@@ -1115,9 +1116,8 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
-  // A lost browser response must retry the same durable owner request, not
-  // allocate a second paid private benchmark for this channel view.
-  const requestKeyRef = useRef<string | null>(null);
+  const [preflight, setPreflight] = useState<{ blockers: string[]; removedDeliveryBlocks: string[] } | null>(null);
+  const [checkingPreflight, setCheckingPreflight] = useState(false);
   const benchmarkRuns = useQuery(api.runs.listRunsByChannel, {
     channelId: channel._id as Id<"channels">,
     limit: 100,
@@ -1178,9 +1178,8 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
     setBusy(true);
     setMessage(null);
     setRunId(null);
-    const requestKey = requestKeyRef.current ?? window.crypto.randomUUID();
-    requestKeyRef.current = requestKey;
     try {
+      const { requestKey } = preparePrivateBenchmark(window.localStorage, channel._id, maximum, () => window.crypto.randomUUID());
       const response = await fetch("/api/route-qualification-benchmarks", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1196,6 +1195,9 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
         setMessage(data.error || "The private benchmark could not be queued.");
         return;
       }
+      if (data.state === "queued_for_preparation" || data.state === "reused") {
+        clearAcceptedPrivateBenchmark(window.localStorage, channel._id, requestKey);
+      }
       setRunId(data.runId);
       setMessage(
         data.state === "dispatch_pending"
@@ -1204,11 +1206,27 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
           ? "The exact private benchmark request is already recorded. Its durable dispatcher will continue from the existing run."
           : "Private benchmark request recorded. The system will re-check the sealed route before any render and will never upload this run.",
       );
-    } catch {
-      setMessage("Network error while recording the private benchmark request.");
+    } catch (error) {
+      try {
+        const pending = readPendingPrivateBenchmark(window.localStorage, channel._id);
+        if (pending && pending.maximumCostUsd !== maximum) setMaximumCostUsd(String(pending.maximumCostUsd));
+      } catch { /* The existing error remains visible; never discard an unreadable request. */ }
+      setMessage(error instanceof Error ? error.message : "Could not safely record the private benchmark request. Retry to check its status.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const checkPrivateBenchmark = async () => {
+    setCheckingPreflight(true);
+    setPreflight(null);
+    try {
+      const response = await fetch(`/api/route-qualification-benchmarks/preflight?channelId=${encodeURIComponent(channel._id)}`, { cache: "no-store" });
+      const result = await response.json() as { blockers?: string[]; removedDeliveryBlocks?: string[]; error?: string };
+      if (!response.ok || !Array.isArray(result.blockers) || !Array.isArray(result.removedDeliveryBlocks)) throw new Error(result.error ?? "Could not check the channel.");
+      setPreflight({ blockers: result.blockers, removedDeliveryBlocks: result.removedDeliveryBlocks });
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not check the channel."); }
+    finally { setCheckingPreflight(false); }
   };
 
   return (
@@ -1223,6 +1241,9 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
         Private end-to-end proof for new or supervised routes. It never uploads or changes the schedule.
       </p>
       <div style={{ display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" onClick={checkPrivateBenchmark} disabled={checkingPreflight} style={{ ...controlButton, alignSelf: "end" }}>
+          {checkingPreflight ? "Checking…" : "Check readiness"}
+        </button>
         <label style={{ display: "grid", gap: "0.22rem", fontSize: "0.68rem", color: "var(--color-muted)" }}>
           PRIVATE COST CEILING (USD)
           <input
@@ -1241,6 +1262,11 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
           {busy ? "Recording…" : "Run private benchmark"}
         </button>
       </div>
+      {preflight && <div role="status" style={{ marginTop: "0.7rem", fontSize: "0.75rem" }}>
+        {preflight.blockers.length ? <ul>{preflight.blockers.map((blocker, index) => <li key={`${index}-${blocker}`}>{blocker}</li>)}</ul> : <p>No configuration blockers found in this limited check.</p>}
+        <p>Provider access, the required route-preflight receipt and actual video output are not checked here.</p>
+        {preflight.removedDeliveryBlocks.length > 0 && <p>Excluded delivery steps: {preflight.removedDeliveryBlocks.join(", ")}.</p>}
+      </div>}
       <div style={{ marginTop: "0.8rem", display: "grid", gap: "0.22rem", fontSize: "0.73rem", lineHeight: 1.42, color: "var(--color-muted)" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", letterSpacing: "0.07em", color: "var(--color-faint)" }}>
           PRIVATE BENCHMARK STATUS
@@ -2982,13 +3008,19 @@ function AutomationNarratorPicker({ channel }: { channel: ChannelDoc }) {
   const config = channel.moduleConfig?.narration_tts ?? {};
   const params = (narration?.params ?? {}) as Record<string, unknown>;
   const provider = config.ttsProvider ?? params.ttsProvider;
-  const savedSpeaker = config.qwenSpeaker ?? params.qwenSpeaker;
-  const current = provider === "qwen3" && typeof savedSpeaker === "string" &&
+  const savedSpeaker = config.qwenSpeaker ?? params.qwenSpeaker ?? channel.identity?.voiceId ?? params.voiceId;
+  const current = typeof provider === "string" && provider.trim().toLowerCase() === "qwen3" && typeof savedSpeaker === "string" &&
     (QWEN3_TTS_SPEAKERS as readonly string[]).includes(savedSpeaker) ? savedSpeaker : "";
   const [selection, setSelection] = useState(current);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  if (!narration) return null;
+  if (!narration) {
+    const specialist = (channel.pipeline ?? []).find((entry) => ["whiteboard_scribe", "motion_comic", "lore_short", "documotion_short"].includes(entry.block));
+    return specialist ? <Row label="Qwen narration" hint="This channel uses a specialist production module.">
+      Qwen narration is not yet integrated with this module. The channel cannot run in private Automation until it is supported.
+      {(specialist.block === "whiteboard_scribe" || specialist.block === "documotion_short") && " Its current art path also requires replacement of the retired Novita route."}
+    </Row> : null;
+  }
 
   const save = async () => {
     if (!selection || !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(selection)) return;

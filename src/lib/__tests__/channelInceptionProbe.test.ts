@@ -27,6 +27,7 @@ import {
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { normalizePipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapshot";
 import { buildQualityEvidence } from "@/engine/qualityEvidence";
+import { assertChannelInceptionProbeEnvelopeStructure } from "@/lib/channelInceptionProbeContract";
 
 const originalSigningKey = process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
 process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = "probe-test-signing-key";
@@ -36,7 +37,7 @@ const channelId = "channel-a";
 const pipeline: PipelineEntry[] = [
   { block: "topic_select", params: { source: "research" } },
   { block: "script_gen", params: { durationSeconds: 60 } },
-  { block: "notify" },
+  { block: "metadata" },
 ];
 const context = freezeChannelInceptionProbeContext({
   ownerId,
@@ -345,6 +346,9 @@ const first = prepareChannelInceptionProbeAttempt({
   maximumCostUsd: 3,
   approval: approval({ runId: "run-1", frozenInput: inputA, maximumCostUsd: 3, now: 1_000 }),
 });
+assert.throws(() => assertChannelInceptionProbeEnvelopeStructure({
+  ...first, input: { ...first.input, pipelineOverride: [...first.input.pipelineOverride, { block: "upload_draft" }] },
+}), /cannot contain delivery block/);
 // A channel/config edit after the durable claim cannot alter the child payload.
 inputA.moduleConfigOverride["script_gen"]!["temperature"] = 0.99;
 context.seedStore["channelName"] = "Mutated after claim";

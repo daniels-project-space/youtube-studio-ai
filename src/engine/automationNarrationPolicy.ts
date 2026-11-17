@@ -8,13 +8,13 @@ import { ExecutionError } from "./executionErrors";
  * provider or Fish voice must be changed through channel configuration, never
  * silently mapped to a different voice.
  */
-export function assertAutomationNarrationPolicy(entries: readonly PipelineEntry[], seedStore: Readonly<Record<string, unknown>>): void {
+export function assertAutomationNarrationPolicy(entries: readonly PipelineEntry[], seedStore: Readonly<Record<string, unknown>>, env: Readonly<Record<string, string | undefined>> = process.env): void {
+  if (env.YOUTUBE_AUTOMATION_PRIVATE !== "1") return;
   for (const entry of entries) {
-    // These legacy specialist renderers synthesize their own speech. The
-    // whiteboard implementation selects Fish/ElevenLabs and motion comic uses
-    // ElevenLabs dialogue, even if a Qwen parameter is supplied. Do not treat
-    // an absent narration_tts block as evidence that a pipeline is Qwen-safe.
-    if (entry.block === "whiteboard_scribe" || entry.block === "motion_comic") {
+    // These specialist renderers synthesize their own speech. A Qwen parameter
+    // does not make their existing speech paths Qwen-capable. Reject before
+    // earlier stages can spend, rather than relying on the final TTS guard.
+    if (["whiteboard_scribe", "motion_comic", "lore_short", "documotion_short"].includes(entry.block)) {
       throw new ExecutionError(`${entry.block} does not yet have a qualified Qwen narration path. Its legacy provider will not be used; the module needs a Qwen integration before this channel can run.`, {
         code: "AUTOMATION_QWEN_MODULE_UNSUPPORTED", retryable: false, phase: "pipeline_configuration",
       });
