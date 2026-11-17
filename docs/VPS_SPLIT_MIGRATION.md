@@ -44,6 +44,16 @@ set matching values in its app and backend. Never expose the private key.
 The local configuration and signed-token behavior have unit evidence only;
 real backend verification and private owner authentication remain required.
 
+Follow-up on 17 November 2026: the full Automation Convex schema and functions
+were deployed to a disposable loopback backend from an isolated source copy.
+The real Studio signer produced a service JWT accepted for its own owner;
+anonymous and cross-owner queries and channel mutations were refused. A real
+channel mutation created one synthetic draft, and the channel survived a
+backend restart. Repeat with `scripts/qualify-local-studio-convex.py --backend
+<absolute-binary-path>` (Python `cryptography` is required). The proof removes
+its temporary data and uses a throwaway key. It does not authenticate a human,
+import actual channels, deploy a persistent service, or run a video job.
+
 The two apps need independent state and service credentials. Import a verified
 snapshot to the Automation instance only after establishing an idempotent,
 reversible mapping and checking channel, run, connector and artifact counts.

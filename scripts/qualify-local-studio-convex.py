@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Deploy the real backend to a disposable loopback instance using synthetic data.
+
+Requires Python cryptography, the project's installed dependencies, and an
+official convex-local-backend binary supplied by --backend. No production
+credentials or data are used; the temporary backend is stopped on exit.
+"""
+import argparse, base64, json, os, secrets, shutil, socket, subprocess, tempfile, threading, time, urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+
+parser=argparse.ArgumentParser()
+parser.add_argument('--backend',required=True,help='path to official convex-local-backend')
+binary=str(Path(parser.parse_args().backend).resolve(strict=True))
+repo=Path(__file__).resolve().parent.parent
+cli=str(repo/'node_modules/.bin/convex')
+def free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1',0)); return s.getsockname()[1]
+def b64(x): return base64.urlsafe_b64encode(x).rstrip(b'=').decode()
+key=ec.generate_private_key(ec.SECP256R1()); pub=key.public_key().public_numbers()
+values={'crv':'P-256','kty':'EC','x':b64(pub.x.to_bytes(32,'big')),'y':b64(pub.y.to_bytes(32,'big'))}
+import hashlib
+kid=b64(hashlib.sha256(json.dumps(values,separators=(',',':')).encode()).digest())
+jwks=json.dumps({'keys':[{**values,'alg':'ES256','use':'sig','kid':kid}]}).encode()
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path!='/api/auth/convex-jwks': self.send_error(404); return
+        self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(jwks)
+    def log_message(self,*args): pass
+http=HTTPServer(('127.0.0.1',0),Handler)
+threading.Thread(target=http.serve_forever,daemon=True).start()
+issuer=f'http://127.0.0.1:{http.server_port}'
+api,site=free_port(),free_port()
+while site==api: site=free_port()
+instance='youtube-automation-real-proof'; secret=secrets.token_hex(32)
+with tempfile.TemporaryDirectory(prefix='yt-real-convex-') as path:
+    app=Path(path)/'app'; app.mkdir()
+    for directory in ('src','convex'):
+        shutil.copytree(repo/directory,app/directory)
+    for filename in ('package.json','tsconfig.json'):
+        shutil.copy2(repo/filename,app/filename)
+    (app/'node_modules').symlink_to(repo/'node_modules',target_is_directory=True)
+    command=[binary,'--interface','127.0.0.1','--port',str(api),'--site-proxy-port',str(site),'--instance-name',instance,'--instance-secret',secret,'--disable-beacon','--redact-logs-to-client']
+    def start():
+        process=subprocess.Popen(command,cwd=path,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        for _ in range(80):
+            if process.poll() is not None: raise RuntimeError('backend exited during startup')
+            try:
+                with urllib.request.urlopen(f'http://127.0.0.1:{api}/version',timeout=1) as r:
+                    if r.status==200: return process
+            except Exception: time.sleep(.25)
+        process.terminate(); process.wait(timeout=15); raise RuntimeError('backend did not start')
+    process=start()
+    try:
+        admin=subprocess.check_output([binary,'keygen','admin-key','--instance-name',instance,'--instance-secret',secret],text=True).strip()
+        env=os.environ.copy()
+        for name in ['CONVEX_DEPLOYMENT','CONVEX_DEPLOY_KEY','CONVEX_SELF_HOSTED_URL','CONVEX_SELF_HOSTED_ADMIN_KEY','NEXT_PUBLIC_CONVEX_URL','NEXT_PUBLIC_CONVEX_SITE_URL','STUDIO_CONVEX_ISSUER','STUDIO_CONVEX_JWKS_URL','STUDIO_CONVEX_AUDIENCE'] : env.pop(name,None)
+        env.update({'CONVEX_SELF_HOSTED_URL':f'http://127.0.0.1:{api}','CONVEX_SELF_HOSTED_ADMIN_KEY':admin,'CI':'1','DISABLE_TELEMETRY':'1'})
+        def run(args,timeout=120):
+            result=subprocess.run([cli,*args],cwd=app,env=env,capture_output=True,text=True,timeout=timeout)
+            if result.returncode:
+                diagnostic=(result.stdout+'\n'+result.stderr)[-2500:].replace(admin,'[redacted]').replace(secret,'[redacted]')
+                raise RuntimeError(f"{' '.join(args[:2])} failed ({result.returncode}): {diagnostic}")
+        for name,value in [('STUDIO_CONVEX_ISSUER',issuer),('STUDIO_CONVEX_JWKS_URL',issuer+'/api/auth/convex-jwks'),('STUDIO_CONVEX_AUDIENCE','youtube-automation-local')]: run(['env','set',name,value])
+        print('local environment set; deploying real Automation backend',flush=True)
+        run(['dev','--once','--typecheck','disable','--codegen','disable','--tail-logs','disable'],240)
+        def token(owner):
+            token_env=env.copy()
+            token_env.update({
+                'STUDIO_CONVEX_JWT_PRIVATE_KEY':key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()).decode(),
+                'STUDIO_CONVEX_ISSUER':issuer,'STUDIO_CONVEX_AUDIENCE':'youtube-automation-local',
+                'LOCAL_PROOF_OWNER':owner,
+            })
+            return subprocess.check_output([str(repo/'node_modules/.bin/tsx'),'-e',
+                'import { issueStudioConvexToken } from "./src/lib/studioConvexAuth"; process.stdout.write(issueStudioConvexToken({role:"service",ownerId:process.env.LOCAL_PROOF_OWNER}).token)'],
+                cwd=app,env=token_env,text=True,timeout=20).strip()
+        def call(kind,path,args,auth):
+            headers={'content-type':'application/json'}
+            if auth:headers['authorization']='Bearer '+auth
+            request=urllib.request.Request(f'http://127.0.0.1:{api}/api/{kind}',data=json.dumps({'path':path,'args':args,'format':'json'}).encode(),headers=headers)
+            try:
+                with urllib.request.urlopen(request,timeout=25) as response: return response.status,json.load(response)
+            except urllib.error.HTTPError as error:
+                return error.code,json.loads(error.read())
+        def query(auth,owner):return call('query','channels:listChannels',{'ownerId':owner},auth)
+        status, authorized=query(token('owner-a'),'owner-a'); _,other=query(token('owner-a'),'owner-b'); _,anonymous=query(None,'owner-a')
+        ok=authorized.get('status')=='success' and authorized.get('value')==[] and other.get('status')!='success' and anonymous.get('status')!='success'
+        print(json.dumps({'deployment':'passed','signedServiceOwnQuery':authorized.get('status'),'crossOwnerRejected':other.get('status')!='success','anonymousRejected':anonymous.get('status')!='success','passed':ok}),flush=True)
+        if not ok:raise RuntimeError('real backend authentication qualification failed')
+        channel={'ownerId':'owner-a','slug':'local-proof','name':'Disposable proof','identity':{'persona':'calm','bannedWords':[],'requiredCallbacks':[],'styleGrammar':'calm','palette':['#123456'],'thumbnailTemplate':'default','topicPool':[],'cadence':'manual'},'template':'C','pipeline':[{'block':'echo_seed','params':{'topic':'local-proof'}},{'block':'echo_sink'}],'budget':1,'status':'draft'}
+        _,foreign_write=call('mutation','channels:createChannel',{**channel,'ownerId':'owner-b'},token('owner-a'))
+        _,anonymous_write=call('mutation','channels:createChannel',channel,None)
+        if foreign_write.get('status')=='success' or anonymous_write.get('status')=='success':
+            raise RuntimeError('unauthorized channel mutation was accepted')
+        _,created=call('mutation','channels:createChannel',channel,token('owner-a'))
+        if created.get('status')!='success':raise RuntimeError('channel create failed: '+str(created.get('errorMessage','unknown'))[:1000])
+        _,before=query(token('owner-a'),'owner-a')
+        process.terminate();process.wait(timeout=15);process=start()
+        _,after=query(token('owner-a'),'owner-a')
+        passed=before.get('status')=='success' and after.get('status')=='success' and before.get('value')==after.get('value') and len(after.get('value',[]))==1
+        print(json.dumps({'realChannelCreate':'passed','restartPersistence':passed}),flush=True)
+        if not passed:raise RuntimeError('real channel persistence failed')
+    finally:
+        process.terminate()
+        try:process.wait(timeout=15)
+        except subprocess.TimeoutExpired:process.kill();process.wait()
+        http.shutdown()
