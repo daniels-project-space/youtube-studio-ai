@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { synthNarration } from "../tts";
 import { elevenDialogue } from "../motionComic";
 import { listAccountVoices } from "../voicecraft";
+import { synthQwenNarration } from "../qwenTts";
 
 async function main() {
   process.env.YOUTUBE_AUTOMATION_PRIVATE = "1";
@@ -11,6 +12,7 @@ async function main() {
   await assert.rejects(synthNarration({ text: "test", provider: "fish" }), /requires an explicitly selected Qwen/);
   await assert.rejects(synthNarration({ text: "test" }), /requires an explicitly selected Qwen/);
   await assert.rejects(synthNarration({ text: "test", provider: "qwen3", qwenSpeaker: "Ryan" }), /project-scoped render handoff/);
+  await assert.rejects(synthQwenNarration({ text: "test", speaker: "Ryan" }), /project-scoped render handoff/);
   await assert.rejects(elevenDialogue([{ text: "test", voice_id: "fixture" }]), /requires an explicitly selected Qwen/);
   await assert.rejects(listAccountVoices(), /requires an explicitly selected Qwen/);
   assert.equal(calls, 0);
