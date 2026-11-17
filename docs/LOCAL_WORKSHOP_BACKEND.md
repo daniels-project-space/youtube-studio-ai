@@ -33,7 +33,15 @@ remains root-only at `/etc/youtube-studio-workshop/web-password-bootstrap.env`
 because the Project Hub vault bridge currently rejects authentication; it
 must be reconciled and read back before removing that bootstrap copy.
 
-The interface currently opens the inherited Golden module catalog and still
-contains legacy navigation and catalog status labels. The workshop worker,
-trials, draft lifecycle, release handoff and rollback are not yet connected;
-the catalog must not be interpreted as evidence that a module can run locally.
+The private interface now opens the workshop draft editor. Drafts and their
+selected formats persist in the separate database. The compatibility check
+uses the actual registered modules and production compiler; it does not prove
+provider readiness, execute a trial, or approve a release. The workshop worker,
+trials, release handoff and rollback are not yet connected.
+
+For subsequent web releases, build the current committed checkout with
+`NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:39420 YOUTUBE_WORKSHOP_STANDALONE=1
+node_modules/.bin/next build`, then run `python3
+scripts/release-local-workshop-web.py --release` as root. The release script
+completes missing pnpm package links inside the standalone artifact, verifies
+link containment and retains the previous release for rollback.

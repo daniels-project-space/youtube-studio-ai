@@ -59,6 +59,7 @@ def main():
         raise SystemExit('Build is not a standalone package of the current revision')
     if not any(b'http://127.0.0.1:39420' in p.read_bytes() for p in (ROOT / '.next/static/chunks').glob('*.js')):
         raise SystemExit('Build does not contain the local database address')
+    run(sys.executable, str(ROOT / 'scripts/prepare-workshop-standalone.py'), '--prepare')
     prior = CURRENT.resolve(strict=True)
     if not prior.is_relative_to(TARGET / 'releases'):
         raise SystemExit('Prior release is outside the retained release directory')
