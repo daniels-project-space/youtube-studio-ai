@@ -1264,7 +1264,7 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
       </div>
       {preflight && <div role="status" style={{ marginTop: "0.7rem", fontSize: "0.75rem" }}>
         {preflight.blockers.length ? <ul>{preflight.blockers.map((blocker, index) => <li key={`${index}-${blocker}`}>{blocker}</li>)}</ul> : <p>No configuration blockers found in this limited check.</p>}
-        <p>Provider access, the required route-preflight receipt and actual video output are not checked here.</p>
+        <p>Route eligibility, provider access, the required route-preflight receipt and actual video output are not checked here.</p>
         {preflight.removedDeliveryBlocks.length > 0 && <p>Excluded delivery steps: {preflight.removedDeliveryBlocks.join(", ")}.</p>}
       </div>}
       <div style={{ marginTop: "0.8rem", display: "grid", gap: "0.22rem", fontSize: "0.73rem", lineHeight: 1.42, color: "var(--color-muted)" }}>
