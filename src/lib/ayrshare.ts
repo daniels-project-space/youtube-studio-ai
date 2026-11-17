@@ -5,6 +5,8 @@
  * Absent → callers degrade (no cross-post). Requires the social accounts to be
  * connected in the Ayrshare dashboard.
  */
+import { assertLocalCrosspostAllowed } from "@/lib/localPublicationPolicy";
+
 const BASE = "https://app.ayrshare.com/api";
 
 export function hasAyrshareKey(): boolean {
@@ -23,6 +25,7 @@ export async function crosspost(args: {
   platforms: string[]; // e.g. ["tiktok","instagram","facebook"]
   timeoutMs?: number;
 }): Promise<CrosspostResult> {
+  assertLocalCrosspostAllowed();
   const key = process.env.AYRSHARE_API_KEY;
   if (!key) return { ok: false, ids: [], errors: ["no AYRSHARE_API_KEY"] };
   try {

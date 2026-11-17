@@ -183,6 +183,7 @@ const FORWARDED_ENV = [
   "STUDIO_CONVEX_AUDIENCE",
   "STUDIO_INTERNAL_API_TOKEN",
   "STUDIO_OWNER_ID",
+  "YOUTUBE_AUTOMATION_PUBLICATION_ENABLED",
   // Studio's own Engine capability; only the staged H3 handoff receives it.
   "RENDER_ENGINE_PROJECT_TOKEN",
   "HRS_YOUTUBE_BASE_URL",
@@ -335,6 +336,7 @@ export default defineConfig({
         ...(localAutomation ? [
           { name: "NEXT_PUBLIC_CONVEX_URL", value: localAutomation.convexUrl, isSecret: false },
           { name: "CONVEX_URL", value: localAutomation.convexUrl, isSecret: false },
+          { name: "YOUTUBE_AUTOMATION_PRIVATE", value: "1", isSecret: false },
         ] : []),
       ]),
       ffmpeg(),

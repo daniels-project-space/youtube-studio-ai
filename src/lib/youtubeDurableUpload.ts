@@ -4,6 +4,7 @@ import { api } from "../../convex/_generated/api";
 import { decryptSecret, encryptSecret } from "@/lib/secretEnvelope";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import { youtubeUploadSessionAad } from "@/lib/youtubeUploadSession";
+import { assertLocalPublicationAllowed } from "@/lib/localPublicationPolicy";
 import {
   uploadPrivateDraft,
   type UploadVideoArgs,
@@ -24,6 +25,7 @@ export async function uploadDurableVideo(args: {
   upload: DurableUploadArgs;
   log?: (message: string) => void;
 }): Promise<UploadVideoResult> {
+  assertLocalPublicationAllowed(args.upload);
   const log = args.log ?? (() => {});
   const internalSecret = requireInternalQuerySecret();
   const aad = youtubeUploadSessionAad(

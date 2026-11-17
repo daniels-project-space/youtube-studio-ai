@@ -282,3 +282,12 @@ individual actions. Do not copy credentials into the repository or use
 the legacy cloud project as a fallback. Trigger's local deploy defaults to a
 builder named `trigger`; explicitly select the dedicated
 `youtube-automation-trigger` builder to avoid using another project's builder.
+
+The local worker runs with `YOUTUBE_AUTOMATION_PRIVATE=1`. Its YouTube upload
+boundary rejects public, unlisted and scheduled uploads, and its social
+cross-post boundary rejects posts, unless publication has been explicitly
+enabled. Private drafts remain permitted. The deployed `automation-safety-probe`
+verified these decisions without opening a file or contacting a provider; both
+the generation and publishing scheduler tasks also returned disabled, and the
+local service had no schedules. This does not cover arbitrary direct calls to
+external APIs or prove the rest of the publishing approval flow.

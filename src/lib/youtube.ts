@@ -13,10 +13,11 @@
  *      body -> returns an upload session URL in the `location` header.
  *   3. PUT the video bytes to that URL -> returns the created video resource.
  *
- * privacyStatus is forced to "private" — this never publishes publicly.
+ * Publication settings are explicit; personal Automation applies its private-review gate.
  */
 import { createHash } from "node:crypto";
 import { open, type FileHandle } from "node:fs/promises";
+import { assertLocalPublicationAllowed } from "@/lib/localPublicationPolicy";
 
 export class YouTubeError extends Error {
   constructor(message: string) {
@@ -676,6 +677,7 @@ async function delay(ms: number): Promise<void> {
 export async function uploadPrivateDraft(
   args: UploadVideoArgs,
 ): Promise<UploadVideoResult> {
+  assertLocalPublicationAllowed(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const file = await open(args.filePath, "r");
   try {
