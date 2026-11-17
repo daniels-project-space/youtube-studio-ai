@@ -185,6 +185,7 @@ import {
   assertChildrenShowBibleSeeded,
 } from "@/engine/childrenShowBible";
 import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
+import { assertAutomationNarrationPolicy } from "@/engine/automationNarrationPolicy";
 import { buildChannelProfile } from "@/engine/channelProfile";
 import { hasSourceAttributedDataStoryParams } from "@/engine/dataStory";
 import {
@@ -2051,6 +2052,8 @@ export const runPipelineTask = task({
       } else if (seedStore[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY] !== undefined) {
         throw new Error("pipeline invocation has a narrative series selector without a validated immutable plan");
       }
+
+      assertAutomationNarrationPolicy(entries, seedStore);
 
       // Compile only after selecting and admitting the actual seed store:
       // current identity is not the source for durable, private or weekly runs.

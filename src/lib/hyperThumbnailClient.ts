@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { resolveHyperYoutubeProject } from "@/lib/hyperYoutubeProject";
+import { assertAutomationModelAllowed } from "@/lib/automationModelPolicy";
 
 /** Project-scoped HRS contract; provider credentials remain in HRS. */
 export interface HyperThumbnailRequest {
@@ -96,6 +97,7 @@ export function createHyperThumbnailClient(options:HyperThumbnailClientOptions) 
   }
   return {
     async uploadReference(args:{bytes:Buffer;name:string;contentType:"image/png"|"image/jpeg"|"image/webp";idempotencyKey:string}) {
+      assertAutomationModelAllowed("gemini-3-pro-image");
       if (!args.bytes.length || args.bytes.length > 8_000_000 || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(args.name) ||
           !args.idempotencyKey || args.idempotencyKey.length > 160) throw new Error("Invalid HRS reference upload");
       const sha256 = createHash("sha256").update(args.bytes).digest("hex");
@@ -121,6 +123,7 @@ export function createHyperThumbnailClient(options:HyperThumbnailClientOptions) 
       return {assetId:upload.assetId,sha256,bytes:args.bytes.length,contentType:args.contentType};
     },
     async submit(input:HyperThumbnailRequest, expectedReferenceHashes:Readonly<Record<string,string>> = {}) {
+      assertAutomationModelAllowed("gemini-3-pro-image");
       if (input.referenceAssets.some(ref => !/^[a-f0-9]{64}$/.test(expectedReferenceHashes[ref.assetId] ?? "")))
         throw new Error("Every HRS thumbnail reference requires its verified source hash");
       const result = verify(await request(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(input)}),input);

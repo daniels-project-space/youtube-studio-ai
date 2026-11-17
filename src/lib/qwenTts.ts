@@ -753,6 +753,9 @@ export function validateRetainedQwenTtsAudio(args: QwenTtsRequestArgs, audio: Ui
 export async function synthQwenNarration(args: QwenTtsRequestArgs & {
   onReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
+  if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1" || process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE === "1") {
+    throw new QwenTtsError("Private Automation Qwen narration requires the project-scoped render handoff");
+  }
   const { renderEngineQwen, engineQwenRequest } = await import("./qwenEngine");
   const { StudioRenderEngineClient } = await import("./studioRenderEngineClient");
   const { wait } = await import("@trigger.dev/sdk");

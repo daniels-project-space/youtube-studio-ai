@@ -2,6 +2,7 @@ allowBuilds:
   # Explicitly reviewed native/build-time dependencies required by the
   # production build and resolver stack. Everything else remains denied by
   # pnpm's strict default.
+  '@depot/cli': false
   esbuild: true
   protobufjs: true
   unrs-resolver: true

@@ -2,6 +2,7 @@ import { defineConfig } from "@trigger.dev/sdk";
 import type { BuildExtension } from "@trigger.dev/build/extensions";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { localWorkshopWorkerConfig } from "./src/lib/localWorkshopWorkerConfig";
 import {
   ffmpeg,
   additionalPackages,
@@ -9,6 +10,8 @@ import {
   aptGet,
   syncEnvVars,
 } from "@trigger.dev/build/extensions/core";
+
+const localWorkshop = localWorkshopWorkerConfig(process.env);
 
 /**
  * PySceneDetect must be present before a task begins.  Unlike the legacy drawn
@@ -279,7 +282,7 @@ const SECRET_FORWARDED_ENV = new Set([
  *   renderer + Chromium-download (ensureBrowser) deps.
  */
 export default defineConfig({
-  project: process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
+  project: localWorkshop?.project ?? process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
   // Trigger.dev's unspecified default is Node 21.7.3, which predates the
   // stable global WebSocket. @browserbasehq/stagehand 4.x's CDP client uses
   // the native global WebSocket directly (no polyfill) and declares
@@ -321,8 +324,14 @@ export default defineConfig({
       "@remotion/noise",
     ],
     extensions: [
-      syncEnvVars(() =>
-        FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
+      syncEnvVars(() => localWorkshop ? [
+        ...["STUDIO_CONVEX_JWT_PRIVATE_KEY", "STUDIO_CONVEX_ISSUER", "STUDIO_CONVEX_AUDIENCE", "STUDIO_OWNER_ID"].map(name => ({
+          name, value: process.env[name] as string, isSecret: name === "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+        })),
+        { name: "NEXT_PUBLIC_CONVEX_URL", value: localWorkshop.convexUrl, isSecret: false },
+        { name: "CONVEX_URL", value: localWorkshop.convexUrl, isSecret: false },
+        { name: "YOUTUBE_STUDIO_WORKSHOP_PRIVATE", value: "1", isSecret: false },
+      ] : FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
           name,
           value: process.env[name] as string,
           isSecret: SECRET_FORWARDED_ENV.has(name),

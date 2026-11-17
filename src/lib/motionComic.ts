@@ -1,4 +1,5 @@
 import { MOTION_COMIC_MAX_CHARACTERS, MOTION_COMIC_MAX_LINES_PER_PANEL, MOTION_COMIC_MAX_LINE_CHARS, MOTION_COMIC_MAX_WORD_CHARS, motionComicPanelCount, motionComicDialogueCharacterCeiling } from "./motionComicBounds";
+import { assertAutomationNarrationProviderAllowed } from "@/lib/automationModelPolicy";
 export * from "./motionComicBounds";
 /**
  * MOTIONCOMIC — a STANDALONE drawn-comic-page engine (NOT wired into the YSA
@@ -1242,6 +1243,7 @@ export async function elevenDialogue(
   inputs: { text: string; voice_id: string }[],
   onBillableCharacters?: (characters: number) => void,
 ): Promise<Buffer> {
+  assertAutomationNarrationProviderAllowed("elevenlabs");
   const key = process.env.ELEVENLABS_API_KEY;
   for (let attempt = 0; attempt < 3; attempt++) {
     let res: Response;
