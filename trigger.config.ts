@@ -2,6 +2,7 @@ import { defineConfig } from "@trigger.dev/sdk";
 import type { BuildExtension } from "@trigger.dev/build/extensions";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { localAutomationWorkerConfig } from "./src/lib/localAutomationWorkerConfig";
 import {
   ffmpeg,
   additionalPackages,
@@ -178,6 +179,8 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
 const FORWARDED_ENV = [
   "INTERNAL_QUERY_SECRET",
   "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+  "STUDIO_CONVEX_ISSUER",
+  "STUDIO_CONVEX_AUDIENCE",
   "STUDIO_INTERNAL_API_TOKEN",
   "STUDIO_OWNER_ID",
   // Studio's own Engine capability; only the staged H3 handoff receives it.
@@ -278,8 +281,10 @@ const SECRET_FORWARDED_ENV = new Set([
  *   present because bundle() compiles it on the fly; node_modules ships the heavy
  *   renderer + Chromium-download (ensureBrowser) deps.
  */
+const localAutomation = localAutomationWorkerConfig(process.env);
+
 export default defineConfig({
-  project: process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
+  project: localAutomation?.project ?? process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
   // Trigger.dev's unspecified default is Node 21.7.3, which predates the
   // stable global WebSocket. @browserbasehq/stagehand 4.x's CDP client uses
   // the native global WebSocket directly (no polyfill) and declares
@@ -321,13 +326,17 @@ export default defineConfig({
       "@remotion/noise",
     ],
     extensions: [
-      syncEnvVars(() =>
-        FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
+      syncEnvVars(() => [
+        ...FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
           name,
           value: process.env[name] as string,
           isSecret: SECRET_FORWARDED_ENV.has(name),
         })),
-      ),
+        ...(localAutomation ? [
+          { name: "NEXT_PUBLIC_CONVEX_URL", value: localAutomation.convexUrl, isSecret: false },
+          { name: "CONVEX_URL", value: localAutomation.convexUrl, isSecret: false },
+        ] : []),
+      ]),
       ffmpeg(),
       additionalPackages({
         packages: [

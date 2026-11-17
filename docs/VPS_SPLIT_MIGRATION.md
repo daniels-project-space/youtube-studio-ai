@@ -254,3 +254,31 @@ job runner and authenticated UI; verify the import; implement the release
 handoff and rollback; then generate and inspect one private existing-channel
 video and its R2 receipt. Validate Project Hub links and readiness from the
 actual interface. Public publishing and scheduling remain gated.
+
+## Local job service
+
+`scripts/provision-local-automation-trigger.py --install` installs a dedicated
+self-hosted Trigger stack using the pinned manifests under `deploy/local-trigger`.
+It refuses to overwrite existing installations or use an overlapping Docker
+network. Credentials are generated into root-only files; the dashboard listens
+on VPS loopback and the private worker bridge, and the image registry listens
+on loopback. A separate, bounded relay exposes the local
+Automation database only to its private worker subnet. The service owns its
+volumes and retains them when stopped. Provisioning does not deploy tasks,
+enable schedules, or connect the dashboard to the web app.
+
+The local deployment guard requires an explicit local project, local service
+endpoint, private worker database address, and database signing identity. The
+two local job projects are separate identities; this alone does not establish
+separate Studio AI application data or release handoff. On 17 November 2026,
+the Automation project deployed its real worker locally with 75 registered
+tasks. Its `convex-auth-probe` task verified signed local database access and
+unsigned denial. The local job service had zero schedules at that point. This
+project's credentials could read the probe run, while the Studio AI project's
+credentials received a not-found response for that same run. This does not
+prove video generation or publishing readiness. The web app is not yet
+connected to this worker: first gate the legacy controls and qualify their
+individual actions. Do not copy credentials into the repository or use
+the legacy cloud project as a fallback. Trigger's local deploy defaults to a
+builder named `trigger`; explicitly select the dedicated
+`youtube-automation-trigger` builder to avoid using another project's builder.

@@ -1,0 +1,22 @@
+services:
+  webapp:
+    mem_limit: 1536m
+    cpus: 2
+  postgres:
+    mem_limit: 512m
+  redis:
+    mem_limit: 256m
+  electric:
+    mem_limit: 512m
+  clickhouse:
+    mem_limit: 1536m
+  registry:
+    mem_limit: 256m
+  minio:
+    mem_limit: 512m
+  s2:
+    mem_limit: 512m
+  supervisor:
+    mem_limit: 512m
+  docker-proxy:
+    mem_limit: 128m
