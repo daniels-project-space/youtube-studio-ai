@@ -82,4 +82,4 @@ try:
     raise RuntimeError('Anonymous channel token request unexpectedly succeeded')
 except urllib.error.HTTPError as error:
     if error.code != 401: raise
-print(f'Installed private loopback Automation interface at revision {revision}; anonymous channel tokens rejected')
+print(f'Installed private loopback Studio workshop interface at revision {revision}; anonymous channel tokens rejected')
