@@ -1,4 +1,3 @@
-import { registerAllBlocks } from "@/engine/blocks";
 import { assertAutomationNarrationPolicy } from "@/engine/automationNarrationPolicy";
 import { ExecutionError } from "@/engine/executionErrors";
 import { completePipelineForPolicy, materializeRuntimePipelineParams } from "@/engine/pipelineCompiler";
@@ -21,11 +20,10 @@ export function privateBenchmarkPreflight(channel: Channel) {
   const blockers: string[] = [];
   let removedDeliveryBlocks: string[] = [];
   try {
-    registerAllBlocks();
     const privatePipeline = buildRouteQualificationBenchmarkPipeline(channel.pipeline);
     const privateBlocks = new Set(privatePipeline.map(entry => entry.block));
     removedDeliveryBlocks = [...new Set(channel.pipeline.map(entry => entry.block).filter(block => !privateBlocks.has(block)))];
-    const completed = completePipelineForPolicy(privatePipeline);
+    const completed = completePipelineForPolicy(privatePipeline, { manifestSource: "structural" });
     const merged = mergeRuntimeModuleConfig({ entries: completed.entries, paramsByBlock: snapshotParamsByBlock(completed.entries), moduleConfig: channel.moduleConfig });
     const effective = materializeRuntimePipelineParams(completed.entries, merged.paramsByBlock);
     assertAutomationNarrationPolicy(effective, { voiceId: channel.identity?.voiceId }, { YOUTUBE_AUTOMATION_PRIVATE: "1" });
