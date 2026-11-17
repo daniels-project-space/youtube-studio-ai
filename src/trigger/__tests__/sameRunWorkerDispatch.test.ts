@@ -22,6 +22,7 @@ let failEnqueue = false;
 let failAcknowledgement = false;
 let invalidYuE2Preparation: "missing" | "oversized" | undefined;
 let preparedYuE2: Row | undefined;
+const doctorSyncCalls: Row[] = [];
 const queries: string[] = [];
 const triggers: { task: string; payload: Row; options: Row }[] = [];
 const keys: { seed: string; options?: Row }[] = [];
@@ -93,7 +94,10 @@ loader._load = function (id, ...args) {
   if (id === "@/lib/bootstrap") return { bootstrapSecrets: async () => {} };
   if (id === "@/lib/automationGate") return { STUDIO_AUTOMATION_GATES: { autopilot: "autopilot" }, studioAutomationGate: () => ({ enabled: true }) };
   if (id === "@/lib/storage") return { putObject: async () => {} };
-  if (id === "@/lib/goldenChannelSync") return { syncChannelPipelines: async () => ({ checked: 0, changed: 0, applied: 0, conflicts: 0, verified: false, verification: "skipped" }) };
+  if (id === "@/lib/goldenChannelSync") return { syncChannelPipelines: async (options: Row) => {
+    doctorSyncCalls.push(options);
+    return { checked: 0, changed: 0, applied: 0, conflicts: 0, verified: false, verification: "dry-run" };
+  } };
   if (id === "@/lib/youtubeConnector") return { requireInternalQuerySecret: () => "test-secret" };
   if (id === "@/lib/creativeText") return { creativeTextJson: async () => { throw new Error("diagnosis provider forbidden"); } };
   if (id === "@/engine/dataStorySchedulerAdmission") return { sourceDataStorySchedulerAdmission: () => ({ automatic: true }) };
@@ -213,6 +217,8 @@ async function main() {
       assert.equal(researchCalls, 0);
     }
   }
+  assert.ok(doctorSyncCalls.length > 0);
+  assert.ok(doctorSyncCalls.every((call) => call.dryRun === true), "Doctor cannot persist pipeline migrations");
   assert.equal(networkCalls, 0);
   originalLog("SAME-RUN WORKER DISPATCH PASS: five real task dispatch paths, worker B pins A, historical absence, unchanged keys/scopes, malformed/foreign/missing-context rejection, pre-research scheduler fence");
 }

@@ -181,10 +181,8 @@ async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?
   const convex = new ConvexHttpClient(url);
 
   const channels = await convex.query(api.channels.listChannels, { ownerId });
-  // Persist the exact catalog/compiler completion the runtime would otherwise
-  // repeat on every invocation. This is deterministic and provider-free: it
-  // preserves specialist choices, removes only proven retired rows, and never
-  // spends model/render tokens.
+  // Report proposed catalog changes without changing an operating channel.
+  // Pipeline releases must be promoted through an explicit approval flow.
   let channelPipelineSync = {
     checked: channels.length,
     changed: 0,
@@ -198,6 +196,7 @@ async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?
       convex,
       ownerId,
       channels,
+      dryRun: true,
       verify: false,
       log: (message) => log(`pipeline sync: ${message}`),
     });
@@ -354,10 +353,8 @@ async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?
       }
     }
 
-    // LEARNING → STRUCTURE: when real-audience evidence accumulates (≥3
-    // high-confidence retention rules newer than the last architect pass),
-    // re-run the architect so the data re-tunes pacing/inserts/structure —
-    // not just the script playbook.
+    // Surface evidence for a future proposed release without running the
+    // architect automatically or changing the channel's active pipeline.
     try {
       const playbook = (ch as { scriptPlaybook?: { retentionLearnings?: { confidence?: string; at?: number }[] } }).scriptPlaybook;
       const lastArch = Number((ch as { architectReport?: { at?: number } }).architectReport?.at ?? 0);
@@ -365,8 +362,7 @@ async function sweep(ownerId: string, log: (m: string) => void, dispatchContext?
         (l) => l.confidence === "high" && (l.at ?? 0) > lastArch,
       );
       if (freshHigh.length >= 3) {
-        await tasks.trigger("architect-pipeline", { channelId: ch._id });
-        log(`re-architect queued for "${ch.name}" — ${freshHigh.length} high-confidence retention rules since last pass`);
+        log(`pipeline review suggested for "${ch.name}" — ${freshHigh.length} high-confidence retention rules since last pass`);
       }
     } catch (e) {
       log(`re-architect check failed for ${ch.name}: ${e instanceof Error ? e.message : e}`);

@@ -1,7 +1,7 @@
 /**
  * `architect-pipeline` — run the LLM Pipeline Architect on an EXISTING channel
- * (new channels get it automatically inside design-channel). dryRun returns
- * the full decision report without touching the channel — the validation mode.
+ * (new channels get it automatically inside design-channel). The task returns
+ * a proposal; activating a pipeline requires the separate release workflow.
  */
 import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -89,27 +89,10 @@ export const architectPipelineTask = task({
     });
     if (!arch) return { ok: false, reason: "architect agent failed (floor kept)" };
 
-    if (!payload.dryRun) {
-      const write = await convex.mutation(api.channels.updateChannel, {
-        channelId,
-        pipeline: arch.pipeline,
-        architectReport: arch.report,
-      });
-      if ((write as { state?: string; blockId?: string }).state === "module_locked") {
-        throw new Error(
-          `architect pipeline update refused: module '${(write as { blockId?: string }).blockId ?? "unknown"}' is locked`,
-        );
-      }
-      if ((write as { state?: string }).state === "channel_locked") {
-        throw new Error("architect pipeline update refused: the owner locked this channel");
-      }
-      log(`APPLIED: ${arch.report.applied.length} op(s); pipeline now ${arch.pipeline.length} blocks`);
-    } else {
-      log("DRY RUN — nothing written");
-    }
+    log("PROPOSAL ONLY — active channel pipeline unchanged");
     return {
       ok: true,
-      dryRun: Boolean(payload.dryRun),
+      dryRun: true,
       report: arch.report,
       pipeline: arch.pipeline.map((e) => ({ ...e })),
     };

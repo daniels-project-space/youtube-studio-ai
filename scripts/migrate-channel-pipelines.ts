@@ -1,12 +1,13 @@
 /**
- * Persist every channel's runtime-effective production catalog pipeline.
+ * Preview every channel's runtime-effective production catalog pipeline.
  *
  * This intentionally preserves specialist module choices. It does not flatten
  * whiteboard, motion-comic, finance, lofi, or other customized channels into a
  * generic A/B/C/D/E archetype. Identity (voice, art, palette, topic pool),
  * scheduling, status, and publishing configuration are never touched.
  *
- * DRY_RUN=1 prints the diff without writing.
+ * This legacy fleet script is preview-only. Pipeline releases require a
+ * separate per-channel approval flow.
  *
  *   NEXT_PUBLIC_CONVEX_URL=https://astute-camel-689.convex.cloud \
  *   NEXT_PUBLIC_OWNER_ID=owner_daniel npx tsx scripts/migrate-channel-pipelines.ts
@@ -15,7 +16,6 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { syncChannelPipelines } from "@/lib/goldenChannelSync";
 
 const OWNER = process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
-const DRY = process.env.DRY_RUN === "1";
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -24,11 +24,11 @@ async function main() {
   const report = await syncChannelPipelines({
     convex,
     ownerId: OWNER,
-    dryRun: DRY,
+    dryRun: true,
     log: (message) => console.log(message),
   });
   console.log(
-    `\n${DRY ? `would change ${report.changed}` : `applied ${report.applied}`}/${report.checked} channel(s)` +
+    `\nwould change ${report.changed}/${report.checked} channel(s)` +
       `${report.conflicts ? `; ${report.conflicts} concurrent conflict(s) skipped` : ""}` +
       `; verification ${report.verification}`,
   );
