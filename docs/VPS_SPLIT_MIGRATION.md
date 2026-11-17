@@ -119,6 +119,24 @@ A dedicated migration must preserve the original settings and source identity,
 map references explicitly, prevent unintended overwrites, keep every imported
 schedule disabled, and verify readback against the captured records. Connector
 metadata alone is not a working YouTube connection.
+
+The local `channelImport:importBaseline` mutation and
+`scripts/import-channel-baseline.ts` now provide that channel-record path. The
+mutation requires an owner-bound service identity and the explicit backend
+setting `YOUTUBE_LOCAL_IMPORT_ENABLED=1`; it refuses a nonempty destination,
+preserves the original channel records in a receipt, translates group IDs,
+and atomically imports paused channels with disabled schedules. The command
+accepts only a private, hash-verified baseline file and a loopback backend,
+then compares each imported record with the expected paused copy. Replays of
+the same baseline are non-mutating; different baselines are rejected.
+
+The disposable real-backend qualification imported all 13 captured channel
+records, compared all fields and translated groups, restarted the backend,
+and verified both persistence and import-command replay. It also tested
+cross-owner rejection and conflicting-baseline rejection using synthetic
+records. The temporary backend was removed after testing: no persistent app
+database has yet been imported. Connector secrets, history, media and retained
+executable pipeline releases still need separate migration and verification.
 Use `scripts/capture-channel-baselines.ts --capture` with the Vault-injected
 production Trigger key, project ref and expected Convex URL to capture again.
 The production Trigger schedules API returned zero schedules at the same

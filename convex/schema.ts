@@ -148,6 +148,13 @@ const planWeekLegacyNovitaProviderReceipt = v.object({
  * R2 keys are per-channel prefixed; nothing here holds media bytes.
  */
 export default defineSchema({
+  channelImportReceipts: defineTable({
+    ownerId: v.string(),
+    sourceFileSha256: v.string(),
+    sourceChannels: v.array(v.any()),
+    mappings: v.array(v.object({ sourceId: v.string(), channelId: v.id("channels") })),
+    importedAt: v.number(),
+  }).index("by_owner", ["ownerId"]),
   channelDirectoryStates: defineTable({
     ownerId: v.string(),
     generation: v.number(),
