@@ -66,6 +66,7 @@ import {
   runPipeline as runEngine,
 } from "@/engine/runner";
 import { ExecutionError } from "@/engine/executionErrors";
+import { assertAutomationNarrationPolicy } from "@/engine/automationNarrationPolicy";
 import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
 import { mergeRuntimeModuleConfig } from "@/engine/runtimeModuleConfig";
 import { renderBlockTask } from "@/trigger/render-block";
@@ -2051,6 +2052,10 @@ export const runPipelineTask = task({
       } else if (seedStore[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY] !== undefined) {
         throw new Error("pipeline invocation has a narrative series selector without a validated immutable plan");
       }
+
+      // Reject legacy narration providers before any pipeline block can spend.
+      // This checks the effective, frozen configuration without rewriting it.
+      assertAutomationNarrationPolicy(entries, seedStore);
 
       // Compile only after selecting and admitting the actual seed store:
       // current identity is not the source for durable, private or weekly runs.

@@ -78,6 +78,28 @@ production Trigger key, project ref and expected Convex URL to capture again.
 The production Trigger schedules API returned zero schedules at the same
 inspection. This is not proof about other scheduling systems or future state.
 
+The saved pipelines passed the current structural flow compiler without
+adding or removing blocks; policy completion left their stored entries and
+parameters unchanged. This does not verify runtime configuration, worker
+availability, duration, audio quality or actual video output.
+
+The read-only `scripts/audit-channel-narration.ts` check materializes the
+saved channel module controls and applies Automation's new preflight. Six
+channels with `narration_tts` require an explicit Qwen provider. Chalk &
+Compound's `whiteboard_scribe` selects Fish/ElevenLabs, while Inked Histories'
+`motion_comic` invokes ElevenLabs dialogue; neither has a qualified Qwen path
+yet. The other five captured pipelines have none of these inspected blocks;
+that is not a provider or output readiness claim. Automation now rejects these
+unqualified narration paths before running pipeline blocks. Saved channels
+and selected voices are not silently rewritten. Qwen integration for the
+specialist modules and channel-level voice selection remain required work.
+The separate `plan-week-prepared-narration` task is not covered by the
+`run-pipeline` preflight and still accepts non-Qwen providers. Its existing
+prepared-narration sidecar does not carry provider provenance; it needs its
+own fail-closed admission and a migration-safe receipt before that path can be
+declared Qwen-only. Do not enable that preparation flow as an Automation
+shortcut until it is fixed and verified.
+
 ## Release handoff
 
 Studio AI creates a candidate containing its ordered modules, exact executable
