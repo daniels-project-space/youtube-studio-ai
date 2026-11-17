@@ -207,6 +207,9 @@ backend address and is not a remotely usable release. Before any public routing,
 configure TLS and a trusted reverse proxy, provide an external backend address,
 add durable proxy-level login throttling, and verify every route's authorization.
 The in-process login throttle alone is not a public deployment boundary.
+For direct VPS access, `YTA_LOCAL_WEB_ORIGIN` binds state-changing requests to
+the exact configured loopback origin and Host header. Remote access will need a
+separate, explicitly configured trusted-origin design.
 The interface now has the local Automation job-project credentials. An
 authenticated browser retrieved a completed local worker safety-probe run
 through `/api/build-channel`; anonymous token access remained denied. This is

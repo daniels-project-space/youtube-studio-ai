@@ -53,6 +53,7 @@ verifier = 'scrypt$'+salt.hex()+'$'+digest.hex()
 pem = (CONFIG/'jwt-private.pem').read_text().replace('\n','\\n')
 values = {
     'NODE_ENV':'production', 'HOSTNAME':'127.0.0.1', 'PORT':'39362',
+    'YTA_LOCAL_WEB_ORIGIN':'http://127.0.0.1:39362',
     'NEXT_PUBLIC_CONVEX_URL':'http://127.0.0.1:39320', 'CONVEX_URL':'http://127.0.0.1:39320',
     'STUDIO_OWNER_ID':'owner_daniel', 'STUDIO_CONVEX_ISSUER':'http://127.0.0.1:39340',
     'STUDIO_CONVEX_AUDIENCE':'youtube-automation-vps', 'STUDIO_CONVEX_JWT_PRIVATE_KEY':pem,

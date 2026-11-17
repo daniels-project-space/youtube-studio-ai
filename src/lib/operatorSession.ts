@@ -161,6 +161,23 @@ export async function getStudioActor(
   return session ? verifyOperatorSessionToken(session) : null;
 }
 
+export function allowedStudioMutationOrigin(
+  request: Request,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  if (env.YOUTUBE_AUTOMATION_PRIVATE !== "1" || !env.YTA_LOCAL_WEB_ORIGIN) return origin === new URL(request.url).origin;
+  try {
+    const configured = new URL(env.YTA_LOCAL_WEB_ORIGIN);
+    return configured.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(configured.hostname) &&
+      !configured.username && !configured.password && configured.pathname === "/" && !configured.search && !configured.hash &&
+      origin === configured.origin && request.headers.get("host") === configured.host;
+  } catch {
+    return false;
+  }
+}
+
 export async function requireStudioActor(
   request: Request,
 ): Promise<StudioActor> {
@@ -171,8 +188,7 @@ export async function requireStudioActor(
     actor.authKind === "session" &&
     !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())
   ) {
-    const origin = request.headers.get("origin");
-    if (!origin || origin !== new URL(request.url).origin) {
+    if (!allowedStudioMutationOrigin(request)) {
       throw new StudioAuthError("cross-origin state change refused", 403);
     }
   }
