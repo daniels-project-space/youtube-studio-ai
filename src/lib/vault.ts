@@ -26,6 +26,28 @@ function vaultUrl(): string {
   return (process.env.VAULT_URL ?? DEFAULT_VAULT_URL).replace(/\/$/, "");
 }
 
+/** A provisioned private workspace never falls back to the cloud vault. */
+function localVaultService(service: string): Record<string, string> | null {
+  if (process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE !== "1") return null;
+  let source: unknown;
+  try {
+    const configured = process.env.YTS_LOCAL_VAULT_JSON ?? "{}";
+    source = JSON.parse(configured.startsWith("uri:") ? decodeURIComponent(configured.slice(4)) : configured);
+  }
+  catch { throw new Error("Local Studio workshop vault configuration is malformed"); }
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("Local Studio workshop vault configuration is malformed");
+  }
+  const services = source as Record<string, unknown>;
+  const values = Object.hasOwn(services, service) ? services[service] : undefined;
+  if (values === undefined) throw new Error(`Local Studio workshop vault service is not configured: ${service}`);
+  if (!values || typeof values !== "object" || Array.isArray(values) ||
+      Object.values(values).some((value) => typeof value !== "string")) {
+    throw new Error(`Local Studio workshop vault service is malformed: ${service}`);
+  }
+  return { ...values as Record<string, string> };
+}
+
 async function vaultQuery<T>(
   path: string,
   args: Record<string, unknown>,
@@ -54,6 +76,8 @@ async function vaultQuery<T>(
 export async function listByService(
   service: string,
 ): Promise<Record<string, string>> {
+  const local = localVaultService(service);
+  if (local) return local;
   const secrets = await vaultQuery<VaultSecret[]>("secrets:listByService", {
     service,
   });
@@ -73,6 +97,12 @@ export async function getOne(
   service: string,
   keyName: string,
 ): Promise<string> {
+  const local = localVaultService(service);
+  if (local) {
+    const value = Object.hasOwn(local, keyName) ? local[keyName] : undefined;
+    if (typeof value !== "string") throw new Error(`Local Studio workshop vault key not configured: ${service}/${keyName}`);
+    return value;
+  }
   const secret = await vaultQuery<VaultSecret | null>("secrets:getOne", {
     service,
     keyName,

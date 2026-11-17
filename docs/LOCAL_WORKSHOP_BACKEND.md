@@ -48,7 +48,7 @@ media have not been changed. Studio's bucket currently has multipart cleanup
 but no diagnostic-object expiry; establish a scoped lifecycle rule before
 writing disposable diagnostic artifacts.
 
-Studio worker deployment `20261117.2` completed a read-only task against its
+Studio worker deployment `20261117.3` completed a read-only task against its
 own local database and scoped R2 bucket and enforced excluded-model policies.
 An Automation Trigger credential was denied access to a Studio run, and the
 shared local Trigger service had zero schedules. This is connectivity evidence,
@@ -62,6 +62,16 @@ The workshop's HRS project is separately onboarded with output prefix
 was verified and reconciled to `youtube-studio-ai/HRS_YOUTUBE_PROJECT_TOKEN`.
 Onboarding and identity checks submitted no render job and did not change the
 paid worker. A real Qwen or video output remains unverified.
+
+The local worker uses a root-protected, project-specific credential snapshot
+and an independently generated backend internal secret. The secret is also
+stored as `youtube-studio-ai/INTERNAL_QUERY_SECRET` in Project Hub Vault.
+The snapshot includes the existing OpenRouter, Pexels, and Pixabay account
+credentials; these accounts and their billing are not isolated by project.
+Use `scripts/provision-local-workshop-vault.cjs` only for a fresh installation
+with the required credentials injected by `ai-vault`. It refuses to overwrite
+existing local configuration. Missing local credentials fail closed rather
+than falling back to a managed vault.
 
 For subsequent web releases, build the current committed checkout with
 `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:39420 YOUTUBE_WORKSHOP_STANDALONE=1

@@ -13,7 +13,7 @@ while (Date.now() < deadline) {
   const result = await runs.retrieve(run.id);
   if (result.status === "COMPLETED") {
     const output = result.output;
-    if (output?.ok !== true || output.localDatabase !== true || output.scopedStorage !== true || output.renderProjectBound !== true || output.modelRestrictions !== true || output.providerJobsStarted !== 0) throw new Error("Unexpected worker readiness evidence");
+    if (output?.ok !== true || output.localDatabase !== true || output.localVault !== true || output.scopedStorage !== true || output.renderProjectBound !== true || output.modelRestrictions !== true || output.providerJobsStarted !== 0) throw new Error("Unexpected worker readiness evidence");
     console.log("Studio worker verified its database, scoped storage and render project; no model job started");
     process.exit(0);
   }

@@ -6,6 +6,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { getBucket, getR2Client } from "@/lib/storage";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { resolveHyperYoutubeProject } from "@/lib/hyperYoutubeProject";
+import { listByService } from "@/lib/vault";
 
 /** Read-only local worker proof; it does not execute a pipeline or model. */
 export const workshopRuntimeReadiness = task({
@@ -26,8 +27,10 @@ export const workshopRuntimeReadiness = task({
     await getR2Client().send(new ListObjectsV2Command({ Bucket: getBucket(), MaxKeys: 1 }));
     const renderProject = await resolveHyperYoutubeProject();
     if (renderProject.outputBucket !== getBucket()) throw new Error("Studio render project points to the wrong bucket");
+    const textProvider = await listByService("openrouter");
+    if (!textProvider.OPENROUTER_API_KEY) throw new Error("Studio local provider configuration is missing");
     const client = new StudioConvexHttpClient(process.env.CONVEX_URL);
     const drafts = await client.query(api.workshopPipelineDrafts.list, { ownerId: process.env.STUDIO_OWNER_ID ?? "" });
-    return { ok: true, localDatabase: true, scopedStorage: true, renderProjectBound: true, modelRestrictions: true, draftCount: drafts.length, providerJobsStarted: 0 };
+    return { ok: true, localDatabase: true, localVault: true, scopedStorage: true, renderProjectBound: true, modelRestrictions: true, draftCount: drafts.length, providerJobsStarted: 0 };
   },
 });
