@@ -27,6 +27,43 @@ child tasks, idempotency, version pinning and recovery need real qualification
 under this app's long-running workload before choosing it. Measure VPS memory,
 disk and concurrency; do not share or disturb another project's database.
 
+On 17 November 2026 an isolated, disposable self-hosted Trigger 4.5.9 stack
+was started on loopback with its own database, secrets, networks, registry,
+test project and worker. Synthetic tasks ran through the actual local service:
+a parent awaited a child, a transient failure retried successfully, and two
+requests with the same idempotency key returned the same run. Those behaviors
+also passed on a locally built and deployed staging worker after its API
+origin was changed from host loopback to the private container address. The
+second synthetic project received its own staging credential, which could not
+read the first project's run (HTTP 404). This checks one access boundary on a
+shared test service, not the required independent app databases or identities.
+The local development worker canceled an in-flight test when killed. A deployed
+worker killed during a wait remained marked executing without a running
+container for roughly five minutes, then retried the same run and completed
+on attempt two. A completed run and its idempotency mapping survived restarts
+of both the test database and web service, and fresh parent/child/retry work
+completed afterward. A failed staging run cleared its Trigger idempotency key;
+submitting the same request again created another run. Trigger idempotency
+alone is therefore not a paid-work fence: the app's durable invocation and
+provider claims remain essential. This synthetic proof does not qualify the
+actual pipeline, its paid-stage recovery or long waits.
+
+The disposable stack used about 2.4 GiB across its running services at one
+observation, plus build and task containers; disk free fell from approximately
+48 to 42 GiB while images and a test build were downloaded. These are point
+measurements, not a production capacity or cost forecast. The supplied stack
+started its supervisor before its bootstrap token existed; starting that test
+supervisor after the web service initialized resolved the ordering problem.
+The host's existing Buildx 0.12.1 lacked an option required by the current CLI,
+so the test used a separately installed, checksum-verified Buildx and a unique
+builder instead of modifying the shared one. The test configuration and data
+are under `/var/tmp/youtube-trigger-qualification-20261117` and isolated Docker
+resources prefixed `youtube-trigger-qual` / `yta-qual`; they are not either
+finished application's data or service configuration. After qualification the
+idle test services and its separate builder were stopped, with their volumes,
+configuration and synthetic records retained. No production schedules or
+publishing were enabled by this test.
+
 On 17 November 2026 the cached official Convex backend binary
 `precompiled-2026-10-22-1447815` passed a disposable localhost qualification:
 a synthetic function was deployed, a record was written and read, and the
