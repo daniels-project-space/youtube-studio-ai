@@ -189,7 +189,14 @@ only its scrypt verifier. The proof used a separate disposable password.
 
 `scripts/provision-local-web-auth.py` creates the private local web identity;
 `scripts/install-local-automation-web.py` installs a clean standalone build as
-a non-root, loopback-only systemd service. The local build embeds a loopback
+a non-root, loopback-only systemd service. On 17 November 2026 the private
+`youtube-automation-web.service` was installed and enabled at
+`http://127.0.0.1:39362`, running as `youtubeautomation` from build revision
+`ad60301eb4cb3967bc4c11519ee25db4223eb6aa`. A browser using the actual
+Vault-backed owner password verified anonymous token denial, wrong-password
+rejection, owner login, all 13 channels and the local backend WebSocket. The
+same proof passed after restarting both web and database services. This is a
+loopback address on the VPS, not a remotely accessible link. The build embeds a loopback
 backend address and is not a remotely usable release. Before any public routing,
 configure TLS and a trusted reverse proxy, provide an external backend address,
 add durable proxy-level login throttling, and verify every route's authorization.
