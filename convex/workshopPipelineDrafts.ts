@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
+import { canonicalJson } from "../src/lib/canonicalJson";
+import { sha256Hex } from "../src/lib/sha256";
 
 const entry = v.object({ block: v.string(), version: v.optional(v.string()), params: v.optional(v.any()) });
 
@@ -7,6 +9,43 @@ export const list = query({
   args: { ownerId: v.string() },
   handler: async (ctx, { ownerId }) => ctx.db.query("workshopPipelineDrafts")
     .withIndex("by_owner_updated", q => q.eq("ownerId", ownerId)).order("desc").take(100),
+});
+
+export const listSnapshots = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, { ownerId }) => ctx.db.query("workshopPipelineSnapshots")
+    .withIndex("by_owner_created", q => q.eq("ownerId", ownerId)).order("desc").take(100),
+});
+
+/** An immutable design snapshot, not a tested or deployable release. */
+export const snapshot = mutation({
+  args: { ownerId: v.string(), draftId: v.id("workshopPipelineDrafts"), expectedRevision: v.number() },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    if (!draft || draft.ownerId !== args.ownerId) throw new Error("Draft not found");
+    if (draft.revision !== args.expectedRevision) throw new Error("Draft changed elsewhere; reload before creating a snapshot");
+    if (!draft.family || !draft.entries.length) throw new Error("A snapshot needs a video format and at least one module");
+    const existing = await ctx.db.query("workshopPipelineSnapshots")
+      .withIndex("by_owner_draft_revision", q => q.eq("ownerId", args.ownerId).eq("draftId", args.draftId).eq("draftRevision", draft.revision)).unique();
+    if (existing) return { snapshotId: existing._id, reused: true };
+    const content = { version: "workshop-design-snapshot/v1", name: draft.name, family: draft.family, entries: draft.entries };
+    const snapshotId = await ctx.db.insert("workshopPipelineSnapshots", {
+      ownerId: args.ownerId, draftId: args.draftId, draftRevision: draft.revision,
+      name: draft.name, family: draft.family, entries: draft.entries,
+      fingerprint: sha256Hex(canonicalJson(content)), createdAt: Date.now(),
+    });
+    return { snapshotId, reused: false };
+  },
+});
+
+export const removeSnapshot = mutation({
+  args: { ownerId: v.string(), snapshotId: v.id("workshopPipelineSnapshots"), fingerprint: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.snapshotId);
+    if (!existing || existing.ownerId !== args.ownerId) throw new Error("Snapshot not found");
+    if (existing.fingerprint !== args.fingerprint) throw new Error("Snapshot identity changed; reload before deleting");
+    await ctx.db.delete(args.snapshotId);
+  },
 });
 
 export const save = mutation({

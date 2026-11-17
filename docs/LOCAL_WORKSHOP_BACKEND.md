@@ -33,10 +33,14 @@ reconciled to Project Hub Vault as `youtube-studio-ai/LOCAL_WEB_PASSWORD` and
 read back successfully; the temporary bootstrap copy was removed.
 
 The private interface now opens the workshop draft editor. Drafts and their
-selected formats persist in the separate database. The compatibility check
-uses the actual registered modules and production compiler; it does not prove
-provider readiness, execute a trial, or approve a release. The workshop worker,
-trials, release handoff and rollback are not yet connected.
+selected formats persist in the separate database. Draft revisions can be
+copied into immutable owner-scoped design snapshots, compared, and used as the
+source of a new draft. The content fingerprint is not an executable worker
+binding: snapshots are untested and cannot be promoted to Automation. The
+compatibility check uses the actual registered modules and production compiler;
+it does not prove provider readiness, execute a trial, or approve a release.
+The local worker is connected for read-only readiness checks; private trials,
+release handoff and rollback are not yet connected.
 
 The local Trigger service hosts a separate Studio project. Its database relay
 is `youtube-studio-workshop-relay`, and its scoped storage broker is

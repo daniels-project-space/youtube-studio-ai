@@ -159,6 +159,13 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_owner_updated", ["ownerId", "updatedAt"]),
+  workshopPipelineSnapshots: defineTable({
+    ownerId: v.string(), draftId: v.id("workshopPipelineDrafts"), draftRevision: v.number(),
+    name: v.string(), family: v.optional(v.string()),
+    entries: v.array(v.object({ block: v.string(), version: v.optional(v.string()), params: v.optional(v.any()) })),
+    fingerprint: v.string(), createdAt: v.number(),
+  }).index("by_owner_created", ["ownerId", "createdAt"])
+    .index("by_owner_draft_revision", ["ownerId", "draftId", "draftRevision"]),
   channelDirectoryStates: defineTable({
     ownerId: v.string(),
     generation: v.number(),

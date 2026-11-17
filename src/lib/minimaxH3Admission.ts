@@ -2,7 +2,7 @@ import {
   SALAD_BULK_PRIORITY,
   SALAD_HIGH_FALLBACK_PRIORITY,
   saladPriorityPolicyFromEnv,
-} from "@/lib/saladCloud";
+} from "@/lib/saladPriorityPolicy";
 import { NOVITA_GENERATION_RETIRED } from "@/lib/novitaGenerationRetirement";
 
 /**
