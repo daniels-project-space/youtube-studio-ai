@@ -35,6 +35,7 @@ const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
 console.info(`[youtube-studio-release] revision=${releaseSha ?? "unknown"} deployment=${deploymentId || "unknown"}`);
 
 const nextConfig: NextConfig = {
+  ...(process.env.YOUTUBE_WORKSHOP_STANDALONE === "1" ? { output: "standalone" as const } : {}),
   // Embed source and deployment identity in the build instead of trusting
   // runtime Git metadata, which can lag the deployment's actual source commit.
   ...(releaseSha || deploymentId
