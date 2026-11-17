@@ -325,8 +325,8 @@ export default defineConfig({
     ],
     extensions: [
       syncEnvVars(() => localWorkshop ? [
-        ...["STUDIO_CONVEX_JWT_PRIVATE_KEY", "STUDIO_CONVEX_ISSUER", "STUDIO_CONVEX_AUDIENCE", "STUDIO_OWNER_ID"].map(name => ({
-          name, value: process.env[name] as string, isSecret: name === "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+        ...["STUDIO_CONVEX_JWT_PRIVATE_KEY", "STUDIO_CONVEX_ISSUER", "STUDIO_CONVEX_AUDIENCE", "STUDIO_OWNER_ID", "R2_ACCOUNT_ID", "R2_BUCKET", "YTS_R2_BROKER_URL", "YTS_R2_BROKER_TOKEN"].map(name => ({
+          name, value: process.env[name] as string, isSecret: name === "STUDIO_CONVEX_JWT_PRIVATE_KEY" || name === "YTS_R2_BROKER_TOKEN",
         })),
         { name: "NEXT_PUBLIC_CONVEX_URL", value: localWorkshop.convexUrl, isSecret: false },
         { name: "CONVEX_URL", value: localWorkshop.convexUrl, isSecret: false },

@@ -39,6 +39,22 @@ uses the actual registered modules and production compiler; it does not prove
 provider readiness, execute a trial, or approve a release. The workshop worker,
 trials, release handoff and rollback are not yet connected.
 
+The local Trigger service hosts a separate Studio project. Its database relay
+is `youtube-studio-workshop-relay`, and its scoped storage broker is
+`youtube-studio-workshop-r2`. The broker mints short-lived credentials limited
+to the existing `youtube-studio-ai-private` bucket; its protected issuer
+credential never enters the worker. A read-only check verified access to that
+bucket and rejection by the Automation bucket. Existing bucket lifecycle and
+media have not been changed. Studio's bucket currently has multipart cleanup
+but no diagnostic-object expiry; establish a scoped lifecycle rule before
+writing disposable diagnostic artifacts.
+
+The first Studio worker deployment completed a read-only task against its own
+local database and enforced the excluded-model policies. This is worker
+connectivity evidence, not a pipeline trial or render qualification. Use
+`node scripts/deploy-local-workshop-worker.cjs` to deploy and
+`node scripts/probe-local-workshop-worker.mjs` to run the read-only check.
+
 For subsequent web releases, build the current committed checkout with
 `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:39420 YOUTUBE_WORKSHOP_STANDALONE=1
 node_modules/.bin/next build`, then run `python3

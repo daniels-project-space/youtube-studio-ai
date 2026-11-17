@@ -10,6 +10,9 @@ export function localWorkshopWorkerConfig(env: Readonly<Record<string, string | 
       env.YTS_WORKER_CONVEX_URL !== "http://172.30.240.1:39403" ||
       env.STUDIO_CONVEX_ISSUER !== "http://127.0.0.1:39440" ||
       env.STUDIO_CONVEX_AUDIENCE !== "youtube-studio-workshop-vps" ||
+      env.R2_BUCKET !== "youtube-studio-ai-private" ||
+      env.YTS_R2_BROKER_URL !== "http://172.30.240.1:39405/v1/credentials" ||
+      !/^[a-f0-9]{32}$/i.test(env.R2_ACCOUNT_ID ?? "") || !env.YTS_R2_BROKER_TOKEN ||
       !env.STUDIO_CONVEX_JWT_PRIVATE_KEY || !env.STUDIO_OWNER_ID) {
     throw new Error("Local workshop worker requires its own project, local database and signing identity");
   }
