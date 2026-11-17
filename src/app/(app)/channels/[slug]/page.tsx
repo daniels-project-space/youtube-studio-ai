@@ -42,6 +42,7 @@ import { fmtUsd } from "@/lib/format";
 import { blockLabel } from "@/lib/blocks";
 import { buildPipelineTopology } from "@/lib/pipelineTopology";
 import { AUTO_VOICE_ID, VOICES } from "@/lib/voices";
+import { QWEN3_TTS_SPEAKERS } from "@/engine/qwenTtsProfiles";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
 import { failureReason } from "@/lib/failureReason";
@@ -1738,6 +1739,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     <section>
       <SectionTitle>Production controls</SectionTitle>
       <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1.1rem" }}>
+        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" ? <AutomationNarratorPicker channel={channel} /> : <>
         <Row label="Narration voice (Fish tier)" hint="Fish reference voice — used when no ElevenLabs narrator is cast below">
           <select value={voice} disabled={busy} onChange={(e) => setVoice(e.target.value)} style={sel}>
             {VOICES.map((v) => (
@@ -1747,6 +1749,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
         </Row>
 
         <NarratorPicker channel={channel} />
+        </>}
 
         <Row label="Upload cadence" hint="How often this channel publishes">
           <select value={cadence} disabled={busy} onChange={(e) => setCadence(e.target.value)} style={sel}>
@@ -2973,6 +2976,52 @@ function WeekAheadTab({
  * ttsProvider/elevenVoiceId + script_gen voiceTags) so the next render speaks
  * with it. Renders only on channels whose pipeline has the narration module.
  */
+function AutomationNarratorPicker({ channel }: { channel: ChannelDoc }) {
+  const saveConfig = useMutation(api.channels.setModuleConfig);
+  const narration = (channel.pipeline ?? []).find((entry) => entry.block === "narration_tts");
+  const config = channel.moduleConfig?.narration_tts ?? {};
+  const params = (narration?.params ?? {}) as Record<string, unknown>;
+  const provider = config.ttsProvider ?? params.ttsProvider;
+  const savedSpeaker = config.qwenSpeaker ?? params.qwenSpeaker;
+  const current = provider === "qwen3" && typeof savedSpeaker === "string" &&
+    (QWEN3_TTS_SPEAKERS as readonly string[]).includes(savedSpeaker) ? savedSpeaker : "";
+  const [selection, setSelection] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!narration) return null;
+
+  const save = async () => {
+    if (!selection || !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(selection)) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await saveConfig({
+        channelId: channel._id as Id<"channels">,
+        blockId: "narration_tts",
+        config: { ...config, ttsProvider: "qwen3", qwenSpeaker: selection },
+      });
+      if ("state" in result) throw new Error(result.state === "channel_locked" ? "This channel is locked." : "The narration module is locked.");
+      setMessage("Voice saved for future runs. Listen to a sample before marking this channel ready.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save the voice.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <Row label="Qwen narration voice" hint="Choose a voice deliberately for this channel; its existing pipeline is preserved.">
+    <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+      <select aria-label="Qwen narration voice" value={selection} disabled={busy} onChange={(event) => setSelection(event.target.value)}>
+        <option value="">Select a Qwen voice</option>
+        {QWEN3_TTS_SPEAKERS.map((speaker) => <option key={speaker} value={speaker}>{speaker}</option>)}
+      </select>
+      <button type="button" onClick={save} disabled={busy || !selection || selection === current}>Save voice</button>
+    </div>
+    {!current && <div>Choose and save a Qwen voice before running narration. The saved legacy voice has not been changed.</div>}
+    {message && <div role="status">{message}</div>}
+  </Row>;
+}
+
 function NarratorPicker({ channel }: { channel: ChannelDoc }) {
   const update = useMutation(api.channels.updateChannel);
   const bank = useQuery(api.voiceBank.listProfiles, { ownerId: channel.ownerId });
