@@ -26,11 +26,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               <header className="studio-topbar">
                 <div className="studio-mobile-brand">
                   <span aria-hidden="true"><StudioMark width={20} height={20} /></span>
-                  <strong>AutoStudio</strong>
+                  <strong>{process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE === "1" ? "YouTube Studio AI" : "AutoStudio"}</strong>
                 </div>
                 <StudioLocation />
                 <div className="studio-topbar-actions">
-                  <ChannelSwitcher />
+                  {process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE !== "1" && <ChannelSwitcher />}
                   <OperationsAccess />
                 </div>
               </header>

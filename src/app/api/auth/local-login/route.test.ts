@@ -33,7 +33,7 @@ async function main() {
   assert.equal(new URL(wrong.headers.get("location")!).pathname, "/operator-login");
   assert.equal(wrong.headers.get("set-cookie"), null);
   const success = await POST(form(password));
-  assert.equal(new URL(success.headers.get("location")!).pathname, "/golden");
+  assert.equal(new URL(success.headers.get("location")!).pathname, "/workshop");
   const cookie = success.headers.get("set-cookie")!.split(";")[0]!;
   assert.match(cookie, /^studio_workshop_session=/);
   const allowed = await proxy(new NextRequest(`${base}/channels`, { headers: { cookie } }));
@@ -43,7 +43,7 @@ async function main() {
     origin: "https://automation.example.test", host: "automation.example.test", "x-forwarded-proto": "https",
     "content-type": "application/x-www-form-urlencoded", "content-length": String(Buffer.byteLength(forwardedBody)),
   }, body: forwardedBody }));
-  assert.equal(forwarded.headers.get("location"), "https://automation.example.test/golden");
+  assert.equal(forwarded.headers.get("location"), "https://automation.example.test/workshop");
   assert.match(forwarded.headers.get("set-cookie")!, /; Secure/i);
   for (let attempt = 0; attempt < 5; attempt++) await POST(form("wrong"));
   assert.equal((await POST(form(password))).status, 429);

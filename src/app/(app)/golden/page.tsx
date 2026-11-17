@@ -330,7 +330,7 @@ export default function GoldenPipelinePage() {
         </div>
         <div className={styles.catalogStats} aria-label="Golden catalog summary">
           <HeroMetric label="Catalog" value={GOLDEN_MODULES.length} note="modules" />
-          <HeroMetric label="Runnable" value={executableCount} note="bound" />
+          <HeroMetric label="Bound" value={executableCount} note="registered" />
           <HeroMetric label="Reference" value={referenceCount} note="candidates" />
           <HeroMetric label="Promoted" value={receiptCount} note="proofs" />
         </div>

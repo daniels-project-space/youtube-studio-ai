@@ -148,6 +148,16 @@ const planWeekLegacyNovitaProviderReceipt = v.object({
  * R2 keys are per-channel prefixed; nothing here holds media bytes.
  */
 export default defineSchema({
+  // Workshop drafts are independent of Automation channels and cannot become
+  // an approved release merely by being saved or passing a structural check.
+  workshopPipelineDrafts: defineTable({
+    ownerId: v.string(),
+    name: v.string(),
+    entries: v.array(v.object({ block: v.string(), version: v.optional(v.string()), params: v.optional(v.any()) })),
+    revision: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_owner_updated", ["ownerId", "updatedAt"]),
   channelDirectoryStates: defineTable({
     ownerId: v.string(),
     generation: v.number(),

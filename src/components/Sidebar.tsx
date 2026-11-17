@@ -16,7 +16,10 @@ import {
 } from "./icons";
 import { StudioMark } from "./StudioMark";
 
-const PRIMARY_NAV_ITEMS = [
+const PRIMARY_NAV_ITEMS = process.env.NEXT_PUBLIC_YTS_WORKSHOP === "1" ? [
+  { href: "/workshop", label: "Pipeline drafts", icon: <IconOverview /> },
+  { href: "/golden", label: "Module catalog", icon: <IconSpark /> },
+] : [
   { href: "/", label: "Studio", icon: <IconOverview /> },
   { href: "/channels", label: "Channels", icon: <IconChannels /> },
   { href: "/runs", label: "Production", icon: <IconRuns /> },
@@ -24,7 +27,7 @@ const PRIMARY_NAV_ITEMS = [
   { href: "/library", label: "Library", icon: <IconLibrary /> },
 ];
 
-const TOOLBOX_NAV_GROUPS = [
+const TOOLBOX_NAV_GROUPS = process.env.NEXT_PUBLIC_YTS_WORKSHOP === "1" ? [] : [
   {
     label: "Insights",
     items: [
@@ -103,8 +106,8 @@ export function Sidebar() {
           <StudioMark width={23} height={23} />
         </span>
         <span>
-          <strong>AutoStudio</strong>
-          <small>Signal / production</small>
+          <strong>{process.env.NEXT_PUBLIC_YTS_WORKSHOP === "1" ? "YouTube Studio AI" : "AutoStudio"}</strong>
+          <small>{process.env.NEXT_PUBLIC_YTS_WORKSHOP === "1" ? "Pipeline workshop" : "Signal / production"}</small>
         </span>
       </div>
 
@@ -127,7 +130,7 @@ export function Sidebar() {
           </div>
         </section>
 
-        <details
+        {TOOLBOX_NAV_GROUPS.length > 0 && <details
           className="studio-toolbox"
           open={toolboxActive ? true : undefined}
         >
@@ -162,9 +165,9 @@ export function Sidebar() {
               </section>
             ))}
           </div>
-        </details>
+        </details>}
 
-        <div className="studio-nav-more" ref={moreRef}>
+        {process.env.NEXT_PUBLIC_YTS_WORKSHOP !== "1" && <div className="studio-nav-more" ref={moreRef}>
           <button
             type="button"
             className="studio-nav-item studio-nav-more-trigger"
@@ -239,7 +242,7 @@ export function Sidebar() {
               <NavItem {...SETTINGS_ITEM} />
             </div>
           )}
-        </div>
+        </div>}
       </nav>
 
       <div className="studio-sidebar-footer">
@@ -250,7 +253,7 @@ export function Sidebar() {
             <small>Approval required to release</small>
           </div>
         </div>
-        <NavItem {...SETTINGS_ITEM} />
+        {process.env.NEXT_PUBLIC_YTS_WORKSHOP !== "1" && <NavItem {...SETTINGS_ITEM} />}
       </div>
     </aside>
   );

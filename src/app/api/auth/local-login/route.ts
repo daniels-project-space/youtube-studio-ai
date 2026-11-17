@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     return response;
   }
   failures = 0;
-  const response = NextResponse.redirect(new URL("/golden", url), 303);
+  const response = NextResponse.redirect(new URL("/workshop", url), 303);
   response.cookies.set(STUDIO_SESSION_COOKIE, await createOperatorSessionToken(), sessionCookieOptions(url.href));
   response.headers.set("Cache-Control", "no-store");
   return response;

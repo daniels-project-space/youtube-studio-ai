@@ -38,11 +38,12 @@ const nextConfig: NextConfig = {
   ...(process.env.YOUTUBE_WORKSHOP_STANDALONE === "1" ? { output: "standalone" as const } : {}),
   // Embed source and deployment identity in the build instead of trusting
   // runtime Git metadata, which can lag the deployment's actual source commit.
-  ...(releaseSha || deploymentId
+  ...(releaseSha || deploymentId || process.env.YOUTUBE_WORKSHOP_STANDALONE === "1"
     ? {
         env: {
           ...(releaseSha ? { RELEASE_SHA: releaseSha } : {}),
           ...(deploymentId ? { RELEASE_DEPLOYMENT_ID: deploymentId } : {}),
+          ...(process.env.YOUTUBE_WORKSHOP_STANDALONE === "1" ? { NEXT_PUBLIC_YTS_WORKSHOP: "1" } : {}),
         },
       }
     : {}),
