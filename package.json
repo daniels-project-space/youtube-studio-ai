@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "NEXT_PUBLIC_CONVEX_URL=${NEXT_PUBLIC_CONVEX_URL:-https://astute-camel-689.convex.cloud} next build",
-    "build:vps": "node scripts/assert-vps-build-env.mjs && next build",
+    "build:vps": "node scripts/assert-vps-build-env.mjs && YOUTUBE_VPS_STANDALONE=1 next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

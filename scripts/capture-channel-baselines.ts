@@ -38,9 +38,10 @@ async function main() {
   delete process.env.STUDIO_CONVEX_AUDIENCE;
   const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
   const client = new StudioConvexHttpClient(url.value);
-  const [channels, connectors] = await Promise.all([
+  const [channels, connectors, folders] = await Promise.all([
     client.query(api.channels.listChannels, { ownerId }),
     client.query(api.youtubeAuth.linkStatus, { ownerId }),
+    client.query(api.folders.list, { ownerId }),
   ]);
   if (!Array.isArray(channels) || !channels.length || channels.some((channel) => channel.ownerId !== ownerId || !Array.isArray(channel.pipeline))) {
     throw new Error("source channel inventory was empty or failed ownership/shape validation");
@@ -48,7 +49,8 @@ async function main() {
   await ensurePrivateDirectory(ROOT);
   await ensurePrivateDirectory(DIRECTORY);
   const capturedAt = new Date().toISOString();
-  const payload = Buffer.from(JSON.stringify({ version: "youtube-automation-channel-baseline/v1", capturedAt, ownerId, sourceDeployment: new URL(url.value).origin, channels, connectorMetadata: connectors }, null, 2) + "\n");
+  if (!Array.isArray(folders) || folders.some((folder) => folder.ownerId !== ownerId || typeof folder.name !== "string")) throw new Error("source room inventory failed validation");
+  const payload = Buffer.from(JSON.stringify({ version: "youtube-automation-channel-baseline/v1", capturedAt, ownerId, sourceDeployment: new URL(url.value).origin, channels, connectorMetadata: connectors, folderMetadata: folders }, null, 2) + "\n");
   const path = join(DIRECTORY, `channels-${capturedAt.replace(/[:.]/g, "-")}.json`);
   const handle = await open(path, "wx", 0o600);
   try { await handle.writeFile(payload); await handle.sync(); }
@@ -57,7 +59,7 @@ async function main() {
   if (digest(stored) !== digest(payload)) throw new Error("baseline readback hash mismatch");
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) throw new Error("baseline file permissions are unsafe");
-  console.log(JSON.stringify({ path, channelCount: channels.length, connectorMetadataCount: connectors.length, sha256: digest(stored), bytes: stored.length }));
+  console.log(JSON.stringify({ path, channelCount: channels.length, connectorMetadataCount: connectors.length, folderCount: folders.length, sha256: digest(stored), bytes: stored.length }));
 }
 
 void main().catch((error) => {

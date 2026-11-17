@@ -167,6 +167,25 @@ records remained unchanged after a backend restart; the import switch was
 removed afterward. This is a private data migration, not a working UI, worker,
 upload connection or active release. The source remains authoritative.
 
+The source snapshot at
+`/var/lib/youtube-automation/baselines/channels-2026-11-17T14-51-34-676Z.json`
+(SHA-256 `6c2e4f4d245d26bcbef7940188f1fa7ceec46f223f6754587c5ebc8ac7cb6596`)
+also captures the one channel room, which contains two channels. The earlier
+channel-only import had preserved their room names but omitted the room row,
+making those channels unreachable from the room navigation. The separate
+`scripts/import-channel-folders.ts` command restored the verified room without
+changing any channel. Its real-backend qualification included replay without
+duplicates. In a temporary loopback-only browser proof, all 11 standalone
+channels and both room members were reachable using the local Convex WebSocket.
+The proof used an artificially issued owner session, not a working owner login.
+
+The VPS build command produces a standalone package. The proof build is not a
+release: it was made from a worktree with uncommitted changes and embeds a
+loopback-only backend address. The existing anonymous token endpoint issues a
+viewer token, so the current interface must not be exposed publicly until a
+private access gate is implemented and verified. Google/YouTube sign-in and the
+actual production worker are still unqualified for this local app.
+
 The saved pipelines passed the current structural flow compiler without
 adding or removing blocks; policy completion left their stored entries and
 parameters unchanged. This does not verify runtime configuration, worker

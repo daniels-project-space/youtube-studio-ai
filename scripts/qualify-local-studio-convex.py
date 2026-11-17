@@ -180,6 +180,13 @@ with tempfile.TemporaryDirectory(prefix='yt-real-convex-') as path:
             if invoked.returncode: raise RuntimeError('local import command failed its replay/readback')
             cli_result=json.loads(invoked.stdout)
             if cli_result.get('reused') is not True or cli_result.get('verifiedChannels')!=len(rows):raise RuntimeError('import command replay/readback mismatch')
+            if 'folderMetadata' in baseline:
+                command=[str(repo/'node_modules/.bin/tsx'),'scripts/import-channel-folders.ts','--import',options.baseline,options.baseline_sha256]
+                for _ in range(2):
+                    invoked=subprocess.run(command,cwd=repo,env=import_env,capture_output=True,text=True,timeout=30)
+                    if invoked.returncode:raise RuntimeError('local room import failed')
+                    if json.loads(invoked.stdout).get('verifiedRooms')!=len(baseline['folderMetadata']):raise RuntimeError('room import count mismatch')
+                print('captured channel rooms imported and replayed without duplicates',flush=True)
             print(json.dumps({'capturedBaselineChannelsVerified':len(rows),'groupRemapping':'verified','schedules':'paused','restartAndImportCommand':'passed'}),flush=True)
     finally:
         process.terminate()
