@@ -5,6 +5,7 @@ import { assertAutomationModelAllowed, assertAutomationNarrationProviderAllowed 
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { getBucket, getR2Client } from "@/lib/storage";
 import { ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { resolveHyperYoutubeProject } from "@/lib/hyperYoutubeProject";
 
 /** Read-only local worker proof; it does not execute a pipeline or model. */
 export const workshopRuntimeReadiness = task({
@@ -23,8 +24,10 @@ export const workshopRuntimeReadiness = task({
     if (!proBlocked || !otherVoiceBlocked) throw new Error("Studio worker model restrictions are missing");
     await bootstrapSecrets(() => {}, { services: ["cloudflare"], required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] });
     await getR2Client().send(new ListObjectsV2Command({ Bucket: getBucket(), MaxKeys: 1 }));
+    const renderProject = await resolveHyperYoutubeProject();
+    if (renderProject.outputBucket !== getBucket()) throw new Error("Studio render project points to the wrong bucket");
     const client = new StudioConvexHttpClient(process.env.CONVEX_URL);
     const drafts = await client.query(api.workshopPipelineDrafts.list, { ownerId: process.env.STUDIO_OWNER_ID ?? "" });
-    return { ok: true, localDatabase: true, scopedStorage: true, modelRestrictions: true, draftCount: drafts.length, providerJobsStarted: 0 };
+    return { ok: true, localDatabase: true, scopedStorage: true, renderProjectBound: true, modelRestrictions: true, draftCount: drafts.length, providerJobsStarted: 0 };
   },
 });

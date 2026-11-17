@@ -16,6 +16,15 @@ async function main() {
   await assert.rejects(resolveHyperYoutubeProject({baseUrl:"https://hrs.example",projectToken:"fixture",fetch:foreign}),/YouTube project/);
   const escaped=(async()=>Response.json({project:{...project,output:{...project.output,prefix:"projects/../foreign/"}},applicationGuidance:{application:"youtube-studio"}})) as typeof fetch;
   await assert.rejects(resolveHyperYoutubeProject({baseUrl:"https://hrs.example",projectToken:"fixture",fetch:escaped}),/YouTube project/);
+  process.env.YOUTUBE_STUDIO_WORKSHOP_PRIVATE="1";
+  process.env.HRS_WORKSHOP_PROJECT_ID=project.id;
+  process.env.HRS_WORKSHOP_OUTPUT_PREFIX="projects/youtube-studio-workshop/";
+  const own={...project,output:{bucket:"youtube-studio-ai-private",prefix:"projects/youtube-studio-workshop/"}};
+  const ownFetch=(async()=>Response.json({project:own})) as typeof fetch;
+  assert.equal((await resolveHyperYoutubeProject({baseUrl:"https://hrs.example",projectToken:"fixture",fetch:ownFetch})).outputBucket,"youtube-studio-ai-private");
+  await assert.rejects(resolveHyperYoutubeProject({baseUrl:"https://hrs.example",projectToken:"fixture",fetch:fetcher}),/YouTube project/);
+  process.env.HRS_WORKSHOP_PROJECT_ID="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await assert.rejects(resolveHyperYoutubeProject({baseUrl:"https://hrs.example",projectToken:"fixture",fetch:ownFetch}),/YouTube project/);
   console.log("HRS YouTube project discovery: ok");
 }
 void main();

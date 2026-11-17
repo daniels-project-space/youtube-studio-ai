@@ -7,9 +7,10 @@ const env = { YOUTUBE_STUDIO_WORKSHOP_TRIGGER_LOCAL: "1", TRIGGER_PROJECT_REF: "
   TRIGGER_API_URL: "http://127.0.0.1:39400", YTS_WORKER_CONVEX_URL: "http://172.30.240.1:39403",
   STUDIO_CONVEX_ISSUER: "http://127.0.0.1:39440", STUDIO_CONVEX_AUDIENCE: "youtube-studio-workshop-vps",
   R2_BUCKET: "youtube-studio-ai-private", R2_ACCOUNT_ID: "a".repeat(32), YTS_R2_BROKER_URL: "http://172.30.240.1:39405/v1/credentials", YTS_R2_BROKER_TOKEN: "fixture",
+  HRS_YOUTUBE_BASE_URL: "https://hyper-render-api.87.106.233.113.nip.io", HRS_WORKSHOP_OUTPUT_PREFIX: "projects/youtube-studio-workshop/", HRS_WORKSHOP_PROJECT_ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", HRS_YOUTUBE_PROJECT_TOKEN: "fixture",
   STUDIO_CONVEX_JWT_PRIVATE_KEY: "fixture", STUDIO_OWNER_ID: "owner_fixture" };
 assert.deepEqual(localWorkshopWorkerConfig(env), { project: env.TRIGGER_PROJECT_REF, convexUrl: env.YTS_WORKER_CONVEX_URL });
-for (const [key, value] of Object.entries({ TRIGGER_PROJECT_REF: "proj_muvntlamcgghjckjvgpi", YTS_WORKER_CONVEX_URL: "http://172.30.240.1:39402", STUDIO_CONVEX_AUDIENCE: "youtube-automation-vps", TRIGGER_API_URL: "https://api.trigger.dev", R2_BUCKET: "youtube-automation", YTS_R2_BROKER_URL: "http://172.30.240.1:39404/v1/credentials" })) {
+for (const [key, value] of Object.entries({ TRIGGER_PROJECT_REF: "proj_muvntlamcgghjckjvgpi", YTS_WORKER_CONVEX_URL: "http://172.30.240.1:39402", STUDIO_CONVEX_AUDIENCE: "youtube-automation-vps", TRIGGER_API_URL: "https://api.trigger.dev", R2_BUCKET: "youtube-automation", YTS_R2_BROKER_URL: "http://172.30.240.1:39404/v1/credentials", HRS_WORKSHOP_OUTPUT_PREFIX: "projects/youtube-automation/" })) {
   assert.throws(() => localWorkshopWorkerConfig({ ...env, [key]: value }));
 }
 assert.throws(() => localWorkshopWorkerConfig({ TRIGGER_API_URL: env.TRIGGER_API_URL }));

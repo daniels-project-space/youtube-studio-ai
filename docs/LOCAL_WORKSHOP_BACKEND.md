@@ -28,10 +28,9 @@ The private workshop web service runs on `127.0.0.1:39462` as
 `youtube-studio-workshop-web`. Its standalone build at revision `0bc57f32`
 connects to the local workshop backend. A real browser check verified the
 password gate, rejection of an incorrect password, the separate HTTP-only
-session cookie, and a local Convex WebSocket. The credential's bootstrap copy
-remains root-only at `/etc/youtube-studio-workshop/web-password-bootstrap.env`
-because the Project Hub vault bridge currently rejects authentication; it
-must be reconciled and read back before removing that bootstrap copy.
+session cookie, and a local Convex WebSocket. The workshop password was
+reconciled to Project Hub Vault as `youtube-studio-ai/LOCAL_WEB_PASSWORD` and
+read back successfully; the temporary bootstrap copy was removed.
 
 The private interface now opens the workshop draft editor. Drafts and their
 selected formats persist in the separate database. The compatibility check
@@ -57,6 +56,12 @@ not a pipeline trial or render qualification. The CLI emitted a skill-discovery
 warning; this checkout declares no `defineSkill` tasks. Use
 `node scripts/deploy-local-workshop-worker.cjs` to deploy and
 `node scripts/probe-local-workshop-worker.mjs` to run the read-only check.
+
+The workshop's HRS project is separately onboarded with output prefix
+`projects/youtube-studio-workshop/` in the Studio bucket. Its scoped credential
+was verified and reconciled to `youtube-studio-ai/HRS_YOUTUBE_PROJECT_TOKEN`.
+Onboarding and identity checks submitted no render job and did not change the
+paid worker. A real Qwen or video output remains unverified.
 
 For subsequent web releases, build the current committed checkout with
 `NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:39420 YOUTUBE_WORKSHOP_STANDALONE=1

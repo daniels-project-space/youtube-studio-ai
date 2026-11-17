@@ -13,6 +13,9 @@ export function localWorkshopWorkerConfig(env: Readonly<Record<string, string | 
       env.R2_BUCKET !== "youtube-studio-ai-private" ||
       env.YTS_R2_BROKER_URL !== "http://172.30.240.1:39405/v1/credentials" ||
       !/^[a-f0-9]{32}$/i.test(env.R2_ACCOUNT_ID ?? "") || !env.YTS_R2_BROKER_TOKEN ||
+      env.HRS_YOUTUBE_BASE_URL !== "https://hyper-render-api.87.106.233.113.nip.io" ||
+      env.HRS_WORKSHOP_OUTPUT_PREFIX !== "projects/youtube-studio-workshop/" ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(env.HRS_WORKSHOP_PROJECT_ID ?? "") || !env.HRS_YOUTUBE_PROJECT_TOKEN ||
       !env.STUDIO_CONVEX_JWT_PRIVATE_KEY || !env.STUDIO_OWNER_ID) {
     throw new Error("Local workshop worker requires its own project, local database and signing identity");
   }
