@@ -110,6 +110,15 @@ Every channel was paused, and every stored pipeline entry was unversioned.
 The two source queries are separate, not an atomic database snapshot. This is
 configuration and connector metadata only: it does not contain connector
 secrets, run history or media, and it does not freeze executable worker builds.
+Do not import these records by calling `channels.createChannel` with its
+current arguments. The 13 captured records include fields that mutation does
+not accept or persist: `schedule` (13), `thumbnailPlaybook` (7),
+`scriptPlaybook` (4), `folder` (2), `youtubeCreated` (3), and
+`architectReport` (5). It is also an upsert that may patch an existing slug.
+A dedicated migration must preserve the original settings and source identity,
+map references explicitly, prevent unintended overwrites, keep every imported
+schedule disabled, and verify readback against the captured records. Connector
+metadata alone is not a working YouTube connection.
 Use `scripts/capture-channel-baselines.ts --capture` with the Vault-injected
 production Trigger key, project ref and expected Convex URL to capture again.
 The production Trigger schedules API returned zero schedules at the same
