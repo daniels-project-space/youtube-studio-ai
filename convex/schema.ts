@@ -153,6 +153,7 @@ export default defineSchema({
   workshopPipelineDrafts: defineTable({
     ownerId: v.string(),
     name: v.string(),
+    family: v.optional(v.string()),
     entries: v.array(v.object({ block: v.string(), version: v.optional(v.string()), params: v.optional(v.any()) })),
     revision: v.number(),
     createdAt: v.number(),

@@ -12,11 +12,12 @@ export const list = query({
 export const save = mutation({
   args: {
     ownerId: v.string(), draftId: v.optional(v.id("workshopPipelineDrafts")),
-    expectedRevision: v.optional(v.number()), name: v.string(), entries: v.array(entry),
+    expectedRevision: v.optional(v.number()), name: v.string(), family: v.optional(v.string()), entries: v.array(entry),
   },
   handler: async (ctx, args) => {
     const name = args.name.trim();
     if (!name || name.length > 120) throw new Error("Draft name must be between 1 and 120 characters");
+    if (args.family !== undefined && !/^[a-z][a-z0-9_]{0,79}$/.test(args.family)) throw new Error("Invalid video format");
     if (args.entries.length > 100 || JSON.stringify(args.entries).length > 100_000)
       throw new Error("Draft exceeds the module or configuration size limit");
     for (const item of args.entries) {
@@ -28,12 +29,12 @@ export const save = mutation({
     const now = Date.now();
     if (!args.draftId) {
       if (args.expectedRevision !== undefined) throw new Error("A new draft cannot have an expected revision");
-      return await ctx.db.insert("workshopPipelineDrafts", { ownerId: args.ownerId, name, entries: args.entries, revision: 1, createdAt: now, updatedAt: now });
+      return await ctx.db.insert("workshopPipelineDrafts", { ownerId: args.ownerId, name, family: args.family, entries: args.entries, revision: 1, createdAt: now, updatedAt: now });
     }
     const existing = await ctx.db.get(args.draftId);
     if (!existing || existing.ownerId !== args.ownerId) throw new Error("Draft not found");
     if (args.expectedRevision !== existing.revision) throw new Error("Draft changed elsewhere; reload before saving");
-    await ctx.db.patch(args.draftId, { name, entries: args.entries, revision: existing.revision + 1, updatedAt: now });
+    await ctx.db.patch(args.draftId, { name, family: args.family, entries: args.entries, revision: existing.revision + 1, updatedAt: now });
     return args.draftId;
   },
 });

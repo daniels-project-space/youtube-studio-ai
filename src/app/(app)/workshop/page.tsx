@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { MODULE_CATALOG } from "@/engine/moduleCatalog";
+import { CONTENT_LANE_BY_FAMILY } from "@/engine/contentLane";
 import { useOwnerId } from "@/lib/owner-context";
 import styles from "./workshop.module.css";
 
@@ -22,12 +23,16 @@ export default function WorkshopPage() {
   const [selected, setSelected] = useState(MODULE_CATALOG[0]?.block ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [family, setFamily] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<{ signature: string; ok: boolean; error?: string; result?: { lane: string; reservedMaxCostUsd: number; unpinnedModules: string[]; warnings: string[] } }>();
+  const checkSignature = JSON.stringify({ family, entries });
 
-  function reset() { setDraftId(undefined); setRevision(undefined); setName(""); setEntries([]); setMessage(""); }
+  function reset() { setDraftId(undefined); setRevision(undefined); setName(""); setEntries([]); setFamily(""); setCheck(undefined); setMessage(""); }
   async function save() {
     setBusy(true); setMessage("");
     try {
-      const id = await saveDraft({ ownerId, ...(draftId ? { draftId, expectedRevision: revision } : {}), name, entries });
+      const id = await saveDraft({ ownerId, ...(draftId ? { draftId, expectedRevision: revision } : {}), name, ...(family ? { family } : {}), entries });
       setDraftId(id);
       setRevision(draftId ? (revision ?? 0) + 1 : 1);
       setMessage("Draft saved. It has not been tested or approved for a channel.");
@@ -39,6 +44,16 @@ export default function WorkshopPage() {
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target]!, next[index]!]; setEntries(next);
   }
+  async function checkCompatibility() {
+    const signature = checkSignature;
+    setChecking(true); setCheck(undefined);
+    try {
+      const response = await fetch("/api/workshop/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: signature });
+      const data = await response.json() as { ok: boolean; error?: string; result?: { lane: string; reservedMaxCostUsd: number; unpinnedModules: string[]; warnings: string[] } };
+      setCheck({ signature, ...data });
+    } catch { setCheck({ signature, ok: false, error: "Could not reach the compatibility checker." }); }
+    finally { setChecking(false); }
+  }
   const box = { padding: "1rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" };
   return <section className={styles.workshop}>
     <header><h1>Pipeline workshop</h1><p>Build a private draft from the module catalog. Saving does not change a channel.</p>
@@ -49,7 +64,7 @@ export default function WorkshopPage() {
         {drafts === undefined ? <p>Loading drafts…</p> : drafts.length === 0 ? <p>No saved drafts yet.</p> : <ul>
           {drafts.map(draft => <li key={draft._id}><button type="button" onClick={() => {
             setDraftId(draft._id); setRevision(draft.revision); setName(draft.name);
-            setEntries(draft.entries as Entry[]); setMessage("");
+            setEntries(draft.entries as Entry[]); setFamily(draft.family ?? ""); setCheck(undefined); setMessage("");
           }}>{draft.name} · revision {draft.revision}</button></li>)}
         </ul>}
       </section>
@@ -69,7 +84,22 @@ export default function WorkshopPage() {
         </ol>}
         <button type="button" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save draft"}</button>
         {message && <p role="status">{message}</p>}
-        <p>Compatibility checks, private trials and release approval are not connected yet.</p>
+        <h3>Check compatibility</h3>
+        <label>Video format <select value={family} onChange={event => setFamily(event.target.value)}>
+          <option value="">Choose a format</option>
+          {Object.keys(CONTENT_LANE_BY_FAMILY).map(key => <option key={key} value={key}>{key.replaceAll("_", " ")}</option>)}
+        </select></label>{" "}
+        <button type="button" disabled={checking || !family || !entries.length} onClick={checkCompatibility}>{checking ? "Checking…" : "Check pipeline"}</button>
+        {check && check.signature === checkSignature && <div role="status">
+          {check.ok && check.result ? <>
+            <p>Structural and production-policy checks passed for {check.result.lane.replaceAll("_", " ")}.</p>
+            <p>Configured maximum reservation: ${check.result.reservedMaxCostUsd.toFixed(2)}; actual cost may differ.</p>
+            {check.result.unpinnedModules.length > 0 && <p>{check.result.unpinnedModules.length} module version(s) are not pinned; this is not a retained release.</p>}
+            {check.result.warnings.map((warning, index) => <p key={`${index}-${warning}`}>{warning}</p>)}
+          </> : <p>Compatibility check: {check.error ?? "Unknown error"}</p>}
+        </div>}
+        {check && check.signature !== checkSignature && <p>The draft or format changed; check it again.</p>}
+        <p>This check does not run a private trial, verify providers or approve a release.</p>
       </section>
     </div>
   </section>;
