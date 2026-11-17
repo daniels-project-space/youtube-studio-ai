@@ -197,7 +197,7 @@ On 17 November 2026 the private
 `youtube-automation-web.service` was installed and enabled at
 `http://127.0.0.1:39362`, running as `youtubeautomation`. The previous build
 `ad60301eb4cb3967bc4c11519ee25db4223eb6aa` is retained for rollback. On 17
-November 2026 the live build was updated to `863e3a4730b563c950b2cc6ab03791af756c34de`.
+November 2026 the live build was updated to `e583b6bcc6b2d0b91f62f8ceb0570b754bf0b5ad`.
 A browser using the actual
 Vault-backed owner password verified anonymous token denial, wrong-password
 rejection, owner login, all 13 channels and the local backend WebSocket. The
@@ -331,7 +331,8 @@ database query accepted the new internal secret and rejected an incorrect one.
 ## Automation storage
 
 The dedicated `youtube-automation` R2 bucket has seven-day cleanup for
-incomplete multipart uploads and for the `diagnostics/` prefix only. Other
+incomplete multipart uploads and for `diagnostics/` and the dedicated
+`owner/owner_daniel/diagnostics/` test prefix. Other
 objects, including finished output, do not have an expiry rule. A root-owned
 broker runs as its own systemd dynamic user and receives its parent credential
 through a systemd credential file. The web and worker receive only a separate
@@ -339,7 +340,10 @@ broker bearer token; the broker issues temporary object credentials scoped to
 this bucket. The Automation storage client refuses to fall back to an
 account-wide R2 credential in private mode. A live scoped write/read/hash test,
 cross-bucket denial, anonymous broker denial, byte-range read and short signed
-URL expiry passed. An actual browser could read a byte range from the exact
+URL expiry passed. An authenticated browser also used the live app's media
+signing API and fetched a test-object range; anonymous signing was denied. The
+deployed worker wrote and read a diagnostic object through the broker and
+verified its hash without receiving a parent R2 key. An actual browser could read a byte range from the exact
 private interface origin; a different origin was rejected. The bucket CORS
 policy currently allows only that loopback origin and read operations, so a
 future remote interface needs its own reviewed origin and access test. The
