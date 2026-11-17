@@ -49,9 +49,12 @@ media have not been changed. Studio's bucket currently has multipart cleanup
 but no diagnostic-object expiry; establish a scoped lifecycle rule before
 writing disposable diagnostic artifacts.
 
-The first Studio worker deployment completed a read-only task against its own
-local database and enforced the excluded-model policies. This is worker
-connectivity evidence, not a pipeline trial or render qualification. Use
+Studio worker deployment `20261117.2` completed a read-only task against its
+own local database and scoped R2 bucket and enforced excluded-model policies.
+An Automation Trigger credential was denied access to a Studio run, and the
+shared local Trigger service had zero schedules. This is connectivity evidence,
+not a pipeline trial or render qualification. The CLI emitted a skill-discovery
+warning; this checkout declares no `defineSkill` tasks. Use
 `node scripts/deploy-local-workshop-worker.cjs` to deploy and
 `node scripts/probe-local-workshop-worker.mjs` to run the read-only check.
 
