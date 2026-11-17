@@ -179,12 +179,22 @@ duplicates. In a temporary loopback-only browser proof, all 11 standalone
 channels and both room members were reachable using the local Convex WebSocket.
 The proof used an artificially issued owner session, not a working owner login.
 
-The VPS build command produces a standalone package. The proof build is not a
-release: it was made from a worktree with uncommitted changes and embeds a
-loopback-only backend address. The existing anonymous token endpoint issues a
-viewer token, so the current interface must not be exposed publicly until a
-private access gate is implemented and verified. Google/YouTube sign-in and the
-actual production worker are still unqualified for this local app.
+The VPS build command produces a standalone package. Private Automation mode
+requires an owner session, disables the legacy anonymous viewer token and adds
+a local password sign-in. An isolated browser proof verified anonymous denial,
+wrong-password rejection, owner login and access to all 13 channels through the
+local WebSocket. The owner password is stored as `LOCAL_WEB_PASSWORD` in the
+`youtube-automation` Project Hub Vault service; the local web process receives
+only its scrypt verifier. The proof used a separate disposable password.
+
+`scripts/provision-local-web-auth.py` creates the private local web identity;
+`scripts/install-local-automation-web.py` installs a clean standalone build as
+a non-root, loopback-only systemd service. The local build embeds a loopback
+backend address and is not a remotely usable release. Before any public routing,
+configure TLS and a trusted reverse proxy, provide an external backend address,
+add durable proxy-level login throttling, and verify every route's authorization.
+The in-process login throttle alone is not a public deployment boundary.
+Google/YouTube sign-in and the actual production worker remain unqualified.
 
 The saved pipelines passed the current structural flow compiler without
 adding or removing blocks; policy completion left their stored entries and

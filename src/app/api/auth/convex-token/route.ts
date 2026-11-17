@@ -28,6 +28,9 @@ export async function GET(request: Request) {
   try {
     const actor = await getStudioActor(request);
     const ownerSession = actor?.authKind === "session" && actor.role === "owner";
+    if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1" && !ownerSession) {
+      return Response.json({ error: "authentication required" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
     const role = ownerSession ? "owner" : "viewer";
     const result = issueStudioConvexToken({
       role,
