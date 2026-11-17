@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { whiteboardNarrationCacheReceipt } from "@/lib/whiteboardNarrationCache";
 
 import type {
   WhiteboardArtRequest,
@@ -117,13 +118,29 @@ async function main(): Promise<void> {
     for (const [name, bytes] of before) assert.deepEqual(await readFile(join(runDir, name)), bytes, `paid ${name} must remain byte-identical`);
     assert.deepEqual(await paidWrites(), beforePaidWrites, "unchanged/title-only retry performs no paid cache writes");
 
-    // A legacy attested pair needs no new sidecar/ID: ordinary stage retries
-    // still reuse it, and title/label/colour/layout changes can reach rendering
-    // with the existing narration and forced-alignment cache intact.
+    // Unbound legacy audio must not be silently reused, and must be preserved.
+    // Once bound, title/layout-only changes may reuse the exact audio.
     const audio = Buffer.from("local retained narration fixture; no synthesis");
     const words = plan.fullText.split(/\s+/).map((text, index) => ({ text, start: index * 700, end: (index + 1) * 700 }));
+    await writeFile(join(runDir, "wwords.json"), JSON.stringify(words));
+    await assert.rejects(() => invoke(plan), /lacks its matching request receipt/);
+    await unlink(join(runDir, "wwords.json"));
+    await writeFile(join(runDir, "narration.receipt.json"), "{}");
+    await assert.rejects(() => invoke(plan), /lacks its matching request receipt/);
+    await unlink(join(runDir, "narration.receipt.json"));
     await writeFile(join(runDir, "narration.mp3"), audio);
     await writeFile(join(runDir, "wwords.json"), JSON.stringify(words));
+    await assert.rejects(() => invoke(plan), /lacks its matching request receipt/);
+    assert.deepEqual(await readFile(join(runDir, "narration.mp3")), audio);
+    assert.equal(requests.length, 0, "unbound audio must fail before new art spend");
+    const savedPlan = JSON.parse(await readFile(join(runDir, "plan.json"), "utf8")) as WhiteboardStoryboard;
+    const receipt = whiteboardNarrationCacheReceipt({ provider: "fish", voiceId: "fixture", speed: 0.95, text: savedPlan.fullText }, audio);
+    await writeFile(join(runDir, "narration.receipt.json"), JSON.stringify(receipt));
+    await assert.rejects(() => invoke(plan, { voiceId: "other-voice" }), /cached narration does not match/);
+    assert.equal(requests.length, 0, "changed voice must fail before new art spend");
+    await writeFile(join(runDir, "narration.mp3"), "tampered audio");
+    await assert.rejects(() => invoke(plan), /cached narration does not match/);
+    await writeFile(join(runDir, "narration.mp3"), audio);
     const equivalent = structuredClone(changed);
     equivalent.panels[0]!.idx = 7; // runtime always uses sequential indices
     equivalent.panels[0]!.narration = `  ${equivalent.panels[0]!.narration.replaceAll(" ", "  ")}  `;

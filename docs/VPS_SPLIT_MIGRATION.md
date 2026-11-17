@@ -93,6 +93,14 @@ that is not a provider or output readiness claim. Automation now rejects these
 unqualified narration paths before running pipeline blocks. Saved channels
 and selected voices are not silently rewritten. Qwen integration for the
 specialist modules and channel-level voice selection remain required work.
+The local whiteboard code now rejects an explicit unsupported provider or an
+ElevenLabs selection without its voice instead of silently substituting Fish.
+It binds newly cached narration to its requested text, provider, voice, speed,
+and audio bytes. Existing unbound audio is preserved and requires review; the
+local cache receipt is not independent proof of its source. The compiler now
+reserves the conservative Qwen rate for a Qwen request, but actual Qwen
+execution, provider evidence, and output quality are not yet implemented or
+qualified for this module. HRS does not currently report per-job Qwen cost.
 The separate `plan-week-prepared-narration` task is not covered by the
 `run-pipeline` preflight and still accepts non-Qwen providers. Its existing
 prepared-narration sidecar does not carry provider provenance; it needs its

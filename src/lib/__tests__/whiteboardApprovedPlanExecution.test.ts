@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { castWhiteboardSync, type WhiteboardStoryboard } from "@/lib/whiteboardSync";
+import { castWhiteboardSync, resolveWhiteboardNarrationProvider, type WhiteboardStoryboard } from "@/lib/whiteboardSync";
 
 const approvedPlan: WhiteboardStoryboard = {
   title: "Approved renderer recovery plan",
@@ -26,6 +26,17 @@ const saved = {
 
 async function main(): Promise<void> {
   try {
+    assert.equal(resolveWhiteboardNarrationProvider(undefined, undefined), "fish");
+    assert.equal(resolveWhiteboardNarrationProvider("ELEVENLABS", "voice"), "elevenlabs");
+    assert.throws(() => resolveWhiteboardNarrationProvider("elevenlabs", ""), /requires its voice id/);
+    for (const provider of ["qwen3", "other"]) {
+      await assert.rejects(() => castWhiteboardSync({
+        brief: { topic: "do not substitute", ttsProvider: provider },
+        runDir: "/tmp/whiteboard-unsupported-provider-test",
+        generateImage: async () => { throw new Error("must not generate images"); },
+        plan: approvedPlan,
+      }), /Fish will not be substituted/);
+    }
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
     delete process.env.ELEVENLABS_API_KEY;

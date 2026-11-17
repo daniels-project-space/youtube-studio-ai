@@ -809,6 +809,11 @@ function configurationSpecificCostEnvelopes(): void {
     whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsElevenPerKCharUsd,
     "cast ElevenLabs whiteboards must reserve the premium narration path",
   );
+  assert.equal(
+    envelope("whiteboard_scribe", { targetSeconds: 132, ttsProvider: "qwen3" }),
+    whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsQwenMaxPerKCharUsd,
+    "Qwen whiteboards must reserve the conservative Qwen ceiling, not Fish pricing",
+  );
 
   const comicPanels = 8;
   const comicCharacters = Math.ceil(180 * 16);
@@ -823,10 +828,13 @@ function configurationSpecificCostEnvelopes(): void {
 
   const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
   const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
+  const maxWhiteboardQwenTts = (16 * 120 * 12 / 1_000) * PRICE.ttsQwenMaxPerKCharUsd;
   assert.ok(
     (MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardPremiumTts,
     "whiteboard hard cap must cover all 16 panels, five direct Novita image workers each, and premium narration",
   );
+  assert.ok((MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardQwenTts,
+    "whiteboard hard cap must include the Qwen narration ceiling");
 
   assert.equal(
     envelope("novita_render_images", { shotCount: 10, generationProfile: "production" }),

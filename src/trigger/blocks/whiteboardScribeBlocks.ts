@@ -32,6 +32,7 @@ import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castWhiteboardSync,
   hasWhiteboardSync,
+  resolveWhiteboardNarrationProvider,
   whiteboardGoldenStyleDefects,
   whiteboardImageCallCeiling,
   planWhiteboardStoryboard,
@@ -501,15 +502,14 @@ export const whiteboardScribe: Block = {
             topic,
           }),
         };
-    // Resolve the exact voice selection before capability admission. A valid
-    // ElevenLabs cast must not depend on an unrelated Fish credential, while
-    // an incomplete Eleven selection deliberately uses the documented Fish
-    // default and is checked as such.
+    // Resolve the exact provider before admission; never fall back to Fish
+    // when a different provider or an incomplete voice was selected.
     const requestedTtsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
     const requestedElevenVoiceId = typeof ctx.params["elevenVoiceId"] === "string"
       ? ctx.params["elevenVoiceId"].trim()
       : "";
-    const usesElevenLabsVoice = requestedTtsProvider === "elevenlabs" && requestedElevenVoiceId.length > 0;
+    const resolvedTtsProvider = resolveWhiteboardNarrationProvider(requestedTtsProvider, requestedElevenVoiceId);
+    const usesElevenLabsVoice = resolvedTtsProvider === "elevenlabs";
     if (
       !hasWhiteboardSync({
         requiresStoryboard: approvedStoryReceipt === undefined,
@@ -540,7 +540,7 @@ export const whiteboardScribe: Block = {
     // + dark/chalk board mode + palette into these params (they used to be unset
     // → every scribe rendered the light "history" marker style in a Fish default
     // voice regardless of the channel's DNA and audition winner).
-    const ttsProvider = requestedTtsProvider;
+    const ttsProvider = resolvedTtsProvider;
     const elevenVoiceId = requestedElevenVoiceId || undefined;
     const boardMode = (ctx.params["boardMode"] as "white" | "chalk" | undefined) ?? undefined;
     const rawVisualRepair = ctx.store["visualRepair"];

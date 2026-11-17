@@ -118,11 +118,12 @@ function whiteboardCostCeiling(
     panels,
     Math.round(seconds * 3.1),
   );
+  const provider = String(params["ttsProvider"] ?? "fish").trim().toLowerCase();
   const usesEleven =
-    String(params["ttsProvider"] ?? "fish").toLowerCase() === "elevenlabs" &&
+    provider === "elevenlabs" &&
     typeof params["elevenVoiceId"] === "string" &&
     params["elevenVoiceId"].trim().length > 0;
-  const ttsRate = usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
+  const ttsRate = provider === "qwen3" ? PRICE.ttsQwenMaxPerKCharUsd : usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
   return (
     whiteboardImageCallCeiling(panels) * PRICE.novitaImageMaxUsd +
     (characters / 1_000) * ttsRate
@@ -1382,10 +1383,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
         "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName", "visualRepair",
       ],
       providerProfiles: [managed, local],
-      // 16 panels × five sealed one-worker image envelopes, plus
-      // the full premium TTS ceiling. Upstream music is charged by its own
-      // block. This must stay above the actual maximum, not a cheaper model.
-      maxCostUsd: 31,
+      // Include the conservative Qwen character envelope even though Qwen
+      // execution remains gated until the whiteboard integration is qualified.
+      maxCostUsd: Math.max(31, 16 * 5 * PRICE.novitaImageMaxUsd + (16 * 120 * 12 / 1_000) * Math.max(PRICE.ttsQwenMaxPerKCharUsd, PRICE.ttsElevenPerKCharUsd, PRICE.ttsPerKCharUsd)),
       // Cold-run bound mirrors the engine's exact image-worker and narration
       // ceilings. Upstream music is charged by its own block.
       maxCostUsdFor: (params, context) => whiteboardCostCeiling(params, context),

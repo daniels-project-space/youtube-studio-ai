@@ -49,6 +49,7 @@ import { join } from "node:path";
 import { fallbackLineArtStyle } from "@/lib/identitySpread";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { assertWhiteboardNarrationCache, whiteboardNarrationCacheReceipt } from "./whiteboardNarrationCache";
 import {
   resolveSelfContainedStoryPlan,
   type SelfContainedStoryReceiptBinding,
@@ -502,6 +503,20 @@ export function assertWhiteboardGoldenStyle(plan: WhiteboardGoldenStylePlan): vo
 }
 
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
+
+/** Resolve the legacy renderer's actual provider without silently substituting Fish. */
+export function resolveWhiteboardNarrationProvider(provider: unknown, elevenVoiceId: unknown): "fish" | "elevenlabs" {
+  const selected = provider === undefined ? "fish" : typeof provider === "string" ? provider.trim().toLowerCase() : "";
+  if (selected === "fish") return "fish";
+  if (selected === "elevenlabs") {
+    if (typeof elevenVoiceId !== "string" || !elevenVoiceId.trim()) {
+      throw new Error("whiteboardSync: an explicit ElevenLabs selection requires its voice id; Fish will not be substituted");
+    }
+    return "elevenlabs";
+  }
+  if (selected === "qwen3") throw new Error("whiteboardSync: Qwen3 narration is not integrated yet; Fish will not be substituted");
+  throw new Error("whiteboardSync: unsupported narration provider; Fish will not be substituted");
+}
 
 export function hasWhiteboardSync(options: {
   requiresStoryboard?: boolean;
@@ -993,8 +1008,8 @@ export async function castWhiteboardSync(args: {
     legacyPlan: args.plan,
   });
   const approvedPlan = approved.plan as WhiteboardStoryboard | undefined;
-  const usesElevenLabsVoice =
-    brief.ttsProvider === "elevenlabs" && Boolean(brief.elevenVoiceId?.trim());
+  const narrationProvider = resolveWhiteboardNarrationProvider(brief.ttsProvider, brief.elevenVoiceId);
+  const usesElevenLabsVoice = narrationProvider === "elevenlabs";
   // A validated supplied plan is already the planning authority, whether it
   // arrived from a sealed receipt or a local approved-plan handoff. Requiring
   // a remote planner here would make renderer-only recovery depend on an
@@ -1027,7 +1042,7 @@ export async function castWhiteboardSync(args: {
   const planPath = join(args.runDir, "plan.json");
   const onDisk = existsSync(planPath) ? await readFile(planPath, "utf8") : null;
   const cachedGenerationFiles = (await readdir(args.runDir)).filter((name) =>
-    /^(?:art_\d+_\d+\.(?:png|jpg|webp|receipt\.json)|narration\.mp3|wwords\.json)$/.test(name),
+    /^(?:art_\d+_\d+\.(?:png|jpg|webp|receipt\.json)|narration\.mp3|narration\.receipt\.json|wwords\.json)$/.test(name),
   );
   if (onDisk === null && cachedGenerationFiles.length) {
     throw new Error(
@@ -1086,6 +1101,26 @@ export async function castWhiteboardSync(args: {
         "preserving paid cache and plan — an explicit artifact revision is required before new spend",
       );
     }
+  }
+  const mp3Path = join(args.runDir, "narration.mp3");
+  const narrationReceiptPath = join(args.runDir, "narration.receipt.json");
+  const wpath = join(args.runDir, "wwords.json");
+  const narrationRequest = {
+    provider: narrationProvider,
+    voiceId: usesElevenLabsVoice ? brief.elevenVoiceId!.trim() : brief.voiceId ?? fallbackVoiceKey(brief.channelName ?? brief.topic),
+    speed: usesElevenLabsVoice ? null : 0.95,
+    text: fullText,
+  };
+  const hasAudio = existsSync(mp3Path);
+  const hasNarrationReceipt = existsSync(narrationReceiptPath);
+  if (hasAudio !== hasNarrationReceipt || (!hasAudio && existsSync(wpath))) {
+    throw new Error("whiteboardSync: cached narration or alignment lacks its matching request receipt; preserving paid cache for review");
+  }
+  if (hasAudio) {
+    let receipt: unknown;
+    try { receipt = JSON.parse(await readFile(narrationReceiptPath, "utf8")); }
+    catch { throw new Error("whiteboardSync: cached narration receipt is unreadable; preserving paid cache for review"); }
+    assertWhiteboardNarrationCache(receipt, narrationRequest, await readFile(mp3Path));
   }
   // Only render-only/equivalent changes may replace a paid plan in this slice.
   // Brief/provider identity is not stored in legacy plans; this comparison is
@@ -1173,8 +1208,6 @@ export async function castWhiteboardSync(args: {
   await pool(artJobs, 3, renderArt);
 
   // 3. narration + alignment (cached → resumable)
-  const mp3Path = join(args.runDir, "narration.mp3");
-  const wpath = join(args.runDir, "wwords.json");
   let ttsCharactersGenerated = 0;
   if (!existsSync(mp3Path)) {
     // Honor a cast ElevenLabs voice when the channel was cast one; else Fish.
@@ -1200,7 +1233,11 @@ export async function castWhiteboardSync(args: {
             onBillableCharacters: (characters: number) => { ttsCharactersGenerated += characters; },
           },
     );
-    await writeFile(mp3Path, Buffer.from(mp3));
+    const narrationReceipt = whiteboardNarrationCacheReceipt(narrationRequest, mp3);
+    // If interrupted between these writes, retry refuses the unbound audio
+    // instead of silently reusing it or purchasing another take.
+    await writeFile(mp3Path, Buffer.from(mp3), { flag: "wx" });
+    await writeFile(narrationReceiptPath, JSON.stringify(narrationReceipt), { flag: "wx" });
   } else log("TTS cached");
   if (!existsSync(wpath)) {
     log("aligning (Whisper)…");
