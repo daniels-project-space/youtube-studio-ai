@@ -291,3 +291,17 @@ verified these decisions without opening a file or contacting a provider; both
 the generation and publishing scheduler tasks also returned disabled, and the
 local service had no schedules. This does not cover arbitrary direct calls to
 external APIs or prove the rest of the publishing approval flow.
+
+Private Automation can load a curated secret snapshot from the root-only
+`/etc/youtube-automation/local-vault.json` through `YTA_LOCAL_VAULT_JSON`.
+The runtime files carry it as `uri:` followed by URI-encoded JSON, and the
+worker marks it secret. In private mode a missing or malformed service fails
+locally rather than contacting the managed Hub database. On this VPS the
+snapshot currently covers the independent local internal-query secret and
+selected OpenRouter, Pexels and Pixabay credentials. It does not yet configure
+project-scoped R2, Qwen, YouTube OAuth or all other pipeline providers. A Hub
+credential rotation must be followed by a deliberate snapshot refresh and
+runtime update; a vault connection alone does not update this copy. The
+deployed Automation safety probe confirmed local access to the internal and
+OpenRouter settings without returning values. A separate authenticated local
+database query accepted the new internal secret and rejected an incorrect one.

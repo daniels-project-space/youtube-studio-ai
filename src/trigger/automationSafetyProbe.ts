@@ -2,6 +2,7 @@ import { task } from "@trigger.dev/sdk";
 import { assertLocalPublicationAllowed } from "@/lib/localPublicationPolicy";
 import { uploadPrivateDraft } from "@/lib/youtube";
 import { crosspost } from "@/lib/ayrshare";
+import { getOne, listByService } from "@/lib/vault";
 
 /** No provider access: verify the deployed private worker refuses public upload. */
 export const automationSafetyProbe = task({
@@ -12,6 +13,9 @@ export const automationSafetyProbe = task({
   run: async () => {
     if (process.env.YOUTUBE_AUTOMATION_PRIVATE !== "1") throw new Error("Private Automation mode is not active");
     if (process.env.YOUTUBE_AUTOMATION_PUBLICATION_ENABLED === "1") throw new Error("Public uploads are enabled");
+    if (!(await getOne("youtube", "INTERNAL_QUERY_SECRET")) || !(await listByService("openrouter")).OPENROUTER_API_KEY) {
+      throw new Error("Local runtime credentials are incomplete");
+    }
     assertLocalPublicationAllowed({ privacyStatus: "private" });
     let requests = 0;
     try {
@@ -26,7 +30,7 @@ export const automationSafetyProbe = task({
           await crosspost({ mediaUrl: "https://example.invalid/video", caption: "", platforms: ["instagram"] });
         } catch (crosspostError) {
           if (crosspostError instanceof Error && crosspostError.message.includes("cross-posting is disabled")) {
-            return { ok: true, privateUploadsPermitted: true, publicUploadBlockedBeforeIo: true, crosspostingBlocked: true };
+            return { ok: true, privateUploadsPermitted: true, publicUploadBlockedBeforeIo: true, crosspostingBlocked: true, localVaultConfigured: true };
           }
           throw crosspostError;
         }
