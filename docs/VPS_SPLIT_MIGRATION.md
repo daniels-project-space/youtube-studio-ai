@@ -321,9 +321,39 @@ worker marks it secret. In private mode a missing or malformed service fails
 locally rather than contacting the managed Hub database. On this VPS the
 snapshot currently covers the independent local internal-query secret and
 selected OpenRouter, Pexels and Pixabay credentials. It does not yet configure
-project-scoped R2, Qwen, YouTube OAuth or all other pipeline providers. A Hub
+Qwen, YouTube OAuth or all other pipeline providers. A Hub
 credential rotation must be followed by a deliberate snapshot refresh and
 runtime update; a vault connection alone does not update this copy. The
 deployed Automation safety probe confirmed local access to the internal and
 OpenRouter settings without returning values. A separate authenticated local
 database query accepted the new internal secret and rejected an incorrect one.
+
+## Automation storage
+
+The dedicated `youtube-automation` R2 bucket has seven-day cleanup for
+incomplete multipart uploads and for the `diagnostics/` prefix only. Other
+objects, including finished output, do not have an expiry rule. A root-owned
+broker runs as its own systemd dynamic user and receives its parent credential
+through a systemd credential file. The web and worker receive only a separate
+broker bearer token; the broker issues temporary object credentials scoped to
+this bucket. The Automation storage client refuses to fall back to an
+account-wide R2 credential in private mode. A live scoped write/read/hash test,
+cross-bucket denial, anonymous broker denial, byte-range read and short signed
+URL expiry passed. An actual browser could read a byte range from the exact
+private interface origin; a different origin was rejected. The bucket CORS
+policy currently allows only that loopback origin and read operations, so a
+future remote interface needs its own reviewed origin and access test. The
+diagnostic objects are subject to the verified expiry.
+
+`scripts/provision-local-r2-broker.py --install` installs the broker after the
+bucket and lifecycle have been established, with `YTA_PARENT_TOKEN`,
+`YTA_PARENT_ID`, and `YTA_ACCOUNT` supplied through the authorized vault
+bridge. `/etc/youtube-automation/r2-broker.json` and both runtime environment
+files remain root-only. Parent-key rotation requires updating that file and
+restarting the broker; existing temporary credentials expire independently.
+These checks do not prove a final video, its render receipt, or a Studio AI
+storage boundary.
+The bucket currently contains only small disposable qualification objects;
+their actual billed usage has not been measured. No subscription or spending
+limit was changed. The account-wide parent credential is not readable by the
+web service account and is not forwarded to the worker.

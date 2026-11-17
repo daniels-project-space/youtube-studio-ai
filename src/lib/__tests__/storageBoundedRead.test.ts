@@ -34,6 +34,7 @@ function fixture(send: (call: number, signal?: AbortSignal) => Promise<Response>
   const requireFixture = (name: string) => {
     if (name === "@aws-sdk/client-s3") return { S3Client: Client, GetObjectCommand: Command };
     if (name === "@aws-sdk/s3-request-presigner") return {};
+    if (name === "@/lib/localR2Credentials") return { localR2Credentials: () => { throw new Error("Unexpected local broker request"); } };
     if (name === "@/lib/vault") return { listByService: async (service: string) => {
       assert.equal(service, "cloudflare"); state.vaultCalls++;
       if (hooks.refresh) return await hooks.refresh();

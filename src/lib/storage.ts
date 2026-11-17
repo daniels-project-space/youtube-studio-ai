@@ -27,6 +27,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { localR2Credentials } from "@/lib/localR2Credentials";
 
 const R2_REGION = "auto";
 
@@ -39,6 +40,13 @@ function requireEnv(name: string): string {
 }
 
 function resolveEndpoint(): string {
+  if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1") {
+    const accountId = requireEnv("R2_ACCOUNT_ID");
+    if (!/^[a-f0-9]{32}$/i.test(accountId)) throw new Error("Invalid local R2 account identifier");
+    const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
+    if (process.env.R2_ENDPOINT && process.env.R2_ENDPOINT !== endpoint) throw new Error("Local R2 endpoint does not match its account");
+    return endpoint;
+  }
   if (process.env.R2_ENDPOINT) return process.env.R2_ENDPOINT;
   const accountId = requireEnv("R2_ACCOUNT_ID");
   return `https://${accountId}.r2.cloudflarestorage.com`;
@@ -104,7 +112,7 @@ export function getR2Client(): S3Client {
   cachedClient = new S3Client({
     region: R2_REGION,
     endpoint: resolveEndpoint(),
-    credentials: {
+    credentials: process.env.YOUTUBE_AUTOMATION_PRIVATE === "1" ? () => localR2Credentials() : {
       accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
       secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
     },
@@ -127,6 +135,16 @@ export interface PresignOptions {
   metadata?: Record<string, string>;
 }
 
+async function presignClient(expiresIn: number): Promise<{ client: S3Client; disposable: boolean }> {
+  if (process.env.YOUTUBE_AUTOMATION_PRIVATE !== "1") return { client: getR2Client(), disposable: false };
+  if (!Number.isSafeInteger(expiresIn) || expiresIn < 1) throw new Error("Invalid R2 presigned URL lifetime");
+  const credentials = await localR2Credentials();
+  if (credentials.expiration.getTime() <= Date.now() + (expiresIn + 30) * 1000) {
+    throw new Error("Requested R2 URL lifetime exceeds the scoped credential lifetime");
+  }
+  return { client: new S3Client({ region: R2_REGION, endpoint: resolveEndpoint(), credentials }), disposable: true };
+}
+
 /** Presigned PUT URL for direct browser -> R2 uploads. */
 export async function presignUpload(
   key: string,
@@ -138,15 +156,17 @@ export async function presignUpload(
     ContentType: opts.contentType,
     Metadata: opts.metadata,
   });
-  return getSignedUrl(getR2Client(), command, {
-    expiresIn: opts.expiresIn ?? 3600,
+  const expiresIn = opts.expiresIn ?? 3600;
+  const { client, disposable } = await presignClient(expiresIn);
+  try { return await getSignedUrl(client, command, {
+    expiresIn,
     // R2 stores signed object metadata only when the client sends it as
     // canonical request headers. Hoisting it into the query string both drops
     // the metadata and makes worker uploads fail signature verification.
     unhoistableHeaders: new Set(
       Object.keys(opts.metadata ?? {}).map((key) => `x-amz-meta-${key}`),
     ),
-  });
+  }); } finally { if (disposable) client.destroy(); }
 }
 
 /** Presigned GET URL for time-limited reads of a private object. */
@@ -159,9 +179,10 @@ export async function presignDownload(
     Key: key,
     ...(opts.responseContentType ? { ResponseContentType: opts.responseContentType } : {}),
   });
-  return getSignedUrl(getR2Client(), command, {
-    expiresIn: opts.expiresIn ?? 3600,
-  });
+  const expiresIn = opts.expiresIn ?? 3600;
+  const { client, disposable } = await presignClient(expiresIn);
+  try { return await getSignedUrl(client, command, { expiresIn }); }
+  finally { if (disposable) client.destroy(); }
 }
 
 /** Public/CDN URL for an object, when R2_PUBLIC_BASE_URL is configured. */
