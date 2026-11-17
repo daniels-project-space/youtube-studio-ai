@@ -92,6 +92,12 @@ assert.doesNotThrow(() => assertFreshPipelineInvocationRouteAdmission({
   programBrief: { sealed: true },
   programRoute: { sealed: true },
 }));
+assert.doesNotThrow(() => assertFreshPipelineInvocationRouteAdmission({
+  hasDurableInvocation: false, programBrief: undefined, programRoute: undefined, signedPrivateLegacy: true,
+}));
+assert.throws(() => assertFreshPipelineInvocationRouteAdmission({
+  hasDurableInvocation: false, programBrief: { sealed: true }, programRoute: undefined, signedPrivateLegacy: true,
+}), /requires a sealed/, "a private request cannot bypass a partially configured route");
 
 const pipelineSource = readFileSync(
   new URL("../../trigger/runPipeline.ts", import.meta.url),

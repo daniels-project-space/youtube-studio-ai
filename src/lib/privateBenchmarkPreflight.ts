@@ -14,8 +14,8 @@ type Channel = {
   contentLane?: unknown;
 };
 
-/** Read-only assessment of the existing benchmark path, not a run admission. */
-export function privateBenchmarkPreflight(channel: Channel) {
+/** Read-only structural and narration check; runtime revalidates before spend. */
+export function privatePipelineConfigurationPreflight(channel: Channel) {
   const blockers: string[] = [];
   let removedDeliveryBlocks: string[] = [];
   try {
@@ -29,6 +29,12 @@ export function privateBenchmarkPreflight(channel: Channel) {
   } catch (error) {
     blockers.push(error instanceof ExecutionError ? error.message : "The saved pipeline or module settings could not be prepared for this private benchmark.");
   }
+  return { blockers, removedDeliveryBlocks };
+}
+
+/** Read-only assessment of the existing benchmark path, not a run admission. */
+export function privateBenchmarkPreflight(channel: Channel) {
+  const { blockers, removedDeliveryBlocks } = privatePipelineConfigurationPreflight(channel);
   if (!channel.identity?.programBrief || !channel.identity?.programRoute) {
     blockers.push("This benchmark requires a sealed, eligible channel route. A general private run for legacy pipelines is not available yet.");
   }

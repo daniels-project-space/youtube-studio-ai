@@ -335,14 +335,35 @@ export const recordAutomaticPreflight = mutation({
  * dispatch key closes the crash gap between creating the run row and saving
  * the parent stage checkpoint.
  */
+export const getProbeRunByDispatchKey = query({
+  args: { ownerId: v.string(), channelId: v.id("channels"), dispatchKey: v.string() },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.query("runs").withIndex("by_channel_probe_dispatch", q =>
+      q.eq("channelId", args.channelId).eq("probeDispatchKey", args.dispatchKey)).unique();
+    if (run && run.ownerId !== args.ownerId) throw new Error("probe dispatch key owner mismatch");
+    return run;
+  },
+});
+
 export const createProbeRun = mutation({
   args: {
     ownerId: v.string(),
     channelId: v.id("channels"),
     dispatchKey: v.string(),
+    manualRequestFingerprint: v.optional(v.string()),
+    manualMaximumCostUsd: v.optional(v.number()),
   },
   returns: v.id("runs"),
   handler: async (ctx, args) => {
+    const manual = args.dispatchKey.startsWith("manual-private-video:");
+    if (manual) {
+      await requireStudioServiceIdentity(ctx, args.ownerId, "manual private video request");
+      if (!/^[a-f0-9]{64}$/.test(args.manualRequestFingerprint ?? "") ||
+          typeof args.manualMaximumCostUsd !== "number" || !Number.isFinite(args.manualMaximumCostUsd) ||
+          args.manualMaximumCostUsd <= 0 || args.manualMaximumCostUsd > 55) throw new Error("manual private video request authority is invalid");
+    } else if (args.manualRequestFingerprint !== undefined || args.manualMaximumCostUsd !== undefined) {
+      throw new Error("manual request authority cannot be used for another probe");
+    }
     if (!args.dispatchKey.trim() || args.dispatchKey.length > 300) {
       throw new Error("probe dispatch key must contain 1-300 characters");
     }
@@ -354,6 +375,10 @@ export const createProbeRun = mutation({
     if (existing) {
       if (existing.ownerId !== args.ownerId) {
         throw new Error("probe dispatch key owner mismatch");
+      }
+      if (manual && (existing.manualPrivateMaximumCostUsd !== args.manualMaximumCostUsd ||
+          (!existing.probeDispatchEnvelope && existing.manualPrivateRequestFingerprint !== args.manualRequestFingerprint))) {
+        throw new Error("manual private video request changed before its snapshot was sealed");
       }
       return existing._id;
     }
@@ -371,7 +396,53 @@ export const createProbeRun = mutation({
       selfHealGeneration: 0,
       leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
       probeDispatchKey: args.dispatchKey,
+      ...(manual ? { manualPrivateRequestFingerprint: args.manualRequestFingerprint, manualPrivateMaximumCostUsd: args.manualMaximumCostUsd } : {}),
     });
+  },
+});
+
+export const cancelUnsealedManualPrivateRun = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), currentFingerprint: v.string() },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "manual private video recovery");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId ||
+        !run.probeDispatchKey?.startsWith("manual-private-video:") || !/^[a-f0-9]{64}$/.test(args.currentFingerprint)) {
+      throw new Error("manual private video recovery identity mismatch");
+    }
+    const reason = "Manual request canceled before sealing because channel settings or spending ceiling changed.";
+    if (run.status === "canceled" && run.error === reason) return true;
+    if (run.manualPrivateRequestFingerprint === args.currentFingerprint || run.status !== "queued" ||
+        run.probeDispatchEnvelope !== undefined || run.probeDispatchEnvelopeFingerprint !== undefined ||
+        run.pipelineInvocationSnapshot !== undefined || run.pipelineInvocationSha256 !== undefined ||
+        run.pipelineFingerprint !== undefined || run.finishedAt !== undefined || run.error !== undefined ||
+        run.videoAssetId !== undefined || run.youtubeVideoId !== undefined || run.leaseOwner !== undefined || (run.costTotal ?? 0) !== 0 ||
+        (await ctx.db.query("runStages").withIndex("by_run", q => q.eq("runId", args.runId)).take(1)).length > 0) {
+      return false;
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.runId, { status: "canceled", error: reason, finishedAt: now, heartbeatAt: now, leaseExpiresAt: undefined });
+    return true;
+  },
+});
+
+export const failUnstartedManualPrivateRun = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), envelopeFingerprint: v.string() },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "manual private video failure reconciliation");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId ||
+        !run.probeDispatchKey?.startsWith("manual-private-video:") ||
+        !/^[a-f0-9]{64}$/.test(args.envelopeFingerprint) || run.probeDispatchEnvelopeFingerprint !== args.envelopeFingerprint) return false;
+    const envelope = run.probeDispatchEnvelope as ChannelInceptionProbeAttemptCheckpoint | undefined;
+    if (envelope?.input?.invocationContext?.invocationKind !== "manual_private_video" ||
+        run.status !== "queued" || run.leaseOwner !== undefined || run.pipelineInvocationSnapshot !== undefined ||
+        run.pipelineInvocationSha256 !== undefined || run.pipelineFingerprint !== undefined || run.finishedAt !== undefined ||
+        run.error !== undefined || run.videoAssetId !== undefined || run.youtubeVideoId !== undefined || (run.costTotal ?? 0) !== 0 ||
+        (await ctx.db.query("runStages").withIndex("by_run", q => q.eq("runId", args.runId)).take(1)).length > 0) return false;
+    const now = Date.now();
+    await ctx.db.patch(args.runId, { status: "failed", error: "The private video could not start after background retries. Check the worker configuration and run logs before retrying.", finishedAt: now, heartbeatAt: now, leaseExpiresAt: undefined });
+    return true;
   },
 });
 

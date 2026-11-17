@@ -473,6 +473,22 @@ export const runPipelineTask = task({
   // render fully in parallel (each run gets its own machine; the old global
   // limit of 3 throttled the whole fleet).
   queue: { concurrencyLimit: 1 },
+  onFailure: async ({ payload }: { payload: RunPipelineInput }) => {
+    if (payload.probeInvocationContext?.invocationKind !== "manual_private_video" || !payload.probeAdmission?.dispatchEnvelopeFingerprint) return;
+    const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+    if (!url) return;
+    try {
+      const client = new ConvexHttpClient(url);
+      const run = await client.query(api.runs.getRun, { runId: payload.runId as Id<"runs"> });
+      if (!run || String(run.channelId) !== payload.channelId) return;
+      await client.mutation(api.runs.failUnstartedManualPrivateRun, {
+        ownerId: run.ownerId, channelId: payload.channelId as Id<"channels">,
+        runId: payload.runId as Id<"runs">, envelopeFingerprint: payload.probeAdmission.dispatchEnvelopeFingerprint,
+      });
+    } catch {
+      console.error("[run-pipeline] could not reconcile a failed manual private request");
+    }
+  },
   run: async (payload: RunPipelineInput, { ctx }) => {
     try {
       registerAllBlocks();
@@ -960,6 +976,12 @@ export const runPipelineTask = task({
       family: (channel as { family?: unknown }).family,
       pipeline: channel.pipeline,
     });
+    const recordManualGate = async (reason: string) => {
+      if (durableProbeEnvelope?.input.invocationContext.invocationKind !== "manual_private_video") return;
+      await convex.mutation(api.runs.updateRun, {
+        runId: payload.runId as Id<"runs">, status: "failed", finishedAt: Date.now(), error: reason,
+      });
+    };
     let routeQualificationAdmission = productionRouteQualificationReceiptAdmission({
       requirement: routeQualificationRequirement,
       row: null,
@@ -994,6 +1016,7 @@ export const runPipelineTask = task({
       routeQualificationReceiptRow = row;
     }
     if (!routeQualificationAdmission.automatic) {
+      await recordManualGate(routeQualificationAdmission.reason);
       console.log(
         `[run-pipeline] production-route qualification manual gate for ${payload.runId}: ` +
           routeQualificationAdmission.reason,
@@ -1038,6 +1061,7 @@ export const runPipelineTask = task({
       identity: channel.identity,
     });
     if (!creatorBriefAdmission.automatic) {
+      await recordManualGate(creatorBriefAdmission.reason);
       console.log(
         `[run-pipeline] creator Brief manual gate for ${payload.runId}: ` +
           creatorBriefAdmission.reason,
@@ -1096,6 +1120,7 @@ export const runPipelineTask = task({
         { narrationProvider: (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig?.["narration_tts"]?.["ttsProvider"] },
       );
       if (!automaticRuntimeAdmission.automatic) {
+        await recordManualGate(automaticRuntimeAdmission.reason);
         console.log(
           `[run-pipeline] automatic execution stack manual gate for ${payload.runId}: ` +
             automaticRuntimeAdmission.reason,
@@ -1709,10 +1734,14 @@ export const runPipelineTask = task({
       ) {
         throw new Error("channel program route is present without a canonical channel program brief");
       }
+      const signedPrivateLegacy = probeBudgetAdmission?.kind === "channel-inception-probe" &&
+        durableProbeEnvelope?.input.invocationContext.invocationKind === "manual_private_video";
+      if (signedPrivateLegacy) assertPrivateVideoHasNoDelivery(entries);
       assertFreshPipelineInvocationRouteAdmission({
         hasDurableInvocation: durableInvocation !== undefined,
         programBrief,
         programRoute,
+        signedPrivateLegacy,
       });
 
       // The narrative selector carries no episode prose. Before the snapshot

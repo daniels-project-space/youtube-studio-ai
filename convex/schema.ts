@@ -879,6 +879,8 @@ export default defineSchema({
     probeDispatchEnvelopeFingerprint: v.optional(v.string()),
     probeDispatchClaimedAt: v.optional(v.number()),
     probeDispatchKey: v.optional(v.string()),
+    manualPrivateRequestFingerprint: v.optional(v.string()),
+    manualPrivateMaximumCostUsd: v.optional(v.number()),
     // Dedicated outbox for an owner-confirmed full private benchmark. Unlike a
     // shortened inception probe, this runs the exact master/QA route and can
     // only earn a later release-qualification receipt—never an upload.

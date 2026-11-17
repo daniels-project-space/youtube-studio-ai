@@ -10,6 +10,8 @@ const storage = {
 let keys = 0;
 const next = () => `request-${++keys}`;
 const original = preparePrivateBenchmark(storage, "channel-a", 25, next);
+const video = preparePrivateBenchmark(storage, "channel-a", 20, () => "video-1", "private-video");
+assert.equal(readPendingPrivateBenchmark(storage, "channel-a", "private-video")?.requestKey, video.requestKey);
 assert.deepEqual(readPendingPrivateBenchmark(storage, "channel-a"), original);
 assert.deepEqual(preparePrivateBenchmark(storage, "channel-a", 25, next), original);
 assert.equal(keys, 1, "reload and retry must not allocate another request");

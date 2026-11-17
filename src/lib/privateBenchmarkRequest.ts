@@ -2,12 +2,14 @@ export type PendingPrivateBenchmark = { requestKey: string; maximumCostUsd: numb
 
 type RequestStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-function storageKey(channelId: string) {
-  return `youtube-automation:private-benchmark:${channelId}`;
+type RequestKind = "private-benchmark" | "private-video";
+
+function storageKey(channelId: string, kind: RequestKind) {
+  return `youtube-automation:${kind}:${channelId}`;
 }
 
-export function readPendingPrivateBenchmark(storage: RequestStorage, channelId: string): PendingPrivateBenchmark | null {
-  const raw = storage.getItem(storageKey(channelId));
+export function readPendingPrivateBenchmark(storage: RequestStorage, channelId: string, kind: RequestKind = "private-benchmark"): PendingPrivateBenchmark | null {
+  const raw = storage.getItem(storageKey(channelId, kind));
   if (raw === null) return null;
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error("The previous private request cannot be read. Check its status before starting another."); }
@@ -19,19 +21,19 @@ export function readPendingPrivateBenchmark(storage: RequestStorage, channelId: 
   return { requestKey, maximumCostUsd };
 }
 
-export function preparePrivateBenchmark(storage: RequestStorage, channelId: string, maximumCostUsd: number, newKey: () => string): PendingPrivateBenchmark {
-  const pending = readPendingPrivateBenchmark(storage, channelId);
+export function preparePrivateBenchmark(storage: RequestStorage, channelId: string, maximumCostUsd: number, newKey: () => string, kind: RequestKind = "private-benchmark"): PendingPrivateBenchmark {
+  const pending = readPendingPrivateBenchmark(storage, channelId, kind);
   if (pending) {
     if (pending.maximumCostUsd !== maximumCostUsd) throw new Error("Retry the pending private request with its original cost ceiling first.");
     return pending;
   }
   const request = { requestKey: newKey(), maximumCostUsd };
-  storage.setItem(storageKey(channelId), JSON.stringify(request));
-  const saved = readPendingPrivateBenchmark(storage, channelId);
+  storage.setItem(storageKey(channelId, kind), JSON.stringify(request));
+  const saved = readPendingPrivateBenchmark(storage, channelId, kind);
   if (!saved || saved.requestKey !== request.requestKey || saved.maximumCostUsd !== maximumCostUsd) throw new Error("Could not safely save the private request for retries.");
   return saved;
 }
 
-export function clearAcceptedPrivateBenchmark(storage: RequestStorage, channelId: string, requestKey: string): void {
-  if (readPendingPrivateBenchmark(storage, channelId)?.requestKey === requestKey) storage.removeItem(storageKey(channelId));
+export function clearAcceptedPrivateBenchmark(storage: RequestStorage, channelId: string, requestKey: string, kind: RequestKind = "private-benchmark"): void {
+  if (readPendingPrivateBenchmark(storage, channelId, kind)?.requestKey === requestKey) storage.removeItem(storageKey(channelId, kind));
 }

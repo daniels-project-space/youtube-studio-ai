@@ -1078,6 +1078,7 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
       </section>
       <section className={styles.settingsSection} data-kind="qualification">
         <div className={styles.sectionRail}><span>02 / route proof</span><i /></div>
+        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" && <ManualPrivateVideoCard channel={channel} />}
         <RouteQualificationBenchmarkCard channel={channel} />
       </section>
       <section id="youtube-destination" className={styles.settingsSection} data-kind="youtube">
@@ -1111,6 +1112,49 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
  * the cadence controls: it runs an exact production master privately, creates
  * no upload, and can only qualify a future route after final QA succeeds.
  */
+function ManualPrivateVideoCard({ channel }: { channel: ChannelDoc }) {
+  const [ceiling, setCeiling] = useState("25");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const submit = async () => {
+    const maximum = Number(ceiling);
+    if (!Number.isFinite(maximum) || maximum <= 0 || maximum > 55) { setMessage("Choose a cost ceiling greater than $0 and no more than $55."); return; }
+    if (!window.confirm(`Generate a full-length private video for “${channel.name}” with a maximum of ${fmtUsd(maximum)}? The channel budget may lower this ceiling. No upload or schedule will start; the thumbnail is deferred.`)) return;
+    setBusy(true); setMessage(null);
+    try {
+      const pending = preparePrivateBenchmark(window.localStorage, channel._id, maximum, () => window.crypto.randomUUID(), "private-video");
+      const response = await fetch("/api/manual-private-video", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channelId: channel._id, requestKey: pending.requestKey, maximumCostUsd: maximum, confirmPrivateVideo: true }) });
+      const result = await response.json() as { ok?: boolean; error?: string; runId?: string; state?: string; restartAllowed?: boolean };
+      if (!response.ok || !result.ok || !result.runId) {
+        if (result.restartAllowed === true) clearAcceptedPrivateBenchmark(window.localStorage, channel._id, pending.requestKey, "private-video");
+        if (result.runId) setRunId(result.runId);
+        setMessage(result.error ?? "The request was not confirmed. Retry to check the same request."); return;
+      }
+      clearAcceptedPrivateBenchmark(window.localStorage, channel._id, pending.requestKey, "private-video");
+      setRunId(result.runId);
+      setMessage(result.state === "queued" ? "Private video queued. Open the run for progress and any blockers." : `Existing private run: ${result.state ?? "recorded"}.`);
+    } catch (error) {
+      try {
+        const pending = readPendingPrivateBenchmark(window.localStorage, channel._id, "private-video");
+        if (pending && pending.maximumCostUsd !== maximum) setCeiling(String(pending.maximumCostUsd));
+      } catch { /* An unreadable request must not be discarded automatically. */ }
+      setMessage(error instanceof Error ? error.message : "The request was not confirmed. Retry to check the same request.");
+    } finally { setBusy(false); }
+  };
+  return <section className={`${styles.qualificationCard} glass`} aria-label="Private video" style={{ padding: "1rem", marginBottom: "1rem" }}>
+    <SectionTitle>Private video</SectionTitle>
+    <div style={{ display: "flex", gap: "0.55rem", alignItems: "end", flexWrap: "wrap" }}>
+      <label style={{ display: "grid", gap: "0.22rem", fontSize: "0.68rem", color: "var(--color-muted)" }}>COST CEILING (USD)
+        <input type="number" min="0.01" max="55" step="1" value={ceiling} disabled={busy} onChange={event => setCeiling(event.target.value)} style={{ width: 116, height: 34, padding: "0 0.55rem", borderRadius: 7, border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }} />
+      </label>
+      <button type="button" onClick={submit} disabled={busy} style={{ height: 34, padding: "0 0.7rem", borderRadius: 7, border: "1px solid var(--color-border)", background: "var(--color-accent)", color: "#111", fontWeight: 700, cursor: busy ? "default" : "pointer" }}>{busy ? "Starting…" : "Generate private video"}</button>
+    </div>
+    {message && <p role="status">{message}</p>}
+    {runId && <Link href={`/runs/${encodeURIComponent(runId)}`}>Open private run</Link>}
+  </section>;
+}
+
 function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
   const [maximumCostUsd, setMaximumCostUsd] = useState("25");
   const [busy, setBusy] = useState(false);

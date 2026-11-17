@@ -60,7 +60,9 @@ export function assertFreshPipelineInvocationRouteAdmission(args: {
   hasDurableInvocation: boolean;
   programBrief: unknown;
   programRoute: unknown;
+  signedPrivateLegacy?: boolean;
 }): void {
+  if (args.signedPrivateLegacy && args.programBrief === undefined && args.programRoute === undefined) return;
   if (
     !args.hasDurableInvocation &&
     (args.programBrief === undefined || args.programRoute === undefined)

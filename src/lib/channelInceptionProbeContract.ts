@@ -14,6 +14,8 @@ export const PRIVATE_PROBE_THUMBNAIL_MODE_STORE_KEY =
 
 export interface ChannelInceptionProbeInvocationContext {
   channelBudgetUsd: number;
+  /** An owner-requested full-length private run, never a qualification proof. */
+  invocationKind?: "manual_private_video";
   /** Exact private proof exception, frozen with the signed pipeline override. */
   thumbnailMode?: "deferred_mvp";
   /**
@@ -89,6 +91,8 @@ export function assertChannelInceptionProbeEnvelopeStructure(
     !Array.isArray(envelope.input?.pipelineOverride) ||
     !envelope.input?.moduleConfigOverride ||
     !envelope.input?.invocationContext ||
+    (envelope.input.invocationContext.invocationKind !== undefined &&
+      envelope.input.invocationContext.invocationKind !== "manual_private_video") ||
     (envelope.input.invocationContext.thumbnailMode !== undefined &&
       envelope.input.invocationContext.thumbnailMode !== "deferred_mvp") ||
     (envelope.input.invocationContext.probeMaximumCostUsd !== undefined &&
