@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Release a built private Automation interface, retaining and restoring its predecessor."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,15 @@ TARGET = Path('/opt/youtube-automation-web')
 CACHE = Path('/var/lib/youtube-automation-web/next-cache')
 CURRENT = TARGET / 'current'
 TEMP_LINK = TARGET / 'current.next'
+
+@contextmanager
+def release_lock(target):
+    fd = os.open(target / '.staged-release.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)
 
 def run(*args):
     return subprocess.run(args, cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
@@ -49,6 +60,10 @@ def switch(release):
 def main():
     if os.geteuid() != 0 or sys.argv[1:] != ['--release']:
         raise SystemExit('Run as root with --release')
+    with release_lock(TARGET):
+        release()
+
+def release():
     if not CURRENT.is_symlink() or not CACHE.is_dir() or TEMP_LINK.exists() or TEMP_LINK.is_symlink():
         raise SystemExit('Existing web service is not in the expected state')
     run('git', 'diff', '--quiet')
