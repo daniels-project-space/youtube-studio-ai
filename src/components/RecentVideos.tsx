@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -54,6 +55,7 @@ export function RecentVideos({
     ownerId,
     ...(channelId ? { channelId } : {}),
     limit,
+    savedOnly: true,
   }) as RenderedVideo[] | undefined;
 
   const renders = videos?.filter(
@@ -80,7 +82,12 @@ export function RecentVideos({
     };
   }, [renderCount, channelId]);
 
-  if (renders !== undefined && renders.length === 0) return null;
+  if (renders !== undefined && renders.length === 0) {
+    return <section className={styles.section} aria-labelledby="recent-renders-empty-title" data-recent-renders>
+      <header className={styles.header}><h2 id="recent-renders-empty-title">Recent renders</h2></header>
+      <p className={styles.empty}>No saved renders found among the most recent 200 runs.</p>
+    </section>;
+  }
 
   const move = (direction: -1 | 1) => {
     const track = trackRef.current;
@@ -247,9 +254,10 @@ function R2VideoDialog({
             <span>{video.channelName}</span>
             <h2 id={titleId}>{video.title}</h2>
           </div>
-          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close video">
-            ×
-          </button>
+          <div className={styles.dialogActions}>
+            <Link href={`/runs/${encodeURIComponent(video._id)}`}>Open run details</Link>
+            <button ref={closeRef} type="button" onClick={onClose} aria-label="Close video">×</button>
+          </div>
         </header>
 
         <div className={styles.player}>

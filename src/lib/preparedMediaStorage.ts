@@ -1,8 +1,12 @@
 /** Limits metadata transfer, not script, image, audio or generation quality. */
 export const PREPARED_METADATA_READ = { maxBytes: 8 * 1024 * 1024, timeoutMs: 30_000 } as const;
 
-export function decodePreparedMetadata(bytes: Uint8Array): unknown {
+export function assertPreparedMetadataSize(bytes: Uint8Array): void {
   if (bytes.byteLength > PREPARED_METADATA_READ.maxBytes) throw new Error("prepared metadata exceeds transfer limit; retain for reconciliation");
+}
+
+export function decodePreparedMetadata(bytes: Uint8Array): unknown {
+  assertPreparedMetadataSize(bytes);
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 

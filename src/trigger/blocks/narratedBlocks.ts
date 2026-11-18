@@ -188,6 +188,7 @@ import { prepareHrsQwenTtsEnvironment, synthesizeHrsQwenTts, type HrsQwenTtsRece
 import { configuredHyperYoutubeStageClient } from "@/lib/hyperYoutubeStageClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { narrationPhysics } from "@/lib/voicecraft";
+import { resolveScriptNarrationTiming, splitNarrationSentences as splitSentences } from "@/lib/narrationTimingPlan";
 import {
   assertNarrationDeliveryRate,
   assertNarrationPerformanceEvidence,
@@ -229,9 +230,9 @@ import {
   type NarrationCueTimingEvidence,
 } from "@/lib/narrationCueTiming";
 import {
-  boundNarrationChapterHeadings,
   boundNarrationColdOpen,
 } from "@/lib/narrationBounds";
+import { chapterItemSpeech, narrationChapterCadence, narrationChapterItems } from "@/lib/narrationChapterPlan";
 import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
@@ -348,14 +349,6 @@ import {
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationAssertion } from "@/engine/creative/types";
 
-/** Split narration into sentences for organic pauses + per-sentence timing. */
-function splitSentences(text: string): string[] {
-  return text
-    .replace(/\s+/g, " ")
-    .split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 import {
   evaluateThumbnail,
 
@@ -805,6 +798,11 @@ export const scriptGen: Block = {
         ctx.log,
         programRoute,
         serializedEpisodeContext?.fingerprint,
+        {
+          qualityProfile: ctx.params["qualityProfile"] === "draft" ? "draft" : "production",
+          sentenceGapSec: ctx.params["sentenceGapSec"] as number | undefined,
+          ttsSpeed: ctx.params["ttsSpeed"] as number | undefined,
+        },
       );
       ctx.log(`script_gen: reused + translated base script → ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
@@ -1368,15 +1366,17 @@ export const narrationTts: Block = {
     const baseGap = Number(ctx.params["sentenceGapSec"] ?? physics.sentenceGap ?? 0.85);
     const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
     // SPEAKING RATE — param > Style-DNA pacing > archetype physics > native.
-    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
+    const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string } } | null)
       ?.narrative;
     const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
-    const quietListeningProfile: "standard" | "quiet_listening" = isQuietListeningNarration(
-      niche, ctx.params["genre"], ctx.params["style"], dnaPacing?.pacing, dnaPacing?.delivery,
-    ) ? "quiet_listening" : "standard";
-    const quietRestBudgetSec = quietListeningProfile === "quiet_listening"
-      ? quietListeningRestBudgetSec(Number(ctx.params["maxSeconds"] ?? 240))
-      : 0;
+    const frozenScriptTiming = ctx.params["scriptNarrationTiming"] === undefined
+      ? undefined
+      : resolveScriptNarrationTiming(ctx.params["scriptNarrationTiming"], niche, dnaPacing);
+    const quietListeningProfile: "standard" | "quiet_listening" = frozenScriptTiming?.profile ??
+      (isQuietListeningNarration(niche, ctx.params["genre"], ctx.params["style"], dnaPacing?.pacing, dnaPacing?.delivery)
+        ? "quiet_listening" : "standard");
+    const quietRestBudgetSec = frozenScriptTiming?.restBudgetSec ?? (quietListeningProfile === "quiet_listening"
+      ? quietListeningRestBudgetSec(Number(ctx.params["maxSeconds"] ?? 240)) : 0);
     const dnaSpeed =
       /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
         : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
@@ -1620,6 +1620,30 @@ export const narrationTts: Block = {
         [COST_PATCH_KEY]: 0,
       };
     }
+    if (quietListeningProfile === "quiet_listening" && !frozenScriptTiming) {
+      throw new Error("narration_tts: frozen script timing is required for quiet-listening synthesis");
+    }
+    const preparation = ctx.store["planWeekPreparation"] as { preparedScriptPresent?: unknown; preparedScriptTiming?: unknown } | undefined;
+    if (preparation?.preparedScriptPresent === true || ctx.params["preparedScriptRequiresTimingProof"] === true) {
+      if (!frozenScriptTiming || preparation?.preparedScriptTiming === undefined ||
+          canonicalJson(resolveScriptNarrationTiming(preparation.preparedScriptTiming, niche, dnaPacing).timing) !== canonicalJson(frozenScriptTiming.timing)) {
+        throw new Error("narration_tts: prepared script lacks matching frozen timing evidence");
+      }
+    }
+    if (quietListeningProfile === "quiet_listening") {
+      const timingScript = ctx.store["script"] as { hook?: string; sections?: { narration: string }[] } | undefined;
+      if (!timingScript?.sections) throw new Error("narration_tts: quiet-listening narration is missing its approved section structure");
+      const keepAudioTags = ttsProvider === "elevenlabs";
+      const sentences = splitSentences(text);
+      const boundaries = deriveNarrationSectionBoundaryIndices({ sentences,
+        openingSentences: timingScript.hook ? splitSentences(sanitizeSpoken(timingScript.hook, { keepAudioTags })) : [],
+        sectionSentences: timingScript.sections.map(section => splitSentences(sanitizeSpoken(section.narration, { keepAudioTags }))) });
+      if (!boundaries) throw new Error("narration_tts: quiet-listening section boundaries do not match the approved spoken source");
+      const boundarySet = new Set(boundaries);
+      planNarrationCadence({ sentences, baseGapSec: baseGap, jitterSec: jitter,
+        sectionBoundaryAfter: sentences.map((_, index) => boundarySet.has(index)),
+        profile: quietListeningProfile, maxQuietRestBudgetSec: quietRestBudgetSec });
+    }
     if (ttsProvider === "elevenlabs") {
       if (!process.env.ELEVENLABS_API_KEY) throw new Error("narration_tts: ELEVENLABS_API_KEY missing");
     } else if (ttsProvider === "qwen3") {
@@ -1673,38 +1697,7 @@ export const narrationTts: Block = {
     if (chapterMode && script?.sections) {
       const preSec = Number(ctx.params["chapterPreSec"] ?? 3); // silence as the card fades in, before the heading
       const postSec = Number(ctx.params["chapterPostSec"] ?? 3); // silence after the heading, as the card fades out
-      type Item = { kind: "narration" | "heading"; text: string; chap?: number; sectionBoundaryAfter?: boolean };
-      const items: Item[] = [];
-      if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
-      // Chapter cards belong to the BODY only: the INTRO (first section) flows
-      // straight out of the cold open with no "Chapter 1" interrupt, and the
-      // OUTRO (final section) lands as the closing narration with no card.
-      const lastIdx = script.sections.length - 1;
-      const eligibleChapterSections = script.sections
-        .map((sec, idx) => ({ heading: sec.heading, idx }))
-        .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && script.sections!.length >= 3));
-      const boundedChapterHeadings = boundNarrationChapterHeadings(
-        eligibleChapterSections.map(({ heading }) => heading),
-      );
-      const chapterBySection = new Map<number, { heading: string; chap: number }>();
-      boundedChapterHeadings.forEach((heading, candidateIndex) => {
-        if (!heading) return;
-        chapterBySection.set(eligibleChapterSections[candidateIndex].idx, {
-          heading,
-          chap: chapterBySection.size + 1,
-        });
-      });
-      const sectionSentences = script.sections.map((section) => splitSentences(sanitizeSpoken(section.narration)));
-      script.sections.forEach((sec, idx) => {
-        const chapter = chapterBySection.get(idx);
-        if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
-        const sectionStart = items.length;
-        for (const sentence of sectionSentences[idx]!) items.push({ kind: "narration", text: sentence });
-        const hasLaterNarration = sectionSentences.slice(idx + 1).some((later) => later.length > 0);
-        if (hasLaterNarration && items.length > sectionStart) {
-          items[items.length - 1]!.sectionBoundaryAfter = true;
-        }
-      });
+      const items = narrationChapterItems({ hook: script.hook, sections: script.sections });
 
       const partPaths: string[] = [];
       const gaps: number[] = [];
@@ -1716,16 +1709,9 @@ export const narrationTts: Block = {
       const itemTimings: { start: number; end: number }[] = [];
       const flush = () => { if (footAccum > 0.1) { chapterPlan.push({ kind: "footage", durSec: footAccum }); footAccum = 0; } };
       // PARALLEL synthesis (small pool — Fish concurrency limit; see sentence mode).
-      const speakOf = (it: Item) =>
-        it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
-      const chapterCadencePlan = planNarrationCadence({
-        sentences: items.map(speakOf),
-        baseGapSec: baseGap,
-        jitterSec: jitter,
-        sectionBoundaryAfter: items.map((item) => item.sectionBoundaryAfter === true),
-        profile: quietListeningProfile,
-        maxQuietRestBudgetSec: quietRestBudgetSec,
-      });
+      const speakOf = chapterItemSpeech;
+      const chapterCadencePlan = narrationChapterCadence({ items, baseGapSec: baseGap, jitterSec: jitter,
+        profile: quietListeningProfile, restBudgetSec: quietRestBudgetSec, preSec, postSec });
       const chPool = ttsConcurrency();
       // Probe-fallback counter: an ESTIMATED duration shifts every later
       // sentenceTiming (captions/quotes/inserts) by the estimation error —

@@ -67,7 +67,13 @@ export function createHyperYoutubeStageClient(options:{baseUrl:string;projectId:
     const response = await call(root + path, {method,redirect:"error",signal:AbortSignal.timeout(30_000),
       headers:{authorization:`Bearer ${options.projectToken}`,accept:"application/json",...(body === undefined ? {} : {"content-type":"application/json"})},
       ...(body === undefined ? {} : {body:JSON.stringify(body)})});
-    if (!response.ok) throw Object.assign(new Error(`HRS YouTube request failed (${response.status})`),{status:response.status});
+    if (!response.ok) {
+      const details=await response.json().catch(()=>null) as {code?:unknown;nextAction?:unknown;retryable?:unknown}|null;
+      const safe=(value:unknown)=>typeof value==="string" && /^[a-zA-Z0-9_-]{1,100}$/.test(value) ? value : undefined;
+      throw Object.assign(new Error(`HRS YouTube request failed (${response.status})`),{status:response.status,
+        code:safe(details?.code),nextAction:safe(details?.nextAction),
+        retryable:typeof details?.retryable==="boolean" ? details.retryable : undefined});
+    }
     return await response.json() as unknown;
   }
   function validate(value:unknown, stage:HyperYoutubeStage, key:string):HyperYoutubeJob {

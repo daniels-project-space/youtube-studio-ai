@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { planWeekPreparedFootageKey } from "@/lib/planWeekPreparation";
@@ -28,11 +29,15 @@ export async function POST(request: Request) {
     const scope = { ownerId: actor.ownerId, channelSlug: input.channelSlug as string, batchId: input.batchId as string, itemId: input.itemId as string };
     // Each manual retry gets a new run: a previous run may have observed unfinished Engine jobs.
     // The materializer itself verifies immutable receipts and performs create-only R2 writes.
-    const handle = await tasks.trigger("render-engine-h3-materialize-prepared-footage", scope);
+    const requestOptions = privateTriggerRequestOptions(process.env);
+    const handle = requestOptions
+      ? await tasks.trigger("render-engine-h3-materialize-prepared-footage", scope, undefined, requestOptions)
+      : await tasks.trigger("render-engine-h3-materialize-prepared-footage", scope);
     return NextResponse.json({ ok: true, state: "queued", triggerRunId: handle.id, sidecarKey: planWeekPreparedFootageKey(scope) },
       { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     return NextResponse.json({ ok: false, error: "could not queue footage materialization" }, { status: 500 });
   }
 }

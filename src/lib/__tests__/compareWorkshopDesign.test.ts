@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { compareWorkshopDesign } from "../compareWorkshopDesign";
+
+const entry = (block: string, version?: string, params?: Record<string, unknown>) => ({ block, ...(version ? { version } : {}), ...(params ? { params } : {}) });
+const shifted = compareWorkshopDesign([entry("a", "1"), entry("b", "1")], [entry("new", "1"), entry("a", "1"), entry("b", "1")]);
+assert.deepEqual(shifted.differences, [{ block: "new", changes: ["Added"] }]);
+const removed = compareWorkshopDesign([entry("x", "1"), entry("a", "1"), entry("b", "1")], [entry("a", "1"), entry("b", "1")]);
+assert.deepEqual(removed.differences, [{ block: "x", changes: ["Removed"] }]);
+const reordered = compareWorkshopDesign([entry("a", "1"), entry("b", "1")], [entry("b", "1"), entry("a", "1")]);
+assert.deepEqual(reordered.differences.map(item => item.changes), [["Relative order changed"], ["Relative order changed"]]);
+const repeated = compareWorkshopDesign([entry("quote", "1", { n: 1 }), entry("quote", "2", { n: 2 }), entry("a")], [entry("quote", "2", { n: 2 }), entry("a")]);
+assert.deepEqual(repeated.repeatedBlocks, ["quote"]);
+assert.deepEqual(repeated.differences, []);
+assert.equal(repeated.unpinnedSaved, 1);
+assert.equal(repeated.unpinnedImported, 1);
+assert.deepEqual(compareWorkshopDesign([entry("a")], [entry("a", "2")]).differences, [{ block: "a", changes: ["Version specified"] }]);
+assert.deepEqual(compareWorkshopDesign([entry("a", "1")], [entry("a")]).differences, [{ block: "a", changes: ["Version omitted"] }]);
+assert.deepEqual(compareWorkshopDesign([entry("a", "1", { a: 1, b: 2 })], [entry("a", "2", { b: 2, a: 1 })]).differences, [{ block: "a", changes: ["Version changed"] }]);
+assert.deepEqual(compareWorkshopDesign([entry("a", "1", { x: 1 })], [entry("a", "1", { x: 2 })]).differences, [{ block: "a", changes: ["Settings changed"] }]);
+console.log("Workshop comparison distinguishes relative order, ambiguous repetitions, versions and settings");

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
@@ -19,7 +20,7 @@ function convexClient(): ConvexHttpClient {
 }
 
 function errorResponse(error: unknown): NextResponse {
-  const status = error instanceof StudioAuthError ? error.status : 400;
+  const status = error instanceof StudioAuthError ? error.status : error instanceof PrivateTriggerTargetError ? 503 : 400;
   return NextResponse.json(
     { ok: false, error: error instanceof Error ? error.message : "request failed" },
     { status },
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const requestOptions = body.action === "approve" ? privateTriggerRequestOptions(process.env) : undefined;
     const convex = convexClient();
     const secret = requireInternalQuerySecret();
     const intentId = body.intentId as Id<"publishIntents">;
@@ -90,6 +92,7 @@ export async function POST(request: Request) {
         "dispatch-publish-intent",
         { intentId: String(intent._id) },
         { concurrencyKey: `publish:${String(intent.channelId)}` },
+        requestOptions,
       );
       dispatchTaskId = handle.id;
     }

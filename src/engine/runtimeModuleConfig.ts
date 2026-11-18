@@ -5,7 +5,7 @@ import {
   type ModuleConfigurationScope,
 } from "./moduleRegistry";
 import type { PipelineEntry } from "./types";
-import { materializeRuntimePipelineParams } from "./pipelineCompiler";
+import { materializeRuntimePipelineParams } from "./materializeRuntimePipelineParams";
 import { snapshotParamsByBlock } from "@/lib/pipelineInvocationSnapshot";
 
 export type RuntimeModuleConfig = Readonly<Record<string, unknown>>;
@@ -183,6 +183,16 @@ export function mergeRuntimeModuleConfig(input: {
       ...(preset ? { preset } : {}),
       ...(virtual ? { virtual: true as const } : {}),
     });
+  }
+  // The script's word budget must use the explicitly selected narration pace.
+  // Leave historical/default pipeline values alone when no pace was selected.
+  if (selected.has("script_gen") && selected.has("narration_tts")) {
+    const narrationConfig = frozenModuleConfig.narration_tts;
+    for (const key of ["sentenceGapSec", "ttsSpeed"] as const) {
+      if (narrationConfig && Object.hasOwn(narrationConfig, key)) {
+        paramsByBlock.script_gen = { ...paramsByBlock.script_gen, [key]: paramsByBlock.narration_tts[key] };
+      }
+    }
   }
   return {
     paramsByBlock,

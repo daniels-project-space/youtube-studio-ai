@@ -42,6 +42,13 @@ assert.ok(
 );
 const runGateSlice = pipeline.slice(runRuntimeGate, executionLease);
 assert.match(runGateSlice, /if \(!automaticRuntimeAdmission\.automatic\)[\s\S]*executionReadinessBlocked[\s\S]*manualGate: true/);
+assert.match(pipeline.slice(pipeline.indexOf("const candidateBenchmarkV3"), runtimeBootstrap), /if \(!candidateBenchmarkV3 && requiresAutomaticFamilyExecutionReadiness\(persistedFamily\)\)/);
+const candidatePreflight = pipeline.indexOf("preflightCandidateBenchmarkWorker({", executionLease);
+const candidateBootstrap = pipeline.indexOf("await bootstrapSecrets(", candidatePreflight);
+const candidateRuntimeGate = pipeline.indexOf("const readiness = automaticFamilyExecutionReadinessAdmission", candidateBootstrap);
+const candidateSnapshot = pipeline.indexOf("api.runs.claimInvocationSnapshot", candidateRuntimeGate);
+assert.ok(candidatePreflight > executionLease && candidateBootstrap > candidatePreflight && candidateRuntimeGate > candidateBootstrap && candidateSnapshot > candidateRuntimeGate);
+assert.match(pipeline.slice(candidateRuntimeGate, candidateSnapshot), /if \(!readiness\.automatic\) throw new Error\(readiness\.reason\)/);
 
 const creatorRoute = readFileSync(
   new URL("../../app/api/build-channel/route.ts", import.meta.url),

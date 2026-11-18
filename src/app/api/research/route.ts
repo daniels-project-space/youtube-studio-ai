@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { OWNER_ID } from "@/lib/config";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
+import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { assertResearchChannel, parseResearchInput, readResearchBody, ResearchChannelError } from "@/lib/nicheResearchAdmission";
 
 /**
  * POST /api/research  { niche: string, channelId?: string }
@@ -20,16 +25,26 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const authFailure = await authorizeStudioRoute(request);
   if (authFailure) return authFailure;
-  let body: { niche?: string; channelId?: string };
+  let body: ReturnType<typeof parseResearchInput>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+    body = parseResearchInput(await readResearchBody(request));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid research request";
+    return NextResponse.json({ error: message }, { status: message === "research request is too large" ? 413 : 400 });
   }
 
-  const niche = body.niche?.trim();
-  if (!niche) {
-    return NextResponse.json({ error: "missing niche" }, { status: 400 });
+  const { niche, channelId } = body;
+  if (channelId) {
+    const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+    if (!url) return NextResponse.json({ error: "channel verification unavailable" }, { status: 503 });
+    try {
+      const channel = await new StudioConvexHttpClient(url).query(api.channels.getChannel, { channelId: channelId as Id<"channels"> });
+      assertResearchChannel(channel, OWNER_ID, niche);
+    } catch (error) {
+      if (error instanceof ResearchChannelError) return NextResponse.json({ error: error.message }, { status: error.message === "channel not found" ? 404 : 409 });
+      if (error instanceof Error && /Studio resource (?:access denied|not found)/.test(error.message)) return NextResponse.json({ error: "channel not found" }, { status: 404 });
+      return NextResponse.json({ error: "channel verification unavailable" }, { status: 503 });
+    }
   }
 
   // Engine-not-activated guard: no Trigger secret → not deployed yet.
@@ -45,15 +60,17 @@ export async function POST(request: Request) {
   }
 
   try {
+    const requestOptions = privateTriggerRequestOptions(process.env);
     // Lazy import so a missing/older SDK never breaks the build or other routes.
     const { tasks } = await import("@trigger.dev/sdk");
     const handle = await tasks.trigger("refresh-niche-research", {
       ownerId: OWNER_ID,
       niche,
-      channelId: body.channelId,
-    });
+      channelId,
+    }, undefined, requestOptions);
     return NextResponse.json({ ok: true, handleId: handle.id, niche });
   } catch (err) {
+    if (err instanceof PrivateTriggerTargetError) return NextResponse.json({ error: err.message, inactive: true }, { status: 503 });
     return NextResponse.json(
       {
         error:

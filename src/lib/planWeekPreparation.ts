@@ -10,6 +10,7 @@ import {
   type NarrationPerformanceEvidence,
 } from "@/lib/narrationPerformance";
 import type { Script } from "@/lib/scriptGen";
+import { resolveScriptNarrationTiming, weeklyScriptNarrationTiming, type ScriptNarrationTiming } from "@/lib/narrationTimingPlan";
 import { sha256Hex } from "@/lib/sha256";
 import {
   ChannelMusicProgramSchema,
@@ -113,6 +114,7 @@ export interface PlanWeekPreparedScript {
   topic: string;
   script: Script;
   scriptSha256: string;
+  narrationTiming?: ScriptNarrationTiming;
   createdAt: number;
 }
 
@@ -495,10 +497,19 @@ export function planWeekPreparationManifestSha256(manifest: PlanWeekPreparationM
   return sha256Hex(canonicalJson(manifest));
 }
 
-function normalizedScript(value: unknown): Script {
+function longPreparedTextAllowed(manifest: PlanWeekPreparationManifest): boolean {
+  try {
+    const seconds = weeklyScriptNarrationTiming(manifest.execution).targetSeconds;
+    return seconds > 3_600 && seconds <= 28_800;
+  } catch {
+    return false;
+  }
+}
+
+function normalizedScript(value: unknown, longText: boolean): Script {
   const script = requiredRecord(value, "prepared script");
   const sections = script.sections;
-  if (!Array.isArray(sections) || !sections.length || sections.length > 128) {
+  if (!Array.isArray(sections) || !sections.length || sections.length > (longText ? 256 : 128)) {
     throw new Error("plan-week prepared script sections are invalid");
   }
   const normalizeOptionalText = (input: unknown, label: string, max: number): string | undefined => {
@@ -522,7 +533,7 @@ function normalizedScript(value: unknown): Script {
         ...(role !== undefined ? { role } : {}),
       };
     }),
-    narrationText: normalizeOptionalText(script.narrationText, "narration text", 200_000) as string,
+    narrationText: normalizeOptionalText(script.narrationText, "narration text", longText ? 1_000_000 : 200_000) as string,
     estDurationSec: (() => {
       const duration = script.estDurationSec;
       if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0 || duration > 28_800) {
@@ -544,7 +555,7 @@ function normalizedScript(value: unknown): Script {
       : {}),
     ...(crafted !== undefined ? { crafted } : {}),
   };
-  if (normalized.hook.length + normalized.narrationText.length > 210_000) {
+  if (normalized.hook.length + normalized.narrationText.length > (longText ? 1_010_000 : 210_000) || (longText && normalized.sections.reduce((sum, section) => sum + section.narration.length, 0) > 1_000_000)) {
     throw new Error("plan-week prepared script is too large");
   }
   return normalized;
@@ -652,7 +663,7 @@ export function assertPlanWeekPreparedScriptBinding(args: {
   if (prepared.version !== PLAN_WEEK_PREPARED_SCRIPT_VERSION) {
     throw new Error("plan-week prepared script version is unsupported");
   }
-  const script = normalizedScript(prepared.script);
+  const script = normalizedScript(prepared.script, longPreparedTextAllowed(args.manifest));
   const manifestSha256 = requiredText(prepared.manifestSha256, "prepared script manifest digest").toLowerCase();
   const scriptSha256 = requiredText(prepared.scriptSha256, "prepared script digest").toLowerCase();
   const createdAt = prepared.createdAt;
@@ -671,6 +682,9 @@ export function assertPlanWeekPreparedScriptBinding(args: {
     topic: requiredText(prepared.topic, "prepared script topic"),
     script,
     scriptSha256,
+    ...(prepared.narrationTiming === undefined ? {} : {
+      narrationTiming: resolveScriptNarrationTiming(prepared.narrationTiming, undefined, undefined).timing,
+    }),
     createdAt,
   };
   const routeSeed = args.manifest.execution.seedStore.channelProgramRoute;
@@ -685,6 +699,7 @@ export function assertPlanWeekPreparedScriptBinding(args: {
     normalized.itemId !== args.manifest.itemId ||
     normalized.requestKey !== args.manifest.requestKey ||
     normalized.topic !== args.manifest.plan.topic ||
+    (normalized.narrationTiming !== undefined && canonicalJson(normalized.narrationTiming) !== canonicalJson(weeklyScriptNarrationTiming(args.manifest.execution))) ||
     (typeof routeFingerprint === "string" && normalized.script.programRouteFingerprint !== routeFingerprint) ||
     normalized.scriptSha256 !== sha256Hex(canonicalJson(normalized.script))
   ) {
@@ -755,6 +770,8 @@ function normalizedPreparedNarrationChapterPlan(value: unknown, durationSec: num
 export function assertPlanWeekPreparedNarrationBinding(args: {
   prepared: unknown;
   manifest: PlanWeekPreparationManifest;
+  requireQwenEvidence?: boolean;
+  expectedQwenVoice?: { speaker: string; language: string };
 }): PlanWeekPreparedNarration {
   const prepared = requiredRecord(args.prepared, "prepared narration receipt");
   if (prepared.version !== PLAN_WEEK_PREPARED_NARRATION_VERSION) {
@@ -787,7 +804,7 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
   }
   const narrationKey = requiredText(prepared.narrationKey, "prepared narration key");
   const narrationTranscriptText = requiredText(prepared.narrationTranscriptText, "prepared narration transcript");
-  if (narrationTranscriptText.length > 250_000) {
+  if (narrationTranscriptText.length > (longPreparedTextAllowed(args.manifest) ? 1_000_000 : 250_000)) {
     throw new Error("plan-week prepared narration transcript is too long");
   }
   if (narrationTranscriptSha256 !== sha256Hex(narrationTranscriptText)) {
@@ -827,6 +844,13 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
     createdAt,
   };
   const qwenSource = normalized.narrationPerformanceEvidence.qwenProviderEvidence?.source;
+  if (args.requireQwenEvidence && !qwenSource) {
+    throw new Error("prepared narration has no verified Qwen3 provider evidence; preserve it for review and prepare a new take");
+  }
+  const qwenEvidence = normalized.narrationPerformanceEvidence.qwenProviderEvidence;
+  if (args.expectedQwenVoice && (!qwenEvidence || qwenEvidence.speaker !== args.expectedQwenVoice.speaker || qwenEvidence.language !== args.expectedQwenVoice.language)) {
+    throw new Error("prepared narration Qwen3 voice does not match the requested speaker and language");
+  }
   if (
     normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
     normalized.ownerId !== args.manifest.ownerId ||
@@ -839,6 +863,7 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
     (qwenSource !== undefined && (
       qwenSource.narrationKey !== normalized.narrationKey ||
       qwenSource.sha256 !== normalized.audioSha256 ||
+      qwenSource.transcriptSha256 !== normalized.narrationTranscriptSha256 ||
       qwenSource.byteLength !== normalized.audioByteLength ||
       Math.abs(qwenSource.durationSec - normalized.narrationDurationSec) > 0.001
     ))

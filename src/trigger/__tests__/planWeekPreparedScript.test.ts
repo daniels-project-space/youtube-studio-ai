@@ -16,6 +16,7 @@ const base = {
 };
 const parsed = assertPlanWeekPreparedScriptArgs(base);
 assert.equal(parsed.maxSeconds, 240);
+assert.equal(assertPlanWeekPreparedScriptArgs({ ...base, maxSeconds: undefined }).maxSeconds, undefined, "an omitted duration must not override the frozen pipeline");
 assert.equal(parsed.maxCostUsd, 2);
 assert.throws(() => assertPlanWeekPreparedScriptArgs({ ...base, maxSeconds: 29 }), /between 30 and 1800/);
 assert.throws(() => assertPlanWeekPreparedScriptArgs({ ...base, maxCostUsd: 0 }), /greater than zero/);

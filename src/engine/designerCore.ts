@@ -1451,7 +1451,10 @@ export function enforceLengthContract(
       pin("minSeconds", envelope.minSeconds);
       pin("maxSeconds", envelope.maxSeconds);
     }
-    if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
+    if (e.block === "assemble" && family === "music_loop") {
+      pin("durationSec", lenSec);
+      pin("exactFinalDuration", true);
+    }
     if (e.block === "metadata" && e.version === DELIVERY_METADATA_VERSION) pin("targetDurationSec", lenSec);
     if (e.block === "loop_clips" && family === "music_loop") {
       const scaling = familyTimeScalingContract("music_loop");

@@ -21,7 +21,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
-import { validatePipeline, preflight } from "@/engine/validate";
+import { preflight } from "@/engine/validate";
 import {
   assertFamilyAutonomousPlanningPipeline,
   FAMILY_KEYS,
@@ -54,11 +54,7 @@ import {
   requiresAutomaticFamilyExecutionReadiness,
 } from "@/engine/automaticFamilyExecutionReadiness";
 import {
-  compilePipeline,
   completePipelineForPolicy,
-  materializeRuntimePipelineParams,
-  PRIVATE_PROBE_CONTRACT_POLICY,
-  PRIVATE_PROBE_DEFERRED_THUMBNAIL_CONTRACT_POLICY,
 } from "@/engine/pipelineCompiler";
 import { assertFrozenUploadQaEvidence } from "@/engine/frozenPipelineQaAdmission";
 import {
@@ -66,10 +62,9 @@ import {
   runPipeline as runEngine,
 } from "@/engine/runner";
 import { ExecutionError } from "@/engine/executionErrors";
-import { assertAutomationNarrationPolicy } from "@/engine/automationNarrationPolicy";
 import { assertPrivateVideoHasNoDelivery } from "@/engine/privateVideoDelivery";
 import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
-import { mergeRuntimeModuleConfig } from "@/engine/runtimeModuleConfig";
+import { prepareWorkerModuleConfig, materializeWorkerPipelineParams, compileWorkerPipeline } from "@/engine/workerPipelineMaterialization";
 import { renderBlockTask } from "@/trigger/render-block";
 import { renderBlockLightTask } from "@/trigger/render-block-light";
 import { planHeal } from "@/engine/healer";
@@ -132,6 +127,7 @@ import {
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
+import { preflightCandidateBenchmarkWorker } from "@/trigger/candidateBenchmarkWorkerPreflight";
 import {
   renderChildWaitLeaseMs,
   renderChildWorkDeadlineMs,
@@ -165,6 +161,7 @@ import {
   assertRouteQualificationBenchmarkDispatchEnvelope,
   routeQualificationBenchmarkApprovalSubject,
   routeQualificationBenchmarkDispatchEnvelopeFingerprint,
+  ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3,
   type RouteQualificationBenchmarkDispatchEnvelope,
   type RouteQualificationBenchmarkInput,
 } from "@/lib/routeQualificationBenchmark";
@@ -186,7 +183,6 @@ import {
 import {
   assertChildrenShowBibleSeeded,
 } from "@/engine/childrenShowBible";
-import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { buildChannelProfile } from "@/engine/channelProfile";
 import { hasSourceAttributedDataStoryParams } from "@/engine/dataStory";
 import {
@@ -1106,7 +1102,8 @@ export const runPipelineTask = task({
     // preflight, then stop before the execution lease, snapshot, or paid work
     // if its automatic foundation has drifted.
     const persistedFamily = (channel as { family?: unknown }).family;
-    if (requiresAutomaticFamilyExecutionReadiness(persistedFamily)) {
+    const candidateBenchmarkV3 = payload.routeQualificationBenchmark?.version === ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3;
+    if (!candidateBenchmarkV3 && requiresAutomaticFamilyExecutionReadiness(persistedFamily)) {
       try {
         await bootstrapSecrets(
           (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
@@ -1434,6 +1431,7 @@ export const runPipelineTask = task({
             weeklyPreparedNarration = assertPlanWeekPreparedNarrationBinding({
               prepared: rawPreparedNarration,
               manifest: weeklyPreparation,
+              requireQwenEvidence: true,
             });
           }
           const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);
@@ -1548,7 +1546,7 @@ export const runPipelineTask = task({
         if (completed.inserted.length) {
           log(`Production compiler completed legacy pipeline: ${completed.inserted.join(", ")}`);
         }
-        const firstParams = snapshotParamsByBlock(entries);
+        let firstParams: ReturnType<typeof snapshotParamsByBlock>;
         // OPERATOR moduleConfig is folded into the write-once invocation. A
         // retry never reads these mutable settings again. Invalid settings for
         // a selected module are terminal before any provider admission; silently
@@ -1558,12 +1556,9 @@ export const runPipelineTask = task({
           const configuredModuleConfig = payload.moduleConfigOverride ??
             weeklyPreparation?.execution.moduleConfig ??
             (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig;
-          const mergedModuleConfig = mergeRuntimeModuleConfig({
-            entries,
-            paramsByBlock: firstParams,
-            moduleConfig: configuredModuleConfig,
-          });
-          Object.assign(firstParams, mergedModuleConfig.paramsByBlock);
+          const prepared = prepareWorkerModuleConfig(entries, configuredModuleConfig);
+          firstParams = prepared.paramsByBlock;
+          const mergedModuleConfig = prepared.merged;
           if (configuredModuleConfig !== undefined) {
             frozenModuleConfig = { ...mergedModuleConfig.frozenModuleConfig };
           }
@@ -1586,21 +1581,7 @@ export const runPipelineTask = task({
             },
           );
         }
-        entries = materializeRuntimePipelineParams(entries, firstParams).map((entry) =>
-          entry.block === "upload_draft" &&
-          typeof entry.params?.["madeForKids"] !== "boolean"
-            ? {
-                ...entry,
-                params: {
-                  ...(entry.params ?? {}),
-                  madeForKids:
-                    payload.probeInvocationContext?.madeForKids ??
-                    channel.schedule?.madeForKids ??
-                    false,
-                },
-              }
-            : entry,
-        );
+        entries = materializeWorkerPipelineParams(entries, firstParams, payload.probeInvocationContext?.madeForKids ?? channel.schedule?.madeForKids ?? false);
       } else {
         log(
           `run-pipeline: restored frozen ${durableInvocation.source} invocation ` +
@@ -1981,6 +1962,10 @@ export const runPipelineTask = task({
             planWeekPreparation: {
               ...scheduledPlan.preparation,
               prompts: structuredClone(weeklyPreparation.prompts),
+              ...(typeof weeklyPreparedScript !== "undefined" && weeklyPreparedScript
+                ? { preparedScriptPresent: true, ...(weeklyPreparedScript.narrationTiming
+                  ? { preparedScriptTiming: structuredClone(weeklyPreparedScript.narrationTiming) } : {}) }
+                : {}),
             },
             // `typeof` intentionally keeps this seed-selection fragment
             // standalone-testable: real execution always declares the local
@@ -2083,30 +2068,10 @@ export const runPipelineTask = task({
         throw new Error("pipeline invocation has a narrative series selector without a validated immutable plan");
       }
 
-      if (probeBudgetAdmission) assertPrivateVideoHasNoDelivery(entries);
-
-      // Reject legacy narration providers before any pipeline block can spend.
-      // This checks the effective, frozen configuration without rewriting it.
-      assertAutomationNarrationPolicy(entries, seedStore);
-
       // Compile only after selecting and admitting the actual seed store:
       // current identity is not the source for durable, private or weekly runs.
       // This projects only registered seed ports, not arbitrary payload keys.
-      const resolved = validatePipeline(entries, channelPipelineValidationSeedKeys(
-        contentLane,
-        seedStore["channelProgramRoute"],
-        entries,
-      ));
-      // A no-thumbnail private MVP probe has a distinct fingerprinted policy;
-      // ordinary private probes and production retain their stricter contracts.
-      const compilation = compilePipeline(
-        resolved,
-        probeBudgetAdmission
-          ? probeThumbnailMode === "deferred_mvp"
-            ? PRIVATE_PROBE_DEFERRED_THUMBNAIL_CONTRACT_POLICY
-            : PRIVATE_PROBE_CONTRACT_POLICY
-          : undefined,
-      );
+      const { resolved, compilation } = compileWorkerPipeline({ entries, contentLane, seedStore, privateAdmission: !!probeBudgetAdmission, deferredThumbnail: probeThumbnailMode === "deferred_mvp" });
       if (durableInvocation) {
         assertPipelineInvocationCompilation(durableInvocation, compilation);
       }
@@ -2245,16 +2210,12 @@ export const runPipelineTask = task({
         });
       }
 
-      // Hydrate scoped provider credentials only after every route/profile/
-      // topic/evidence fence above has admitted the exact frozen invocation.
-      // Gemini remains thumbnail-only; creative text routes through their
-      // declared non-Google provider or deterministic modules.
-      try {
-        await bootstrapSecrets(
-          (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
-        );
-      } catch (error) {
-        throwForTaskRetryPolicy(error);
+      if (!candidateBenchmarkV3) {
+        try {
+          await bootstrapSecrets((m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""));
+        } catch (error) {
+          throwForTaskRetryPolicy(error);
+        }
       }
 
       const invocationCandidate = durableInvocation ?? normalizePipelineInvocationSnapshot({
@@ -2296,7 +2257,26 @@ export const runPipelineTask = task({
         ...(programRoute ? { programRouteFingerprint: programRoute.fingerprint } : {}),
         ...(probeBudgetAdmission ? { budgetAdmission: probeBudgetAdmission } : {}),
       });
+      if (candidateBenchmarkV3 && payload.routeQualificationBenchmark) {
+        preflightCandidateBenchmarkWorker({ benchmark: payload.routeQualificationBenchmark, frozenInput: durableRun.routeQualificationBenchmarkCandidateInvocationInput, candidateTarget: durableRun.routeQualificationBenchmarkCandidate, snapshot: invocationCandidate, entries, seedStore, contentLane });
+      }
       preflight(resolved, { budgetUsd: invocationCandidate.budgetUsd });
+      // Candidate v3 checks the final invocation before hydrating credentials.
+      if (candidateBenchmarkV3) {
+        try {
+          await bootstrapSecrets((m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""));
+        } catch (error) {
+          throwForTaskRetryPolicy(error);
+        }
+        if (requiresAutomaticFamilyExecutionReadiness(persistedFamily)) {
+          const readiness = automaticFamilyExecutionReadinessAdmission(
+            persistedFamily,
+            undefined,
+            { narrationProvider: (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig?.["narration_tts"]?.["ttsProvider"] },
+          );
+          if (!readiness.automatic) throw new Error(readiness.reason);
+        }
+      }
       const invocationSha256 = pipelineInvocationSha256(invocationCandidate);
       const claimedInvocation = await convex.mutation(api.runs.claimInvocationSnapshot, {
         ownerId,

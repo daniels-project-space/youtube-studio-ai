@@ -24,6 +24,15 @@ const PRIMARY_NAV_ITEMS = [
   { href: "/library", label: "Library", icon: <IconLibrary /> },
 ];
 
+const AUTOMATION_NAV_ITEMS = [
+  { href: "/", label: "Overview", icon: <IconOverview /> },
+  { href: "/channels", label: "Channels", icon: <IconChannels /> },
+  { href: "/runs", label: "Production", icon: <IconRuns /> },
+  { href: "/library", label: "Video Library", icon: <IconLibrary /> },
+  { href: "/schedule", label: "Calendar", icon: <IconCalendar /> },
+  { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
+];
+
 const TOOLBOX_NAV_GROUPS = [
   {
     label: "Insights",
@@ -49,16 +58,20 @@ const MOBILE_MORE_ITEMS = [
 ];
 
 /** Desktop rail with a mobile dock that adapts to available width and text size. */
-export function Sidebar() {
+export function Sidebar({ automation = false }: { automation?: boolean }) {
   const pathname = usePathname();
+  const primaryItems = automation ? AUTOMATION_NAV_ITEMS : PRIMARY_NAV_ITEMS;
+  const mobileCoreItems = automation ? primaryItems.slice(MOBILE_PRIMARY_COUNT) : MOBILE_CORE_ITEMS;
+  const compactMoreItems = automation ? primaryItems.slice(2, MOBILE_PRIMARY_COUNT) : COMPACT_MORE_ITEMS;
+  const mobileMoreItems = automation ? [...mobileCoreItems, SETTINGS_ITEM] : MOBILE_MORE_ITEMS;
   const [moreOpenForPath, setMoreOpenForPath] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreOpen = moreOpenForPath === pathname;
-  const moreActive = MOBILE_MORE_ITEMS.some((item) =>
+  const moreActive = mobileMoreItems.some((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
-  const compactMoreActive = moreActive || COMPACT_MORE_ITEMS.some((item) => pathname.startsWith(item.href));
+  const compactMoreActive = moreActive || compactMoreItems.some((item) => pathname.startsWith(item.href));
   const toolboxActive = TOOLBOX_NAV_ITEMS.some((item) =>
     pathname.startsWith(item.href),
   );
@@ -97,14 +110,14 @@ export function Sidebar() {
   }, [moreOpen]);
 
   return (
-    <aside className="studio-sidebar" aria-label="Studio navigation">
+    <aside className="studio-sidebar" aria-label={automation ? "Automation navigation" : "Studio navigation"}>
       <div className="studio-brand">
         <span className="studio-brand-mark">
-          <StudioMark width={23} height={23} />
+          {automation ? <i className="automation-play" aria-hidden="true" /> : <StudioMark width={23} height={23} />}
         </span>
         <span>
-          <strong>AutoStudio</strong>
-          <small>Signal / production</small>
+          <strong>{automation ? "YouTube Automation" : "AutoStudio"}</strong>
+          {!automation ? <small>Signal / production</small> : null}
         </span>
       </div>
 
@@ -116,7 +129,7 @@ export function Sidebar() {
         >
           <span className="studio-nav-label">Workspace</span>
           <div className="studio-nav-items">
-            {PRIMARY_NAV_ITEMS.map((item) => (
+            {primaryItems.map((item) => (
               <NavItem
                 key={item.href}
                 href={item.href}
@@ -127,7 +140,7 @@ export function Sidebar() {
           </div>
         </section>
 
-        <details
+        {!automation && <details
           className="studio-toolbox"
           open={toolboxActive ? true : undefined}
         >
@@ -162,7 +175,7 @@ export function Sidebar() {
               </section>
             ))}
           </div>
-        </details>
+        </details>}
 
         <div className="studio-nav-more" ref={moreRef}>
           <button
@@ -184,15 +197,15 @@ export function Sidebar() {
             <div
               id="studio-mobile-more-menu"
               className="studio-nav-more-menu glass"
-              aria-label="More studio destinations"
+              aria-label={automation ? "More automation destinations" : "More studio destinations"}
               onClick={(event) => {
                 if ((event.target as HTMLElement).closest("a")) {
                   setMoreOpenForPath(null);
                 }
               }}
             >
-              {COMPACT_MORE_ITEMS.map((item) => <NavItem key={item.href} {...item} compactOnly />)}
-              {MOBILE_CORE_ITEMS.map((item) => (
+              {compactMoreItems.map((item) => <NavItem key={item.href} {...item} compactOnly />)}
+              {mobileCoreItems.map((item) => (
                 <NavItem
                   key={item.href}
                   href={item.href}
@@ -200,7 +213,7 @@ export function Sidebar() {
                   icon={item.icon}
                 />
               ))}
-              <details
+              {!automation && <details
                 className="studio-toolbox studio-mobile-toolbox"
                 open={toolboxActive ? true : undefined}
               >
@@ -235,7 +248,7 @@ export function Sidebar() {
                     </section>
                   ))}
                 </div>
-              </details>
+              </details>}
               <NavItem {...SETTINGS_ITEM} />
             </div>
           )}

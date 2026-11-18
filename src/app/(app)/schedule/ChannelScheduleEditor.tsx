@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChannelAvatar } from "@/components/ChannelArt";
+import { channelScheduleWriteFence } from "@/lib/channelScheduleWriteFence";
 import {
   DOW,
   channelHref,
@@ -21,14 +22,7 @@ type DraftSchedule = {
 };
 
 export function channelScheduleEditorKey(channel: ChannelRow): string {
-  return [
-    channel._id,
-    channel.schedule?.frequency,
-    channel.schedule?.days?.join(","),
-    channel.schedule?.timezone,
-    channel.schedule?.localTime,
-    channel.schedule?.enabled,
-  ].join(":");
+  return channel._id;
 }
 
 function scheduleDraft(channel: ChannelRow): DraftSchedule {
@@ -46,7 +40,7 @@ function scheduleDraft(channel: ChannelRow): DraftSchedule {
         : [],
     timezone: channel.schedule?.timezone ?? "UTC",
     localTime: channel.schedule?.localTime ?? "09:00",
-    enabled: channel.schedule?.enabled !== false,
+    enabled: channel.schedule?.enabled === true,
   };
 }
 
@@ -65,10 +59,21 @@ export function ChannelScheduleEditor({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Notice | null>(null);
+  const editVersion = useRef(0);
+  const incomingFence = channelScheduleWriteFence(channel.schedule);
+  const [baseline, setBaseline] = useState(incomingFence);
+  const lastSynced = useRef(incomingFence);
+  useEffect(() => {
+    if (incomingFence === lastSynced.current || dirty || saving) return;
+    setDraft(scheduleDraft(channel));
+    setBaseline(incomingFence);
+    lastSynced.current = incomingFence;
+  }, [channel, incomingFence, dirty, saving]);
   const usesTimeDefaults = !channel.schedule?.timezone || !channel.schedule?.localTime;
   const usesDays = draft.frequency === "weekly" || draft.frequency === "biweekly";
 
   const update = (patch: Partial<DraftSchedule>) => {
+    editVersion.current++;
     setDraft((current) => ({ ...current, ...patch }));
     setDirty(true);
     setMessage(null);
@@ -81,6 +86,7 @@ export function ChannelScheduleEditor({
     }
     setSaving(true);
     setMessage(null);
+    const savingVersion = editVersion.current;
     try {
       const response = await fetch("/api/channel-settings", {
         method: "POST",
@@ -88,6 +94,7 @@ export function ChannelScheduleEditor({
         body: JSON.stringify({
           action: "schedule",
           channelId: channel._id,
+          expectedScheduleFence: baseline,
           schedule: {
             frequency: draft.frequency,
             days: usesDays ? (draft.days.length ? draft.days : [1]) : undefined,
@@ -97,10 +104,12 @@ export function ChannelScheduleEditor({
           },
         }),
       });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      const result = (await response.json().catch(() => ({}))) as { error?: string; schedule?: unknown };
       if (!response.ok) throw new Error(result.error ?? "Schedule update failed");
-      setDirty(false);
-      setMessage({ tone: "ok", text: "Schedule saved" });
+      setBaseline(channelScheduleWriteFence(result.schedule));
+      const changedWhileSaving = editVersion.current !== savingVersion;
+      setDirty(changedWhileSaving);
+      setMessage({ tone: "ok", text: changedWhileSaving ? "Saved; newer edits are not saved" : "Schedule saved" });
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : "Schedule update failed" });
     } finally {

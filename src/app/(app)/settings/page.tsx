@@ -649,7 +649,7 @@ function ChannelSettingsPanel({
   const [timezone, setTimezone] = useState(schedule.timezone ?? "UTC");
   const [localTime, setLocalTime] = useState(schedule.localTime ?? "09:00");
   const [scheduleEnabled, setScheduleEnabled] = useState(
-    schedule.enabled !== false,
+    schedule.enabled === true,
   );
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(
     schedule.approvalMode ?? "manual",
@@ -837,11 +837,13 @@ function ChannelSettingsPanel({
       const result = (await response.json().catch(() => ({}))) as {
         error?: string;
         dataPolicy?: string;
+        channelPauseWarning?: string;
+        providerWarning?: string;
       };
       if (!response.ok)
         throw new Error(result.error ?? "YouTube revocation failed");
       setMessage(
-        result.dataPolicy ?? "YouTube access revoked and channel paused.",
+        [result.dataPolicy ?? "YouTube access revoked.", result.channelPauseWarning, result.providerWarning ? `Google warning: ${result.providerWarning}` : null].filter(Boolean).join(" "),
       );
     } catch (revokeError) {
       onError(

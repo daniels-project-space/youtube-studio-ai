@@ -18,6 +18,8 @@ type StudioAuthCtx = Pick<StudioCtx, "auth">;
 const RESOURCE_KEYS = {
   channelId: "channels",
   targetChannelId: "channels",
+  fromChannelId: "channels",
+  toChannelId: "channels",
   runId: "runs",
   folderId: "channelFolders",
   connectorId: "youtubeAuth",

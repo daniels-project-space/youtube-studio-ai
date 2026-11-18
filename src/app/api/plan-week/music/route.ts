@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { assertPlanWeekPreparedMusicArgs } from "@/lib/planWeekPreparedMusicArgs";
@@ -20,11 +21,12 @@ export async function POST(request: Request) {
     const payload = assertPlanWeekPreparedMusicArgs({ ...(body as Record<string, unknown>), ownerId: actor.ownerId });
     if (!ownedBy(actor.ownerId, payload.manifestKey)) return NextResponse.json({ ok: false, error: "weekly music manifest is outside the signed-in owner namespace" }, { status: 403 });
     if (!process.env.TRIGGER_SECRET_KEY) return NextResponse.json({ ok: false, error: "weekly music preparation is not activated (no TRIGGER_SECRET_KEY)", inactive: true }, { status: 503 });
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const idempotencyKey = await idempotencyKeys.create(`plan-week-music:${actor.ownerId}:${payload.manifestSha256}`, { scope: "global" });
     const handle = await tasks.trigger("plan-week-prepared-music", payload, {
       concurrencyKey: `plan-week-music:${actor.ownerId}:${payload.channelId}`,
       idempotencyKey,
-    });
+    }, requestOptions);
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     return NextResponse.json({
       ok: true,
@@ -35,6 +37,7 @@ export async function POST(request: Request) {
     }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "could not queue weekly music preparation";
     return NextResponse.json({ ok: false, error: message }, { status: /invalid|must |outside|canonical/u.test(message) ? 422 : 500 });
   }

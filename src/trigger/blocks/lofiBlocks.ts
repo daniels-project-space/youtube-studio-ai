@@ -1799,6 +1799,8 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
     // is just ffmpeg time, not another upscale. Lofi has no narration so the
     // music plays at full volume the whole way (composeWithIntro skips ducking).
     const durationSec = Number(ctx.params.durationSec ?? 90);
+    const exactFinalDuration = options?.exactFinalDuration === true ||
+      ctx.params.exactFinalDuration === true || durationSec % 3600 !== 0;
     const duration = familyDurationContract("music_loop");
     const scaling = familyTimeScalingContract("music_loop");
     if (scaling.method !== "stream_loop") {
@@ -1811,7 +1813,7 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       || (durationSec - duration.minimumSeconds) % duration.stepSeconds !== 0
     ) {
       throw new Error(
-        `assemble: music-loop duration must be an authored 1–8 hour unit; received ${String(ctx.params.durationSec)}`,
+        `assemble: music-loop duration must be a whole minute between 1 and 8 hours; received ${String(ctx.params.durationSec)}`,
       );
     }
     const internalSeamDiff = Number(ctx.store["loopSourceInternalSeamDiff"]);
@@ -1909,11 +1911,11 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       const introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
       introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
       introApplied = Boolean(introCardPath);
-      if (options?.exactFinalDuration && (!Number.isFinite(introSec) || introSec < 0 || introSec >= durationSec ||
+      if (exactFinalDuration && (!Number.isFinite(introSec) || introSec < 0 || introSec >= durationSec ||
         (introCardPath && introSec === 0))) {
         throw new Error("assemble: intro must fit inside the exact requested final duration");
       }
-      const bodySec = options?.exactFinalDuration ? durationSec - introSec : durationSec;
+      const bodySec = exactFinalDuration ? durationSec - introSec : durationSec;
       videoDurationSec = introSec + bodySec;
       ctx.log(`assemble: prepend card (${introSec}s) + stream_loop body (${bodySec}s) for ${videoDurationSec}s @ ${W}x${H}…`);
       await composeWithIntro({
@@ -1932,7 +1934,7 @@ export function createLoopAssemblyBlock(prepareMusic?: (ctx: StageContext, direc
       });
     }
 
-    if (options?.exactFinalDuration) {
+    if (exactFinalDuration) {
       const delivered = await probe(finalPath);
       if (!Number.isFinite(delivered.durationSec) || Math.abs(delivered.durationSec - durationSec) > 0.001) {
         throw new Error(`assemble: rendered final duration ${delivered.durationSec}s does not match ${durationSec}s`);

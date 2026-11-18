@@ -1,5 +1,9 @@
 export class SettingsValidationError extends Error {}
 
+export function isValidChannelBudget(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000;
+}
+
 function numberInRange(
   value: unknown,
   name: string,
@@ -56,7 +60,7 @@ export function validatedSchedule(
     days: frequency === "weekly" || frequency === "biweekly" ? days : undefined,
     timezone,
     localTime,
-    enabled: merged.enabled !== false,
+    enabled: merged.enabled === true,
     approvalMode: approvalMode as "manual" | "private_auto",
     dailyQuota: numberInRange(merged.dailyQuota ?? 1, "dailyQuota", 1, 50),
     maxConcurrent: numberInRange(

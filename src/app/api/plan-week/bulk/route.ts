@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { buildPlanWeekBulkOrder } from "@/lib/planWeekBulk";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -140,6 +141,7 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const { idempotencyKeys, tasks } = await import("@trigger.dev/sdk");
     const idempotencyKey = await idempotencyKeys.create(
       `plan-week-bulk:${order.ownerId}:${order.requestKey}:${order.fingerprint}`,
@@ -154,7 +156,7 @@ export async function POST(request: Request) {
     }, {
       concurrencyKey: `plan-week-bulk:${order.ownerId}`,
       idempotencyKey,
-    });
+    }, requestOptions);
     return NextResponse.json({
       ok: true,
       state: "queued",
@@ -166,6 +168,7 @@ export async function POST(request: Request) {
       triggerRunId: handle.id,
     }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "could not queue bulk planner";
     const status = /required|invalid|must |cannot exceed|exceeds caller cap|identifiers|unique|object/i.test(message)
       ? 422

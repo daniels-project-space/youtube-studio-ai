@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
+import { PrivateTriggerStatusError, retrievePrivateTriggerStatus } from "@/lib/privateTriggerStatus";
 import { OWNER_ID } from "@/lib/config";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 import {
@@ -112,6 +114,7 @@ export async function POST(request: Request) {
     );
   }
   try {
+    const requestOptions = privateTriggerRequestOptions(process.env);
     // Advanced-editor param overrides are sanitized (unknown blocks/keys
     // dropped, numbers clamped) before reaching the modular task.
     let design = body.design;
@@ -765,6 +768,7 @@ export async function POST(request: Request) {
         "design-channel",
         { ...design, ownerId: OWNER_ID },
         { idempotencyKey },
+        requestOptions,
       );
     })();
     return NextResponse.json({
@@ -773,6 +777,7 @@ export async function POST(request: Request) {
       slug: channelSlug,
     });
   } catch (err) {
+    if (err instanceof PrivateTriggerTargetError) return NextResponse.json({ error: err.message, inactive: true }, { status: 503 });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "trigger failed" },
       { status: 500 },
@@ -789,6 +794,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "inactive", inactive: true }, { status: 503 });
   }
   try {
+    if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1") {
+      const run = await retrievePrivateTriggerStatus(process.env, id);
+      return NextResponse.json(run, { headers: { "Cache-Control": "private, no-store" } });
+    }
     const { runs } = await import("@trigger.dev/sdk");
     const run = await runs.retrieve(id);
     return NextResponse.json({
@@ -797,6 +806,11 @@ export async function GET(request: Request) {
       error: run.error ?? null,
     });
   } catch (err) {
+    if (process.env.YOUTUBE_AUTOMATION_PRIVATE === "1") {
+      const message = err instanceof PrivateTriggerStatusError || err instanceof PrivateTriggerTargetError
+        ? err.message : "Private Trigger status is unavailable.";
+      return NextResponse.json({ error: message, inactive: true }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "retrieve failed" },
       { status: 500 },

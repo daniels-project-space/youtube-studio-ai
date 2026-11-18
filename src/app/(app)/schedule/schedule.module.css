@@ -706,6 +706,21 @@ a.nextRelease:focus-visible { border-radius: 8px; outline: 2px solid var(--color
 .sectionHeader { margin-bottom: 0.85rem; }
 .sectionHeader > span { color: var(--color-faint); font-size: 0.7rem; }
 
+.weekNavigation { display: flex; align-items: center; gap: 0.35rem; }
+.weekNavigation button {
+  min-width: 36px;
+  height: 34px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--color-fg);
+  cursor: pointer;
+}
+.weekNavigation button:hover:not(:disabled) { border-color: var(--color-accent); }
+.weekNavigation button:focus-visible { outline: 2px solid var(--color-secondary); outline-offset: 2px; }
+.weekNavigation button:disabled { opacity: 0.5; cursor: default; }
+
 .weekBoard {
   display: grid;
   grid-template-columns: repeat(7, minmax(142px, 1fr));
@@ -1192,4 +1207,58 @@ a.nextRelease:focus-visible { border-radius: 8px; outline: 2px solid var(--color
   .dayColumn { transition: none; }
   .nextReleaseSignal i,
   .rhythmDay > i { animation: none; }
+}
+
+/* Calendar workspace */
+.scheduleHero { border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; margin-bottom: 1rem; }
+.scheduleHero::before { display: none; }
+.heroGrid { display: block; padding: 0 0 0.85rem; }
+.heroCopy { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.heroCopy > .eyebrow { display: none; }
+.heroCopy h1 { margin: 0; font-size: 1.8rem; line-height: 1.2; letter-spacing: 0; }
+.nextRelease { margin: 0 0 0 auto; padding: 0; border: 0; max-width: 320px; }
+.rhythmPanel { display: none; }
+.heroControls { flex-wrap: wrap; justify-content: flex-start; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(255,255,255,.025); padding: .65rem; }
+.scopeControl { min-width: 190px; }
+.metrics { margin-left: auto; }
+.scheduleWorkspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 1rem; align-items: start; }
+.scheduleMain { min-width: 0; }
+.scheduleWorkspace:has(> .scheduleMain:only-child) { grid-template-columns: minmax(0, 1fr); }
+.scheduleAside { min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(255,255,255,.025); padding: .85rem; }
+.asideHeading { display: flex; justify-content: space-between; gap: .5rem; align-items: end; margin-bottom: .8rem; }
+.asideHeading h2 { margin: .2rem 0 0; font-size: 1rem; }
+.asideHeading > span, .asideHint { color: var(--color-faint); font-size: .7rem; }
+.asideHint { line-height: 1.4; }
+.scheduleAside .scheduleCard { border-radius: 7px; padding: .75rem; }
+.scheduleAside .scheduleCardHeader { align-items: flex-start; flex-direction: column; }
+.scheduleAside .scheduleFields { grid-template-columns: 1fr; }
+.scheduleAside .weekdayPicker { gap: .15rem; }
+.weekBoard { gap: 0; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(0,0,0,.12); }
+.dayColumn { border: 0; border-right: 1px solid var(--color-border); border-radius: 0; background: none; min-height: 250px; }
+.dayColumn:last-child { border-right: 0; }
+.dayColumn:hover { transform: none; }
+.dayColumnHeader { min-height: 52px; }
+.dayEmpty { border: 0; min-height: 140px; text-transform: none; letter-spacing: 0; }
+.dayEvent { border-radius: 6px; }
+.reviewQueue { border: 1px solid var(--color-border); border-radius: 8px; padding: .85rem; background: rgba(255,255,255,.02); }
+.reviewQueue .section { margin: 0; }
+.reviewQueue .upcomingList { gap: 0; }
+.reviewQueue .upcomingCard { border: 0; border-bottom: 1px solid var(--color-border); border-left: 3px solid; border-radius: 0; background: none; box-shadow: none; }
+.reviewQueue .upcomingCard:last-child { border-bottom: 0; }
+@media (max-width: 1100px) {
+  .scheduleWorkspace { grid-template-columns: minmax(0, 1fr); }
+  .scheduleAside .scheduleFields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .scheduleHero { margin-inline: 0; }
+  .heroGrid { padding: 0 0 .75rem; }
+  .heroCopy h1 { margin: 0; font-size: 1.45rem; line-height: 1.2; }
+  .nextRelease { width: 100%; max-width: none; margin: .3rem 0 0; }
+  .heroControls { align-items: stretch; }
+  .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem 0; margin: 0; }
+  .metric { min-width: 0; }
+  .metric:nth-child(3) { border-left: 0; padding-left: 0; }
+  .scheduleAside .scheduleFields { grid-template-columns: 1fr 1fr; }
+  .scheduleAside .scheduleFields label:last-child { grid-column: 1 / -1; }
+  .reviewQueue { padding: .65rem; }
 }

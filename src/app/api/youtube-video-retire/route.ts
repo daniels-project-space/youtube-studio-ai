@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { LegacyVideoRetirementReason } from "@/lib/legacyVideoCleanup";
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
       );
     }
     const requested = body(await request.json());
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const convex = client();
     const shell = await convex.mutation(
       youtubeVideoRetirementRuntimeApi.createPlanShell,
@@ -155,6 +157,7 @@ export async function POST(request: Request) {
           concurrencyKey: triggerRequest.concurrencyKey,
           idempotencyKey,
         },
+        requestOptions,
       );
       await convex.mutation(youtubeVideoRetirementRuntimeApi.markQueued, {
         ownerId: actor.ownerId,
@@ -186,6 +189,7 @@ export async function POST(request: Request) {
         { status: error.status },
       );
     }
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error
       ? error.message
       : "Could not retire the YouTube video";

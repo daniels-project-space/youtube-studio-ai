@@ -1,5 +1,6 @@
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 
 import {
   ERNIE_THUMBNAIL_REFRESH_BATCH_CANDIDATE_COUNT,
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "ERNIE thumbnail batch worker is not deployed" }, { status: 503 });
     }
     body(await request.json());
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const batchFingerprint = ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_SHA256;
     const approval = issueStudioActionApproval({
       action: "thumbnail-ernie-batch-apply",
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     }, {
       concurrencyKey: ownerId,
       idempotencyKey,
-    });
+    }, requestOptions);
     return NextResponse.json({
       ok: true,
       state: "queued",
@@ -70,6 +72,7 @@ export async function POST(request: Request) {
     if (error instanceof StudioAuthError) {
       return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
     }
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "Could not queue the reviewed ERNIE thumbnail batch";
     const status = /type|unrecognized|different Studio owner/i.test(message) ? 422 : 500;
     return NextResponse.json({ ok: false, error: message }, { status });

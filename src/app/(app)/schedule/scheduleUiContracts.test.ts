@@ -17,6 +17,8 @@ assert.match(page, /summary\.pinned/,
   "the schedule header must distinguish pinned exceptions from cadence projections");
 assert.match(page, /api\.contentPlan\.setScheduledAt/,
   "the redesigned exact-date control must remain connected to the scheduling mutation");
+assert.equal((page.match(/expectedScheduledAt: event\.savedScheduledAt \?\? null/g) ?? []).length, 2,
+  "pin and unpin must both submit the saved baseline shown in the calendar");
 assert.match(page, /useOperationsAccess/,
   "schedule edits must read the shared owner capability before mutating");
 assert.match(page, /if \(operationsAccess !== "owner"\)/,
@@ -30,6 +32,8 @@ assert.match(page, /channelHref\(nextEvent\.slug, "week-ahead", nextEvent\.id\)/
 assert.match(page, /Seven-day board/);
 assert.match(page, /Month map/);
 assert.match(page, /Cadence controls/);
+assert.match(page, /effectiveScope === "all" \? \([\s\S]*?Choose a channel above to view its schedule\.[\s\S]*?\) : visibleChannels\.length > 0 \? \([\s\S]*?<ChannelScheduleEditor/,
+  "the calendar must not expose the first channel's editor in all-channel scope");
 assert.match(board, /aspectRatio="16 \/ 9"/,
   "the operational week board must show packaging artwork at a legible video ratio");
 assert.match(board, /prioritizedPreviews < 3/,
@@ -50,6 +54,9 @@ assert.doesNotMatch(queue, /useAssetUrl\(/,
 const cadence = readFileSync(`${here}/ChannelScheduleEditor.tsx`, "utf8");
 assert.match(cadence, /onRequestOwner/);
 assert.match(cadence, /Verify owner to save/);
+assert.match(cadence, /return channel\._id;/, "schedule refreshes must not remount and discard drafts");
+assert.match(cadence, /expectedScheduleFence: baseline/, "calendar writes must carry the edited baseline");
+assert.match(cadence, /editVersion\.current !== savingVersion/, "edits made during a save must remain unsaved");
 assert.doesNotMatch(page, /<PageHeader/,
   "Schedule must keep its own release-clock composition instead of the generic page header");
 assert.match(page, /<WeekBulkPlanner/,

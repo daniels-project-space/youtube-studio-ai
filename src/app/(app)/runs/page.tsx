@@ -31,7 +31,9 @@ export default function RunsPage() {
   const [filter, setFilter] = useState<RunFilter>("all");
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_RUNS);
 
-  const runs = useQuery(api.runs.listRecent, { ownerId, limit: 200 }) as
+  const runs = useQuery(api.runs.listRecent, {
+    ownerId, limit: 200, ...(selectedSlug ? { channelSlug: selectedSlug } : {}),
+  }) as
     | RunRow[]
     | undefined;
 
@@ -53,8 +55,9 @@ export default function RunsPage() {
       <header className={styles.hero}>
         <div>
           <h1>Runs</h1>
+          <p>Latest 200 runs {selectedSlug ? "for this channel" : "across all channels"}</p>
         </div>
-        <dl className={styles.heroFacts} aria-label="Production totals">
+        <dl className={styles.heroFacts} aria-label="Totals for the latest 200 runs">
           <div><dt>On YouTube</dt><dd>{runs === undefined ? "—" : outputCount}</dd></div>
           <div><dt>Spend</dt><dd>{runs === undefined ? "—" : fmtUsd(totalCost)}</dd></div>
         </dl>

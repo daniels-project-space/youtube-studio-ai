@@ -54,7 +54,11 @@ assert.match(page, /className=\{styles\.fieldMobileDirectory\}/,
 assert.match(css, /\.fieldNodeAction\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
   "desktop graph links must retain a 44px CSS-pixel target");
 assert.match(page, /Cumulative views/);
-assert.match(page, /Published inventory/);
+assert.match(page, /Recorded upload IDs/);
+assert.doesNotMatch(page, /Published inventory|observed released videos/i, "an upload ID does not establish public visibility");
+assert.match(page, /analyticsFleetRowsForMetric\(rows, metric, snapshotChannelIds\)/, "reach comparisons omit channels without observations");
+assert.match(page, /snapshotChannelIds\.has\(row\.channelId\)/, "the reach map does not plot missing snapshots as zero");
+assert.doesNotMatch(page, /Math\.max\(0\.015, row\[metric\] \/ peak\)/, "a recorded zero must not produce a positive bar");
 assert.doesNotMatch(page, /<PageHeader/);
 
 const operationsCheck = page.indexOf('fetch("/api/operations/elevation"');

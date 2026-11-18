@@ -14,6 +14,7 @@ const channels = [
 ];
 const runs = [0,1,2,3,4,5].map(i => ({ _id: `run${i}`, status: "failed", costTotal: .25, channelName: "Alpha", channelSlug: "alpha" }));
 const summaries = channels.map((c,i) => ({ channelId: c._id, slug: c.slug, name: c.name,
+  hasAnalytics: true,
   subscriberCount: i+1, totalViews: i === 2 ? 9000 : i === 0 ? 0 : 20,
   costTotal: i+1, videoCount: i+1 }));
 const ready = {
@@ -45,12 +46,24 @@ try {
   const { default: Page } = require("./page") as typeof import("./page");
   const render = () => renderToStaticMarkup(createElement(Page));
   let html = render();
+  assert.match(html, /Recurring schedules paused/);
+  assert.match(html, /Individual queued items are managed separately/);
+  data["channels:listChannels"] = [{ ...channels[0], schedule: { enabled: true } }, channels[2]];
+  html = render();
+  assert.match(html, /1 recurring schedule enabled/);
+  data["channels:listChannels"] = channels;
+  calls.length = 0;
+  html = render();
+  assert.match(html, /<h1>Channel overview<\/h1>/);
+  assert.match(html, /No saved renders found among the most recent 200 runs/);
+  assert.ok(html.indexOf('data-channel-rail') < html.indexOf('aria-label="Studio control overview"'),
+    "channel identities should precede the operational summary");
   assert.doesNotMatch(html, /50-run spend|ON AIR|Master controls|Live route|>Published</);
   assert.match(html, /href="\/golden"/, "the visual module catalog remains reachable from Studio");
   for (const run of runs) assert.ok(html.includes(`data-issue-key="failed:${run._id}"`), "same-channel failures must all be reachable");
   assert.equal((html.match(/data-issue-key=/g) ?? []).length, 8, "six failures and both active connectors");
-  assert.ok(html.includes('Recorded views</small><strong>20</strong>'), "only operating-channel analytics");
-  assert.ok(html.includes('YouTube uploads</small><strong>3</strong>'), "upload IDs are not public-release proof");
+  assert.ok(html.includes('Recorded views</small><strong>9K</strong>'), "all-channel analytics include paused channels");
+  assert.ok(html.includes('Recorded upload IDs</small><strong>10</strong>'), "upload IDs are not public-release proof");
   assert.match(html, /--bar-width:0%/, "zero recorded views must not create a positive bar");
   assert.ok(html.includes('6 recent · $1.50'));
   assert.ok(html.includes('0% success · 6 completed'));
@@ -67,11 +80,30 @@ try {
   selectedSlug = "beta"; html = render();
   assert.match(html, /data-channel-slug="beta"/, "selected family members remain accessible");
   assert.doesNotMatch(html, /data-channel-slug="alpha"|failed:run/);
-  assert.ok(html.includes('YouTube uploads</small><strong>2</strong>'));
+  assert.ok(html.includes('Recorded upload IDs</small><strong>2</strong>'));
   assert.ok(html.includes('0 recent · $0.00'));
   selectedSlug = "paused"; html = render();
   assert.ok(html.includes('Recorded views</small><strong>9K</strong>'), "explicit paused selection works");
   assert.doesNotMatch(html, /data-issue-key=/);
+
+  selectedSlug = "missing"; calls.length = 0; html = render();
+  assert.match(html, /Selected channel is unavailable/);
+  assert.ok(!calls.includes("videos:listVideos"), "an unresolved channel must not fall back to all-channel renders");
+  data["channels:listChannels"] = undefined; calls.length = 0; html = render();
+  assert.match(html, /Loading channel\.\.\./);
+  assert.ok(!calls.includes("videos:listVideos"), "a loading channel must not display another channel's renders");
+  data["channels:listChannels"] = channels;
+
+  selectedSlug = null;
+  data["channels:listChannels"] = [channels[2]];
+  data["runs:listOverviewRuns"] = { active: [], recent: [] };
+  data["contentPlan:listPlanByOwner"] = [];
+  html = render();
+  assert.match(html, /Channel paused/);
+  assert.doesNotMatch(html, /Create a channel/, "paused channels are not an empty fleet");
+  data["channels:listChannels"] = channels;
+  data["contentPlan:listPlanByOwner"] = [ready];
+  data["runs:listOverviewRuns"] = { active: [], recent: runs };
 
   selectedSlug = null;
   const live = { ...runs[0], _id: "live", status: "running" };
@@ -87,10 +119,29 @@ try {
   html = render();
   assert.doesNotMatch(html, /<progress/);
   assert.match(html, /Running · open for stage details/);
+  const manualPaused = { ...live, _id: "manual-paused", channelName: "Paused", channelSlug: "paused" };
+  data["runs:listOverviewRuns"] = { active: [manualPaused], recent: [{ ...manualPaused, stageProgress: { completed: 2, total: 5, totalKnown: true } }] };
+  html = render();
+  assert.match(html, /1 in production/, "manual runs remain visible while their channel is paused");
+  assert.match(html, /<progress max="5" value="2"/, "the paused channel's live progress remains visible");
+  data["runs:listOverviewRuns"] = { active: [], recent: [{ ...manualPaused, status: "failed", pipelineSource: "frozen", manualPrivate: true }] };
+  html = render();
+  assert.match(html, /data-issue-key="failed:manual-paused"/, "a failed manual run remains visible after it stops");
+  data["runs:listOverviewRuns"] = { active: [], recent: [{ ...manualPaused, _id: "paused-legacy", status: "ok", manualPrivate: false }] };
+  data["contentPlan:listPlanByOwner"] = [{ ...ready, _id: "paused-plan", channelId: "paused", channelSlug: "paused", channelName: "Paused", topic: "Paused channel plan" }];
+  html = render();
+  assert.match(html, /href="\/runs\/paused-legacy"/, "paused channel history remains visible in the fleet");
+  assert.match(html, /Paused channel plan/, "paused channel plans remain visible in the fleet");
+  assert.match(html, /Not scheduled/, "an undated plan is not represented as an automatic release");
+  data["contentPlan:listPlanByOwner"] = [ready];
   data["runs:listOverviewRuns"] = { active: [], recent: runs };
 
   selectedSlug = null; data["analytics:channelSummary"] = undefined; html = render();
   assert.ok(html.includes('Recorded views</small><strong>—</strong>'), "loading is not zero");
+  data["analytics:channelSummary"] = summaries.map(row => ({ ...row, hasAnalytics: false })); html = render();
+  assert.ok(html.includes('Recorded views</small><strong>—</strong>'), "missing snapshots are not presented as zero");
+  data["analytics:channelSummary"] = summaries.map((row, i) => ({ ...row, hasAnalytics: i === 0 })); html = render();
+  assert.ok(html.includes('Recorded views · partial</small><strong>0</strong>'), "a real zero stays visible and incomplete coverage is labeled");
   data["channels:listChannels"] = undefined; html = render();
   assert.match(html, /Reading studio state/);
   assert.ok(html.includes('Plans ready</small><strong>—</strong>'));

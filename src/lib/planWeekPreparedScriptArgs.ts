@@ -41,8 +41,8 @@ export function assertPlanWeekPreparedScriptArgs(value: unknown): PlanWeekPrepar
   if (manifestKey !== planWeekPreparationKey({ ownerId, channelSlug, batchId, itemId })) {
     throw new Error("weekly prepared script manifest key is not canonical");
   }
-  const maxSeconds = raw.maxSeconds === undefined ? 240 : raw.maxSeconds;
-  if (typeof maxSeconds !== "number" || !Number.isFinite(maxSeconds) || maxSeconds < 30 || maxSeconds > 1_800) {
+  const maxSeconds = raw.maxSeconds;
+  if (maxSeconds !== undefined && (typeof maxSeconds !== "number" || !Number.isFinite(maxSeconds) || maxSeconds < 30 || maxSeconds > 1_800)) {
     throw new Error("weekly prepared script maxSeconds must be between 30 and 1800");
   }
   const maxCostUsd = raw.maxCostUsd;
@@ -51,7 +51,7 @@ export function assertPlanWeekPreparedScriptArgs(value: unknown): PlanWeekPrepar
   }
   return {
     ownerId, channelId, channelSlug, batchId, itemId, manifestKey, manifestSha256,
-    maxSeconds,
+    ...(maxSeconds === undefined ? {} : { maxSeconds: maxSeconds as number }),
     ...(typeof raw.language === "string" && raw.language.trim() ? { language: raw.language.trim() } : {}),
     ...(typeof raw.style === "string" && raw.style.trim() ? { style: raw.style.trim() } : {}),
     maxCostUsd,

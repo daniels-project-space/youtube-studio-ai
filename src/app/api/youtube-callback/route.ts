@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
+import { pauseAfterConnectorChange } from "@/lib/connectorPause";
 import { replaceChannelPublishPolicy } from "@/lib/channelPublishPolicy";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../../convex/_generated/api";
@@ -210,30 +212,29 @@ export async function GET(request: NextRequest) {
       evidence: "YouTube connector created or rotated; explicit publish reapproval required",
       convex,
     });
-    await convex.mutation(api.channels.updateChannel, {
-      channelId: channelId as Id<"channels">,
-      status: "paused",
-    });
+    const channelPaused = await pauseAfterConnectorChange(convex, channelId as Id<"channels">, ownerId);
 
     // A newly connected channel should not look disconnected until the next
     // six-hour cadence. Queue one bounded, owner-scoped refresh now; its
     // durable cursor still prevents duplicate provider calls if the schedule
     // is already working on the same channel.
     //
-    // Branding and analytics are non-authoritative follow-ups to a successful
-    // connector write. A queue outage must never turn a completed Google
-    // consent flow into a false failure or weaken the explicit publish gate.
-    if (process.env.TRIGGER_SECRET_KEY) {
+    // Refreshing stats is read-only. Connecting a destination does not grant
+    // authority to replace its existing YouTube branding.
+    let statsRefreshUnavailable = false;
+    if (channelPaused && process.env.TRIGGER_SECRET_KEY) {
       try {
+        const requestOptions = privateTriggerRequestOptions(process.env);
         const { tasks } = await import("@trigger.dev/sdk");
-        await Promise.all([
-          tasks.trigger("wire-youtube-branding", { channelId }),
-          tasks.trigger("stats-refresh", { ownerId }),
-        ]);
-      } catch { /* follow-up automation is best-effort; the link itself succeeded */ }
+        if (requestOptions) await tasks.trigger("stats-refresh", { ownerId }, undefined, requestOptions);
+        else await tasks.trigger("stats-refresh", { ownerId });
+      } catch (error) {
+        if (error instanceof PrivateTriggerTargetError) statsRefreshUnavailable = true;
+        /* Follow-up automation is best-effort; the link itself succeeded. */
+      }
     }
 
-    return redirectAndClearNonce(`${BASE}/channels/${slug}?yt=connected`);
+    return redirectAndClearNonce(`${BASE}/channels/${slug}?yt=${channelPaused ? "connected" : "connected_unpaused"}${statsRefreshUnavailable ? "&stats=unavailable" : ""}`);
   } catch (e) {
     return redirectAndClearNonce(
       `${BASE}/channels?yt=error&msg=${encodeURIComponent(e instanceof Error ? e.message : "callback failed")}`,

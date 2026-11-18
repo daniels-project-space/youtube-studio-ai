@@ -206,7 +206,7 @@ function NavButton({ children, onClick, label, flip }: {
       className={styles.navButton}
       onClick={onClick}
       aria-label={label}
-      style={{ transform: flip ? "rotate(180deg)" : undefined }}
+      style={{ transform: flip ? "rotate(90deg)" : "rotate(-90deg)" }}
     >
       {children}
     </button>

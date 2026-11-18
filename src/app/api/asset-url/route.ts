@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { presignDownload } from "@/lib/storage";
+import { headObjectMetadata, presignDownload } from "@/lib/storage";
 import { OWNER_ID } from "@/lib/config";
 
 /**
@@ -62,6 +62,20 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Historical copies may use immutable extensionless object keys. Resolve
+    // their recorded storage MIME once rather than guessing from the key.
+    if (key.startsWith(`${ownerPrefix}historical-library/`) && !responseContentType(key)) {
+      const metadata = await headObjectMetadata(key);
+      const type = metadata?.contentType?.toLowerCase().split(";")[0];
+      const formats: Record<string, [string, string]> = {
+        "video/mp4": ["asset-video", "mp4"], "video/webm": ["asset-video", "webm"],
+        "image/jpeg": ["asset-image", "jpg"], "image/png": ["asset-image", "png"],
+        "image/webp": ["asset-image", "webp"], "image/gif": ["asset-image", "gif"],
+      };
+      const media = type ? formats[type] : undefined;
+      if (!media) return NextResponse.json({ error: "Unsupported historical media type" }, { status: 415 });
+      return NextResponse.json({ url: `/api/${media[0]}?key=${encodeURIComponent(key)}&format=${media[1]}` }, { headers: { "Cache-Control": "private, max-age=600" } });
+    }
     // R2's direct endpoint can return an opaque/ambiguous response for image
     // objects (Chromium then blocks it with ORB). Keep the browser-facing
     // image path same-origin; the proxy below still enforces this exact owner

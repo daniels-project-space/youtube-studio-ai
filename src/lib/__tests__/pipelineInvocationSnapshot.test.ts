@@ -166,6 +166,18 @@ const baseClaim = {
   sha256: hash,
 };
 assert.equal(decidePipelineInvocationClaim(baseClaim).kind, "new");
+assert.throws(
+  () => decidePipelineInvocationClaim({ ...baseClaim, sha256: "f".repeat(64) }),
+  /content hash mismatch/,
+);
+assert.throws(
+  () => decidePipelineInvocationClaim({
+    ...baseClaim,
+    sha256: "f".repeat(64),
+    run: { ...baseClaim.run, snapshot: frozen, sha256: "f".repeat(64) },
+  }),
+  /content hash mismatch/,
+);
 assert.equal(decidePipelineInvocationClaim({
   ...baseClaim,
   run: { ...baseClaim.run, snapshot: frozen, sha256: hash },

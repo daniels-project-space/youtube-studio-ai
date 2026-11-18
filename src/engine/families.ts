@@ -311,7 +311,7 @@ export const FAMILY_DURATION_CONTRACTS: Readonly<Record<FamilyKey, FamilyDuratio
     minimumSeconds: 3_600,
     maximumSeconds: 28_800,
     defaultSeconds: 7_200,
-    stepSeconds: 3_600,
+    stepSeconds: 60,
     inputUnit: "hours",
     rationale: "A sealed 30-second visual unit streams under an original mastered mix for one to eight hours.",
   },
@@ -496,6 +496,9 @@ export function familyEpisodeLengthError(family: FamilyKey, value: unknown): str
   const seconds = Math.round(minutes * 60);
   if (seconds < contract.minimumSeconds || seconds > contract.maximumSeconds) {
     return `${FAMILIES[family].label} supports ${formatFamilyDurationContract(family)} per episode; received ${seconds} sec.`;
+  }
+  if (family === "music_loop" && (seconds - contract.minimumSeconds) % contract.stepSeconds !== 0) {
+    return `${FAMILIES[family].label} requires whole-minute episode durations; received ${seconds} sec.`;
   }
   return undefined;
 }

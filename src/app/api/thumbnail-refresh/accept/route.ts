@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
       );
     }
     const requested = body(await request.json());
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const convex = client();
     const shell = await convex.mutation(
       youtubeThumbnailReplacementRuntimeApi.createPlanShell,
@@ -134,6 +136,7 @@ export async function POST(request: Request) {
           concurrencyKey: triggerRequest.concurrencyKey,
           idempotencyKey,
         },
+        requestOptions,
       );
       await convex.mutation(youtubeThumbnailReplacementRuntimeApi.markQueued, {
         ownerId: actor.ownerId,
@@ -161,6 +164,7 @@ export async function POST(request: Request) {
     if (error instanceof StudioAuthError) {
       return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
     }
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "Could not apply the thumbnail";
     const status = /invalid|confirm|binding|candidate|reconnect|changed|unrecognized|requires/i.test(message)
       ? 422

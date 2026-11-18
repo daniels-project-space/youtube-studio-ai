@@ -31,12 +31,20 @@ function eventTime(event: CalendarEvent) {
 export function DayByDaySchedule({
   events,
   today,
+  weekStart,
+  onPrevious,
+  onToday,
+  onNext,
 }: {
   events: CalendarEvent[];
   today: Date;
+  weekStart: Date;
+  onPrevious: () => void;
+  onToday: () => void;
+  onNext: () => void;
 }) {
   const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + index);
+    const date = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + index);
     const key = civilDayKey(date);
     return {
       date,
@@ -52,18 +60,22 @@ export function DayByDaySchedule({
     <section className={styles.section} aria-labelledby="day-by-day-title">
       <div className={styles.sectionHeader}>
         <div>
-          <span className={styles.eyebrow}>Next seven days</span>
+          <span className={styles.eyebrow}>Seven-day calendar</span>
           <h2 id="day-by-day-title">Day by day</h2>
         </div>
-        <span>Exact channel-local publishing times</span>
+        <div className={styles.weekNavigation}>
+          <button type="button" onClick={onPrevious} aria-label="Previous seven days">&#8249;</button>
+          <button type="button" onClick={onToday} disabled={civilDayKey(weekStart) === civilDayKey(today)}>Today</button>
+          <button type="button" onClick={onNext} aria-label="Next seven days">&#8250;</button>
+        </div>
       </div>
 
       <div className={styles.weekBoard}>
-        {days.map(({ date, key, events: dayEvents }, index) => (
-          <article className={styles.dayColumn} data-today={index === 0} key={key}>
+        {days.map(({ date, key, events: dayEvents }) => (
+          <article className={styles.dayColumn} data-today={key === civilDayKey(today)} key={key}>
             <header className={styles.dayColumnHeader}>
               <div>
-                <span>{index === 0 ? "Today" : date.toLocaleDateString("en-GB", { weekday: "short" })}</span>
+                <span>{key === civilDayKey(today) ? "Today" : date.toLocaleDateString("en-GB", { weekday: "short" })}</span>
                 <strong>{date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</strong>
               </div>
               <small>{dayEvents.length || "—"}</small>

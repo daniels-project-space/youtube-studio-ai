@@ -72,6 +72,7 @@ export type CalendarEvent = {
   readiness: PlanReadiness | "published";
   id?: string;
   pinned?: boolean;
+  savedScheduledAt?: number | null;
   usesScheduleDefaults?: boolean;
 };
 
@@ -201,7 +202,7 @@ export function buildCalendarModel({
       continue;
     }
     const isPinned = item.scheduledAt !== undefined && Number.isFinite(item.scheduledAt);
-    if (channel.schedule?.enabled === false && !isPinned) {
+    if (channel.schedule?.enabled !== true && !isPinned) {
       excludedCounts.disabled += 1;
       continue;
     }
@@ -238,6 +239,7 @@ export function buildCalendarModel({
         readiness: planReadiness(item.status, item.thumbnailKey),
         id: item._id,
         pinned,
+        savedScheduledAt: item.scheduledAt ?? null,
         usesScheduleDefaults,
       });
     });

@@ -9,7 +9,8 @@ const source = [
 const before = JSON.stringify(source);
 const result = buildManualPrivateVideoPipeline(source);
 assert.equal(JSON.stringify(source), before);
-assert.deepEqual(result.slice(0, 3), source.slice(0, 3), "full duration and all creative settings remain unchanged");
+assert.deepEqual(result.slice(0, 2), source.slice(0, 2), "script and topic settings remain unchanged");
+assert.deepEqual(result[2].params, { durationSec: 1800, exactFinalDuration: true }, "manual assembly pins the final clock");
 assert.deepEqual(result.map(entry => entry.block), ["topic_select", "script_gen", "assemble", "qa_visual"]);
 assert.equal(result.at(-1)?.params?.channelInceptionProbeThumbnailMode, "deferred_mvp");
 console.log("Manual private video retains requested duration and excludes delivery and thumbnail generation");

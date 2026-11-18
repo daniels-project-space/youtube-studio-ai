@@ -1742,6 +1742,32 @@ export default function NewChannelWizard() {
                         <strong>{hours}</strong><span>hr</span>
                       </button>
                     ))}
+                    <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span>Minutes</span>
+                      <input
+                        key={lengthMinutes}
+                        aria-label="Episode duration in minutes"
+                        type="number"
+                        min={duration.minimumSeconds / 60}
+                        max={duration.maximumSeconds / 60}
+                        step={duration.stepSeconds / 60}
+                        defaultValue={lengthMinutes}
+                        onBlur={(event) => {
+                          const value = event.currentTarget.valueAsNumber;
+                          if (!Number.isFinite(value)) {
+                            event.currentTarget.value = String(lengthMinutes);
+                            return;
+                          }
+                          const next = clampFamilyEpisodeLengthMinutes(family as FamilyKey, value);
+                          event.currentTarget.value = String(next);
+                          setLengthMinutes(next);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                        style={{ ...inpStyle, width: 90 }}
+                      />
+                    </label>
                     <small>2 × 15 sec source · streamed</small>
                   </div>
                 ) : (

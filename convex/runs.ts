@@ -13,6 +13,9 @@ import {
   type PipelineInvocationSnapshot,
 } from "../src/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "../src/lib/pipelineInvocationHash";
+import { assertRouteQualificationBenchmarkInvocationBinding } from "../src/lib/routeQualificationBenchmarkInvocationBinding";
+import { assertCurrentCandidateBenchmarkInvocation } from "../src/lib/candidateBenchmarkInvocation";
+import { manualPrivateRequestFingerprint } from "../src/lib/manualPrivateRequestFingerprint";
 import { verifiedWorkerDeploymentFields, workerDeploymentValidator, type WorkerDeploymentFields } from "./pipelineWorkerDeploymentTransport";
 import { frozenRunPipelinePresentation } from "../src/lib/runPipelinePresentation";
 import { summarizeRunStageProgress } from "../src/lib/runStageProgress";
@@ -2515,6 +2518,15 @@ export const claimProbeDispatchEnvelope = mutation({
         reused: true,
       };
     }
+    if (run.probeDispatchKey?.startsWith("manual-private-video:")) {
+      const channel = await ctx.db.get(args.channelId);
+      if (!channel || channel.ownerId !== args.ownerId ||
+          typeof run.manualPrivateMaximumCostUsd !== "number" ||
+          envelope.maximumCostUsd !== run.manualPrivateMaximumCostUsd ||
+          run.manualPrivateRequestFingerprint !== manualPrivateRequestFingerprint(channel, run.manualPrivateMaximumCostUsd)) {
+        throw new Error("Manual private video settings changed before the request was sealed");
+      }
+    }
     const claimedAt = Date.now();
     await ctx.db.patch(args.runId, {
       probeDispatchEnvelope: envelope,
@@ -2598,6 +2610,13 @@ export const claimInvocationSnapshot = mutation({
       sha256: args.sha256,
     });
     const incoming = normalizePipelineInvocationSnapshot(decision.snapshot);
+    assertRouteQualificationBenchmarkInvocationBinding({ ownerId: args.ownerId, channelId: String(args.channelId), runId: String(args.runId), envelope: run.routeQualificationBenchmarkDispatchEnvelope, storedEnvelopeFingerprint: run.routeQualificationBenchmarkDispatchEnvelopeFingerprint, snapshot: incoming, candidateInvocationInput: run.routeQualificationBenchmarkCandidateInvocationInput, candidateTarget: run.routeQualificationBenchmarkCandidate });
+    if (decision.kind !== "reused" && run.routeQualificationBenchmarkCandidate) {
+      const target = run.routeQualificationBenchmarkCandidate;
+      const [channel, candidate] = await Promise.all([ctx.db.get(args.channelId), ctx.db.get(target.candidateId)]);
+      if (!channel) throw new Error("candidate benchmark channel is unavailable");
+      assertCurrentCandidateBenchmarkInvocation({ ownerId: args.ownerId, channelId: String(args.channelId), runId: String(args.runId), target: { ...target, candidateId: String(target.candidateId) }, channel: { ...channel, pipeline: channel.pipeline ?? [] } as never, candidate, maximumCostUsd: incoming.budgetUsd, frozenInput: run.routeQualificationBenchmarkCandidateInvocationInput });
+    }
     if (decision.kind === "reused") {
       return {
         snapshot: incoming,
@@ -3561,6 +3580,7 @@ export const listOverviewRuns = query({
         channelName: channel?.name ?? "(unknown)",
         channelSlug: channel?.slug ?? "",
         pipelineSource,
+        manualPrivate: Boolean(run.probeDispatchKey?.startsWith("manual-private-video:")),
         ...(recentLive
           ? { stageProgress: summarizeRunStageProgress({ pipeline: pipeline?.entries, stages }) }
           : {}),
@@ -3586,14 +3606,16 @@ export const repointChannel = mutation({
   },
   returns: v.number(),
   handler: async (ctx, args) => {
-    const runs = await ctx.db
-      .query("runs")
-      .withIndex("by_channel", (q) => q.eq("channelId", args.fromChannelId))
-      .collect();
-    for (const run of runs) {
-      await ctx.db.patch(run._id, { channelId: args.toChannelId });
+    const source = await ctx.db.get(args.fromChannelId);
+    if (!source) throw new Error("Channel reassignment source not found");
+    await requireStudioServiceIdentity(ctx, source.ownerId, "channel reassignment");
+    const destination = await ctx.db.get(args.toChannelId);
+    if (!destination || destination.ownerId !== source.ownerId) {
+      throw new Error("Channel reassignment destination ownership mismatch");
     }
-    return runs.length;
+    // Run identity is also bound into assets, receipts and immutable snapshots.
+    // A partial move cannot preserve those contracts, even for legacy runs.
+    throw new Error("Channel run reassignment is disabled; a verified migration is required");
   },
 });
 
@@ -3602,16 +3624,23 @@ export const repointChannel = mutation({
  * Powers the minimal dashboard page (read-only).
  */
 export const listRecent = query({
-  args: { ownerId: v.string(), limit: v.optional(v.number()) },
+  args: { ownerId: v.string(), limit: v.optional(v.number()), channelSlug: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const limit = validatedReadLimit(args.limit, RECENT_RUNS_LIMIT);
+    const channel = args.channelSlug === undefined ? null : await ctx.db
+      .query("channels")
+      .withIndex("by_owner_slug", (q) => q.eq("ownerId", args.ownerId).eq("slug", args.channelSlug!))
+      .unique();
+    if (args.channelSlug !== undefined && !channel) return [];
     // Index desc ≈ startedAt desc (startedAt is stamped at insert) — take the
     // page directly instead of collecting every owner run then slicing.
-    const limited = await ctx.db
-      .query("runs")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .order("desc")
-      .take(limit);
+    const limited = channel
+      ? (await ctx.db.query("runs")
+          .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+          .order("desc").take(limit)).filter((run) => run.ownerId === args.ownerId)
+      : await ctx.db.query("runs")
+          .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+          .order("desc").take(limit);
     limited.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     // Keep channel enrichment bounded to one in-flight read per channel. The
     // returned rows and their ordering remain unchanged for legacy callers.

@@ -21,7 +21,7 @@ const base: PlanWeekPreparationManifest = {
     topic: "The Missing Pin", title: "The Missing Pin", description: "A history story.",
     sceneSeed: "An archive with an old lock.", thumbnailKey: "owner/test/thumb.jpg", thumbnailSource: "planner_artwork",
   },
-  execution: { pipeline: [{ block: "music" }], moduleConfig: {}, seedStore: {} },
+  execution: { pipeline: [{ block: "music" }], moduleConfig: {}, seedStore: { voiceId: "Ryan" } },
   prompts: { script: "A grounded story.", narration: "Measured narration.", shotlist: "Show the lock.", visual: "Keep the lock readable." },
 };
 
@@ -233,7 +233,12 @@ async function main(): Promise<void> {
     assert.equal(dispatches, 0);
     assert.equal(networkCalls, 0);
     sidecarMode = "missing";
-    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run(payload), /paid call forbidden/);
+    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run(payload), /unique script_gen/);
+    assert.equal(paidCalls, 0, "missing frozen script parameters cannot admit generation");
+    const scriptManifest = normalizePlanWeekPreparationManifest({ ...base, execution: { ...base.execution,
+      pipeline: [...base.execution.pipeline, { block: "script_gen", params: { maxSeconds: 600 } }] } });
+    manifestBytes = Buffer.from(canonicalJson(scriptManifest));
+    await assert.rejects(() => producers.find(([name]) => name === "script")![1].run({ ...payload, manifestSha256: sha256BytesHex(manifestBytes) }), /paid call forbidden/);
     assert.equal(paidCalls, 1, "confirmed missing object still admits first-time script generation (stubbed)");
     console.log("WEEKLY VERSION ADMISSION PASS: four real producers, version gates, bounded metadata, 28 ambiguous-read holds, 12 corrupt metadata holds, confirmed absence admits one stubbed purchase");
   } finally {

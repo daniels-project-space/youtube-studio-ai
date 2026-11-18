@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { OWNER_ID } from "@/lib/config";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Engine not activated.", inactive: true }, { status: 503 });
   }
   try {
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const { tasks } = await import("@trigger.dev/sdk");
     const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!convexUrl) {
@@ -107,9 +109,10 @@ export async function POST(request: Request) {
       ownerId: OWNER_ID,
       requestKey,
       approval,
-    });
+    }, undefined, requestOptions);
     return NextResponse.json({ id: handle.id });
   } catch (err) {
+    if (err instanceof PrivateTriggerTargetError) return NextResponse.json({ error: err.message, inactive: true }, { status: 503 });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "trigger failed" },
       { status: 500 },

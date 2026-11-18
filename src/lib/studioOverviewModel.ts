@@ -167,7 +167,7 @@ function applyAutomaticScheduleProjection(
   const projections = new Map<string, { timestamp?: number; automatic: boolean }>();
   for (const rows of grouped.values()) {
     const first = rows[0];
-    if (!first || first.scheduleEnabled === false) continue;
+    if (!first || first.scheduleEnabled !== true) continue;
     const projected = projectPlanSchedule({
       items: rows.map((row, index) => ({
         id: row._id,
@@ -343,9 +343,9 @@ export function buildStudioOverview(args: {
           }
         : firstChannel
           ? {
-              eyebrow: "Studio ready",
+              eyebrow: firstChannel.status === "paused" ? "Channel paused" : "Channel overview",
               title: firstChannel.name,
-              detail: "No open production or release issue",
+              detail: firstChannel.status === "active" ? "No open production or release issue" : "Open the channel to review its current settings",
               action: "Open channel",
               href: `/channels/${encodeURIComponent(firstChannel.slug)}`,
               tone: "quiet",

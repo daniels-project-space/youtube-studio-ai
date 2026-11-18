@@ -13,11 +13,16 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
+import { channelScheduleWriteFence } from "@/lib/channelScheduleWriteFence";
+import { channelIdentityWriteFence } from "@/lib/channelIdentityWriteFence";
+import { channelPipelineWriteFence } from "@/lib/channelPipelineWriteFence";
+import { advancedScheduleWrite } from "@/lib/advancedScheduleDraft";
 import { clearAcceptedPrivateBenchmark, preparePrivateBenchmark, readPendingPrivateBenchmark } from "@/lib/privateBenchmarkRequest";
 import type { ChannelIdentity, VideoRow } from "@/lib/types";
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
+import { PublishModeControl } from "@/components/PublishModeControl";
 import type { ChannelModuleLock } from "@/lib/channelModuleLock";
 import { StatCard } from "@/components/StatCard";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
@@ -32,6 +37,9 @@ import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
 import { RecentVideos } from "@/components/RecentVideos";
+import { PipelineCandidateReview } from "@/components/PipelineCandidateReview";
+import { ChannelDurationReadOnly } from "./ChannelDurationReadOnly";
+import { ChannelDurationDraft } from "./ChannelDurationDraft";
 import { StatsCharts } from "@/components/StatsCharts";
 import {
   IconAnalytics,
@@ -43,7 +51,8 @@ import { fmtUsd } from "@/lib/format";
 import { blockLabel } from "@/lib/blocks";
 import { buildPipelineTopology } from "@/lib/pipelineTopology";
 import { AUTO_VOICE_ID, VOICES } from "@/lib/voices";
-import { QWEN3_TTS_SPEAKERS } from "@/engine/qwenTtsProfiles";
+import { currentAutomationQwenSpeaker } from "@/lib/automationQwenVoice";
+import { AutomationQwenVoiceControl } from "@/components/AutomationQwenVoiceControl";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
 import { failureReason } from "@/lib/failureReason";
@@ -106,6 +115,24 @@ type ChannelDoc = {
     >;
   };
 };
+
+type EffectiveSettings = { durationSource: "assembly" | "script_maximum" | null; targetSeconds: number | null; minimumSeconds: number | null; maximumSeconds: number | null; tailSeconds: number | null; maxQuotes: number | null; voiceConfigured: boolean | null };
+
+function useEffectiveChannelSettings(channel: ChannelDoc | null | undefined): EffectiveSettings | null | undefined {
+  const [resolved, setResolved] = useState<{ revision: string; value: EffectiveSettings | null }>();
+  const id = channel?._id;
+  const revision = JSON.stringify([id, channel?.pipeline, channel?.moduleConfig, channel?.identity?.voiceId]);
+  useEffect(() => {
+    if (!id) return;
+    const controller = new AbortController();
+    fetch(`/api/channel-effective-settings?channelId=${encodeURIComponent(id)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async response => response.ok ? response.json() : null)
+      .then(value => { if (!controller.signal.aborted) setResolved({ revision, value }); })
+      .catch(() => { if (!controller.signal.aborted) setResolved({ revision, value: null }); });
+    return () => controller.abort();
+  }, [id, revision]);
+  return resolved?.revision === revision ? resolved.value : undefined;
+}
 
 type RawRun = {
   _id: string;
@@ -258,6 +285,7 @@ export default function ChannelHubPage({
     ownerId,
     slug,
   }) as ChannelDoc | null | undefined;
+  const effectiveSettings = useEffectiveChannelSettings(channel);
 
   const channelId = channel?._id as Id<"channels"> | undefined;
   const needsRuns = tab === "Overview" || tab === "Analytics";
@@ -351,16 +379,16 @@ export default function ChannelHubPage({
     cadence: id.cadence,
     fromTimestamp: viewStartedAt,
   });
-  const readinessChecks = [
-    Boolean(id.niche && avatarArtFreshness.current && bannerArtFreshness.current),
-    Boolean(id.voiceId),
-    Boolean(id.thumbnailTemplate),
-    Boolean(channel.pipeline?.length),
-    Boolean(channel.schedule?.frequency && channel.schedule?.localTime && channel.schedule?.timezone),
+  const voiceSetup = effectiveSettings?.voiceConfigured;
+  const setupChecks = [
+    { label: "identity", done: Boolean(id.niche) },
+    { label: "artwork", done: avatarArtFreshness.current && bannerArtFreshness.current },
+    ...(effectiveSettings === null ? [{ label: "settings", done: false }] : voiceSetup === null || voiceSetup === undefined ? [] : [{ label: "voice", done: voiceSetup }]),
+    { label: "thumbnail", done: Boolean(id.thumbnailTemplate) },
+    { label: "pipeline", done: Boolean(channel.pipeline?.length) },
   ];
-  const readinessDone = readinessChecks.filter(Boolean).length;
-  const readinessLabels = ["identity", "voice", "thumbnail", "pipeline", "schedule"];
-  const missingSetup = readinessLabels.filter((_, index) => !readinessChecks[index]);
+  const readinessDone = setupChecks.filter((check) => check.done).length;
+  const missingSetup = setupChecks.filter((check) => !check.done).map((check) => check.label);
   const modulePath = (channel.pipeline ?? []).map((entry) => entry.block.replaceAll("_", " "));
   const latestArtwork = channelCard.latestThumbnailKey;
   const plannedArtwork = (nextPlan?.item.thumbnailSource !== "rendered_video_frame"
@@ -379,6 +407,8 @@ export default function ChannelHubPage({
         >
           {ytStatus === "connected"
             ? "✓ YouTube connected — the channel is linked and paused. Reapprove the destination and enable runs in Settings when ready."
+            : ytStatus === "connected_unpaused"
+              ? "YouTube connected, but the channel could not be confirmed paused. Check its lock and pause it before enabling automation."
             : ytStatus === "cancelled"
               ? "YouTube connection cancelled — no changes were made. Link to YouTube again whenever you’re ready."
             : ytStatus === "wrongchannel"
@@ -414,8 +444,9 @@ export default function ChannelHubPage({
               <h1>{channel.name}</h1>
               <div className={styles.heroMeta}>
                 <span>{id.niche ?? channel.template}</span>
-                <span>{channelCard.recentPublishedCount} published</span>
+                <span>{channelCard.recentPublishedCount} uploads</span>
                 <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
+                <span>{channel.schedule?.enabled === false ? "Scheduler disabled" : channel.schedule?.enabled === true ? "Scheduler setting enabled" : "Scheduler setting not set"}</span>
                 {channel.language && channel.language !== "primary" && <span>{channel.language}</span>}
               </div>
             </div>
@@ -451,12 +482,12 @@ export default function ChannelHubPage({
               : "Ready queue is clear"}
           </span>
         </Link>
-        <Link href={tabHref("Settings")} scroll={false} className={styles.operatingSignal} data-signal="setup" data-tone={readinessDone === readinessChecks.length ? "ready" : "attention"}>
+        <Link href={tabHref("Settings")} scroll={false} className={styles.operatingSignal} data-signal="setup" data-tone={effectiveSettings !== undefined && readinessDone === setupChecks.length ? "ready" : "attention"}>
           <small>Setup</small>
           <strong>
-            {readinessDone}/{readinessChecks.length} complete
+            {effectiveSettings === undefined ? "Checking setup" : `${readinessDone}/${setupChecks.length} complete`}
           </strong>
-          <span>{missingSetup.length ? `Needs ${missingSetup.join(", ")}` : "All five configured"}</span>
+          <span>{effectiveSettings === undefined ? "Checking settings" : missingSetup.length ? `Needs ${missingSetup.join(", ")}` : "Configuration complete"}</span>
         </Link>
         <Link href={tabHref("Pipeline")} scroll={false} className={styles.operatingSignal} data-signal="pipeline">
           <small>Pipeline</small>
@@ -526,11 +557,12 @@ export default function ChannelHubPage({
         </nav>
       )}
 
-      <div className={styles.view} data-view={QUERY_BY_TAB[tab]} aria-busy={needsRuns && runs === undefined}>
+      <div key={channel._id} className={styles.view} data-view={QUERY_BY_TAB[tab]} aria-busy={needsRuns && runs === undefined}>
       {needsRuns && runs === undefined ? <SkeletonList rows={4} /> : <>
       {tab === "Overview" && (
         <OverviewTab
           channel={channel}
+          effective={effectiveSettings}
           runs={runs}
           kpis={{
             runs: allRuns.length,
@@ -558,7 +590,7 @@ export default function ChannelHubPage({
         <LibraryTab ownerId={ownerId} channelId={channelId} />
       )}
       {tab === "SEO" && <SeoTab ownerId={ownerId} channelId={channel._id} niche={id.niche} />}
-      {tab === "Pipeline" && <PipelineTab pipeline={channel.pipeline ?? []} />}
+      {tab === "Pipeline" && <><PipelineTab pipeline={channel.pipeline ?? []} /><PipelineCandidateReview channelId={channel._id} revision={JSON.stringify([channel.pipeline, channel.moduleConfig])} /></>}
       {tab === "Identity" && (
         <IdentityTab
           id={id}
@@ -568,7 +600,7 @@ export default function ChannelHubPage({
           artworkIdentity={artworkIdentity}
         />
       )}
-      {tab === "Settings" && <SettingsTab channel={channel} />}
+      {tab === "Settings" && <SettingsTab channel={channel} effective={effectiveSettings} />}
       </>}
       </div>
     </>
@@ -665,10 +697,12 @@ function ChannelInceptionProgress({
 
 function OverviewTab({
   channel,
+  effective,
   runs,
   kpis,
 }: {
   channel: ChannelDoc;
+  effective: EffectiveSettings | null | undefined;
   runs: RawRun[] | undefined;
   kpis: {
     runs: number;
@@ -679,63 +713,91 @@ function OverviewTab({
     costPerVideo: number | null;
   };
 }) {
-  const overBudget =
-    kpis.costPerVideo !== null && kpis.costPerVideo > channel.budget;
-
   // Surface the key configured SETTINGS (read from the pipeline params).
-  const pipe = (channel.pipeline ?? []) as Array<{ block: string; params?: Record<string, unknown> }>;
-  const param = (b: string, k: string): unknown => pipe.find((p) => p.block === b)?.params?.[k];
   const mins = (s: unknown): string => (typeof s === "number" ? `${Math.round((s / 60) * 10) / 10} min` : "—");
-  const targetLen = param("script_gen", "maxSeconds");
-  const minLen = param("length_check", "minSeconds");
-  const maxLen = param("length_check", "maxSeconds");
-  const tailSec = param("timeline_assemble", "tailSec");
-  const maxQuotes = param("quote_overlays", "maxQuotes");
+  const { targetSeconds: targetLen, minimumSeconds: minLen, maximumSeconds: maxLen, tailSeconds: tailSec, maxQuotes } = effective ?? {};
+  const unavailable = effective === undefined ? "Loading" : "Settings unavailable";
+  const narrationParams = channel.pipeline?.find(entry => entry.block === "narration_tts")?.params;
+  const speaker = currentAutomationQwenSpeaker({
+    config: channel.moduleConfig?.narration_tts ?? {},
+    params: narrationParams && typeof narrationParams === "object" && !Array.isArray(narrationParams) ? narrationParams as Record<string, unknown> : {},
+    identityVoice: channel.identity?.voiceId,
+  });
   const settings: { label: string; value: string }[] = [
-    { label: "Target length", value: mins(targetLen) },
-    { label: "Length range", value: minLen != null && maxLen != null ? `${mins(minLen)} – ${mins(maxLen)}` : "—" },
-    { label: "Philosopher quotes", value: maxQuotes != null ? `up to ${maxQuotes}, ≥5s apart` : "≥2 attributed" },
-    { label: "Outro", value: tailSec != null ? `${tailSec}s defined outro card` : "defined card" },
-    { label: "Music", value: "gradual duck, fades out" },
+    { label: effective?.durationSource === "script_maximum" ? "Script maximum" : effective?.durationSource === "assembly" ? "Assembly duration" : "Saved duration", value: effective ? mins(targetLen) : unavailable },
+    { label: "Length range", value: effective ? (minLen != null && maxLen != null ? `${mins(minLen)} – ${mins(maxLen)}` : "—") : unavailable },
+    { label: "Quote limit", value: effective ? (maxQuotes != null ? `up to ${maxQuotes}` : "Not configured") : unavailable },
+    { label: "Outro hold", value: effective ? (tailSec != null ? `${tailSec}s` : "Not configured") : unavailable },
     {
-      label: "Thumbnail",
-      value: `Nano Banana · ${channel.identity?.thumbnailTemplate ?? "Style DNA + playbook"}`,
+      label: "Thumbnail style",
+      value: channel.identity?.thumbnailTemplate ?? "Not configured",
     },
   ];
 
   return (
     <>
+      <div className={styles.overviewWorkspace}>
+        <div className={styles.overviewActivity}>
+      <section className={styles.configurationSummary} aria-label="Channel configuration">
+        <h2>Channel configuration</h2>
+        <div>
+          <Link href="?tab=settings#release-control"><small>{effective?.durationSource === "script_maximum" ? "Script maximum" : effective?.durationSource === "assembly" ? "Assembly duration" : "Saved duration"}</small><strong>{effective ? mins(targetLen) : unavailable}</strong></Link>
+          <Link href={effective?.voiceConfigured === null ? "?tab=pipeline" : "?tab=settings#narration-control"}><small>Narration</small><strong>{!effective ? unavailable : effective.voiceConfigured === null ? "Not required" : effective.voiceConfigured ? speaker ? `Qwen · ${speaker}` : "Configured" : "Not configured"}</strong></Link>
+          <Link href="?tab=settings#release-control"><small>Per-run budget</small><strong>{Number.isFinite(channel.budget) ? fmtUsd(channel.budget) : "Not configured"}</strong></Link>
+          <Link href="?tab=pipeline"><small>Pipeline</small><strong>{channel.pipeline?.length ?? 0} modules</strong></Link>
+        </div>
+      </section>
       <section className={styles.overviewMetrics} aria-label="Channel operating metrics">
-        <StatCard label="Recent published" value={kpis.videos} accent="var(--color-secondary)" />
-        <StatCard label="Recent completed" value={kpis.completed} accent="var(--color-ok)" />
+        <StatCard label="Recent uploads" value={kpis.videos} accent="var(--color-secondary)" hint="From loaded run history" />
+        <StatCard label="Recent completed" value={kpis.completed} accent="var(--color-ok)" hint="From loaded run history" />
         <StatCard
           label="Recent spend"
           value={fmtUsd(kpis.totalCost)}
           accent="var(--color-accent)"
         />
         <StatCard
-          label="Cost / video"
+          label="Spend / upload"
           value={kpis.costPerVideo === null ? "—" : fmtUsd(kpis.costPerVideo)}
-          accent={overBudget ? "var(--color-failed)" : "var(--color-accent)"}
+          accent="var(--color-accent)"
           hint={
             kpis.costPerVideo === null
-              ? "no measured runs yet"
-              : overBudget
-                ? `over ${fmtUsd(channel.budget)} budget`
-                : `within ${fmtUsd(channel.budget)} budget`
+              ? "no uploads in this run history"
+              : "recent run spend divided by uploads"
           }
         />
       </section>
 
-      <RecentVideos ownerId={channel.ownerId} channelId={channel._id as Id<"channels">} limit={8} />
-
-      <StatsCharts runs={(runs ?? []) as { status: string; startedAt?: number; finishedAt?: number; costTotal?: number }[]} />
+          <RecentVideos ownerId={channel.ownerId} channelId={channel._id as Id<"channels">} limit={8} />
+          <section className={styles.overviewRuns} aria-label="Recent runs">
+            <h2>Recent runs</h2>
+            {(runs ?? []).length === 0 ? <p>No runs yet.</p> : (
+              <ul>
+                {[...(runs ?? [])].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)).slice(0, 5).map((run) => (
+                  <li key={run._id}>
+                    <Link href={`/runs/${encodeURIComponent(run._id)}`}>
+                      <time>{run.startedAt ? new Date(run.startedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "Date unavailable"}</time>
+                      <span className={styles.runStatus} data-status={run.status}>{run.status === "ok" ? "Complete" : run.status}</span>
+                      <span>{Number.isFinite(run.costTotal) ? fmtUsd(run.costTotal) : "Cost unavailable"}</span>
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          {(runs ?? []).length > 0 && <details className={styles.overviewCharts}>
+            <summary>Activity charts</summary>
+            <StatsCharts runs={(runs ?? []) as { status: string; startedAt?: number; finishedAt?: number; costTotal?: number }[]} />
+          </details>}
+        </div>
+        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" && <ManualPrivateVideoCard channel={channel} />}
+      </div>
 
       <section className={styles.overviewSection}>
         <details className={styles.channelBrief}>
           <summary>
             <span>Voice &amp; production rules</span>
-            <small>{settings.length} active controls</small>
+            <small>Settings summary</small>
           </summary>
           {channel.identity?.persona ? <blockquote className={styles.personaStatement}>{channel.identity.persona}</blockquote> : null}
           <div className={styles.configurationGrid}>
@@ -768,17 +830,21 @@ function Row({ label, hint, children }: { label: string; hint: string; children:
   );
 }
 
-function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
+function ChannelSettingsCard({ channel, effective }: { channel: ChannelDoc; effective: EffectiveSettings | null | undefined }) {
+  const access = useOperationsAccess();
+  const requestAccess = useRequestOperationsAccess();
   const active = channel.status === "active";
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [budget, setBudget] = useState(String(channel.budget ?? 0));
+  const [budgetBaseline, setBudgetBaseline] = useState<number | null>(channel.budget ?? null);
   const schedule = channel.schedule ?? { frequency: "weekly" };
+  const [scheduleBaseline, setScheduleBaseline] = useState(() => channelScheduleWriteFence(channel.schedule));
   const [frequency, setFrequency] = useState(schedule.frequency ?? "weekly");
   const [days, setDays] = useState<number[]>(schedule.days?.length ? schedule.days : [1]);
   const [timezone, setTimezone] = useState(schedule.timezone ?? "UTC");
   const [localTime, setLocalTime] = useState(schedule.localTime ?? "09:00");
-  const [scheduleEnabled, setScheduleEnabled] = useState(schedule.enabled !== false);
+  const [scheduleEnabled, setScheduleEnabled] = useState(schedule.enabled === true);
   const [approvalMode, setApprovalMode] = useState<"manual" | "private_auto">(
     schedule.approvalMode ?? "manual",
   );
@@ -793,6 +859,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
   const [madeForKids, setMadeForKids] = useState(schedule.madeForKids === true);
 
   const pipe = (channel.pipeline ?? []) as Array<{ block: string; params?: Record<string, unknown> }>;
+  const hasUpload = pipe.some((entry) => entry.block === "upload_draft");
   const publishMode = (pipe.find((p) => p.block === "upload_draft")?.params?.["publishMode"] as string) ?? "draft";
   const hasConfiguredCrosspost = pipe.some(
     (entry) =>
@@ -809,6 +876,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
     });
     const result = (await response.json().catch(() => ({}))) as {
       error?: string;
+      schedule?: unknown;
     };
     if (!response.ok) throw new Error(result.error ?? "settings update failed");
     return result;
@@ -846,10 +914,14 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
   };
   const saveBudget = async () => {
     const n = Number(budget);
-    if (!Number.isFinite(n) || n < 0) return;
+    if (!budget.trim() || !Number.isFinite(n) || n < 0 || n > 10_000) {
+      setMessage("Enter a budget between 0 and 10000 USD.");
+      return;
+    }
     setBusy(true);
     try {
-      await postSetting({ action: "budget", budget: n });
+      await postSetting({ action: "budget", budget: n, expectedBudget: budgetBaseline });
+      setBudgetBaseline(n);
       setMessage("Render budget saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "budget update failed");
@@ -877,8 +949,9 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
   const saveSchedule = async () => {
     setBusy(true);
     try {
-      await postSetting({
+      const result = await postSetting({
         action: "schedule",
+        expectedScheduleFence: scheduleBaseline,
         schedule: {
           frequency,
           days,
@@ -893,6 +966,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
           madeForKids,
         },
       });
+      setScheduleBaseline(channelScheduleWriteFence(result.schedule));
       setMessage("Tenant schedule, quota, and retry policy saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "schedule update failed");
@@ -922,6 +996,10 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
     <section style={{ marginBottom: "1.6rem" }}>
       <SectionTitle>Release control + cadence</SectionTitle>
       <div className={`${styles.settingsCard} glass`}>
+        <Row label="Duration" hint="Saved pipeline values">
+          <ChannelDurationReadOnly effective={effective} />
+          <ChannelDurationDraft key={channel._id} channelId={channel._id} baselineRevision={channelPipelineWriteFence(channel)} canRequest={access === "owner"} onRequestOwner={requestAccess} />
+        </Row>
         <Row label="Channel" hint={active ? "Active — eligible for scheduled + manual runs" : "Paused — auto-scheduling skips it"}>
           <button
             onClick={() => setStatus(active ? "paused" : "active")}
@@ -937,19 +1015,8 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
             {active ? "ENABLED" : "DISABLED"}
           </button>
         </Row>
-        <Row label="Auto-publish" hint="How finished videos go live on YouTube">
-          <div style={{ display: "flex", gap: "0.45rem", alignItems: "center" }}>
-            <select value={publishMode} disabled={busy} onChange={(e) => setPublishMode(e.target.value)} style={ctlSelect}>
-              <option value="draft">Private draft (you approve)</option>
-              <option value="scheduled">Scheduled (drip)</option>
-              <option value="public">Public immediately</option>
-            </select>
-            {publishMode !== "draft" && (
-              <button onClick={() => setPublishMode(publishMode)} disabled={busy} style={ctlBtn}>
-                Reapprove
-              </button>
-            )}
-          </div>
+        <Row label="Auto-publish" hint={hasUpload ? "How finished videos go live on YouTube" : "This pipeline has no YouTube upload module."}>
+          <PublishModeControl hasUpload={hasUpload} mode={publishMode} busy={busy} onChange={setPublishMode} selectStyle={ctlSelect} buttonStyle={ctlBtn} />
         </Row>
         {hasConfiguredCrosspost && (
           <Row label="Cross-post authority" hint="Separate revocable approval for configured off-YouTube platforms">
@@ -961,7 +1028,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
         )}
         <Row label="Budget / run (USD)" hint="Cost cap per render; over-budget is flagged">
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            <input type="number" min="0" step="0.5" value={budget} onChange={(e) => setBudget(e.target.value)} style={ctlInput} />
+            <input aria-label="Budget per run (USD)" type="number" min="0" step="0.5" value={budget} onChange={(e) => setBudget(e.target.value)} style={ctlInput} />
             <button
               onClick={saveBudget}
               disabled={busy || budget === String(channel.budget)}
@@ -1023,7 +1090,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
             <input type="number" min="1" max="1440" value={retryBaseMinutes} onChange={(e) => setRetryBaseMinutes(e.target.value)} aria-label="Retry base minutes" style={{ ...ctlInput, width: 86 }} />
           </div>
         </Row>
-        <Row label="Content declarations" hint="Required upload audience setting and scheduler enable switch">
+        <Row label="Content declarations" hint="Unchecking Made for kids does not override a pipeline already marked for children.">
           <div style={{ display: "flex", gap: "1rem", alignItems: "center", fontSize: "0.78rem" }}>
             <label className="channel-check-control"><input type="checkbox" checked={madeForKids} onChange={(e) => setMadeForKids(e.target.checked)} /> Made for kids</label>
             <label className="channel-check-control"><input type="checkbox" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} /> Scheduler enabled</label>
@@ -1047,11 +1114,15 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
 
 /* -------------------------------- Settings ------------------------------ */
 
-function SettingsTab({ channel }: { channel: ChannelDoc }) {
+function SettingsTab({ channel, effective }: { channel: ChannelDoc; effective: EffectiveSettings | null | undefined }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  useEffect(() => {
+    if (window.location.hash === "#narration-control") setAdvancedOpen(true);
+  }, []);
   const pipeline = (channel.pipeline ?? []) as Array<{ block: string; params?: Record<string, unknown> }>;
+  const hasUpload = pipeline.some((entry) => entry.block === "upload_draft");
   const publishMode = (pipeline.find((entry) => entry.block === "upload_draft")?.params?.["publishMode"] as string) ?? "draft";
-  const scheduleEnabled = channel.schedule?.enabled !== false;
+  const scheduleEnabled = channel.schedule?.enabled === true;
   return (
     <div className={`${styles.settingsWorkspace} channel-settings-stack`}>
       <WorkspaceIntro
@@ -1059,7 +1130,7 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
         title="Channel controls"
         signals={[
           { label: "Channel", value: channel.status === "active" ? "Enabled" : "Paused", detail: "Eligibility for scheduled + manual runs", tone: channel.status === "active" ? "ready" : "attention" },
-          { label: "Release", value: publishMode === "draft" ? "Private drafts" : publishMode, detail: "Main-video publishing authority", tone: publishMode === "draft" ? "ready" : "attention" },
+          { label: "Release", value: !hasUpload ? "Not configured" : publishMode === "draft" ? "Private drafts" : publishMode, detail: hasUpload ? "Main-video publishing authority" : "No YouTube upload module", tone: hasUpload && publishMode === "draft" ? "ready" : "attention" },
           { label: "Scheduler", value: scheduleEnabled ? channel.schedule?.frequency ?? "Enabled" : "Disabled", detail: `${channel.schedule?.timezone ?? "UTC"} · ${channel.schedule?.localTime ?? "time not set"}` },
           { label: "Route", value: `${pipeline.length} modules`, detail: "Configured production chain" },
         ]}
@@ -1074,11 +1145,10 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
 
       <section id="release-control" className={styles.settingsSection} data-kind="release">
         <div className={styles.sectionRail}><span>01 / release control</span><i /></div>
-        <ChannelSettingsCard channel={channel} />
+        <ChannelSettingsCard channel={channel} effective={effective} />
       </section>
       <section className={styles.settingsSection} data-kind="qualification">
         <div className={styles.sectionRail}><span>02 / route proof</span><i /></div>
-        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" && <ManualPrivateVideoCard channel={channel} />}
         <RouteQualificationBenchmarkCard channel={channel} />
       </section>
       <section id="youtube-destination" className={styles.settingsSection} data-kind="youtube">
@@ -1117,12 +1187,19 @@ function ManualPrivateVideoCard({ channel }: { channel: ChannelDoc }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const workerWarning = "Worker support for this channel's selected duration has not been verified.";
   const submit = async () => {
     const maximum = Number(ceiling);
     if (!Number.isFinite(maximum) || maximum <= 0 || maximum > 55) { setMessage("Choose a cost ceiling greater than $0 and no more than $55."); return; }
-    if (!window.confirm(`Generate a full-length private video for “${channel.name}” with a maximum of ${fmtUsd(maximum)}? The channel budget may lower this ceiling. No upload or schedule will start; the thumbnail is deferred.`)) return;
+    if (!window.confirm(`Generate a full-length private video for “${channel.name}” with a maximum of ${fmtUsd(maximum)}? The channel budget may lower this ceiling. No upload or schedule will start; the thumbnail is deferred. ${workerWarning}`)) return;
     setBusy(true); setMessage(null);
     try {
+      const existing = readPendingPrivateBenchmark(window.localStorage, channel._id, "private-video");
+      if (!existing) {
+        const check = await fetch(`/api/manual-private-video?channelId=${encodeURIComponent(channel._id)}&maximumCostUsd=${encodeURIComponent(String(maximum))}`, { cache: "no-store" });
+        const result = await check.json() as { ok?: boolean; error?: string };
+        if (!check.ok || !result.ok) { setMessage(result.error ?? "Could not check the private video configuration."); return; }
+      }
       const pending = preparePrivateBenchmark(window.localStorage, channel._id, maximum, () => window.crypto.randomUUID(), "private-video");
       const response = await fetch("/api/manual-private-video", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channelId: channel._id, requestKey: pending.requestKey, maximumCostUsd: maximum, confirmPrivateVideo: true }) });
       const result = await response.json() as { ok?: boolean; error?: string; runId?: string; state?: string; restartAllowed?: boolean };
@@ -1142,13 +1219,16 @@ function ManualPrivateVideoCard({ channel }: { channel: ChannelDoc }) {
       setMessage(error instanceof Error ? error.message : "The request was not confirmed. Retry to check the same request.");
     } finally { setBusy(false); }
   };
-  return <section className={`${styles.qualificationCard} glass`} aria-label="Private video" style={{ padding: "1rem", marginBottom: "1rem" }}>
-    <SectionTitle>Private video</SectionTitle>
-    <div style={{ display: "flex", gap: "0.55rem", alignItems: "end", flexWrap: "wrap" }}>
-      <label style={{ display: "grid", gap: "0.22rem", fontSize: "0.68rem", color: "var(--color-muted)" }}>COST CEILING (USD)
-        <input type="number" min="0.01" max="55" step="1" value={ceiling} disabled={busy} onChange={event => setCeiling(event.target.value)} style={{ width: 116, height: 34, padding: "0 0.55rem", borderRadius: 7, border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-text)" }} />
+  return <section id="private-video" className={styles.privateVideoCard} aria-label="Private video">
+    <h2>New private video</h2>
+    <p>Create a private full-length run using this channel&apos;s configuration. No upload or schedule will start.</p>
+    <p>{workerWarning}</p>
+    <div className={styles.privateVideoControls}>
+      <label>Cost ceiling (USD)
+        <input type="number" min="0.01" max="55" step="1" value={ceiling} disabled={busy} onChange={event => setCeiling(event.target.value)} />
       </label>
-      <button type="button" onClick={submit} disabled={busy} style={{ height: 34, padding: "0 0.7rem", borderRadius: 7, border: "1px solid var(--color-border)", background: "var(--color-accent)", color: "#111", fontWeight: 700, cursor: busy ? "default" : "pointer" }}>{busy ? "Starting…" : "Generate private video"}</button>
+      <span>The channel budget may lower this ceiling. Thumbnail generation is deferred.</span>
+      <button type="button" onClick={submit} disabled={busy}>{busy ? "Starting…" : "Generate private video"}</button>
     </div>
     {message && <p role="status">{message}</p>}
     {runId && <Link href={`/runs/${encodeURIComponent(runId)}`}>Open private run</Link>}
@@ -1428,7 +1508,7 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
       const d = await r.json();
       setMsg(
         r.ok
-          ? `${d.dataPolicy}.${d.providerWarning ? ` Google warning: ${d.providerWarning}` : ""}`
+          ? `${d.dataPolicy}.${d.channelPauseWarning ? ` ${d.channelPauseWarning}` : ""}${d.providerWarning ? ` Google warning: ${d.providerWarning}` : ""}`
           : d.error || "Revocation failed.",
       );
     } catch {
@@ -1702,10 +1782,16 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
   const update = useMutation(api.channels.updateChannel);
   const cid = channel._id as Id<"channels">;
   const id = channel.identity ?? ({} as ChannelIdentity);
+  const identityDraft = useRef(id);
 
   const [voice, setVoice] = useState(id.voiceId ?? AUTO_VOICE_ID);
   const [cadence, setCadence] = useState(channel.schedule?.frequency ?? id.cadence ?? "weekly");
   const [days, setDays] = useState<number[]>(channel.schedule?.days?.length ? channel.schedule.days : [1]);
+  const scheduleDraft = useRef({
+    schedule: channel.schedule,
+    cadence: channel.schedule?.frequency ?? id.cadence ?? "weekly",
+    days: channel.schedule?.days?.length ? channel.schedule.days : [1],
+  });
   const [niche, setNiche] = useState(id.niche ?? "");
   const [nicheKey, setNicheKey] = useState("");
   const [subcat, setSubcat] = useState("");
@@ -1733,7 +1819,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     try {
       // "Auto" must persist as ABSENT, never as an empty string — an empty
       // voiceId would be a declared value that resolves to nothing.
-      const nextId = { ...id, cadence, niche: niche.trim() };
+      const nextId = { ...identityDraft.current, cadence, niche: niche.trim() };
       if (voice) nextId.voiceId = voice;
       else delete (nextId as { voiceId?: string }).voiceId;
       // If a catalog subcategory was picked, seed its SEO tags into the metadata
@@ -1747,11 +1833,13 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
                 : p,
             )
           : undefined;
+      const scheduleWrite = advancedScheduleWrite(scheduleDraft.current, cadence, days);
       const outcome = await update({
         channelId: cid,
         identity: nextId,
-        schedule: { ...channel.schedule, frequency: cadence, days },
-        ...(pipelinePatch ? { pipeline: pipelinePatch } : {}),
+        expectedIdentityFence: channelIdentityWriteFence(identityDraft.current),
+        ...(scheduleWrite ?? {}),
+        ...(pipelinePatch ? { pipeline: pipelinePatch, expectedPipelineFence: channelPipelineWriteFence(channel) } : {}),
       } as Parameters<typeof update>[0]);
       if ((outcome as { state?: string; blockId?: string }).state === "module_locked") {
         throw new Error(`Module '${(outcome as { blockId?: string }).blockId ?? "unknown"}' is locked.`);
@@ -1759,6 +1847,8 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
       if ((outcome as { state?: string }).state === "channel_locked") {
         throw new Error("This channel is frozen. Unlock it in Pipeline modules before saving settings.");
       }
+      identityDraft.current = nextId;
+      if (scheduleWrite) scheduleDraft.current = { schedule: scheduleWrite.schedule, cadence, days };
       setMsg(seed.length ? `Saved · seeded ${seed.length} SEO tags.` : "Saved.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed.");
@@ -1774,8 +1864,11 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     setResearch(null);
     try {
       // Persist the niche first so the research keys off the latest value.
-      if (n !== (id.niche ?? "")) {
-        await update({ channelId: cid, identity: { ...id, voiceId: voice, cadence, niche: n } } as Parameters<typeof update>[0]);
+      if (n !== (identityDraft.current.niche ?? "")) {
+        const nextIdentity = { ...identityDraft.current, niche: n };
+        const outcome = await update({ channelId: cid, identity: nextIdentity, expectedIdentityFence: channelIdentityWriteFence(identityDraft.current) } as Parameters<typeof update>[0]);
+        if ((outcome as { state?: string }).state) throw new Error("Channel settings are locked.");
+        identityDraft.current = nextIdentity;
       }
       const r = await fetch("/api/research", {
         method: "POST",
@@ -1788,8 +1881,8 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
           ? `Researching "${n}" — fresh competitor + SEO intel will populate the SEO tab shortly.`
           : d.error || "Could not start research.",
       );
-    } catch {
-      setResearch("Network error starting research.");
+    } catch (error) {
+      setResearch(error instanceof Error ? error.message : "Network error starting research.");
     } finally {
       setBusy(false);
     }
@@ -1809,7 +1902,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     <section>
       <SectionTitle>Production controls</SectionTitle>
       <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1.1rem" }}>
-        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" ? <AutomationNarratorPicker channel={channel} /> : <>
+        {process.env.NEXT_PUBLIC_YOUTUBE_AUTOMATION_PRIVATE === "1" ? <div id="narration-control"><AutomationNarratorPicker channel={channel} /></div> : <>
         <Row label="Narration voice (Fish tier)" hint="Fish reference voice — used when no ElevenLabs narrator is cast below">
           <select value={voice} disabled={busy} onChange={(e) => setVoice(e.target.value)} style={sel}>
             {VOICES.map((v) => (
@@ -2036,7 +2129,7 @@ function LibraryTab({
   if (videos === undefined) return <SkeletonList rows={3} />;
   const active = videos.filter((video) => video.libraryState !== "archived");
   const archived = videos.filter((video) => video.libraryState === "archived");
-  const published = active.filter((video) => video.youtubeVideoId).length;
+  const uploaded = active.filter((video) => video.youtubeVideoId).length;
   const evidenced = active.filter((video) => video.releaseEvidenceStatus === "release_evidence_recorded").length;
 
   return (
@@ -2046,7 +2139,7 @@ function LibraryTab({
         title="Videos"
         signals={[
           { label: "Active masters", value: String(active.length), detail: "Visible on this channel shelf", tone: active.length ? "ready" : "quiet" },
-          { label: "Published", value: String(published), detail: "YouTube-linked outputs" },
+          { label: "Uploads", value: String(uploaded), detail: "YouTube-linked outputs, including private" },
           { label: "Evidence recorded", value: `${evidenced}/${active.length}`, detail: "Sealed retained-master provenance", tone: active.length > 0 && evidenced === active.length ? "ready" : "attention" },
           { label: "Archive", value: String(archived.length), detail: "Recoverable, never deleted" },
         ]}
@@ -2329,8 +2422,8 @@ function PipelineTab({
     <section className={styles.pipelineTopology} aria-label="Channel production pipeline">
       <header className={styles.pipelineHeader}>
         <div>
-          <span>Frozen channel route</span>
-          <h2>{pipeline.length}-module production route</h2>
+          <span>Saved channel pipeline</span>
+          <h2>{pipeline.length}-module pipeline</h2>
         </div>
         <dl className={styles.pipelineStats}>
           <div><dt>Groups</dt><dd>{bands.length}</dd></div>
@@ -3040,24 +3133,14 @@ function WeekAheadTab({
 }
 
 /**
- * NARRATOR PICKER — voicecraft's profiled bank inside channel settings: every
- * saved ElevenLabs voice plays the SAME ~10s audition line so the operator
- * picks by ear. Selecting one patches the channel pipeline (narration_tts
- * ttsProvider/elevenVoiceId + script_gen voiceTags) so the next render speaks
- * with it. Renders only on channels whose pipeline has the narration module.
+ * Choose a Qwen speaker for channels using the standard narration module.
  */
 function AutomationNarratorPicker({ channel }: { channel: ChannelDoc }) {
   const saveConfig = useMutation(api.channels.setModuleConfig);
   const narration = (channel.pipeline ?? []).find((entry) => entry.block === "narration_tts");
   const config = channel.moduleConfig?.narration_tts ?? {};
   const params = (narration?.params ?? {}) as Record<string, unknown>;
-  const provider = config.ttsProvider ?? params.ttsProvider;
-  const savedSpeaker = config.qwenSpeaker ?? params.qwenSpeaker ?? channel.identity?.voiceId ?? params.voiceId;
-  const current = typeof provider === "string" && provider.trim().toLowerCase() === "qwen3" && typeof savedSpeaker === "string" &&
-    (QWEN3_TTS_SPEAKERS as readonly string[]).includes(savedSpeaker) ? savedSpeaker : "";
-  const [selection, setSelection] = useState(current);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const current = currentAutomationQwenSpeaker({ config, params, identityVoice: channel.identity?.voiceId });
   if (!narration) {
     const specialist = (channel.pipeline ?? []).find((entry) => ["whiteboard_scribe", "motion_comic", "lore_short", "documotion_short"].includes(entry.block));
     return specialist ? <Row label="Qwen narration" hint="This channel uses a specialist production module.">
@@ -3066,35 +3149,9 @@ function AutomationNarratorPicker({ channel }: { channel: ChannelDoc }) {
     </Row> : null;
   }
 
-  const save = async () => {
-    if (!selection || !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(selection)) return;
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result = await saveConfig({
-        channelId: channel._id as Id<"channels">,
-        blockId: "narration_tts",
-        config: { ...config, ttsProvider: "qwen3", qwenSpeaker: selection },
-      });
-      if ("state" in result) throw new Error(result.state === "channel_locked" ? "This channel is locked." : "The narration module is locked.");
-      setMessage("Voice saved for future runs. Listen to a sample before marking this channel ready.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save the voice.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return <Row label="Qwen narration voice" hint="Choose a voice deliberately for this channel; its existing pipeline is preserved.">
-    <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-      <select aria-label="Qwen narration voice" value={selection} disabled={busy} onChange={(event) => setSelection(event.target.value)}>
-        <option value="">Select a Qwen voice</option>
-        {QWEN3_TTS_SPEAKERS.map((speaker) => <option key={speaker} value={speaker}>{speaker}</option>)}
-      </select>
-      <button type="button" onClick={save} disabled={busy || !selection || selection === current}>Save voice</button>
-    </div>
-    {!current && <div>Choose and save a Qwen voice before running narration. The saved legacy voice has not been changed.</div>}
-    {message && <div role="status">{message}</div>}
+    <AutomationQwenVoiceControl channelId={channel._id} config={config} current={current}
+      saveConfig={(change) => saveConfig({ channelId: channel._id as Id<"channels">, blockId: "narration_tts", ...change })} />
   </Row>;
 }
 

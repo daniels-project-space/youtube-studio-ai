@@ -5,6 +5,9 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { channelPipelineWriteFence } from "@/lib/channelPipelineWriteFence";
+import { channelModuleConfigFence } from "@/lib/channelModuleConfigFence";
+import { prepareInceptionScheduleUpdate } from "@/lib/inceptionScheduleUpdate";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import {
   channelArtIdentityFromSource,
@@ -843,6 +846,18 @@ async function currentChannel(
   const channel = await convex.query(api.channels.getChannel, { channelId });
   if (!channel) throw new Error(`channel not found: ${channelId}`);
   return channel;
+}
+
+async function updateInceptionSchedule(
+  convex: ConvexHttpClient,
+  channelId: Id<"channels">,
+  update: { frequency: string; days?: number[] },
+) {
+  const channel = await currentChannel(convex, channelId);
+  const result = await convex.mutation(api.channels.updateChannel, {
+    channelId, ...prepareInceptionScheduleUpdate(channel.schedule, update),
+  });
+  if ("state" in result) throw new Error("channel schedule is locked; inception could not apply its schedule");
 }
 
 async function mergeIdentity(
@@ -2067,10 +2082,7 @@ export async function executeDesignChannel(
   });
 
   if (payload.cadence) {
-    await convex.mutation(api.channels.updateChannel, {
-      channelId,
-      schedule: { frequency: payload.cadence, days: payload.days },
-    });
+    await updateInceptionSchedule(convex, channelId, { frequency: payload.cadence, days: payload.days });
   }
 
   if (reviewedDataStoryIntake) {
@@ -2439,9 +2451,12 @@ export async function executeDesignChannel(
   // half-configured channel. A Convex mutation is atomic, so validating every
   // block before writing any makes a refusal change nothing at all.
   if (Object.keys(requestedModuleConfig).length > 0) {
+    const configBaseline = existingAtStart?.moduleConfig ?? resolvedDesignModuleConfig.frozenModuleConfig;
+    const expectedConfigFences = Object.fromEntries(Object.keys(requestedModuleConfig).map(blockId => [blockId, channelModuleConfigFence(configBaseline?.[blockId])]));
     const moduleConfigWrite = await convex.mutation(api.channels.setModuleConfigs, {
       channelId,
       configs: requestedModuleConfig as Record<string, Record<string, unknown>>,
+      expectedConfigFences,
     });
     const refusal = moduleConfigWrite as { state?: string; blockId?: string };
     if (refusal.state === "module_locked") {
@@ -2449,6 +2464,8 @@ export async function executeDesignChannel(
         `channel inception module configuration refused: module '${refusal.blockId ?? "unknown"}' is locked`,
       );
     }
+    if (refusal.state === "config_conflict") throw new Error(`channel inception module configuration changed during preparation: '${refusal.blockId ?? "unknown"}'`);
+    if (refusal.state === "channel_locked") throw new Error("channel inception module configuration refused: channel is locked");
   }
   const canonicalModuleConfig = (await currentChannel(convex, channelId) as {
     moduleConfig?: Record<string, Record<string, unknown>>;
@@ -3393,6 +3410,7 @@ export async function executeDesignChannel(
     loadCompleted: loadPipeline,
     adoptExisting: existingAtStart ? loadPipeline : undefined,
     execute: async () => {
+      const pipelineInputFence = channelPipelineWriteFence(await currentChannel(convex, channelId));
       const customized = customizePipelineFromDna(design.pipeline, positioning.identity, positioning.styleDNA);
       if (customized.changed.length) log(`pipeline customized from DNA: ${customized.changed.join(", ")}`);
       const architect = await architectPipeline({
@@ -3496,6 +3514,7 @@ export async function executeDesignChannel(
       });
       const pipelineWrite = await convex.mutation(api.channels.updateChannel, {
         channelId,
+        expectedPipelineFence: pipelineInputFence,
         pipeline: wired.pipeline,
         architectReport: {
           ...(report ?? {
@@ -3871,12 +3890,13 @@ export async function executeDesignChannel(
         ) {
           const failedBlock = (spendStages as { block?: string; status?: unknown }[])
             .find((stage) => stage.status === "failed")?.block;
+          const repairChannel = await currentChannel(convex, channelId);
           const fix = await architectPipeline({
             family: payload.family,
             channelName: positioning.name,
             niche: seoIdentity.niche,
             persona: seoIdentity.persona,
-            pipeline: ((await currentChannel(convex, channelId)).pipeline ?? effectivePipeline) as PipelineEntry[],
+            pipeline: (repairChannel.pipeline ?? effectivePipeline) as PipelineEntry[],
             dna: positioning.styleDNA,
             bible: positioning.creativeBrief,
             qualityBar: positioning.qualityBar,
@@ -3888,6 +3908,7 @@ export async function executeDesignChannel(
           if (fix) {
             const repairWrite = await convex.mutation(api.channels.updateChannel, {
               channelId,
+              expectedPipelineFence: channelPipelineWriteFence(repairChannel),
               pipeline: completePipelineForPolicy(withLengthLaw(fix.pipeline)).entries,
               architectReport: {
                 ...fix.report,
@@ -4046,10 +4067,7 @@ export async function executeDesignChannel(
       budgetAllocation?: string;
     } | undefined;
     if (report?.schedule) {
-      await convex.mutation(api.channels.updateChannel, {
-        channelId,
-        schedule: { frequency: report.schedule.frequency, days: report.schedule.days },
-      });
+      await updateInceptionSchedule(convex, channelId, report.schedule);
     }
   }
 

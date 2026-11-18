@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { OWNER_ID } from "@/lib/config";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 
@@ -29,14 +30,16 @@ export async function POST(request: Request) {
     );
   }
   try {
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const { tasks } = await import("@trigger.dev/sdk");
     const handle = await tasks.trigger("plan-week-ahead", {
       ownerId: OWNER_ID,
       channelId,
       count: Math.max(1, Math.min(12, body.count ?? 5)),
-    });
+    }, undefined, requestOptions);
     return NextResponse.json({ id: handle.id });
   } catch (err) {
+    if (err instanceof PrivateTriggerTargetError) return NextResponse.json({ error: err.message, inactive: true }, { status: 503 });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "trigger failed" },
       { status: 500 },

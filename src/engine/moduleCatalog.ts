@@ -480,7 +480,8 @@ export function sanitizeParamOverrides(
         if (field.max !== undefined) n = Math.min(field.max, n);
         clean[field.key] = n;
       } else if (field.type === "toggle") {
-        clean[field.key] = Boolean(v);
+        if (v === true || v === "true") clean[field.key] = true;
+        else if (v === false || v === "false") clean[field.key] = false;
       } else if (field.type === "select") {
         const ok = field.options?.some((o) => o.value === v);
         if (ok) clean[field.key] = v;

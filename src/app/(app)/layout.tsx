@@ -6,7 +6,7 @@ import { AppShell } from "@/components/AppShell";
 export default function AppGroupLayout({ children }: { children: ReactNode }) {
   return (
     <ConvexClientProvider>
-      <AppShell>{children}</AppShell>
+      <AppShell automation={process.env.YOUTUBE_AUTOMATION_PRIVATE === "1"}>{children}</AppShell>
     </ConvexClientProvider>
   );
 }

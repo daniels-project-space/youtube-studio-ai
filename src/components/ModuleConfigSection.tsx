@@ -24,6 +24,7 @@ import {
   type ChannelModuleLock,
 } from "@/lib/channelModuleLock";
 import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
+import { channelModuleConfigFence } from "@/lib/channelModuleConfigFence";
 import { failureReason } from "@/lib/failureReason";
 import { useOwnerId } from "@/lib/owner-context";
 import { ModuleConfigPanel, type ModuleConfigValue } from "./ModuleConfigPanel";
@@ -84,7 +85,10 @@ function ModuleCard({
     setBusy(true);
     setErr(null);
     try {
-      const outcome = await setModuleConfig({ channelId, blockId, config: next });
+      const outcome = await setModuleConfig({ channelId, blockId, config: next, expectedConfigFence: channelModuleConfigFence(value) });
+      if ((outcome as { state?: string }).state === "config_conflict") {
+        throw new Error("This module changed elsewhere. Refresh its settings before trying again.");
+      }
       if ((outcome as { state?: string }).state === "module_locked") {
         throw new Error(`\"${title}\" is locked. Unlock this exact module before changing its controls.`);
       }

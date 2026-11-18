@@ -100,6 +100,14 @@ function claimBoundaries(): void {
 }
 
 function timezoneScheduling(): void {
+  const repeatedHour: ChannelSchedulePolicy = {
+    enabled: true, timezone: "America/New_York", localTime: "01:30", frequency: "daily",
+  };
+  const firstOccurrence = Date.parse("2026-11-01T05:30:00.000Z");
+  const secondOccurrence = Date.parse("2026-11-01T06:30:00.000Z");
+  assert.equal(isGenerationDue({ now: firstOccurrence, lastStartedAt: 0, schedule: repeatedHour }), true);
+  assert.equal(isGenerationDue({ now: secondOccurrence, lastStartedAt: firstOccurrence, schedule: repeatedHour }), false,
+    "the repeated daylight-saving hour must not start a second run on the same local date");
   const schedule: ChannelSchedulePolicy = {
     enabled: true,
     timezone: "America/New_York",
@@ -108,6 +116,9 @@ function timezoneScheduling(): void {
     frequency: "weekly",
   };
   assert.equal(isGenerationDue({ now: NOW, lastStartedAt: 0, schedule }), true);
+  assert.equal(isGenerationDue({ now: NOW, lastStartedAt: 0 }), false);
+  assert.equal(isGenerationDue({ now: NOW, lastStartedAt: 0, schedule: {} }), false);
+  assert.equal(isGenerationDue({ now: NOW, lastStartedAt: 0, schedule: { ...schedule, enabled: false } }), false);
   assert.equal(
     isGenerationDue({ now: Date.parse("2026-07-19T12:59:00.000Z"), lastStartedAt: 0, schedule }),
     false,
@@ -120,7 +131,7 @@ function timezoneScheduling(): void {
     isGenerationDue({
       now: Date.parse("2026-07-19T13:30:00.000Z"),
       lastStartedAt: 0,
-      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
+      schedule: { enabled: true, timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
     }),
     false,
     "an unset weekly weekday follows the calendar's Monday default",
@@ -129,7 +140,7 @@ function timezoneScheduling(): void {
     isGenerationDue({
       now: Date.parse("2026-07-20T13:30:00.000Z"),
       lastStartedAt: 0,
-      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
+      schedule: { enabled: true, timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
     }),
     true,
   );
@@ -137,7 +148,7 @@ function timezoneScheduling(): void {
     isGenerationDue({
       now: Date.parse("2026-07-22T13:30:00.000Z"),
       lastStartedAt: Date.parse("2026-07-20T13:30:00.000Z"),
-      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly", days: [1, 3] },
+      schedule: { enabled: true, timezone: "America/New_York", localTime: "09:00", frequency: "weekly", days: [1, 3] },
     }),
     true,
     "each configured weekly day is independently due",
@@ -146,7 +157,7 @@ function timezoneScheduling(): void {
     isGenerationDue({
       now: Date.parse("2026-08-10T13:30:00.000Z"),
       lastStartedAt: 0,
-      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
+      schedule: { enabled: true, timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
     }),
     true,
   );
@@ -154,7 +165,7 @@ function timezoneScheduling(): void {
     isGenerationDue({
       now: Date.parse("2026-08-17T13:30:00.000Z"),
       lastStartedAt: 0,
-      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
+      schedule: { enabled: true, timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
     }),
     false,
   );
@@ -167,7 +178,7 @@ function timezoneScheduling(): void {
     "2026-07-19",
   );
   assert.throws(
-    () => isGenerationDue({ now: NOW, lastStartedAt: 0, schedule: { localTime: "25:00" } }),
+    () => isGenerationDue({ now: NOW, lastStartedAt: 0, schedule: { enabled: true, localTime: "25:00" } }),
     /invalid channel schedule/,
   );
 }

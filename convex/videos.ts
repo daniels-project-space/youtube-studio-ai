@@ -475,10 +475,11 @@ export const listVideos = query({
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
     includeArchived: v.optional(v.boolean()),
+    savedOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    // Bound the scan even when the caller passes no limit (all current
-    // callers do); early termination below keeps the common case cheap.
+    // Bound returned rows; the saved-render view additionally caps how many
+    // runs it examines when recent rows have no retained video.
     const limit = args.limit ?? 200;
     // Narrowest index first: by_channel when filtered, else by_owner. desc =
     // newest _creationTime first (≈ startedAt order; runs stamp startedAt at
@@ -503,11 +504,14 @@ export const listVideos = query({
     };
     const channelCache = new Map<string, Promise<LibraryChannel | null>>();
     const rows: Array<Record<string, unknown>> = [];
+    let scanned = 0;
 
     for await (const run of source) {
       if (rows.length >= limit) break;
+      if (args.savedOnly && scanned >= 200) break;
+      scanned++;
       const projected = await projectLibraryVideo(ctx, run, filters, channelCache);
-      if (projected) rows.push(projected);
+      if (projected && (!args.savedOnly || projected.videoKey)) rows.push(projected);
     }
 
     // Newest first (startedAt can drift a hair from _creationTime).

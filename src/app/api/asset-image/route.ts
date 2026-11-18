@@ -42,8 +42,8 @@ function readSharedImageBytes(key: string): Promise<Uint8Array> {
   return read;
 }
 
-function contentType(key: string): string | undefined {
-  const extension = key.toLowerCase().split(".").pop();
+function contentType(key: string, format: string | null): string | undefined {
+  const extension = key.startsWith(`owner/${OWNER_ID}/historical-library/`) && format ? format : key.toLowerCase().split(".").pop();
   if (extension === "png") return "image/png";
   if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   if (extension === "webp") return "image/webp";
@@ -67,12 +67,18 @@ function isOwnedKey(key: string): boolean {
   return key.startsWith(ownerPrefix) && !key.includes("..") && !key.includes("\\") && key.length <= 1_024;
 }
 
+function isMissingObject(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const failure = error as { name?: unknown };
+  return failure.name === "NoSuchKey" || failure.name === "NotFound";
+}
+
 /** Same-origin image response for private R2 artwork; videos keep direct signed playback. */
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const key = searchParams.get("key") ?? "";
   const probe = searchParams.get("probe") === "1";
-  const mimeType = contentType(key);
+  const mimeType = contentType(key, searchParams.get("format"));
   if (!mimeType || !isOwnedKey(key)) {
     return NextResponse.json({ error: "forbidden image key" }, { status: 403 });
   }
@@ -106,7 +112,7 @@ export async function GET(request: Request) {
         status: 413, headers: { "Cache-Control": "private, no-store" },
       });
     }
-    if (isR2CredentialFailure(error)) {
+    if (isR2CredentialFailure(error) || !isMissingObject(error)) {
       return NextResponse.json(
         { error: "private media storage is unavailable" },
         { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "60" } },

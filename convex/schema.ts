@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { runLogLineValidator } from "./runLogChunks";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
+import { historicalLibraryImportSchema } from "./historicalLibraryImportSchema";
 import {
   CHANNEL_COMPOSITION_RECEIPT_VERSION,
   CHANNEL_PROGRAM_BRIEF_VERSION,
@@ -148,6 +149,41 @@ const planWeekLegacyNovitaProviderReceipt = v.object({
  * R2 keys are per-channel prefixed; nothing here holds media bytes.
  */
 export default defineSchema({
+  ...historicalLibraryImportSchema,
+  retainedPipelineCandidates: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), fingerprint: v.string(),
+    candidate: v.any(), createdAt: v.number(),
+  }).index("by_channel_fingerprint", ["channelId", "fingerprint"])
+    .index("by_channel_created", ["channelId", "createdAt"]),
+  durationDraftCandidates: defineTable({
+    status: v.literal("untested"),
+    version: v.optional(v.union(v.literal("duration-draft-candidate/v2"), v.literal("duration-draft-candidate/v3"))),
+    baselineModuleConfig: v.optional(v.any()), moduleConfig: v.optional(v.any()),
+    sourceInception: v.optional(v.any()),
+    ownerId: v.string(), channelId: v.id("channels"), fingerprint: v.string(), baselineFingerprint: v.string(),
+    family: v.string(), requestedSeconds: v.number(), baselinePipeline: v.any(), pipeline: v.any(), createdAt: v.number(),
+  }).index("by_owner_channel_created", ["ownerId", "channelId", "createdAt"])
+    .index("by_owner_channel_fingerprint", ["ownerId", "channelId", "fingerprint"]),
+  durationCandidateLocalReports: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), candidateId: v.id("durationDraftCandidates"),
+    candidateFingerprint: v.string(), baselineFingerprint: v.string(), fingerprint: v.string(), report: v.any(), createdAt: v.number(),
+  }).index("by_owner_candidate_created", ["ownerId", "candidateId", "createdAt"])
+    .index("by_owner_candidate_fingerprint", ["ownerId", "candidateId", "fingerprint"]),
+  durationCandidatePreflightRequests: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), candidateId: v.id("durationDraftCandidates"), requestKey: v.string(),
+    candidateFingerprint: v.string(), baselineFingerprint: v.string(), optionsFingerprint: v.string(),
+    state: v.union(v.literal("pending"), v.literal("queued"), v.literal("running"), v.literal("completed"), v.literal("failed")),
+    taskRunId: v.optional(v.string()), reportFingerprint: v.optional(v.string()), error: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+  }).index("by_owner_candidate_key", ["ownerId", "candidateId", "requestKey"]),
+  importedWorkshopDesigns: defineTable({
+    ownerId: v.string(), fingerprint: v.string(), design: v.any(), importedAt: v.number(),
+  }).index("by_owner_imported", ["ownerId", "importedAt"])
+    .index("by_owner_fingerprint", ["ownerId", "fingerprint"]),
+  workshopReviewCandidates: defineTable({
+    ownerId: v.string(), channelId: v.id("channels"), designFingerprint: v.string(),
+    fingerprint: v.string(), baselineFingerprint: v.string(), candidate: v.any(), createdAt: v.number(),
+  }).index("by_owner_channel_design_created", ["ownerId", "channelId", "designFingerprint", "createdAt"])
+    .index("by_owner_channel_fingerprint", ["ownerId", "channelId", "fingerprint"]),
   channelImportReceipts: defineTable({
     ownerId: v.string(),
     sourceFileSha256: v.string(),
@@ -887,6 +923,9 @@ export default defineSchema({
     routeQualificationBenchmarkDispatchEnvelope: v.optional(v.any()),
     routeQualificationBenchmarkDispatchEnvelopeFingerprint: v.optional(v.string()),
     routeQualificationBenchmarkDispatchKey: v.optional(v.string()),
+    routeQualificationBenchmarkCandidate: v.optional(v.object({ candidateId: v.id("durationDraftCandidates"), fingerprint: v.string(), baselineFingerprint: v.string() })),
+    routeQualificationBenchmarkCandidatePreflight: v.optional(v.any()),
+    routeQualificationBenchmarkCandidateInvocationInput: v.optional(v.any()),
     routeQualificationBenchmarkRequestApproval: v.optional(v.any()),
     routeQualificationBenchmarkRequestApprovalFingerprint: v.optional(v.string()),
     routeQualificationBenchmarkMaximumCostUsd: v.optional(v.number()),

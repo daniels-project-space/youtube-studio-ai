@@ -8,28 +8,12 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 import {
-  buildChannelInceptionPlan,
-  type ChannelInceptionPlan,
-  type ChannelInceptionRequest,
-} from "./channelInceptionPlan";
-import {
   assertCanonicalChannelProgramBrief,
   channelProgramBriefFingerprint,
 } from "./channelProgramBrief";
 import {
   assertChannelProgramRouteBinding,
 } from "./channelProgramRoute";
-import {
-  assertChannelShowProfilePipelineCompatibility,
-  channelShowProfileFingerprint,
-  parseChannelShowProfile,
-  type ChannelShowProfile,
-} from "./channelShowProfile";
-import {
-  assertPipelineMatchesContentLane,
-  contentLaneForFamily,
-  type ContentLaneKey,
-} from "./contentLane";
 import { designPipeline, type DesignOptions } from "./designer";
 import { FAMILY_KEYS, type FamilyKey } from "./families";
 import {
@@ -42,11 +26,6 @@ import {
   type NovitaVideoRuntimeTarget,
 } from "./runtimeCapability";
 import type { PipelineEntry } from "./types";
-import {
-  VisualMatterManifestSchema,
-  visualMatterDirectiveForShot,
-  visualMatterReferenceAssetsForShot,
-} from "./visualMatter";
 
 /**
  * A pure, read-only qualification projection for a concrete production route.
@@ -56,20 +35,23 @@ import {
  * every conclusion is derived from current planner, inception, runtime,
  * quality, release-provenance, and (where relevant) Visual Matter receipts.
  */
-export const PRODUCTION_ROUTE_QUALIFICATION_VERSION =
-  "production-route-qualification/v1" as const;
+import { PRODUCTION_ROUTE_QUALIFICATION_VERSION, ProductionRouteQualificationBindingSchema, assertProductionRouteQualificationBinding, type ProductionRouteQualificationBinding } from "./productionRouteQualificationBinding";
+export { PRODUCTION_ROUTE_QUALIFICATION_VERSION, ProductionRouteQualificationBindingSchema, assertProductionRouteQualificationBinding, productionRouteQualificationBindingFingerprint, readProductionRouteQualificationBinding } from "./productionRouteQualificationBinding";
+export type { ProductionRouteQualificationBinding, ProductionRouteQualificationBindingBody } from "./productionRouteQualificationBinding";
 export const PRODUCTION_ROUTE_PLANNER_EVIDENCE_VERSION =
   "production-route-planner-evidence/v1" as const;
-export const PRODUCTION_ROUTE_INCEPTION_EVIDENCE_VERSION =
-  "production-route-inception-evidence/v1" as const;
+import { ProductionRouteInceptionEvidenceSchema, assertProductionRouteInceptionEvidence } from "./productionRouteInceptionEvidence";
+export { PRODUCTION_ROUTE_INCEPTION_EVIDENCE_VERSION, ProductionRouteInceptionEvidenceSchema, assertProductionRouteInceptionEvidence, productionRouteInceptionEvidenceFingerprint, readProductionRouteInceptionEvidence } from "./productionRouteInceptionEvidence";
+export type { ProductionRouteInceptionEvidence, ProductionRouteInceptionEvidenceBody } from "./productionRouteInceptionEvidence";
 export const PRODUCTION_ROUTE_RUNTIME_EVIDENCE_VERSION =
   "production-route-runtime-evidence/v1" as const;
 export const PRODUCTION_ROUTE_QUALITY_EVIDENCE_VERSION =
   "production-route-quality-evidence/v1" as const;
 export const PRODUCTION_ROUTE_PROVENANCE_EVIDENCE_VERSION =
   "production-route-provenance-evidence/v1" as const;
-export const PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION =
-  "production-route-visual-matter-evidence/v1" as const;
+import { ProductionRouteVisualMatterEvidenceSchema, assertProductionRouteVisualMatterEvidence } from "./productionRouteVisualMatterEvidence";
+export { PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION, ProductionRouteVisualMatterEvidenceSchema, assertProductionRouteVisualMatterEvidence, productionRouteVisualMatterEvidenceFingerprint, readProductionRouteVisualMatterEvidence } from "./productionRouteVisualMatterEvidence";
+export type { ProductionRouteVisualMatterEvidence, ProductionRouteVisualMatterEvidenceBody } from "./productionRouteVisualMatterEvidence";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const sha256 = z.string().regex(SHA256_PATTERN, "expected SHA-256 fingerprint");
@@ -107,223 +89,6 @@ function fingerprintWithout(value: object, field: string): string {
 
 function readablePipeline(value: unknown): readonly PipelineEntry[] {
   return pipelineSchema.parse(value) as unknown as readonly PipelineEntry[];
-}
-
-function contentLaneKeyForFamily(family: FamilyKey): ContentLaneKey {
-  const lane = contentLaneForFamily(family);
-  if (!lane) throw new Error(`family ${family} does not resolve to a content lane`);
-  return lane.key;
-}
-
-const ProgramBriefBindingSchema = z.object({
-  version: identifier,
-  catalogFingerprint: sha256,
-  fingerprint: sha256,
-}).strict();
-
-const ShowProfileBindingSchema = z.object({
-  version: identifier,
-  fingerprint: sha256,
-  designedPipelineFingerprint: sha256,
-}).strict();
-
-const RouteBindingSchema = z.object({
-  version: identifier,
-  key: shortIdentifier,
-  admission: z.enum(["automatic", "supervised_private"]),
-  definitionVersion: z.union([z.string().trim().min(1).max(160), z.number().int().nonnegative()]),
-  definitionFingerprint: sha256,
-  fingerprint: sha256,
-}).strict();
-
-const ExactCompositionBindingSchema = z.object({
-  kind: z.literal("exact_catalog_v1"),
-  version: identifier,
-  key: shortIdentifier,
-  definitionVersion: z.union([z.string().trim().min(1).max(160), z.number().int().nonnegative()]),
-  definitionFingerprint: sha256,
-  fingerprint: sha256,
-  selectedCapabilityKeys: z.array(shortIdentifier),
-}).strict();
-
-const CapabilityPlanCompositionBindingSchema = z.object({
-  kind: z.literal("capability_plan_v1"),
-  version: identifier,
-  key: shortIdentifier,
-  definitionVersion: z.union([z.string().trim().min(1).max(160), z.number().int().nonnegative()]),
-  definitionFingerprint: sha256,
-  fingerprint: sha256,
-  operationsFingerprint: sha256,
-  selectedCapabilityKeys: z.array(shortIdentifier).min(1),
-}).strict();
-
-const CompositionBindingSchema = z.discriminatedUnion("kind", [
-  ExactCompositionBindingSchema,
-  CapabilityPlanCompositionBindingSchema,
-]);
-
-const ProductionRouteQualificationBindingBodySchema = z.object({
-  version: z.literal(PRODUCTION_ROUTE_QUALIFICATION_VERSION),
-  family: FamilyKeySchema,
-  contentLaneKey: shortIdentifier,
-  programBrief: ProgramBriefBindingSchema,
-  showProfile: ShowProfileBindingSchema,
-  route: RouteBindingSchema,
-  composition: CompositionBindingSchema,
-  pipelineFingerprint: sha256,
-}).strict();
-
-export type ProductionRouteQualificationBindingBody = z.infer<
-  typeof ProductionRouteQualificationBindingBodySchema
->;
-
-export function productionRouteQualificationBindingFingerprint(
-  value: ProductionRouteQualificationBindingBody,
-): string {
-  return fingerprintWithout(value, "bindingFingerprint");
-}
-
-export const ProductionRouteQualificationBindingSchema =
-  ProductionRouteQualificationBindingBodySchema.extend({
-    bindingFingerprint: sha256,
-  }).strict().superRefine((value, context) => {
-    const normalizedCapabilities = sortedUniqueStrings(value.composition.selectedCapabilityKeys);
-    if (!sameStrings(value.composition.selectedCapabilityKeys, normalizedCapabilities)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["composition", "selectedCapabilityKeys"],
-        message: "composition capability keys must be sorted and unique",
-      });
-    }
-    if (value.bindingFingerprint !== productionRouteQualificationBindingFingerprint(value)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["bindingFingerprint"],
-        message: "production-route qualification binding fingerprint does not match its payload",
-      });
-    }
-  });
-
-export type ProductionRouteQualificationBinding = z.infer<
-  typeof ProductionRouteQualificationBindingSchema
->;
-
-export function assertProductionRouteQualificationBinding(
-  value: unknown,
-): ProductionRouteQualificationBinding {
-  return ProductionRouteQualificationBindingSchema.parse(value);
-}
-
-function compositionBindingFor(profile: ChannelShowProfile): ProductionRouteQualificationBindingBody["composition"] {
-  if (profile.composition) {
-    return {
-      kind: "exact_catalog_v1",
-      version: profile.composition.version,
-      key: profile.composition.key,
-      definitionVersion: profile.composition.definitionVersion,
-      definitionFingerprint: profile.composition.definitionFingerprint,
-      fingerprint: profile.composition.fingerprint,
-      selectedCapabilityKeys: [...profile.selectedCapabilityKeys],
-    };
-  }
-  const binding = profile.compositionBinding;
-  if (!binding) {
-    throw new Error(
-      "production-route qualification requires one frozen composition authority on the show profile",
-    );
-  }
-  if (binding.kind === "exact_catalog_v1") {
-    return {
-      kind: binding.kind,
-      version: binding.receipt.version,
-      key: binding.receipt.key,
-      definitionVersion: binding.receipt.definitionVersion,
-      definitionFingerprint: binding.receipt.definitionFingerprint,
-      fingerprint: binding.receipt.fingerprint,
-      selectedCapabilityKeys: [...profile.selectedCapabilityKeys],
-    };
-  }
-  return {
-    kind: binding.kind,
-    version: binding.plan.version,
-    key: binding.plan.base.key,
-    definitionVersion: binding.plan.base.definitionVersion,
-    definitionFingerprint: binding.plan.base.definitionFingerprint,
-    fingerprint: binding.plan.fingerprint,
-    operationsFingerprint: binding.plan.operationsFingerprint,
-    selectedCapabilityKeys: [...binding.plan.selectedCapabilityKeys],
-  };
-}
-
-/**
- * Compatibility reader for the current Program Brief, Program Route, Show
- * Profile, composition receipt, and effective compiled pipeline.
- */
-export function readProductionRouteQualificationBinding(input: {
-  readonly programBrief: unknown;
-  readonly programRoute: unknown;
-  readonly showProfile: unknown;
-  readonly pipeline: unknown;
-}): ProductionRouteQualificationBinding {
-  const programBrief = assertCanonicalChannelProgramBrief(input.programBrief);
-  const route = assertChannelProgramRouteBinding({
-    route: input.programRoute,
-    programBrief,
-    expectedFamily: programBrief.family,
-  });
-  const pipeline = readablePipeline(input.pipeline);
-  const contentLaneKey = contentLaneKeyForFamily(programBrief.family);
-  if (route.contentLaneKey !== contentLaneKey) {
-    throw new Error("production route content lane does not match the frozen family lane");
-  }
-  assertPipelineMatchesContentLane(contentLaneForFamily(programBrief.family), pipeline);
-  const showProfile = assertChannelShowProfilePipelineCompatibility({
-    profile: input.showProfile,
-    programBrief,
-    pipeline,
-  });
-  if (!showProfile.programRoute) {
-    throw new Error(
-      "production-route qualification does not admit a route-less historical Show Profile",
-    );
-  }
-  if (showProfile.programRoute.fingerprint !== route.fingerprint) {
-    throw new Error("show profile program route does not match the qualification route");
-  }
-  const pipelineFingerprint = fingerprint(pipeline);
-  if (showProfile.designedPipelineFingerprint !== pipelineFingerprint) {
-    throw new Error("show profile does not bind the effective qualification pipeline");
-  }
-
-  const body: ProductionRouteQualificationBindingBody = {
-    version: PRODUCTION_ROUTE_QUALIFICATION_VERSION,
-    family: programBrief.family,
-    contentLaneKey,
-    programBrief: {
-      version: programBrief.version,
-      catalogFingerprint: programBrief.catalogFingerprint,
-      fingerprint: channelProgramBriefFingerprint(programBrief),
-    },
-    showProfile: {
-      version: showProfile.version,
-      fingerprint: channelShowProfileFingerprint(showProfile),
-      designedPipelineFingerprint: showProfile.designedPipelineFingerprint,
-    },
-    route: {
-      version: route.version,
-      key: route.routeKey,
-      admission: route.admission ?? "automatic",
-      definitionVersion: route.definitionVersion,
-      definitionFingerprint: route.definitionFingerprint,
-      fingerprint: route.fingerprint,
-    },
-    composition: compositionBindingFor(showProfile),
-    pipelineFingerprint,
-  };
-  return assertProductionRouteQualificationBinding({
-    ...body,
-    bindingFingerprint: productionRouteQualificationBindingFingerprint(body),
-  });
 }
 
 const PlannerEvidenceBodySchema = z.object({
@@ -422,138 +187,6 @@ export function readProductionRoutePlannerEvidence(input: {
   return assertProductionRoutePlannerEvidence({
     ...body,
     evidenceFingerprint: productionRoutePlannerEvidenceFingerprint(body),
-  });
-}
-
-const InceptionEvidenceBodySchema = z.object({
-  version: z.literal(PRODUCTION_ROUTE_INCEPTION_EVIDENCE_VERSION),
-  bindingFingerprint: sha256,
-  inceptionSchemaVersion: identifier,
-  inceptionKey: identifier,
-  requestFingerprint: sha256,
-  pipelineFingerprint: sha256,
-  stageKeys: z.array(identifier).min(1),
-  planFingerprint: sha256,
-}).strict();
-
-export type ProductionRouteInceptionEvidenceBody = z.infer<typeof InceptionEvidenceBodySchema>;
-
-export function productionRouteInceptionEvidenceFingerprint(
-  value: ProductionRouteInceptionEvidenceBody,
-): string {
-  return fingerprintWithout(value, "evidenceFingerprint");
-}
-
-export const ProductionRouteInceptionEvidenceSchema = InceptionEvidenceBodySchema.extend({
-  evidenceFingerprint: sha256,
-}).strict().superRefine((value, context) => {
-  const normalized = sortedUniqueStrings(value.stageKeys);
-  if (!sameStrings(value.stageKeys, normalized)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["stageKeys"],
-      message: "inception stage keys must be sorted and unique",
-    });
-  }
-  if (value.evidenceFingerprint !== productionRouteInceptionEvidenceFingerprint(value)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["evidenceFingerprint"],
-      message: "inception evidence fingerprint does not match its payload",
-    });
-  }
-});
-
-export type ProductionRouteInceptionEvidence = z.infer<typeof ProductionRouteInceptionEvidenceSchema>;
-
-export function assertProductionRouteInceptionEvidence(value: unknown): ProductionRouteInceptionEvidence {
-  return ProductionRouteInceptionEvidenceSchema.parse(value);
-}
-
-const ChannelInceptionPlanCompatibilitySchema = z.object({
-  schemaVersion: identifier,
-  mode: z.literal("plan-only"),
-  providerCallsAuthorized: z.literal(false),
-  inceptionKey: identifier,
-  requestFingerprint: sha256,
-  requestSnapshot: z.object({
-    family: FamilyKeySchema,
-    pipelineSourceFingerprint: sha256,
-    programBrief: z.unknown(),
-    programRoute: z.unknown().optional(),
-    showProfile: z.unknown().optional(),
-  }).passthrough(),
-  channel: z.object({ family: FamilyKeySchema }).passthrough(),
-  stages: z.array(z.object({
-    stageKey: identifier,
-  }).passthrough()).min(1),
-}).passthrough();
-
-/**
- * Reads a persisted plan-only Channel Inception artifact by rebuilding it from
- * its immutable request snapshot. This verifies the plan rather than trusting
- * a stored status field, and does not authorize or invoke provider work.
- */
-export function readProductionRouteInceptionEvidence(input: {
-  readonly binding: unknown;
-  readonly plan: ChannelInceptionPlan | unknown;
-}): ProductionRouteInceptionEvidence {
-  const binding = assertProductionRouteQualificationBinding(input.binding);
-  const plan = ChannelInceptionPlanCompatibilitySchema.parse(input.plan);
-  const snapshot = plan.requestSnapshot;
-  if (!snapshot.programRoute || !snapshot.showProfile) {
-    throw new Error("production-route inception evidence requires a route-bound Show Profile snapshot");
-  }
-  const brief = assertCanonicalChannelProgramBrief(snapshot.programBrief);
-  const route = assertChannelProgramRouteBinding({
-    route: snapshot.programRoute,
-    programBrief: brief,
-    expectedFamily: binding.family as FamilyKey,
-  });
-  const showProfile = parseChannelShowProfile(snapshot.showProfile);
-  if (
-    snapshot.family !== binding.family
-    || plan.channel.family !== binding.family
-    || channelProgramBriefFingerprint(brief) !== binding.programBrief.fingerprint
-    || route.fingerprint !== binding.route.fingerprint
-    || channelShowProfileFingerprint(showProfile) !== binding.showProfile.fingerprint
-    || snapshot.pipelineSourceFingerprint !== binding.pipelineFingerprint
-  ) {
-    throw new Error("channel inception plan does not match the frozen production-route qualification binding");
-  }
-
-  const expected = buildChannelInceptionPlan(
-    snapshot as unknown as ChannelInceptionRequest,
-  );
-  const actualStageKeys = sortedUniqueStrings(plan.stages.map((stage) => stage.stageKey));
-  const expectedStageKeys = sortedUniqueStrings(expected.stages.map((stage) => stage.stageKey));
-  if (
-    plan.schemaVersion !== expected.schemaVersion
-    || plan.inceptionKey !== expected.inceptionKey
-    || plan.requestFingerprint !== expected.requestFingerprint
-    || !sameStrings(actualStageKeys, expectedStageKeys)
-  ) {
-    throw new Error("channel inception plan is not the exact deterministic output of its request snapshot");
-  }
-  const body: ProductionRouteInceptionEvidenceBody = {
-    version: PRODUCTION_ROUTE_INCEPTION_EVIDENCE_VERSION,
-    bindingFingerprint: binding.bindingFingerprint,
-    inceptionSchemaVersion: plan.schemaVersion,
-    inceptionKey: plan.inceptionKey,
-    requestFingerprint: plan.requestFingerprint,
-    pipelineFingerprint: binding.pipelineFingerprint,
-    stageKeys: actualStageKeys,
-    planFingerprint: fingerprint({
-      schemaVersion: plan.schemaVersion,
-      inceptionKey: plan.inceptionKey,
-      requestFingerprint: plan.requestFingerprint,
-      requestSnapshot: snapshot,
-      stageKeys: actualStageKeys,
-    }),
-  };
-  return assertProductionRouteInceptionEvidence({
-    ...body,
-    evidenceFingerprint: productionRouteInceptionEvidenceFingerprint(body),
   });
 }
 
@@ -905,200 +538,6 @@ export function readProductionRouteProvenanceEvidenceFromReleaseCertificate(inpu
     binding: input.binding,
     quality: input.quality,
     claim,
-  });
-}
-
-const VisualMatterControlSchema = z.object({
-  shotId: shortIdentifier,
-  directiveFingerprint: sha256,
-  referenceAssetIds: z.array(shortIdentifier),
-}).strict();
-
-const VisualMatterEvidenceBodySchema = z.object({
-  version: z.literal(PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION),
-  bindingFingerprint: sha256,
-  required: z.boolean(),
-  requiresAnchoredReferenceAssets: z.boolean(),
-  status: z.enum(["not_required", "planned_controls", "anchored_controls"]),
-  manifestRevision: sha256.optional(),
-  referencePackFingerprint: sha256.optional(),
-  controls: z.array(VisualMatterControlSchema),
-  controlsReady: z.boolean(),
-}).strict();
-
-export type ProductionRouteVisualMatterEvidenceBody = z.infer<typeof VisualMatterEvidenceBodySchema>;
-
-export function productionRouteVisualMatterEvidenceFingerprint(
-  value: ProductionRouteVisualMatterEvidenceBody,
-): string {
-  return fingerprintWithout(value, "evidenceFingerprint");
-}
-
-export const ProductionRouteVisualMatterEvidenceSchema = VisualMatterEvidenceBodySchema.extend({
-  evidenceFingerprint: sha256,
-}).strict().superRefine((value, context) => {
-  const shotIds = value.controls.map((control) => control.shotId);
-  const normalizedShotIds = sortedUniqueStrings(shotIds);
-  if (!sameStrings(shotIds, normalizedShotIds)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["controls"],
-      message: "Visual Matter control shot ids must be sorted and unique",
-    });
-  }
-  for (const [index, control] of value.controls.entries()) {
-    const normalizedAssets = sortedUniqueStrings(control.referenceAssetIds);
-    if (!sameStrings(control.referenceAssetIds, normalizedAssets)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["controls", index, "referenceAssetIds"],
-        message: "Visual Matter reference asset ids must be sorted and unique",
-      });
-    }
-  }
-  if (value.status === "not_required") {
-    if (value.required || value.requiresAnchoredReferenceAssets || value.manifestRevision || value.referencePackFingerprint || value.controls.length) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "not-required Visual Matter evidence cannot carry an active manifest or controls",
-      });
-    }
-    if (!value.controlsReady) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["controlsReady"],
-        message: "not-required Visual Matter evidence must be ready by definition",
-      });
-    }
-  } else if (!value.manifestRevision || !value.controls.length || !value.controlsReady) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "active Visual Matter evidence requires a manifest revision and per-shot controls",
-    });
-  }
-  if (value.requiresAnchoredReferenceAssets && (value.status !== "anchored_controls" || !value.referencePackFingerprint)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "anchored-reference requirement needs anchored controls and a reference-pack fingerprint",
-    });
-  }
-  if (value.evidenceFingerprint !== productionRouteVisualMatterEvidenceFingerprint(value)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["evidenceFingerprint"],
-      message: "Visual Matter evidence fingerprint does not match its payload",
-    });
-  }
-});
-
-export type ProductionRouteVisualMatterEvidence = z.infer<typeof ProductionRouteVisualMatterEvidenceSchema>;
-
-export function assertProductionRouteVisualMatterEvidence(value: unknown): ProductionRouteVisualMatterEvidence {
-  return ProductionRouteVisualMatterEvidenceSchema.parse(value);
-}
-
-/**
- * Reads existing Visual Matter planning/reference artifacts only. It never
- * generates them, and it keeps reference-pixel conditioning opt-in and explicit.
- */
-export function readProductionRouteVisualMatterEvidence(input: {
-  readonly binding: unknown;
-  readonly required?: boolean;
-  readonly requiresAnchoredReferenceAssets?: boolean;
-  readonly manifest?: unknown;
-  readonly shotIds?: readonly string[];
-}): ProductionRouteVisualMatterEvidence {
-  const binding = assertProductionRouteQualificationBinding(input.binding);
-  const required = input.required === true;
-  const requiresAnchoredReferenceAssets = input.requiresAnchoredReferenceAssets === true;
-  const requestedShotIds = sortedUniqueStrings(input.shotIds ?? []);
-  if (requiresAnchoredReferenceAssets && !required) {
-    throw new Error("anchored Visual Matter reference assets can only be required for an active Visual Matter route");
-  }
-  if (input.manifest === undefined) {
-    if (required || requestedShotIds.length) {
-      throw new Error("required Visual Matter controls need an actual manifest");
-    }
-    const body: ProductionRouteVisualMatterEvidenceBody = {
-      version: PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION,
-      bindingFingerprint: binding.bindingFingerprint,
-      required: false,
-      requiresAnchoredReferenceAssets: false,
-      status: "not_required",
-      controls: [],
-      controlsReady: true,
-    };
-    return assertProductionRouteVisualMatterEvidence({
-      ...body,
-      evidenceFingerprint: productionRouteVisualMatterEvidenceFingerprint(body),
-    });
-  }
-
-  if (binding.contentLaneKey !== "cinematic_ai") {
-    throw new Error("Visual Matter controls are only admitted for the cinematic_ai content lane");
-  }
-  const manifest = VisualMatterManifestSchema.parse(input.manifest);
-  if (manifest.status === "disabled") {
-    if (required || requestedShotIds.length) {
-      throw new Error("a disabled Visual Matter manifest cannot satisfy required per-shot controls");
-    }
-    const body: ProductionRouteVisualMatterEvidenceBody = {
-      version: PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION,
-      bindingFingerprint: binding.bindingFingerprint,
-      required: false,
-      requiresAnchoredReferenceAssets: false,
-      status: "not_required",
-      controls: [],
-      controlsReady: true,
-    };
-    return assertProductionRouteVisualMatterEvidence({
-      ...body,
-      evidenceFingerprint: productionRouteVisualMatterEvidenceFingerprint(body),
-    });
-  }
-  if (requiresAnchoredReferenceAssets && manifest.status !== "anchored") {
-    throw new Error("anchored Visual Matter reference assets were required but the manifest is only planned");
-  }
-  const shotIds = requestedShotIds.length
-    ? requestedShotIds
-    : sortedUniqueStrings(manifest.storyboard.map((frame) => frame.shotId));
-  if (!shotIds.length) throw new Error("active Visual Matter evidence requires storyboard shots");
-  const controls = shotIds.map((shotId) => {
-    const directive = visualMatterDirectiveForShot(manifest, shotId);
-    if (!directive) throw new Error(`Visual Matter does not define controls for storyboard shot ${shotId}`);
-    const referenceAssetIds = sortedUniqueStrings(
-      visualMatterReferenceAssetsForShot(manifest, shotId).map((asset) => asset.id),
-    );
-    if (requiresAnchoredReferenceAssets && !referenceAssetIds.length) {
-      throw new Error(`Visual Matter shot ${shotId} has no attached reference asset`);
-    }
-    return {
-      shotId,
-      directiveFingerprint: fingerprint({
-        renderPrompt: directive.renderPrompt,
-        motionPrompt: directive.motionPrompt,
-        qaCriteria: directive.qaCriteria,
-        referenceAssetLabels: directive.referenceAssetLabels,
-      }),
-      referenceAssetIds,
-    };
-  });
-  const body: ProductionRouteVisualMatterEvidenceBody = {
-    version: PRODUCTION_ROUTE_VISUAL_MATTER_EVIDENCE_VERSION,
-    bindingFingerprint: binding.bindingFingerprint,
-    required,
-    requiresAnchoredReferenceAssets,
-    status: manifest.status === "anchored" ? "anchored_controls" : "planned_controls",
-    manifestRevision: manifest.revision,
-    ...(manifest.referencePackFingerprint
-      ? { referencePackFingerprint: manifest.referencePackFingerprint }
-      : {}),
-    controls,
-    controlsReady: true,
-  };
-  return assertProductionRouteVisualMatterEvidence({
-    ...body,
-    evidenceFingerprint: productionRouteVisualMatterEvidenceFingerprint(body),
   });
 }
 

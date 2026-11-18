@@ -15,9 +15,9 @@ const VIDEO_TYPES: Record<string, string> = {
 const PREVIEW_PROBE_RANGES = ["bytes=0-0", "bytes=0-0", "bytes=1048576-1048576"] as const;
 const PREVIEW_PROBE_MAX_ATTEMPTS = 5;
 
-function contentType(key: string): string | undefined {
+function contentType(key: string, format: string | null): string | undefined {
   const extension = key.toLowerCase().split(".").pop() ?? "";
-  return VIDEO_TYPES[extension];
+  return VIDEO_TYPES[extension] ?? (key.startsWith(`owner/${OWNER_ID}/historical-library/`) && format ? VIDEO_TYPES[format] : undefined);
 }
 
 function isOwnedVideoKey(key: string): boolean {
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key") ?? "";
   const probe = searchParams.get("probe") === "1";
-  const mimeType = contentType(key);
+  const mimeType = contentType(key, searchParams.get("format"));
   if (!mimeType || !isOwnedVideoKey(key)) {
     return NextResponse.json({ error: "forbidden video key" }, { status: 403 });
   }

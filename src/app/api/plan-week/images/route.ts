@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { assertPlanWeekPreparedImagesArgs } from "@/lib/planWeekPreparedImagesArgs";
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
     if (!process.env.TRIGGER_SECRET_KEY) {
       return NextResponse.json({ ok: false, error: "weekly image rendering is not activated (no TRIGGER_SECRET_KEY)", inactive: true }, { status: 503 });
     }
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const idempotencyKey = await idempotencyKeys.create(
       `plan-week-images:${actor.ownerId}:${payload.manifestSha256}`,
       { scope: "global" },
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
     const handle = await tasks.trigger("plan-week-prepared-images", payload, {
       concurrencyKey: `plan-week-images:${actor.ownerId}:${payload.channelId}`,
       idempotencyKey,
-    });
+    }, requestOptions);
     return NextResponse.json({
       ok: true,
       state: "queued",
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
     }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "could not queue weekly image render";
     return NextResponse.json({ ok: false, error: message }, { status: /invalid|requires|must |outside|canonical/u.test(message) ? 422 : 500 });
   }

@@ -11,24 +11,24 @@ import { StudioLocation } from "./StudioLocation";
 import { StudioMark } from "./StudioMark";
 
 /** Responsive app chrome shared by every operating surface. */
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, automation = false }: { children: ReactNode; automation?: boolean }) {
   return (
     <OwnerProvider>
       <ChannelProvider>
         <OperationsAccessProvider>
-          <div className="studio-shell">
+          <div className="studio-shell" data-automation={automation || undefined}>
             <div className="studio-ambient" aria-hidden="true">
               <span />
               <span />
             </div>
-            <Sidebar />
+            <Sidebar automation={automation} />
             <div className="studio-workspace">
               <header className="studio-topbar">
                 <div className="studio-mobile-brand">
-                  <span aria-hidden="true"><StudioMark width={20} height={20} /></span>
-                  <strong>AutoStudio</strong>
+                  <span aria-hidden="true">{automation ? <i className="automation-play" /> : <StudioMark width={20} height={20} />}</span>
+                  <strong>{automation ? "YouTube Automation" : "AutoStudio"}</strong>
                 </div>
-                <StudioLocation />
+                <StudioLocation automation={automation} />
                 <div className="studio-topbar-actions">
                   <ChannelSwitcher />
                   <OperationsAccess />

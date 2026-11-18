@@ -18,6 +18,7 @@ const crafted = {
 async function main(): Promise<void> {
   const previousFetch = globalThis.fetch;
   const previousKey = process.env.OPENROUTER_API_KEY;
+  const previousRate = process.env.NARRATION_WPS;
   let calls = 0;
   let omitDiscovery = false;
   let quietListening = false;
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
   let quoteCalls = 0;
   try {
     process.env.OPENROUTER_API_KEY = "fixture-only-never-sent";
+    delete process.env.NARRATION_WPS;
     globalThis.fetch = async (url, init) => {
       assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
       const body = JSON.parse(String(init?.body));
@@ -114,6 +116,10 @@ async function main(): Promise<void> {
       assert.fail(`unexpected long-form writer request: ${prompt.slice(0, 100)}`);
     };
 
+    process.env.NARRATION_WPS = "3.1";
+    await assert.rejects(synthScript({ topic: "Fixture", precraftedHook: crafted }), /outside.*contract/);
+    assert.equal(calls, 0, "incompatible production override fails before creative calls");
+    delete process.env.NARRATION_WPS;
     const script = await synthScript({
       topic: "The bridge's warm final stone",
       maxSeconds: 421,
@@ -155,7 +161,7 @@ async function main(): Promise<void> {
       niche: "meditation",
       style: "meditation",
       maxSeconds: 421,
-      ttsSpeed: 0.8,
+      ttsSpeed: 0.85,
       sentenceGapSec: 0.5,
       precraftedHook: crafted,
       structure: { beats: [
@@ -203,6 +209,8 @@ async function main(): Promise<void> {
     assert.doesNotMatch(quietShort.narrationText, /(?:\.{2,}|…+)/u, "quiet short-form narration removes unplanned ellipses");
     console.log("SCRIPTGEN PASS — standard retention craft remains intact; quiet-listening rules and paced duration are honored on short and long paths");
   } finally {
+    if (previousRate === undefined) delete process.env.NARRATION_WPS;
+    else process.env.NARRATION_WPS = previousRate;
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previousKey;

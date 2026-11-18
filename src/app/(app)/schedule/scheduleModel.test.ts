@@ -19,6 +19,7 @@ const channels: ChannelRow[] = [
     status: "active",
     schedule: {
       frequency: "weekly",
+      enabled: true,
       days: [1],
       timezone: "Asia/Tokyo",
       localTime: "09:00",
@@ -31,6 +32,7 @@ const channels: ChannelRow[] = [
     status: "active",
     schedule: {
       frequency: "daily",
+      enabled: true,
       timezone: "America/New_York",
       localTime: "09:30",
     },
@@ -117,8 +119,14 @@ const all = buildCalendarModel({
   todayMs: Date.parse("2026-08-06T12:00:00.000Z"),
 });
 
+const unspecified = new Map(channels.map(channel => [channel._id, { ...channel, schedule: channel.schedule ? { ...channel.schedule, enabled: undefined } : undefined }]));
+const unspecifiedCalendar = buildCalendarModel({ plan, publishedVideos: [], channelById: unspecified, channelColors: colors, scope: "all", todayMs: Date.parse("2026-08-06T12:00:00.000Z") });
+assert.deepEqual(unspecifiedCalendar.flat.map(event => event.key), ["plan:plan-b-1"], "unset cadence must not project; an explicitly pinned plan remains visible");
+
 assert.equal(all.flat.length, 4, "all-channel overlay includes planned and published work only");
 const missingThumbnail = all.flat.find((event) => event.key === "plan:plan-a-1");
+assert.equal(missingThumbnail?.savedScheduledAt, null, "cadence projections retain the unpinned saved baseline");
+assert.equal(all.flat.find((event) => event.key === "plan:plan-b-1")?.savedScheduledAt, pinned, "pinned projections retain the exact saved baseline");
 assert.equal(civilDayKey(missingThumbnail!.date), "2026-08-10");
 assert.equal(
   missingThumbnail?.timestamp,
@@ -177,7 +185,7 @@ const operationalChannels: ChannelRow[] = [
     name: "Eligible",
     slug: "eligible",
     status: "active",
-    schedule: { frequency: "weekly", days: [1], timezone: "UTC", localTime: "09:00" },
+    schedule: { frequency: "weekly", days: [1], timezone: "UTC", localTime: "09:00", enabled: true },
   },
   {
     _id: "inactive",

@@ -10,6 +10,8 @@ import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { isQuietListeningNarration, quietListeningRestBudgetSec } from "@/lib/narrationPerformance";
+import { effectiveScriptWordsPerSecond } from "@/lib/scriptNarrationBudget";
+import { planQuietLongScript } from "@/lib/quietLongScriptPlan";
 
 export interface ScriptSection {
   heading: string;
@@ -280,12 +282,6 @@ function playbookSlim(req: ScriptRequest): string {
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
-// Calibrated to the ACTUAL TTS speaking rate (Fish/etc. read ~3.0-3.3 w/s, NOT the
-// 2.5 we assumed) — at 2.5 the word budget was ~20-25% too small, so every long-form
-// video came out short and failed length_check. Env-tunable (set NARRATION_WPS in the
-// vault to fine-tune per voice).
-const WORDS_PER_SEC = Number(process.env.NARRATION_WPS) || 3.1;
-
 /**
  * Strip anything the TTS would read aloud as a symbol. Models occasionally leak
  * markdown (*bold*, _italic_, # heading), bracketed stage directions ([music],
@@ -329,24 +325,9 @@ function assemble(hook: string, sections: ScriptSection[]): string {
     .join("\n\n");
 }
 
-// CRAFT_RULES targets <15-word sentences; ~14 is the observed mean.
-const AVG_WORDS_PER_SENTENCE = 14;
-
-/**
- * Effective speaking rate INCLUDING the per-sentence pause the TTS block adds.
- * gap=0.85s at 3.1 w/s → ~2.7 effective w/s; ignoring it over-budgets every
- * script by 10-20%.
- */
-function effectiveWps(gapSec = 0, ttsSpeed = 1): number {
-  const g = Math.max(0, gapSec);
-  const speed = Math.min(1.3, Math.max(0.7, ttsSpeed || 1));
-  // The voice-speed multiplier scales the SPEECH rate, not the pauses.
-  return 1 / (1 / (WORDS_PER_SEC * speed) + g / AVG_WORDS_PER_SENTENCE);
-}
-
-function estSeconds(text: string, gapSec = 0, ttsSpeed = 1): number {
+function estSeconds(text: string, gapSec = 0, ttsSpeed = 1, qualityProfile: "production" | "draft" = "draft"): number {
   const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.round(words / effectiveWps(gapSec, ttsSpeed));
+  return Math.round(words / effectiveScriptWordsPerSecond({ gapSec, speed: ttsSpeed, qualityProfile, override: process.env.NARRATION_WPS }));
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -411,6 +392,16 @@ function isQuietListeningRequest(req: ScriptRequest): boolean {
     req.narrative?.pacing,
     req.narrative?.delivery,
   );
+}
+
+const MAX_LONG_SCRIPT_SECTIONS = 60;
+
+export function quietRestStructureDirective(req: ScriptRequest): string {
+  if (!isQuietListeningRequest(req)) return "";
+  const budget = quietListeningRestBudgetSec(req.maxSeconds ?? 240);
+  if (!budget) return "";
+  const sections = Math.ceil(budget / 30) + 1;
+  return `Use at least ${sections} distinct spoken sections so the planned quiet rests fit between sections.`;
 }
 
 function scriptCraftRules(req: ScriptRequest): string {
@@ -487,8 +478,10 @@ function closingSectionName(req: ScriptRequest): string {
   return isQuietListeningRequest(req) ? "gentle landing" : "conclusion";
 }
 
-function estimateScriptSeconds(req: ScriptRequest, text: string): number {
-  return estSeconds(text, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1);
+type ScriptEstimateTiming = Pick<ScriptRequest, "sentenceGapSec" | "ttsSpeed" | "qualityProfile">;
+
+function estimateScriptSeconds(req: ScriptEstimateTiming, text: string): number {
+  return estSeconds(text, req.sentenceGapSec ?? 0, req.ttsSpeed ?? 1, req.qualityProfile ?? "production");
 }
 
 function directorStructureClause(req: ScriptRequest): string {
@@ -604,6 +597,7 @@ async function synthFullScriptOneShot(
         playbookFull(req),
         voiceTagClause(req),
         scriptCraftRules(req),
+        quietRestStructureDirective(req),
         scriptArcRules(req),
         directorStructureClause(req),
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
@@ -786,7 +780,7 @@ async function synthLongScript(
   let total = 0;
   let i = 0;
   let refills = 0;
-  while (total < targetWords && sections.length < 60) {
+  while ((total < targetWords || i < beats.length) && sections.length < MAX_LONG_SCRIPT_SECTIONS) {
     if (i >= queue.length) {
       if (refills >= 12) break;
       refills++;
@@ -799,7 +793,7 @@ async function synthLongScript(
     // BUDGETED sections: a flat "250-400 words" per section overshot short
     // budgets by ~40% (7 sections × ~257w against a 1285w budget → a 15-min
     // video for a 10-min slot). Each section gets its fair share of what's left.
-    const remainingSections = Math.max(1, Math.min(queue.length - i + 1, 60 - sections.length));
+    const remainingSections = Math.max(1, Math.min(queue.length - i + 1, MAX_LONG_SCRIPT_SECTIONS - sections.length));
     const perSection = Math.max(140, Math.min(400, Math.round((targetWords - total) / remainingSections)));
     // PROMPT ORDER = COST: the static doctrine block (style/playbook/voice/
     // CRAFT_RULES, ~1.5-2k tokens) leads and the per-section variables trail,
@@ -945,6 +939,7 @@ export async function translateScript(
   log: Logger = () => {},
   programRoute?: ChannelProgramRouteRunSeed,
   serializedProgramEpisodeContextFingerprint?: string,
+  timing?: ScriptEstimateTiming,
 ): Promise<Script> {
   if (
     programRoute !== undefined &&
@@ -964,7 +959,8 @@ export async function translateScript(
   ) {
     throw new Error("scriptGen: serialized-episode-bound reused script cannot run without its immutable context");
   }
-  if (!language || language === "en" || !hasCreativeTextKey()) return script;
+  const reusedEstimate = timing ? estimateScriptSeconds(timing, script.narrationText) : undefined;
+  if (!language || language === "en" || !hasCreativeTextKey()) return reusedEstimate === undefined ? script : { ...script, estDurationSec: reusedEstimate };
   const name = LANG_NAMES[language] ?? language;
   log(`scriptGen: translating ${script.sections.length}-section script → ${name}`);
 
@@ -1038,7 +1034,7 @@ export async function translateScript(
     hook,
     sections,
     narrationText,
-    estDurationSec: estSeconds(narrationText),
+    estDurationSec: timing ? estimateScriptSeconds(timing, narrationText) : estSeconds(narrationText),
     closingLine,
     ...(script.programRouteFingerprint ? { programRouteFingerprint: script.programRouteFingerprint } : {}),
     ...(script.serializedProgramEpisodeContextFingerprint
@@ -1047,10 +1043,20 @@ export async function translateScript(
   };
 }
 
+/** Checks the long-form structural limit before any provider work or paid-stage claim. */
+export function assertScriptGenerationFeasible(req: ScriptRequest): void {
+  const maxSeconds = req.maxSeconds ?? 240;
+  if (isQuietListeningRequest(req) && maxSeconds >= 180) {
+    const plan = planQuietLongScript({ targetSeconds: maxSeconds, gapSec: req.sentenceGapSec ?? 0, speed: req.ttsSpeed, qualityProfile: req.qualityProfile, override: process.env.NARRATION_WPS });
+    if (plan.sectionCount > MAX_LONG_SCRIPT_SECTIONS) throw new Error(`scriptGen: quiet duration plan needs ${plan.sectionCount} sections and ${plan.restSeconds}s of rests; generation beyond ${MAX_LONG_SCRIPT_SECTIONS} sections requires bounded spend admission and expanded prepared-media limits`);
+  }
+}
+
 export async function synthScript(
   req: ScriptRequest,
   log: Logger = () => {},
 ): Promise<Script> {
+  assertScriptGenerationFeasible(req);
   const maxSeconds = req.maxSeconds ?? 240;
   const gapSec = req.sentenceGapSec ?? 0;
   const quietListening = isQuietListeningRequest(req);
@@ -1058,7 +1064,7 @@ export async function synthScript(
   const spokenTargetSeconds = Math.max(0, maxSeconds - quietRestBudgetSec);
   // Speed multiplier folded in — a 0.94× documentary voice on a 1.0× budget
   // overshot the slot ~15% (render #6: 848s actual vs 660s target).
-  const wordBudget = Math.round(spokenTargetSeconds * effectiveWps(gapSec, req.ttsSpeed ?? 1));
+  const wordBudget = Math.round(spokenTargetSeconds * effectiveScriptWordsPerSecond({ gapSec, speed: req.ttsSpeed, qualityProfile: req.qualityProfile, override: process.env.NARRATION_WPS }));
 
   if (!hasCreativeTextKey()) {
     // NO silent thin-fallback: a one-sentence "script" used to ship as a full
@@ -1117,6 +1123,7 @@ export async function synthScript(
         req.priorIssues.map((i) => `- ${i}`).join("\n")
       : "",
     scriptCraftRules(req),
+    quietRestStructureDirective(req),
     scriptArcRules(req),
     `Target spoken length: about ${spokenTargetSeconds} seconds, with up to ${quietRestBudgetSec} seconds ` +
       `reserved for intentional quiet section rests — write roughly ${wordBudget} words of ` +

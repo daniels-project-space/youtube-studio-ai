@@ -9,6 +9,7 @@ import {
 } from "@/lib/operatorSession";
 import { hydrateEnv } from "@/lib/vault";
 import { getAccessToken } from "@/lib/youtube";
+import { pauseAfterConnectorChange } from "@/lib/connectorPause";
 import {
   requireInternalQuerySecret,
   requireYouTubeConnector,
@@ -76,14 +77,13 @@ export async function POST(request: Request) {
       evidence: "YouTube connector revoked; all channel publish authority removed",
       convex,
     });
-    await convex.mutation(api.channels.updateChannel, {
-      channelId,
-      status: "paused",
-    });
+    const channelPaused = await pauseAfterConnectorChange(convex, channelId, actor.ownerId);
     return NextResponse.json({
       ok: true,
       result,
       dataPolicy: "credentials and resumable capabilities deleted; aggregate history retained",
+      channelPaused,
+      ...(!channelPaused ? { channelPauseWarning: "The channel could not be confirmed paused. Check its lock and pause it before enabling automation." } : {}),
       ...(providerWarning ? { providerWarning } : {}),
     });
   } catch (error) {

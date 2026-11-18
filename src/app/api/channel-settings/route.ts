@@ -13,14 +13,25 @@ import {
   StudioAuthError,
 } from "@/lib/operatorSession";
 import { hydrateEnv } from "@/lib/vault";
+import { readBoundedRequestText, RequestBodyTooLarge } from "@/lib/readBoundedRequestText";
+import { channelPipelineWriteFence } from "@/lib/channelPipelineWriteFence";
+import { channelScheduleWriteFence } from "@/lib/channelScheduleWriteFence";
 import { assertLocalCrosspostAllowed, assertLocalPublicationAllowed, LocalPublicationDisabledError } from "@/lib/localPublicationPolicy";
 import {
   assertCasefileAutoResearchLaneEligible,
+  isValidChannelBudget,
   SettingsValidationError,
   validatedSchedule,
 } from "@/lib/channelSettingsValidation";
 
 export const runtime = "nodejs";
+
+class ChannelSettingsConflict extends Error {}
+
+function assertSettingsApplied(result: { state?: string; blockId?: string }): void {
+  if (result.state === "channel_locked") throw new ChannelSettingsConflict("The channel was frozen before the settings change could be saved.");
+  if (result.state === "module_locked") throw new ChannelSettingsConflict(`Module '${result.blockId ?? "unknown"}' is locked; the settings change was not saved.`);
+}
 
 function convexClient(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -29,6 +40,12 @@ function convexClient(): ConvexHttpClient {
 }
 
 function errorResponse(error: unknown) {
+  if (error instanceof Error && error.message.includes("channel budget changed; reload")) {
+    return NextResponse.json({ ok: false, error: "channel budget changed; reload to review the current value and retry" }, { status: 409 });
+  }
+  if (error instanceof ChannelSettingsConflict) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
+  }
   if (error instanceof LocalPublicationDisabledError) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
   }
@@ -53,8 +70,13 @@ function errorResponse(error: unknown) {
 export async function POST(request: Request) {
   try {
     const actor = await requireStudioActor(request);
-    await hydrateEnv("youtube");
-    const body = (await request.json()) as {
+    let input: unknown;
+    try { input = JSON.parse(await readBoundedRequestText(request, 100_000)); }
+    catch (error) {
+      return NextResponse.json({ ok: false, error: error instanceof RequestBodyTooLarge ? "settings request is too large" : "invalid settings request" }, { status: error instanceof RequestBodyTooLarge ? 413 : 400 });
+    }
+    if (!input || typeof input !== "object" || Array.isArray(input)) return NextResponse.json({ ok: false, error: "invalid settings request" }, { status: 400 });
+    const body = input as {
       action?:
         | "publish_mode"
         | "crosspost_policy"
@@ -65,8 +87,10 @@ export async function POST(request: Request) {
       channelId?: string;
       mode?: string;
       schedule?: Record<string, unknown>;
+      expectedScheduleFence?: string;
       status?: string;
       budget?: number;
+      expectedBudget?: number | null;
       approved?: boolean;
       enabled?: boolean;
     };
@@ -76,6 +100,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (typeof body.channelId !== "string" || body.channelId.trim() !== body.channelId || body.channelId.length > 256) {
+      return NextResponse.json({ ok: false, error: "invalid channelId" }, { status: 400 });
+    }
+    if (!["publish_mode", "crosspost_policy", "schedule", "status", "budget", "casefile_auto_research"].includes(body.action)) {
+      return NextResponse.json({ ok: false, error: "unknown settings action" }, { status: 400 });
+    }
+    await hydrateEnv("youtube");
     const channelId = body.channelId as Id<"channels">;
     const convex = convexClient();
     const channel = await convex.query(api.channels.getChannel, { channelId });
@@ -100,6 +131,9 @@ export async function POST(request: Request) {
         );
       }
       const mode = body.mode;
+      if (!channel.pipeline.some((entry) => entry.block === "upload_draft")) {
+        return NextResponse.json({ ok: false, error: "channel has no upload_draft module" }, { status: 409 });
+      }
       if (mode === "public" || mode === "scheduled") {
         assertLocalPublicationAllowed({ privacyStatus: mode === "public" ? "public" : "private", ...(mode === "scheduled" ? { publishAt: "scheduled" } : {}) });
       }
@@ -156,7 +190,17 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-      const pipelineWrite = await convex.mutation(api.channels.updateChannel, { channelId, pipeline });
+      const expectedPipelineFence = channelPipelineWriteFence(channel);
+      let pipelineWrite;
+      try {
+        pipelineWrite = await convex.mutation(api.channels.updateChannel, { channelId, pipeline, expectedPipelineFence });
+      } catch (error) {
+        const latest = await convex.query(api.channels.getChannel, { channelId }).catch(() => null);
+        if (latest && latest.ownerId === actor.ownerId && channelPipelineWriteFence(latest) !== expectedPipelineFence) {
+          return NextResponse.json({ ok: false, error: "Channel settings changed while the publishing update was prepared. Review them and try again." }, { status: 409 });
+        }
+        throw error;
+      }
       if ((pipelineWrite as { state?: string; blockId?: string }).state === "module_locked") {
         return NextResponse.json(
           {
@@ -239,11 +283,26 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+      if (typeof body.expectedScheduleFence !== "string" || !/^[a-f0-9]{64}$/.test(body.expectedScheduleFence)) {
+        return NextResponse.json({ ok: false, error: "previous schedule is required; reload and retry" }, { status: 400 });
+      }
+      if (body.expectedScheduleFence !== channelScheduleWriteFence(channel.schedule)) {
+        return NextResponse.json({ ok: false, error: "The schedule changed while you were editing. Review it and try again." }, { status: 409 });
+      }
       const schedule = validatedSchedule(
         (channel.schedule ?? {}) as Record<string, unknown>,
         body.schedule,
       );
-      await convex.mutation(api.channels.updateChannel, { channelId, schedule });
+      const expectedScheduleFence = body.expectedScheduleFence;
+      try {
+        assertSettingsApplied(await convex.mutation(api.channels.updateChannel, { channelId, schedule, expectedScheduleFence }));
+      } catch (error) {
+        const latest = await convex.query(api.channels.getChannel, { channelId }).catch(() => null);
+        if (latest && latest.ownerId === actor.ownerId && channelScheduleWriteFence(latest.schedule) !== expectedScheduleFence) {
+          return NextResponse.json({ ok: false, error: "The schedule changed while this update was prepared. Review it and try again." }, { status: 409 });
+        }
+        throw error;
+      }
       return NextResponse.json({ ok: true, schedule });
     }
 
@@ -254,22 +313,32 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      await convex.mutation(api.channels.updateChannel, {
+      assertSettingsApplied(await convex.mutation(api.channels.updateChannel, {
         channelId,
         status: body.status,
-      });
+      }));
       return NextResponse.json({ ok: true, status: body.status });
     }
 
     if (body.action === "budget") {
-      const budget = Number(body.budget);
-      if (!Number.isFinite(budget) || budget < 0 || budget > 10_000) {
+      const budget = body.budget;
+      if (!isValidChannelBudget(budget)) {
         return NextResponse.json(
           { ok: false, error: "budget must be between 0 and 10000" },
           { status: 400 },
         );
       }
-      await convex.mutation(api.channels.updateChannel, { channelId, budget });
+      if (body.expectedBudget === undefined) {
+        return NextResponse.json({ ok: false, error: "previous budget is required; reload and retry" }, { status: 400 });
+      }
+      if (body.expectedBudget !== null && !isValidChannelBudget(body.expectedBudget)) {
+        return NextResponse.json({ ok: false, error: "invalid previous budget" }, { status: 400 });
+      }
+      const expectedBudget = body.expectedBudget;
+      if ((channel.budget ?? null) !== expectedBudget) {
+        return NextResponse.json({ ok: false, error: "channel budget changed; reload to review the current value and retry" }, { status: 409 });
+      }
+      assertSettingsApplied(await convex.mutation(api.channels.updateChannel, { channelId, budget, expectedBudget }));
       return NextResponse.json({ ok: true, budget });
     }
 
@@ -282,10 +351,10 @@ export async function POST(request: Request) {
       }
       // Throws SettingsValidationError (→ 400) when the lane is wrong.
       assertCasefileAutoResearchLaneEligible(channel, body.enabled);
-      await convex.mutation(api.channels.updateChannel, {
+      assertSettingsApplied(await convex.mutation(api.channels.updateChannel, {
         channelId,
         casefileAutoResearchEnabled: body.enabled,
-      });
+      }));
       return NextResponse.json({ ok: true, casefileAutoResearchEnabled: body.enabled });
     }
 

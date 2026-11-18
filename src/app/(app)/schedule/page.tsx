@@ -42,6 +42,7 @@ export default function SchedulePage() {
   const operationsAccess = useOperationsAccess();
   const requestOperationsAccess = useRequestOperationsAccess();
   const [offset, setOffset] = useState(0);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [scope, setScope] = useState("all");
   const [scheduleView, setScheduleView] = useState<ScheduleView>("week");
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -51,6 +52,7 @@ export default function SchedulePage() {
   const now = new Date(todayMs);
   const view = new Date(now.getFullYear(), now.getMonth() + offset, 1);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() + weekOffset * 7);
   const gridStart = new Date(view.getFullYear(), view.getMonth(), 1 - view.getDay());
   const cells = Array.from(
     { length: 42 },
@@ -58,14 +60,13 @@ export default function SchedulePage() {
   );
   const weekCells = Array.from(
     { length: 7 },
-    (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + index),
+    (_, index) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + index),
   );
-  // A six-row month grid can end one day before the seven-day board when the
-  // month starts late in the week. Include the explicit week dates so the last
-  // day never silently loses a real scheduled/published upload.
+  // Published history follows the visible board, including weeks outside the
+  // current month, without requesting an ever-growing range during navigation.
   const publishedRange = publishedTimestampRange(
     scheduleView === "week"
-      ? [...cells, ...weekCells].sort((left, right) => left.getTime() - right.getTime())
+      ? weekCells
       : cells,
   );
 
@@ -155,7 +156,7 @@ export default function SchedulePage() {
       return;
     }
     try {
-      await reschedule({ id: event.id as Id<"contentPlan">, scheduledAt: timestamp });
+      await reschedule({ id: event.id as Id<"contentPlan">, scheduledAt: timestamp, expectedScheduledAt: event.savedScheduledAt ?? null });
       setNotice({ tone: "ok", text: `${event.title} pinned to ${isoDay} at ${localTime} ${timeZone}.` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not update that date." });
@@ -169,7 +170,7 @@ export default function SchedulePage() {
       return;
     }
     try {
-      await reschedule({ id: event.id as Id<"contentPlan">, scheduledAt: null });
+      await reschedule({ id: event.id as Id<"contentPlan">, scheduledAt: null, expectedScheduledAt: event.savedScheduledAt ?? null });
       setNotice({ tone: "ok", text: `${event.title} is back on its channel cadence.` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not unpin that item." });
@@ -185,8 +186,8 @@ export default function SchedulePage() {
       >
         <div className={styles.heroGrid}>
           <div className={styles.heroCopy}>
-            <span className={styles.eyebrow}>Schedule</span>
-            <h1>{scopeName}</h1>
+            <span className={styles.eyebrow}>Publishing</span>
+            <h1>Publishing &amp; Calendar</h1>
             {nextEvent ? (
               <Link
                 className={styles.nextRelease}
@@ -329,24 +330,26 @@ export default function SchedulePage() {
           <SkeletonList rows={5} />
         </div>
       ) : (
-        <>
+        <div className={styles.scheduleWorkspace}>
+          <div className={styles.scheduleMain}>
           {scheduleView === "week" && (
             <>
-              <DayByDaySchedule events={calendar.flat} today={today} />
-              <details className={`${styles.queueDisclosure} glass`}>
-                <summary>
-                  <span>Manage exact dates</span>
-                  <small>{upcoming.length} upcoming</small>
-                </summary>
-                <div className={styles.queueDisclosureBody}>
+              <DayByDaySchedule
+                events={calendar.flat}
+                today={today}
+                weekStart={weekStart}
+                onPrevious={() => setWeekOffset((value) => value - 1)}
+                onToday={() => setWeekOffset(0)}
+                onNext={() => setWeekOffset((value) => value + 1)}
+              />
+              <div className={styles.reviewQueue}>
                   <ScheduleQueue
                     events={upcoming}
                     onPin={pinEvent}
                     onUnpin={unpinEvent}
                     canEdit={operationsAccess === "owner"}
                   />
-                </div>
-              </details>
+              </div>
             </>
           )}
           {scheduleView === "month" && (
@@ -392,7 +395,28 @@ export default function SchedulePage() {
               <TimeZoneSuggestions />
             </section>
           )}
-        </>
+          </div>
+          {scheduleView !== "cadence" && (
+            <aside className={styles.scheduleAside} aria-label="Channel schedule">
+              <div className={styles.asideHeading}>
+                <div><span className={styles.eyebrow}>Channel settings</span><h2>Channel schedule</h2></div>
+                <span>{scopeName}</span>
+              </div>
+              {effectiveScope === "all" ? (
+                <div className={styles.emptyState}>Choose a channel above to view its schedule.</div>
+              ) : visibleChannels.length > 0 ? (
+                <ChannelScheduleEditor
+                  key={channelScheduleEditorKey(visibleChannels[0])}
+                  channel={visibleChannels[0]}
+                  color={channelColors.get(visibleChannels[0]._id) ?? CHANNEL_COLORS[0]}
+                  canEdit={operationsAccess === "owner"}
+                  onRequestOwner={requestOperationsAccess}
+                />
+              ) : <div className={styles.emptyState}>No channels available.</div>}
+              <TimeZoneSuggestions />
+            </aside>
+          )}
+        </div>
       )}
     </>
   );

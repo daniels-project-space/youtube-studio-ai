@@ -5,6 +5,10 @@ assert.deepEqual(studioLocationForPathname("/"), {
   area: "Workspace",
   title: "Studio",
 });
+assert.deepEqual(studioLocationForPathname("/", true), {
+  area: "Workspace",
+  title: "Overview",
+});
 assert.deepEqual(studioLocationForPathname("/channels/new"), {
   area: "Channel workspace",
   title: "New channel",
@@ -25,5 +29,6 @@ assert.deepEqual(studioLocationForPathname("/unknown"), {
   area: "Workspace",
   title: "AutoStudio",
 });
+assert.equal(studioLocationForPathname("/unknown", true).title, "Overview");
 
 console.log("studio location tests passed");

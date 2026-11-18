@@ -12,6 +12,10 @@ import { isPrivateVideoDeliveryBlock } from "@/engine/privateVideoDelivery";
  */
 export const ROUTE_QUALIFICATION_BENCHMARK_VERSION =
   "route-qualification-benchmark/v1" as const;
+export const ROUTE_QUALIFICATION_BENCHMARK_INPUT_V2 =
+  "route-qualification-benchmark-input/v2" as const;
+export const ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3 =
+  "route-qualification-benchmark-input/v3" as const;
 
 /**
  * A signed owner approval may narrow this; it may never exceed this hard rail.
@@ -27,7 +31,7 @@ export interface RouteQualificationBenchmarkInvocationContext {
 }
 
 export interface RouteQualificationBenchmarkInput {
-  version: typeof ROUTE_QUALIFICATION_BENCHMARK_VERSION;
+  version: typeof ROUTE_QUALIFICATION_BENCHMARK_VERSION | typeof ROUTE_QUALIFICATION_BENCHMARK_INPUT_V2 | typeof ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3;
   /** The exact current channel pipeline that the preflight receipt binds. */
   productionPipeline: PipelineEntry[];
   /** Exact production pipeline minus delivery-only terminal work. */
@@ -37,6 +41,7 @@ export interface RouteQualificationBenchmarkInput {
   productionPipelineFingerprint: string;
   benchmarkPipelineFingerprint: string;
   preflightReceiptFingerprint: string;
+  candidateExecutionBinding?: { candidateId: string; candidateFingerprint: string; baselineFingerprint: string; invocationInputFingerprint: string; executionFingerprint: string };
 }
 
 /**
@@ -116,6 +121,7 @@ export function routeQualificationBenchmarkInputFingerprint(
     moduleConfigOverride: value.moduleConfigOverride,
     invocationContext: value.invocationContext,
     preflightReceiptFingerprint: value.preflightReceiptFingerprint,
+    ...(value.version === ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3 ? { candidateExecutionBinding: value.candidateExecutionBinding } : {}),
   });
 }
 
@@ -129,7 +135,7 @@ export function createRouteQualificationBenchmarkInput(args: {
   const productionPipeline = clonedPipeline(args.productionPipeline);
   const benchmarkPipeline = buildRouteQualificationBenchmarkPipeline(productionPipeline);
   const input: RouteQualificationBenchmarkInput = {
-    version: ROUTE_QUALIFICATION_BENCHMARK_VERSION,
+    version: ROUTE_QUALIFICATION_BENCHMARK_INPUT_V2,
     productionPipeline,
     benchmarkPipeline,
     moduleConfigOverride: structuredClone(args.moduleConfigOverride),
@@ -151,7 +157,7 @@ export function assertRouteQualificationBenchmarkInput(
   }
   const input = value as RouteQualificationBenchmarkInput;
   if (
-    input.version !== ROUTE_QUALIFICATION_BENCHMARK_VERSION ||
+    (input.version !== ROUTE_QUALIFICATION_BENCHMARK_VERSION && input.version !== ROUTE_QUALIFICATION_BENCHMARK_INPUT_V2 && input.version !== ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3) ||
     !Array.isArray(input.productionPipeline) ||
     !Array.isArray(input.benchmarkPipeline) ||
     !input.moduleConfigOverride || typeof input.moduleConfigOverride !== "object" ||
@@ -167,6 +173,10 @@ export function assertRouteQualificationBenchmarkInput(
     !isSha256(input.preflightReceiptFingerprint)
   ) {
     throw new Error("route qualification benchmark input is structurally invalid");
+  }
+  if (input.version === ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3) {
+    const binding = input.candidateExecutionBinding;
+    if (Object.keys(input).sort().join(",") !== "benchmarkPipeline,benchmarkPipelineFingerprint,candidateExecutionBinding,invocationContext,moduleConfigOverride,preflightReceiptFingerprint,productionPipeline,productionPipelineFingerprint,version" || Object.keys(input.invocationContext).sort().join(",") !== "keyPrefix,madeForKids,seedStore" || !binding || typeof binding !== "object" || Array.isArray(binding) || Object.keys(binding).sort().join(",") !== "baselineFingerprint,candidateFingerprint,candidateId,executionFingerprint,invocationInputFingerprint" || typeof binding.candidateId !== "string" || !binding.candidateId.trim() || binding.candidateId.length > 500 || /[\u0000-\u001f]/.test(binding.candidateId) || !isSha256(binding.candidateFingerprint) || !isSha256(binding.baselineFingerprint) || !isSha256(binding.invocationInputFingerprint) || !isSha256(binding.executionFingerprint)) throw new Error("candidate benchmark execution binding is invalid");
   }
   const expectedBenchmark = buildRouteQualificationBenchmarkPipeline(input.productionPipeline);
   if (
@@ -192,6 +202,9 @@ export function routeQualificationBenchmarkApprovalSubject(args: {
     productionPipelineFingerprint: args.benchmarkInput.productionPipelineFingerprint,
     benchmarkPipelineFingerprint: args.benchmarkInput.benchmarkPipelineFingerprint,
     preflightReceiptFingerprint: args.benchmarkInput.preflightReceiptFingerprint,
+    ...(args.benchmarkInput.version === ROUTE_QUALIFICATION_BENCHMARK_INPUT_V2 || args.benchmarkInput.version === ROUTE_QUALIFICATION_BENCHMARK_INPUT_V3
+      ? { inputFingerprint: routeQualificationBenchmarkInputFingerprint(args.benchmarkInput) }
+      : {}),
     maximumCostUsd: args.maximumCostUsd,
   }))}`;
 }
@@ -207,6 +220,7 @@ export function routeQualificationBenchmarkRequestApprovalSubject(args: {
   runId: string;
   dispatchKey: string;
   maximumCostUsd: number;
+  candidate?: { candidateId: string; fingerprint: string; baselineFingerprint: string };
 }): string {
   return `route-qualification-benchmark-request:${sha256Hex(canonicalJson({
     ownerId: requiredId(args.ownerId, "route qualification benchmark request owner id"),
@@ -214,6 +228,7 @@ export function routeQualificationBenchmarkRequestApprovalSubject(args: {
     runId: requiredId(args.runId, "route qualification benchmark request run id"),
     dispatchKey: requiredId(args.dispatchKey, "route qualification benchmark request dispatch key"),
     maximumCostUsd: args.maximumCostUsd,
+    ...(args.candidate ? { candidate: args.candidate } : {}),
   }))}`;
 }
 

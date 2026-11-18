@@ -15,6 +15,7 @@ export interface PlanWeekPreparedNarrationArgs {
   speed?: number;
   baseGapSec?: number;
   jitterSec?: number;
+  legacyScriptRunId?: string;
 }
 
 function safePart(value: unknown, label: string): string {
@@ -71,5 +72,6 @@ export function assertPlanWeekPreparedNarrationArgs(value: unknown): PlanWeekPre
     ...(speed === undefined ? {} : { speed }),
     ...(baseGapSec === undefined ? {} : { baseGapSec }),
     ...(jitterSec === undefined ? {} : { jitterSec }),
+    ...(raw.legacyScriptRunId === undefined ? {} : { legacyScriptRunId: safePart(raw.legacyScriptRunId, "legacy script run id") }),
   };
 }

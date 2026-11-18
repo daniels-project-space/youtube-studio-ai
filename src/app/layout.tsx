@@ -20,12 +20,15 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: { default: "AutoStudio — AI YouTube", template: "%s · AutoStudio" },
-  description:
-    "AutoStudio — autonomous AI YouTube channel pipeline. Channels, schedule, runs, analytics.",
-  applicationName: "AutoStudio",
-};
+export function generateMetadata(): Metadata {
+  const automation = process.env.YOUTUBE_AUTOMATION_PRIVATE === "1";
+  const name = automation ? "YouTube Automation" : "AutoStudio";
+  return {
+    title: { default: name, template: `%s · ${name}` },
+    description: `${name} — YouTube channel production and management.`,
+    applicationName: name,
+  };
+}
 
 export default function RootLayout({
   children,

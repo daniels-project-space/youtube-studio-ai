@@ -1,0 +1,11 @@
+.section { border-top: 1px solid var(--color-border); margin-top: 1.5rem; padding-top: 1.25rem; }
+.section h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.section p { color: var(--color-muted); font-size: 0.86rem; line-height: 1.5; }
+.candidate { border-top: 1px solid var(--color-border); padding: 0.8rem 0; }
+.candidate summary { cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; }
+.candidate summary span, .facts dt { color: var(--color-muted); font-size: 0.78rem; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+.facts dd { margin: 0.3rem 0 0; overflow-wrap: anywhere; font-size: 0.8rem; }
+.changes { list-style: none; padding: 0; margin: 0; }
+.changes li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.4rem 1rem; border-top: 1px solid var(--color-border); padding: 0.55rem 0; font-size: 0.82rem; }
+.changes span { color: var(--color-muted); }

@@ -13,6 +13,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { channelPipelineWriteFence } from "@/lib/channelPipelineWriteFence";
 import type { PipelineEntry } from "@/engine/types";
 
 export interface MakeMultilingualArgs {
@@ -75,6 +76,7 @@ export const makeMultilingualTask = task({
       language: base.language ?? "en",
       groupRole: "base",
       pipeline: basePipeline,
+      expectedPipelineFence: channelPipelineWriteFence(base),
     });
     if ((baseWrite as { state?: string; blockId?: string }).state === "module_locked") {
       throw new Error(

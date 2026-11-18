@@ -1,0 +1,14 @@
+.section { border-top: 1px solid var(--color-border); padding: 20px 0; }
+.section h2 { font-size: 1rem; margin: 0 0 8px; }
+.section p { color: var(--color-muted); line-height: 1.5; }
+.selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.selectors label { display: grid; gap: 6px; font-size: .85rem; }
+.selectors select { width: 100%; min-width: 0; padding: 8px; color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; }
+.facts { display: grid; gap: 8px; }
+.facts div { display: grid; grid-template-columns: minmax(110px, 150px) minmax(0, 1fr); gap: 8px; }
+.facts dt { color: var(--color-muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.changes { padding-left: 20px; }
+.changes li { padding: 4px 0; }
+.changes span { margin-left: 8px; color: var(--color-muted); }
+@media (max-width: 600px) { .selectors { grid-template-columns: 1fr; } }

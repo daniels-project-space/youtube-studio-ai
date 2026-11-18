@@ -16,6 +16,8 @@ import { IconChannels, IconSettings } from "@/components/icons";
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
 import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
+import { WorkshopDesignImports } from "@/components/WorkshopDesignImports";
+import { ChannelAutopilotToggle, type ChannelSchedule } from "@/components/ChannelAutopilotToggle";
 import {
   useOperationsAccess,
   useRequestOperationsAccess,
@@ -32,20 +34,6 @@ import {
   pageChannels,
 } from "./channelCardVisibility";
 import { channelCategoryLabelFor, groupChannelsByCategory } from "./channelCategories";
-
-type ChannelSchedule = {
-  frequency?: string;
-  days?: number[];
-  localTime?: string;
-  timezone?: string;
-  enabled?: boolean;
-  approvalMode?: "manual" | "private_auto";
-  dailyQuota?: number;
-  maxConcurrent?: number;
-  retryMaxAttempts?: number;
-  retryBaseMinutes?: number;
-  madeForKids?: boolean;
-};
 
 type ChannelCardRow = ChannelRow & {
   folder?: string;
@@ -193,6 +181,8 @@ export default function ChannelsPage() {
         }
       />
 
+      <WorkshopDesignImports />
+
       {!loading ? (
         <ChannelFolderWorkspace
           channels={channels}
@@ -279,7 +269,7 @@ export default function ChannelsPage() {
                 : planArtwork
                   ? "Planned thumbnail"
                   : "Channel artwork";
-            const autopilotEnabled = c.status === "active" && c.schedule?.enabled !== false;
+            const autopilotEnabled = c.status === "active" && c.schedule?.enabled === true;
             const inactive = !autopilotEnabled || !linked;
             const operatingState = inactive
               ? {
@@ -350,7 +340,7 @@ export default function ChannelsPage() {
                     <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "Queue empty"}</strong>
                   </div>
                   <div>
-                    <small>Published</small>
+                    <small>Uploads</small>
                     <strong>{videos} video{videos === 1 ? "" : "s"}</strong>
                   </div>
                 </div>
@@ -464,7 +454,7 @@ function ChannelFleetInspector({
   const requestOperationsAccess = useRequestOperationsAccess();
   const creating = channel.youtubeCreated?.status === "creating";
   const needsLink = !linked && !creating;
-  const autopilotEnabled = channel.status === "active" && channel.schedule?.enabled !== false;
+  const autopilotEnabled = channel.status === "active" && channel.schedule?.enabled === true;
   const next = nextProjectedPlanItem({
     items: readyPlan,
     schedule: channel.schedule,
@@ -604,7 +594,7 @@ function ChannelFleetInspector({
             value={next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : "No ready item"}
           />
           <CardStat label="Recent runs" value={String(artwork?.recentRunCount ?? 0)} />
-          <CardStat label="Published" value={String(artwork?.recentPublishedCount ?? 0)} />
+          <CardStat label="Uploads" value={String(artwork?.recentPublishedCount ?? 0)} />
           <CardStat label="Recent spend" value={fmtUsd(artwork?.recentSpend ?? 0)} />
         </div>
 
@@ -695,43 +685,7 @@ function DeleteChannelX({ id, name }: { id: string; name: string }) {
 /** Inline on/off toggle on a channel card. Stops the parent Link navigation. */
 function ChannelToggle({ id, active, schedule }: { id: string; active: boolean; schedule?: ChannelSchedule }) {
   const update = useMutation(api.channels.updateChannel);
-  const [busy, setBusy] = useState(false);
-  const toggle = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    try {
-      const shouldEnableSchedule = !active && schedule?.enabled === false;
-      await update({
-        channelId: id as Id<"channels">,
-        status: active ? "paused" : "active",
-        ...(shouldEnableSchedule
-          ? {
-              schedule: {
-                ...schedule,
-                frequency: schedule.frequency || "weekly",
-                enabled: true,
-              },
-            }
-          : {}),
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <button
-      onClick={toggle}
-      disabled={busy}
-      className="channel-account-action"
-      title={active
-        ? "Autopilot ON — builds + uploads (private) on the channel's cadence. Click to pause."
-        : "Paused — no auto-builds. Click to enable autopilot."}
-    >
-      {busy ? "Updating…" : active ? "Pause autopilot" : "Resume autopilot"}
-    </button>
-  );
+  return <ChannelAutopilotToggle id={id} active={active} schedule={schedule} update={update} />;
 }
 
 /** Red "Link to YouTube" CTA on unwired cards → kicks off the OAuth connect. */

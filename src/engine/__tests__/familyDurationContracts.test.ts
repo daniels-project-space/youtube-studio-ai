@@ -183,13 +183,16 @@ for (const block of ["documentary_source_plan", "topic_select", "script_gen", "s
 {
   const lofi = designPipeline({ family: "music_loop", lengthMinutes: 120 });
   const repaired = enforceLengthContract(
-    corrupt(lofi.pipeline, ["topic_select", "loop_clips", "assemble", "music"]),
+    corrupt(lofi.pipeline, ["topic_select", "loop_clips", "assemble", "music"]).map(entry =>
+      entry.block === "assemble" ? { ...entry, params: { ...entry.params, exactFinalDuration: false } } : entry),
     lofi.episodeLengthSeconds,
     "music_loop",
   ).pipeline;
   assert.equal(lofi.episodeLengthSeconds, 7_200);
   assert.equal(params(repaired, "topic_select").targetSeconds, 7_200);
   assert.equal(params(repaired, "assemble").durationSec, 7_200);
+  assert.equal(params(lofi.pipeline, "assemble").exactFinalDuration, true);
+  assert.equal(params(repaired, "assemble").exactFinalDuration, true);
   assert.equal(params(repaired, "music").trackCount, 8);
   assert.deepEqual(
     {
@@ -212,6 +215,10 @@ for (const block of ["documentary_source_plan", "topic_select", "script_gen", "s
   });
   assert.equal(resolveFamilyEpisodeLengthSeconds("music_loop", 60), 3_600);
   assert.equal(resolveFamilyEpisodeLengthSeconds("music_loop", 480), 28_800);
+  assert.equal(resolveFamilyEpisodeLengthSeconds("music_loop", 90), 5_400);
+  assert.equal(params(designPipeline({ family: "music_loop", lengthMinutes: 90 }).pipeline, "assemble").durationSec, 5_400);
+  assert.throws(() => resolveFamilyEpisodeLengthSeconds("music_loop", 90.5), /whole-minute/);
+  assert.equal(resolveFamilyEpisodeLengthSeconds("narrated_stock", 1.5), 90, "other families keep their existing duration acceptance");
   assert.throws(() => resolveFamilyEpisodeLengthSeconds("music_loop", 59), /supports 1 hr–8 hr/);
   assert.throws(() => resolveFamilyEpisodeLengthSeconds("music_loop", 481), /supports 1 hr–8 hr/);
 }

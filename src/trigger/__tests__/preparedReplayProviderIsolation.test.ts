@@ -9,13 +9,14 @@ import {
   planWeekPreparedImagesKey, planWeekPreparedImageKey, type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PREPARED_METADATA_READ } from "@/lib/preparedMediaStorage";
+import { createHrsQwenNarrationSourceEvidence } from "@/lib/hyperYoutubeQwenNarrationEvidence";
 
 const manifest: PlanWeekPreparationManifest = {
   version: "plan-week-preparation/inputs-v1", ownerId: "replay-owner", channelId: "replay-channel",
   channelSlug: "archive", batchId: "batch", itemId: "episode", itemKey: "week:0", requestKey: "week", frozenAt: 1,
   plan: { topic: "The old lock", title: "The old lock", description: "A source-bound history.",
     sceneSeed: "An archive", thumbnailKey: "owner/replay-owner/old.jpg", thumbnailSource: "planner_artwork" },
-  execution: { pipeline: [{ block: "script_gen" }, { block: "qa_script" }, { block: "narration_tts" }], moduleConfig: {}, seedStore: {} },
+  execution: { pipeline: [{ block: "script_gen" }, { block: "qa_script" }, { block: "narration_tts" }], moduleConfig: {}, seedStore: { voiceId: "Vivian" } },
   prompts: { script: "Source", narration: "Voice", shotlist: "Shots", visual: "Archive" },
 };
 const encode = (value: unknown) => Buffer.from(canonicalJson(value));
@@ -33,18 +34,28 @@ const reviewBody = { version: "plan-week-script-review/v1", manifestSha256, scri
 const media = Buffer.alloc(4096, 7), mediaHash = sha256BytesHex(media);
 const narrationKey = planWeekPreparedNarrationAudioKey(manifest), musicKey = planWeekPreparedMusicAudioKey(manifest);
 const imageKey = planWeekPreparedImageKey({ ...manifest, index: 0 });
+const qwenChunk = { schema: "hrs-qwen3-tts-receipt/v1" as const, route: "hyper-render-service" as const, modelId: "qwen3-tts" as const,
+  projectId: "00000000-0000-4000-8000-000000000001", jobId: "00000000-0000-4000-8000-000000000002", generation: 0,
+  environmentId: "00000000-0000-4000-8000-000000000003", environmentSha256: "a".repeat(64), idempotencyKey: "fixture",
+  requestSha256: "b".repeat(64), textSha256: "d".repeat(64), instructionSha256: "e".repeat(64), speaker: "Vivian" as const,
+  language: "English" as const, seed: 1, audioSha256: "f".repeat(64), audioFormat: "wav" as const, byteLength: 2048,
+  contentType: "audio/wav" as const, output: { bucket: "fixture", key: "fixture.wav", sha256: "f".repeat(64), bytes: 2048, contentType: "audio/wav" as const }, costStatus: "unreported" as const };
+const qwenEvidence = createHrsQwenNarrationSourceEvidence({ speaker: "Vivian", language: "English",
+  source: { narrationKey, sha256: mediaHash, byteLength: media.length, durationSec: 12, transcriptSha256: sha256Hex(script.narrationText),
+    assembly: "concat_audio_with_gaps/v1", gapPlanSha256: "a".repeat(64), mode: "sentence", voiceFx: null },
+  sourceChunks: [{ ordinal: 0, textSha256: qwenChunk.textSha256, audioSha256: qwenChunk.audioSha256, byteLength: qwenChunk.byteLength, receipt: qwenChunk }], preflightReceipts: [] });
 const stillRenderManifest = { version: "1.0.0", generation: { contractVersion: "1.0.0", profileId: "production",
   model: "Tongyi-MAI/Z-Image-Turbo", revision: "f332072aa78be7aecdf3ee76d5c247082da564a6", checkpoint: "Z-Image-Turbo",
   precision: "bf16", width: 1920, height: 1088, steps: 9, allowFallback: false },
   items: [{ shotId: "shot-1", candidateIndex: 0, stillKey: imageKey, outputId: "fixture" }] };
 const sidecars = new Map<string, Buffer>([
   [`${planWeekPreparedScriptKey(manifest)}.review.json`, encode({ ...reviewBody, fingerprint: sha256Hex(canonicalJson(reviewBody)) })],
-  [planWeekPreparedScriptKey(manifest), encode({ ...common, version: "plan-week-prepared-script/v1", script, scriptSha256 })],
+  [planWeekPreparedScriptKey(manifest), encode({ ...common, version: "plan-week-prepared-script/v1", script, scriptSha256, narrationTiming: { version: "script-narration-timing/v1", targetSeconds: 240, style: null, genre: null } })],
   [planWeekPreparedNarrationKey(manifest), encode({ ...common, version: "plan-week-prepared-narration/v1", scriptSha256,
     narrationKey, audioSha256: mediaHash, audioByteLength: media.length, narrationDurationSec: 12,
     narrationTranscriptText: script.narrationText, narrationTranscriptSha256: sha256Hex(script.narrationText),
     narrationPerformanceEvidence: { version: "narration-performance-evidence/v1", source: "local_ffmpeg",
-      durationSec: 12, wordCount: 6, wordsPerSec: 0.5, integratedLufs: -18, windowMeanDb: -15 },
+      durationSec: 12, wordCount: 6, wordsPerSec: 0.5, integratedLufs: -18, windowMeanDb: -15, qwenProviderEvidence: qwenEvidence },
     sentenceTimings: [{ text: script.narrationText, start: 0, end: 12 }], chapterPlan: [{ kind: "footage", durSec: 12 }] })],
   [planWeekPreparedMusicKey(manifest), encode({ ...common, version: "plan-week-prepared-music/v1", musicKey,
     audioSha256: mediaHash, audioByteLength: media.length, musicDurationSec: 120, provider: "mureka",
@@ -128,6 +139,11 @@ async function main() {
     const stop = async () => { paidCalls++; events.push("generation"); throw new Error("stubbed generation boundary"); };
     if (id === "@/lib/scriptGen") return { ...actual as object, synthScript: async () => {
       if (!resultMode) return stop();
+      if (resultMode === "budget") {
+        const { creativeTextJson } = createRequire(import.meta.url)("../../lib/creativeText") as typeof import("../../lib/creativeText");
+        await creativeTextJson({ prompt: "synthetic weekly script", maxTokens: 4000 });
+        return script;
+      }
       paidCalls++;
       const { recordModelUsage } = createRequire(import.meta.url)("../../lib/modelUsage") as typeof import("../../lib/modelUsage");
       recordModelUsage({ provider: "openrouter", model: "fixture", kind: "text", reportedCostUsd: 0.25 });
@@ -208,10 +224,8 @@ async function main() {
       missingKey = key;
       const fresh = { ...payload, provider: "fish", speaker: "fixture-voice" };
       const before: number = paidCalls;
-      await assert.rejects(() => tasks[index].run(fresh), /stubbed generation boundary/);
-      assert.equal(paidCalls, before + 1);
-      await assert.rejects(() => tasks[index].run(fresh), /PAID_STAGE_RECONCILIATION_REQUIRED/);
-      assert.equal(paidCalls, before + 1, "lost prepared audio cannot buy another take");
+      await assert.rejects(() => tasks[index].run(fresh), /requires Qwen3/);
+      assert.equal(paidCalls, before, "retired provider is rejected before generation");
     }
     // Independent fixture attempt for the current default route.
     claims.delete(`${planWeekPreparedNarrationKey(manifest)}.dispatch.json`);
@@ -243,6 +257,19 @@ async function main() {
       assert.equal(resultWrites, mode === "once" ? 2 : 1);
       assert.equal(claims.size, 1);
     }
+    claims.clear(); freshResults.clear(); resultWrites = 0; resultMode = "budget";
+    missingKey = planWeekPreparedScriptKey(manifest);
+    let syntheticFetches = 0;
+    globalThis.fetch = async () => { syntheticFetches++; throw new Error("external network forbidden"); };
+    const concurrent = await Promise.allSettled([tasks[0].run({ ...payload, maxCostUsd: 0.001 }), tasks[0].run({ ...payload, maxCostUsd: 0.001 })]);
+    const reasons = concurrent.map(result => result.status === "rejected" ? String(result.reason) : "unexpected success");
+    assert.ok(reasons.some(reason => /reserve/.test(reason)));
+    assert.ok(reasons.some(reason => /PAID_STAGE_RECONCILIATION_REQUIRED/.test(reason)));
+    assert.equal(syntheticFetches, 0, "weekly task rejects before provider dispatch");
+    assert.equal(claims.size, 1, "the durable stage claim is retained");
+    assert.equal(resultWrites, 0);
+    await assert.rejects(() => tasks[0].run({ ...payload, maxCostUsd: 0.001 }), /PAID_STAGE_RECONCILIATION_REQUIRED/);
+    assert.equal(syntheticFetches, 0, "retry cannot re-enter a claimed stage");
     console.log("PREPARED REPLAY ISOLATION PASS: four real producers and real bootstrap, no generation credentials on reuse, bounded retained bytes, nine bad-media holds, fresh-work credential ordering");
   } finally {
     loader._load = originalLoad; globalThis.fetch = originalFetch;

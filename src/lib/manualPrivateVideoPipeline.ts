@@ -7,7 +7,11 @@ import { buildRouteQualificationBenchmarkPipeline } from "@/lib/routeQualificati
 export function buildManualPrivateVideoPipeline(source: readonly PipelineEntry[]): PipelineEntry[] {
   const pipeline = buildRouteQualificationBenchmarkPipeline(source)
     .filter(entry => entry.block !== "thumbnail_gen")
-    .map(entry => entry.block === "qa_visual" ? { ...entry, params: { ...entry.params, [PRIVATE_PROBE_THUMBNAIL_MODE_PARAM]: "deferred_mvp" } } : entry);
+    .map(entry => entry.block === "qa_visual"
+      ? { ...entry, params: { ...entry.params, [PRIVATE_PROBE_THUMBNAIL_MODE_PARAM]: "deferred_mvp" } }
+      : entry.block === "assemble"
+        ? { ...entry, params: { ...entry.params, exactFinalDuration: true } }
+        : entry);
   assertPrivateVideoHasNoDelivery(pipeline);
   return pipeline;
 }

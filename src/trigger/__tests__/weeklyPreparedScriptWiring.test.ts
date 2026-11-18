@@ -31,6 +31,7 @@ assert.ok(sidecarBinding > sidecarKey, "the sidecar must be cryptographically/sc
 assert.ok(seed > sidecarBinding, "only an admitted sidecar may seed script_gen");
 assert.ok(narrationKey > sidecarBinding, "the narration receipt must derive from the same verified weekly packet");
 assert.ok(narrationBinding > narrationKey, "prepared narration must be scope-bound before it reaches narration_tts");
+assert.match(source.slice(narrationBinding, narrationBinding + 300), /requireQwenEvidence:\s*true/, "scheduled reuse must require Qwen evidence");
 assert.ok(narrationSeed > narrationBinding, "only an admitted narration receipt may seed the paid TTS stage");
 assert.ok(musicKey > narrationBinding, "the music receipt must derive from the same verified weekly packet");
 assert.ok(musicBinding > musicKey, "prepared music must be scope-bound before it reaches the paid music stage");

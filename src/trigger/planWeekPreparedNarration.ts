@@ -7,7 +7,7 @@
  * FFmpeg, and writes an immutable narration receipt. A replay first verifies
  * the retained audio and returns without another provider call.
  */
-import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks, runs } from "@trigger.dev/sdk";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -30,7 +30,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
-import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
+import { PREPARED_METADATA_READ, assertPreparedMetadataSize, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
 import { concatAudioWithGaps, probe } from "@/lib/ffmpeg";
@@ -38,16 +38,23 @@ import { writeBytes } from "@/lib/files";
 import {
   assertNarrationDeliveryRate,
   assertNarrationSpeed,
+  deriveNarrationSectionBoundaryIndices,
+  evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
   type NarrationPerformanceEvidence,
 } from "@/lib/narrationPerformance";
+import { resolveScriptNarrationTiming, splitNarrationSentences, weeklyTimingPipeline } from "@/lib/narrationTimingPlan";
+import { reconcileLegacyPreparedScriptTiming } from "@/lib/legacyPreparedScriptTiming";
+import { chapterItemSpeech, narrationChapterCadence, narrationChapterItems, narrationChapterTimeline } from "@/lib/narrationChapterPlan";
+import { sanitizeSpoken } from "@/lib/scriptGen";
 import { narrationTtsCost } from "@/engine/pricing";
 import { planStorySpine } from "@/engine/storySpine";
 import { planVisualMatter, visualMatterDirectiveForShot } from "@/engine/visualMatter";
 import { studioAssetRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { planVisualTreatment, visualTreatmentKeyFromUnknown } from "@/engine/visualTreatmentCatalog";
-import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
+import { synthNarration, normalizeTtsProvider } from "@/lib/tts";
+import { assertAutomationWeeklyProvider } from "@/lib/weeklyNarrationPolicy";
 import {
   composeQwenNarrationInstruction,
   QWEN3_TTS_SPEAKERS,
@@ -252,10 +259,10 @@ async function readScript(key: string, manifest: PlanWeekPreparationManifest): P
   return prepared;
 }
 
-async function readSidecar(key: string, audioKey: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedNarration | null> {
+async function readSidecar(key: string, audioKey: string, manifest: PlanWeekPreparationManifest, expectedQwenVoice: { speaker: string; language: string }): Promise<PlanWeekPreparedNarration | null> {
   let bytes: Uint8Array;
   try { bytes = await getObjectBytes(key, undefined, PREPARED_METADATA_READ); } catch (error) { if (objectNotFound(error)) return null; throw error; }
-  const prepared = assertPlanWeekPreparedNarrationBinding({ prepared: decodePreparedMetadata(bytes), manifest });
+  const prepared = assertPlanWeekPreparedNarrationBinding({ prepared: decodePreparedMetadata(bytes), manifest, requireQwenEvidence: true, expectedQwenVoice });
   const audio = await getObjectBytes(audioKey, undefined, { maxBytes: prepared.audioByteLength, timeoutMs: 300_000 });
   if (audio.byteLength !== prepared.audioByteLength || sha256BytesHex(audio) !== prepared.audioSha256) {
     throw new Error("weekly prepared narration retained audio failed its immutable receipt check");
@@ -264,16 +271,55 @@ async function readSidecar(key: string, audioKey: string, manifest: PlanWeekPrep
 }
 
 function splitSentences(text: string): string[] {
-  const normalized = stripAudioTags(text).replace(/\s+/g, " ").trim();
-  const matches = normalized.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((value) => value.trim()).filter(Boolean) ?? [];
+  const normalized = sanitizeSpoken(text).replace(/\s+/g, " ").trim();
+  const matches = splitNarrationSentences(normalized);
   if (!matches.length && normalized) return [normalized];
   if (!matches.length || matches.length > 2_000) throw new Error("weekly prepared narration sentence plan is invalid");
   return matches;
 }
 
+export function buildWeeklyNarrationCadence(args: {
+  script: PlanWeekPreparedScript["script"]; narrationTiming: unknown; niche: unknown;
+  narrative?: { scriptStyle?: unknown; hookStyle?: unknown; pacing?: unknown; delivery?: unknown };
+  baseGapSec: number; jitterSec: number;
+  chapterCards?: boolean; preSec?: number; postSec?: number;
+}) {
+  const text = sanitizeSpoken(args.script.narrationText).trim();
+  const sentences = splitSentences(text);
+  const timing = resolveScriptNarrationTiming(args.narrationTiming, args.niche, args.narrative);
+  const boundaries = deriveNarrationSectionBoundaryIndices({
+    sentences, openingSentences: splitSentences(args.script.hook),
+    sectionSentences: args.script.sections.map(section => splitSentences(section.narration)),
+  });
+  if (timing.profile === "quiet_listening" && boundaries === undefined) {
+    throw new Error("weekly prepared narration section boundaries do not match the approved script");
+  }
+  if (timing.profile === "quiet_listening" && args.chapterCards && args.script.sections.length >= 2) {
+    const items = narrationChapterItems(args.script);
+    const spoken = items.map(chapterItemSpeech);
+    const preSec = args.preSec ?? 3, postSec = args.postSec ?? 3;
+    const cadence = narrationChapterCadence({ items, baseGapSec: args.baseGapSec, jitterSec: args.jitterSec,
+      profile: timing.profile, restBudgetSec: timing.restBudgetSec, preSec, postSec });
+    return { text: spoken.join(" "), sentences: spoken, cadence, items, preSec, postSec };
+  }
+  const boundarySet = new Set(boundaries ?? []);
+  const cadence = planNarrationCadence({ sentences, baseGapSec: args.baseGapSec, jitterSec: args.jitterSec,
+    sectionBoundaryAfter: sentences.map((_, index) => boundarySet.has(index)),
+    profile: timing.profile, maxQuietRestBudgetSec: timing.restBudgetSec });
+  return { text, sentences, cadence, items: undefined, preSec: 0, postSec: 0 };
+}
+
+export function requirePreparedScriptTiming(preparedScript: PlanWeekPreparedScript) {
+  if (!preparedScript.narrationTiming) {
+    throw new Error("weekly prepared script lacks frozen narration timing evidence; retain the script and reconcile before narration");
+  }
+  return preparedScript.narrationTiming;
+}
+
 function moduleConfig(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
-  const config = manifest.execution.moduleConfig.narration_tts;
-  return config && typeof config === "object" && !Array.isArray(config) ? config : {};
+  const entries = weeklyTimingPipeline(manifest.execution).filter(entry => entry.block === "narration_tts");
+  if (entries.length > 1) throw new Error("weekly narration requires a unique frozen narration_tts module");
+  return entries[0]?.params ?? manifest.execution.moduleConfig.narration_tts ?? {};
 }
 
 function seedRecord(manifest: PlanWeekPreparationManifest): Record<string, unknown> {
@@ -298,36 +344,59 @@ export const planWeekPreparedNarrationTask = task({
     await bootstrapSecrets(() => undefined, { services: ["cloudflare"] });
     const manifest = await readPreparationManifest(payload);
     assertWeeklyPreparationVersionsSupported(manifest.execution.pipeline, "plan-week-prepared-narration");
+    const config = moduleConfig(manifest);
+    const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "qwen3");
+    assertAutomationWeeklyProvider(provider);
+    const seed = seedRecord(manifest);
+    const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
+    if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(String(speakerValue))) {
+      throw new Error(`weekly prepared narration Qwen3 requires one pinned speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
+    }
+    const speaker = String(speakerValue);
+    const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
+    const expectedQwenVoice = { speaker, language };
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     const sidecarKey = planWeekPreparedNarrationKey(scope);
     const audioKey = planWeekPreparedNarrationAudioKey(scope);
-    const prior = await readSidecar(sidecarKey, audioKey, manifest);
+    const prior = await readSidecar(sidecarKey, audioKey, manifest, expectedQwenVoice);
     if (prior) {
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
       const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prior);
       return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd: 0, audioSha256: prior.audioSha256 };
     }
-    // Reject a legacy music selection before script review or narration spend.
-    await dispatchPreparedMusic(manifest, payload);
-
+    if (!weeklyTimingPipeline(manifest.execution).some(entry => entry.block === "narration_tts")) {
+      throw new Error("weekly narration requires a frozen narration_tts module");
+    }
     const scriptKey = planWeekPreparedScriptKey(scope);
     const preparedScript = await readScript(scriptKey, manifest);
+    const preparedTiming = preparedScript.narrationTiming ?? (payload.legacyScriptRunId
+      ? reconcileLegacyPreparedScriptTiming({ manifest, prepared: preparedScript, runId: payload.legacyScriptRunId,
+          run: await runs.retrieve(payload.legacyScriptRunId),
+          claim: decodePreparedMetadata(await getObjectBytes(`${scriptKey}.dispatch.json`, undefined, PREPARED_METADATA_READ)) })
+      : requirePreparedScriptTiming(preparedScript));
     const script = preparedScript.script;
-    const text = stripAudioTags(script.narrationText).trim();
-    const sentences = splitSentences(text);
-    const config = moduleConfig(manifest);
-    const seed = seedRecord(manifest);
-    const provider = normalizeTtsProvider(payload.provider ?? config.ttsProvider ?? "qwen3");
-    const speed = assertNarrationSpeed(payload.speed ?? numberOr(config.ttsSpeed, 1), "weekly prepared narration speed");
-    const baseGapSec = payload.baseGapSec ?? numberOr(config.sentenceGapSec, 0.85);
-    const jitterSec = payload.jitterSec ?? numberOr(config.sentenceGapJitter, 0.2);
-    const cadence = planNarrationCadence({ sentences, baseGapSec, jitterSec });
-    const speakerValue = payload.speaker ?? (typeof config.qwenSpeaker === "string" ? config.qwenSpeaker : seed.voiceId);
-    const language = resolveQwenTtsLanguage(payload.language ?? config.language ?? config.locale ?? "en");
     const dnaNarrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
-      ? (seed.styleDNA as { narrative?: { pacing?: unknown; delivery?: unknown } }).narrative
+      ? (seed.styleDNA as { narrative?: { scriptStyle?: unknown; hookStyle?: unknown; pacing?: unknown; delivery?: unknown } }).narrative
       : undefined;
     const physics = narrationPhysics(typeof seed.niche === "string" ? seed.niche : undefined);
+    const pacingText = `${dnaNarrative?.pacing ?? ""} ${dnaNarrative?.delivery ?? ""}`.toLowerCase();
+    const dnaSpeed = /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
+      : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
+        : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
+          : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05 : 0;
+    const speed = assertNarrationSpeed(numberOr(config.ttsSpeed, dnaSpeed || physics.speed), "weekly prepared narration speed");
+    const baseGapSec = numberOr(config.sentenceGapSec, physics.sentenceGap ?? 0.85);
+    const jitterSec = numberOr(config.sentenceGapJitter, 0.2);
+    if ((payload.speed !== undefined && payload.speed !== speed) ||
+        (payload.baseGapSec !== undefined && payload.baseGapSec !== baseGapSec) ||
+        (payload.jitterSec !== undefined && payload.jitterSec !== jitterSec)) {
+      throw new Error("weekly narration timing overrides differ from the frozen pipeline");
+    }
+    const { text, sentences, cadence, items, preSec, postSec } = buildWeeklyNarrationCadence({ script, narrationTiming: preparedTiming,
+      niche: seed.niche, narrative: dnaNarrative, baseGapSec, jitterSec, chapterCards: config.chapterCards === true,
+      preSec: Number(config.chapterPreSec ?? 3), postSec: Number(config.chapterPostSec ?? 3) });
+    // Reject a legacy music selection before script review or narration spend.
+    await dispatchPreparedMusic(manifest, payload);
     const instruction = qwenTtsInstruction(composeQwenNarrationInstruction({
       explicit: config.qwenInstruction,
       editorialBrief: manifest.prompts.narration,
@@ -335,12 +404,6 @@ export const planWeekPreparedNarrationTask = task({
       pacing: dnaNarrative?.pacing,
       archetype: physics.archetype,
     }), speed);
-    if (provider === "qwen3" && !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(String(speakerValue))) {
-      throw new Error(`weekly prepared narration Qwen3 requires one pinned speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
-    }
-    const speaker = String(speakerValue ?? "").trim();
-    if (!speaker && provider !== "qwen3") throw new Error("weekly prepared narration requires an explicit voice");
-
     const estimatedUpperCost = provider === "qwen3"
       ? (text.length * 1) / 1_000
       : narrationTtsCost(provider, text.length, 0, 0);
@@ -405,14 +468,18 @@ export const planWeekPreparedNarrationTask = task({
       await concatAudioWithGaps(partPaths, cadence.gapsSec, finalPath);
       const finalBytes = new Uint8Array(await import("node:fs/promises").then(({ readFile }) => readFile(finalPath)));
       const finalProbe = await probe(finalPath);
-      const sentenceTimings = sentences.map((sentence, index) => {
+      const flatTimings = sentences.map((sentence, index) => {
         const start = partDurations.slice(0, index).reduce((sum, duration, previous) => sum + duration + (cadence.gapsSec[previous] ?? 0), 0);
         return { text: sentence, start, end: start + partDurations[index]! };
       });
-      const baseEvidence = await preflightNarrationPerformance({ audioPath: finalPath, text, speed });
+      evaluateNarrationCadence({ sentences, sentenceTimings: flatTimings, plan: cadence });
+      const chapter = items ? narrationChapterTimeline(items, partDurations, cadence.gapsSec, preSec, postSec) : undefined;
+      const sentenceTimings = chapter?.sentenceTimings ?? flatTimings;
+      const baseEvidence = await preflightNarrationPerformance({ audioPath: finalPath, text, speed,
+        spokenDurationSec: partDurations.reduce((sum, duration) => sum + duration, 0) });
       assertNarrationDeliveryRate({
         wordCount: baseEvidence.wordCount,
-        durationSec: baseEvidence.durationSec,
+        durationSec: baseEvidence.spokenDurationSec ?? baseEvidence.durationSec,
         speed,
         label: "weekly prepared narration",
       });
@@ -439,7 +506,7 @@ export const planWeekPreparedNarrationTask = task({
               transcriptSha256: sha256Hex(text),
               assembly: "concat_audio_with_gaps/v1",
               gapPlanSha256: sha256Hex(canonicalJson(cadence.gapsSec)),
-              mode: "sentence",
+              mode: items ? "chapter" : "sentence",
               voiceFx: null,
             },
             sourceChunks: chunks,
@@ -475,11 +542,12 @@ export const planWeekPreparedNarrationTask = task({
         narrationTranscriptSha256: sha256Hex(text),
         narrationPerformanceEvidence,
         sentenceTimings,
-        chapterPlan: [{ kind: "footage", durSec: finalProbe.durationSec }],
+        chapterPlan: chapter?.chapterPlan ?? [{ kind: "footage", durSec: finalProbe.durationSec }],
         createdAt: Date.now(),
       };
-      assertPlanWeekPreparedNarrationBinding({ prepared, manifest });
+      assertPlanWeekPreparedNarrationBinding({ prepared, manifest, requireQwenEvidence: true, expectedQwenVoice });
       const body = new TextEncoder().encode(canonicalJson(prepared));
+      assertPreparedMetadataSize(body);
       await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-narration": "v1" });
       const retainedSidecar = await getObjectBytes(sidecarKey, undefined, { maxBytes: body.byteLength, timeoutMs: 30_000 });
       if (retainedSidecar.byteLength !== body.byteLength || sha256BytesHex(retainedSidecar) !== sha256BytesHex(body)) {

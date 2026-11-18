@@ -325,14 +325,38 @@ export function planNarrationCadence(args: {
     : Number.isFinite(args.maxQuietRestBudgetSec)
       ? Math.max(0, args.maxQuietRestBudgetSec)
       : 0;
+  const reservedRests = new Map<number, number>();
+  if (args.profile === "quiet_listening" && Number.isFinite(quietRestBudgetSec) && quietRestBudgetSec >= 15) {
+    // Spend the writer's reserved time across verified boundaries, not estimated ones.
+    const boundaries = args.sentences.flatMap((_, index) =>
+      index < args.sentences.length - 1 && args.sectionBoundaryAfter?.[index] ? [index] : []);
+    const minimumRests = Math.ceil(quietRestBudgetSec / 30);
+    if (boundaries.length < minimumRests) {
+      throw new Error(`narration cadence: ${quietRestBudgetSec}s reserved quiet time requires at least ${minimumRests} verified section boundaries`);
+    }
+    const count = Math.min(boundaries.length, Math.floor(quietRestBudgetSec / 15), Math.max(minimumRests, Math.ceil(quietRestBudgetSec / 25)));
+    const each = Math.floor(quietRestBudgetSec / count * 1000) / 1000;
+    let assigned = 0;
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+      const index = boundaries[Math.floor((ordinal + 0.5) * boundaries.length / count)]!;
+      const rest = ordinal === count - 1 ? Number((quietRestBudgetSec - assigned).toFixed(3)) : each;
+      reservedRests.set(index, rest);
+      assigned += rest;
+    }
+  }
   const gapsSec = args.sentences.map((sentence, index) => {
     if (index === args.sentences.length - 1) {
       purposes.push("continuation");
       return 0;
     }
     if (args.profile === "quiet_listening" && args.sectionBoundaryAfter?.[index]) {
+      const reserved = reservedRests.get(index);
+      if (reserved !== undefined) {
+        purposes.push("section");
+        return reserved;
+      }
       const boundaryOrdinal = sectionBoundaryOrdinal++;
-      if (boundaryOrdinal % 3 === 0) {
+      if (!Number.isFinite(quietRestBudgetSec) && boundaryOrdinal % 3 === 0) {
         purposes.push("section");
         const restDurations = [15, 20, 25, 30] as const;
         const restIndex = Math.min(

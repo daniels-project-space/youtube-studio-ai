@@ -1,5 +1,6 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
+import { canonicalJson } from "../src/lib/canonicalJson";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { deleteRunLogChunks } from "./runLogChunks";
@@ -55,6 +56,11 @@ import {
 } from "@/engine/channelShowProfileCodec";
 import { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "@/engine/channelCompositionCatalog";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
+import { channelPipelineWriteFence } from "@/lib/channelPipelineWriteFence";
+import { channelScheduleWriteFence } from "@/lib/channelScheduleWriteFence";
+import { channelIdentityWriteFence } from "@/lib/channelIdentityWriteFence";
+import { isValidChannelBudget } from "@/lib/channelSettingsValidation";
+import { channelModuleConfigFence } from "@/lib/channelModuleConfigFence";
 import type { PipelineEntry } from "@/engine/types";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
@@ -795,9 +801,10 @@ export const createChannel = mutation({
   },
   returns: v.id("channels"),
   handler: async (ctx, args) => {
-    // Idempotent upsert keyed on (ownerId, slug): a re-seed of the same
-    // channel patches the existing doc instead of inserting a duplicate
-    // (the prior bare-insert was the source of duplicate channels).
+    if (!isValidChannelBudget(args.budget)) {
+      throw new Error("budget must be between 0 and 10000");
+    }
+    // Existing slugs are retries, never an implicit channel update.
     const existing = await ctx.db
       .query("channels")
       .withIndex("by_owner_slug", (q) =>
@@ -857,7 +864,7 @@ export const createChannel = mutation({
       family,
       contentLane: lane,
       disabledBlocks: args.disabledBlocks ?? existing?.disabledBlocks,
-      budget: args.budget,
+      budget: existing?.budget ?? args.budget,
       status: args.status ?? "draft",
       groupId: args.groupId,
       language: args.language,
@@ -865,15 +872,16 @@ export const createChannel = mutation({
     };
 
     if (existing) {
-      // A locked slug is immutable. This legacy mutation returns an id, so it
-      // keeps the existing id while the guarded re-seed is audit-recorded.
-      const outcome = await patchChannelRespectingLock(
-        ctx,
-        existing._id,
-        doc,
-        "channels.createChannel reseed",
-      );
-      return outcome.channelId;
+      const stored = Object.fromEntries(Object.keys(doc).map(key => [key, (existing as unknown as Record<string, unknown>)[key]]));
+      const proposed: Record<string, unknown> = { ...doc };
+      if (existing.contentLane === undefined && args.contentLane === undefined) delete proposed.contentLane;
+      if (existing.status === undefined && args.status === undefined) delete proposed.status;
+      if (canonicalJson(stored) === canonicalJson(proposed)) return existing._id;
+      if (existing.locked === true) {
+        const outcome = await patchChannelRespectingLock(ctx, existing._id, doc, "channels.createChannel reseed");
+        return outcome.channelId;
+      }
+      throw new Error("Channel slug already exists with different settings; use an explicit channel update or release.");
     }
 
     const channelId = await ctx.db.insert("channels", doc);
@@ -1284,6 +1292,10 @@ export const updateChannel = mutation({
      * identity write must refuse to overwrite an intervening operator edit.
      */
     expectedBannerKey: v.optional(v.union(v.string(), v.null())),
+    expectedPipelineFence: v.optional(v.string()),
+    expectedScheduleFence: v.optional(v.string()),
+    expectedIdentityFence: v.optional(v.string()),
+    expectedBudget: v.optional(v.union(v.number(), v.null())),
     name: v.optional(v.string()),
     identity: v.optional(identityValidator),
     thumbnailer: v.optional(thumbnailerValidator),
@@ -1351,9 +1363,27 @@ export const updateChannel = mutation({
     }),
   ),
   handler: async (ctx, args) => {
-    const { channelId, expectedBannerKey, ...rest } = args;
+    const { channelId, expectedBannerKey, expectedPipelineFence, expectedScheduleFence, expectedIdentityFence, expectedBudget, ...rest } = args;
+    if (rest.budget !== undefined && !isValidChannelBudget(rest.budget)) {
+      throw new Error("budget must be between 0 and 10000");
+    }
+    if (rest.budget !== undefined && expectedBudget === undefined) {
+      throw new Error("budget updates require the previously observed budget; reload and retry");
+    }
     const existing = await ctx.db.get(channelId);
     if (!existing) throw new Error(`channel not found: ${channelId}`);
+    if (expectedIdentityFence !== undefined && (rest.identity === undefined || !/^[a-f0-9]{64}$/.test(expectedIdentityFence) || channelIdentityWriteFence(existing.identity) !== expectedIdentityFence)) {
+      throw new Error("channel identity changed while you were editing; reload to review the current settings and retry");
+    }
+    if (expectedBudget !== undefined && (rest.budget === undefined || (existing.budget ?? null) !== expectedBudget)) {
+      throw new Error("channel budget changed; reload to review the current value and retry");
+    }
+    if ((rest.pipeline !== undefined && expectedPipelineFence === undefined) || (expectedPipelineFence !== undefined && (rest.pipeline === undefined || !/^[a-f0-9]{64}$/.test(expectedPipelineFence) || channelPipelineWriteFence(existing) !== expectedPipelineFence))) {
+      throw new Error("channel pipeline or its configuration changed during preparation; review and retry");
+    }
+    if ((rest.schedule !== undefined && expectedScheduleFence === undefined) || (expectedScheduleFence !== undefined && (rest.schedule === undefined || !/^[a-f0-9]{64}$/.test(expectedScheduleFence) || channelScheduleWriteFence(existing.schedule) !== expectedScheduleFence))) {
+      throw new Error("channel schedule changed during preparation; review and retry");
+    }
     if (
       expectedBannerKey !== undefined &&
       (existing.identity?.bannerKey ?? null) !== expectedBannerKey
@@ -1807,6 +1837,7 @@ export const setModuleConfig = mutation({
     channelId: v.id("channels"),
     blockId: v.string(),
     config: v.record(v.string(), v.any()),
+    expectedConfigFence: v.optional(v.string()),
   },
   // A locked channel is never edited in place: the request returns a durable
   // rejection and no v2 is created.
@@ -1821,6 +1852,7 @@ export const setModuleConfig = mutation({
       forked: v.literal(false),
       state: v.literal("channel_locked"),
     }),
+    v.object({ forked: v.literal(false), state: v.literal("config_conflict") }),
   ),
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.channelId);
@@ -1836,6 +1868,11 @@ export const setModuleConfig = mutation({
         "channels.setModuleConfig",
       );
       return { forked: false as const, ...rejected };
+    }
+
+    if (args.expectedConfigFence === undefined || !/^[a-f0-9]{64}$/.test(args.expectedConfigFence) ||
+       channelModuleConfigFence(existing.moduleConfig?.[args.blockId]) !== args.expectedConfigFence) {
+      return { forked: false as const, state: "config_conflict" as const };
     }
 
     const next: Record<string, unknown> = { ...(existing.moduleConfig ?? {}) };
@@ -1893,17 +1930,20 @@ export const setModuleConfigs = mutation({
   args: {
     channelId: v.id("channels"),
     configs: v.record(v.string(), v.record(v.string(), v.any())),
+    expectedConfigFences: v.record(v.string(), v.string()),
   },
   returns: v.union(
     v.object({ applied: v.number() }),
     v.object({ state: v.literal("module_locked"), blockId: v.string() }),
     v.object({ state: v.literal("channel_locked") }),
+    v.object({ state: v.literal("config_conflict"), blockId: v.string() }),
   ),
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.channelId);
     if (!existing) throw new Error(`channel not found: ${args.channelId}`);
 
     const blockIds = Object.keys(args.configs);
+    if (Object.keys(args.expectedConfigFences).length !== blockIds.length) throw new Error("setModuleConfigs: expected configuration baselines are required");
     const selected = new Set((existing.pipeline ?? []).map((entry) => entry.block));
 
     // Validate EVERYTHING first. A single pass that writes as it goes is what
@@ -1917,6 +1957,10 @@ export const setModuleConfigs = mutation({
           ctx, existing, blockId, "channels.setModuleConfigs",
         );
         return { state: rejected.state, blockId };
+      }
+      const expected = args.expectedConfigFences[blockId];
+      if (typeof expected !== "string" || !/^[a-f0-9]{64}$/.test(expected) || channelModuleConfigFence(existing.moduleConfig?.[blockId]) !== expected) {
+        return { state: "config_conflict" as const, blockId };
       }
     }
 

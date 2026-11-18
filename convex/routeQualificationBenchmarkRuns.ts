@@ -13,6 +13,9 @@ import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { canonicalJson } from "../src/lib/canonicalJson";
 import { sha256Hex } from "../src/lib/sha256";
 import type { StudioActionApprovalReceipt } from "../src/lib/studioActionApprovalContract";
+import { verifiedDurationCandidate } from "../src/lib/durationCandidateEvidenceReview";
+import { channelPipelineWriteFence } from "../src/lib/channelPipelineWriteFence";
+import { candidateBenchmarkInvocation } from "../src/lib/candidateBenchmarkInvocation";
 
 const MAX_ROUTE_QUALIFICATION_BENCHMARK_DISPATCH_ATTEMPTS = 2;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -88,6 +91,7 @@ function requestApproval(run: BenchmarkRun): {
       runId: String(run._id),
       dispatchKey: required(run.routeQualificationBenchmarkDispatchKey, "route qualification benchmark request dispatch key"),
       maximumCostUsd: acceptedMaximumCostUsd,
+      ...(run.routeQualificationBenchmarkCandidate ? { candidate: { ...run.routeQualificationBenchmarkCandidate, candidateId: String(run.routeQualificationBenchmarkCandidate.candidateId) } } : {}),
     })
   ) {
     throw new Error("route qualification benchmark owner request is not bound to its durable run");
@@ -107,6 +111,7 @@ export function assertRouteQualificationBenchmarkDispatchLease(
   run: BenchmarkRun,
   input: unknown,
 ): RouteQualificationBenchmarkDispatchEnvelope {
+  if (run.routeQualificationBenchmarkCandidate) throw new Error("candidate benchmark worker admission is not available");
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("route qualification benchmark dispatch lease is missing");
   }
@@ -141,6 +146,7 @@ export const createShell = mutation({
     ownerId: v.string(),
     channelId: v.id("channels"),
     dispatchKey: v.string(),
+    candidate: v.optional(v.object({ candidateId: v.id("durationDraftCandidates"), fingerprint: v.string(), baselineFingerprint: v.string() })),
     now: v.optional(v.number()),
   },
   returns: v.any(),
@@ -153,6 +159,10 @@ export const createShell = mutation({
     if (!channel || channel.ownerId !== args.ownerId) {
       throw new Error("route qualification benchmark channel is not owned by this operator");
     }
+    if (args.candidate) {
+      const candidate = await ctx.db.get(args.candidate.candidateId);
+      if (!candidate || !verifiedDurationCandidate(candidate, args.ownerId, String(args.channelId)) || candidate.fingerprint !== fingerprint(args.candidate.fingerprint, "candidate fingerprint") || candidate.baselineFingerprint !== fingerprint(args.candidate.baselineFingerprint, "candidate baseline fingerprint") || channelPipelineWriteFence(channel) !== candidate.baselineFingerprint || channel.locked) throw new Error("candidate or channel baseline is unavailable or changed");
+    }
     const existing = await ctx.db
       .query("runs")
       .withIndex("by_owner_channel_route_qualification_benchmark_dispatch", (q) => q
@@ -161,6 +171,7 @@ export const createShell = mutation({
         .eq("routeQualificationBenchmarkDispatchKey", dispatchKey))
       .unique();
     if (existing) {
+      if (canonicalJson(existing.routeQualificationBenchmarkCandidate ?? null) !== canonicalJson(args.candidate ?? null)) throw new Error("request key is already bound to a different candidate");
       return {
         state: existing.routeQualificationBenchmarkDispatchEnvelope ||
           existing.routeQualificationBenchmarkRequestApproval
@@ -180,6 +191,7 @@ export const createShell = mutation({
       releaseEvidenceStatus: "not_ready",
       releaseEvidenceUpdatedAt: now,
       routeQualificationBenchmarkDispatchKey: dispatchKey,
+      ...(args.candidate ? { routeQualificationBenchmarkCandidate: args.candidate } : {}),
     });
     return { state: "created" as const, runId };
   },
@@ -213,6 +225,7 @@ export const claimRequestApproval = mutation({
       runId: String(args.runId),
       dispatchKey: required(run.routeQualificationBenchmarkDispatchKey, "route qualification benchmark request dispatch key"),
       maximumCostUsd: args.maximumCostUsd,
+      ...(run.routeQualificationBenchmarkCandidate ? { candidate: { ...run.routeQualificationBenchmarkCandidate, candidateId: String(run.routeQualificationBenchmarkCandidate.candidateId) } } : {}),
     })) {
       throw new Error("route qualification benchmark request approval is not bound to its durable shell");
     }
@@ -220,17 +233,29 @@ export const claimRequestApproval = mutation({
       throw new Error("route qualification benchmark shell is not awaiting an owner request");
     }
     const approvalFingerprint = sha256Hex(canonicalJson(args.approval));
+    let invocationInput: ReturnType<typeof candidateBenchmarkInvocation> | undefined;
+    if (run.routeQualificationBenchmarkCandidate) {
+      const target = run.routeQualificationBenchmarkCandidate;
+      const channel = await ctx.db.get(args.channelId);
+      const candidate = await ctx.db.get(target.candidateId);
+      if (!channel) throw new Error("candidate benchmark channel is unavailable");
+      const version = run.routeQualificationBenchmarkCandidateInvocationInput?.body?.version;
+      if (version !== undefined && version !== "candidate-benchmark-invocation-input/v1" && version !== "candidate-benchmark-invocation-input/v2") throw new Error("candidate benchmark invocation input version is invalid");
+      invocationInput = candidateBenchmarkInvocation({ ownerId: args.ownerId, channelId: String(args.channelId), runId: String(args.runId), target: { ...target, candidateId: String(target.candidateId) }, channel, candidate, maximumCostUsd: args.maximumCostUsd, ...(version ? { version } : {}) });
+    }
     if (run.routeQualificationBenchmarkRequestApproval !== undefined) {
       const existing = requestApproval(run);
       if (existing.approvalFingerprint !== approvalFingerprint) {
         throw new Error("route qualification benchmark owner request is immutable");
       }
+      if (invocationInput && canonicalJson(run.routeQualificationBenchmarkCandidateInvocationInput) !== canonicalJson(invocationInput)) throw new Error("candidate benchmark invocation input is immutable or unavailable");
       return { fingerprint: approvalFingerprint, reused: true };
     }
     await ctx.db.patch(run._id, {
       routeQualificationBenchmarkRequestApproval: args.approval,
       routeQualificationBenchmarkRequestApprovalFingerprint: approvalFingerprint,
       routeQualificationBenchmarkMaximumCostUsd: args.maximumCostUsd,
+      ...(invocationInput ? { routeQualificationBenchmarkCandidateInvocationInput: invocationInput } : {}),
       routeQualificationBenchmarkDispatchState: "pending",
       routeQualificationBenchmarkDispatchAttempts: 0,
       routeQualificationBenchmarkPreparationLastError: undefined,
@@ -254,6 +279,7 @@ export const claimDispatchEnvelope = mutation({
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "route qualification benchmark envelope claim");
     const run = ownedRun(await ctx.db.get(args.runId), args);
+    if (run.routeQualificationBenchmarkCandidate) throw new Error("candidate benchmark worker admission is not available");
     const requestedFingerprint = fingerprint(args.fingerprint, "route qualification benchmark envelope fingerprint");
     assertRouteQualificationBenchmarkDispatchEnvelope(args.envelope);
     const envelope = args.envelope as RouteQualificationBenchmarkDispatchEnvelope;
@@ -302,7 +328,7 @@ function pendingDispatch(run: BenchmarkRun) {
   return { runId: run._id, channelId: run.channelId,
     dispatchKey: required(run.routeQualificationBenchmarkDispatchKey, "route qualification benchmark dispatch key"),
     envelope, approval: request.approval, approvalFingerprint: request.approvalFingerprint,
-    maximumCostUsd: request.maximumCostUsd, attempt };
+    maximumCostUsd: request.maximumCostUsd, attempt, candidate: run.routeQualificationBenchmarkCandidate, candidateInvocationInput: run.routeQualificationBenchmarkCandidateInvocationInput };
 }
 
 /** Fetch one owner-approved request without waking unrelated channels. */
@@ -335,6 +361,8 @@ export const listPending = query({
       approvalFingerprint: string;
       maximumCostUsd: number;
       attempt: number;
+      candidate?: { candidateId: Id<"durationDraftCandidates">; fingerprint: string; baselineFingerprint: string };
+      candidateInvocationInput?: unknown;
     }> = [];
     for (const run of rows) {
       try {
@@ -460,6 +488,22 @@ export const recordPreparationFailure = mutation({
       heartbeatAt: args.failedAt,
     });
     return { state: "pending" as const };
+  },
+});
+
+/** Stores a diagnostic only. It can neither issue a receipt nor authorize a worker. */
+export const recordCandidatePreflightBlocked = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), report: v.any(), failedAt: v.number() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "candidate benchmark preflight");
+    const run = ownedRun(await ctx.db.get(args.runId), args);
+    requestApproval(run);
+    const target = run.routeQualificationBenchmarkCandidate;
+    const report = args.report;
+    if (!target || run.status !== "awaiting_route_qualification_benchmark_dispatch" || run.routeQualificationBenchmarkDispatchState !== "pending" || run.routeQualificationBenchmarkDispatchEnvelope !== undefined || !Number.isSafeInteger(args.failedAt) || args.failedAt < 0 || !report || typeof report !== "object" || !report.binding || report.binding.ownerId !== args.ownerId || report.binding.channelId !== String(args.channelId) || report.binding.candidateFingerprint !== target.fingerprint || report.binding.baselineFingerprint !== target.baselineFingerprint || report.binding.maximumCostUsd !== run.routeQualificationBenchmarkMaximumCostUsd || report.ready !== false || report.dispatchAuthorized !== false || report.receiptIssued !== false || !Array.isArray(report.blockers) || JSON.stringify(report).length > 100_000) throw new Error("candidate benchmark preflight report is invalid");
+    await ctx.db.patch(run._id, { routeQualificationBenchmarkCandidatePreflight: report, routeQualificationBenchmarkDispatchState: "blocked", status: "route_qualification_benchmark_blocked", routeQualificationBenchmarkPreparationLastError: "Candidate preflight is not an admission; candidate-aware worker validation is unavailable.", routeQualificationBenchmarkPreparationUpdatedAt: args.failedAt, heartbeatAt: args.failedAt, finishedAt: args.failedAt });
+    return { state: "blocked" as const };
   },
 });
 

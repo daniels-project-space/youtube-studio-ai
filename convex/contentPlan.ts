@@ -762,10 +762,17 @@ export const listPlanHistoryPage = query({
 
 /** Pin (or clear) a planned item's calendar date — drag-to-reschedule / date field. */
 export const setScheduledAt = mutation({
-  args: { id: v.id("contentPlan"), scheduledAt: v.union(v.number(), v.null()) },
+  args: {
+    id: v.id("contentPlan"),
+    scheduledAt: v.union(v.number(), v.null()),
+    expectedScheduledAt: v.union(v.number(), v.null()),
+  },
   handler: async (ctx, args) => {
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("content plan item not found");
+    if ((item.scheduledAt ?? null) !== args.expectedScheduledAt) {
+      throw new Error("The planned date changed. Refresh and try again.");
+    }
     if (item.scheduledRunId && item.status !== "used") {
       throw new Error("cannot reschedule a plan item after its run has been claimed");
     }

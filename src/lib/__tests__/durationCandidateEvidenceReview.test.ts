@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
+import { verifiedDurationCandidate, verifiedRetainedEvidence } from "@/lib/durationCandidateEvidenceReview";
+import { comparePipelineCandidates } from "@/lib/comparePipelineCandidates";
+
+const content = { version: "duration-draft-candidate/v2", ownerId: "owner-a", channelId: "channel-a", baselineFingerprint: "baseline", family: "music_loop", requestedSeconds: 7200, baselineModuleConfig: {}, moduleConfig: { music: { trackCount: 3 } }, pipeline: [{ block: "music", params: { trackCount: 3 } }, { block: "music", version: "2" }] };
+const row = { ...content, status: "untested", fingerprint: sha256Hex(canonicalJson(content)) };
+assert.ok(verifiedDurationCandidate(row, "owner-a", "channel-a"));
+assert.equal(verifiedDurationCandidate(row, "owner-b", "channel-a"), null);
+assert.equal(verifiedDurationCandidate({ ...row, moduleConfig: {} }, "owner-a", "channel-a"), null);
+assert.equal(verifiedDurationCandidate({ ...row, version: undefined }, "owner-a", "channel-a"), null);
+const v3 = { ...content, version: "duration-draft-candidate/v3", sourceInception: { requestSnapshot: { ownerId: "owner-a" } } };
+const v3row = { ...v3, status: "untested", fingerprint: sha256Hex(canonicalJson(v3)) };
+assert.ok(verifiedDurationCandidate(v3row, "owner-a", "channel-a"));
+assert.equal(verifiedDurationCandidate({ ...v3row, sourceInception: { requestSnapshot: { ownerId: "owner-b" } } }, "owner-a", "channel-a"), null);
+const candidate = { version: "retained-pipeline-candidate/v1", ownerId: "owner-a", channelId: "channel-a", sourceRunId: "run-a", workerDeployment: { version: "worker-a" }, qualification: {}, entries: [{ block: "music", params: { trackCount: 4 } }, { block: "music", version: "3" }] };
+const evidence = { ownerId: "owner-a", channelId: "channel-a", createdAt: 1, candidate, fingerprint: sha256Hex(canonicalJson(candidate)) };
+assert.ok(verifiedRetainedEvidence(evidence, "owner-a", "channel-a"));
+assert.equal(verifiedRetainedEvidence(evidence, "owner-a", "channel-b"), null);
+assert.equal(verifiedRetainedEvidence(evidence, "owner-b", "channel-a"), null);
+assert.equal(verifiedRetainedEvidence({ ...evidence, candidate: { ...candidate, sourceRunId: "tampered" } }, "owner-a", "channel-a"), null);
+assert.deepEqual(comparePipelineCandidates(content.pipeline, candidate.entries).map(item => [item.block, item.occurrence, item.changes]), [["music", 1, ["Settings changed"]], ["music", 2, ["Version changed"]]]);
+console.log("Draft and benchmark review rejects altered or foreign records and compares repeated modules independently");

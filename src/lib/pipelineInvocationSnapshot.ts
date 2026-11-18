@@ -1,5 +1,6 @@
 import type { PipelineEntry } from "@/engine/types";
 import { stableJson } from "@/lib/publishingPolicy";
+import { sha256Hex } from "@/lib/sha256";
 import {
   normalizePipelineWorkerDeployment,
   type PipelineWorkerDeployment,
@@ -407,6 +408,7 @@ export function decidePipelineInvocationClaim(args: {
     if (args.run.sha256 !== args.sha256) {
       throw new Error("pipeline invocation snapshot sha256 mismatch");
     }
+    if (sha256Hex(stableJson(durable)) !== args.sha256) throw new Error("pipeline invocation snapshot content hash mismatch");
     return { kind: "reused", snapshot: durable, sha256: args.sha256 };
   }
   if (args.run.hasExecutionHistory) {
@@ -414,6 +416,7 @@ export function decidePipelineInvocationClaim(args: {
       "pipeline invocation snapshot missing after execution began; legacy run requires manual recovery",
     );
   }
+  if (sha256Hex(stableJson(incoming)) !== args.sha256) throw new Error("pipeline invocation snapshot content hash mismatch");
   return { kind: "new", snapshot: incoming, sha256: args.sha256 };
 }
 

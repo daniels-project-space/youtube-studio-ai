@@ -23,7 +23,8 @@ const EXACT_LOCATIONS: Record<string, StudioLocation> = {
   "/loreshort": { area: "Toolbox · Infrastructure", title: "Lore references" },
 };
 
-export function studioLocationForPathname(pathname: string): StudioLocation {
+export function studioLocationForPathname(pathname: string, automation = false): StudioLocation {
+  if (automation && pathname === "/") return { area: "Workspace", title: "Overview" };
   if (EXACT_LOCATIONS[pathname]) return EXACT_LOCATIONS[pathname];
   if (pathname.startsWith("/channels/")) {
     return { area: "Channel workspace", title: "Operating room" };
@@ -31,5 +32,5 @@ export function studioLocationForPathname(pathname: string): StudioLocation {
   if (pathname.startsWith("/runs/")) {
     return { area: "Production", title: "Run detail" };
   }
-  return { area: "Workspace", title: "AutoStudio" };
+  return { area: "Workspace", title: automation ? "Overview" : "AutoStudio" };
 }

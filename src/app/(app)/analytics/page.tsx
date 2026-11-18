@@ -28,6 +28,7 @@ import {
 } from "@/lib/analyticsDataFreshness";
 import {
   ANALYTICS_FLEET_PAGE_SIZE,
+  analyticsFleetRowsForMetric,
   nextAnalyticsFleetLimit,
 } from "@/lib/analyticsFleetPresentation";
 import { layoutAnalyticsEfficiencyField } from "@/lib/analyticsEfficiencyField";
@@ -91,7 +92,8 @@ const C_AMBER = "var(--color-amber)";
 
 export default function AnalyticsPage() {
   const ownerId = useOwnerId();
-  const { selectedSlug } = useSelectedChannel();
+  const { selectedSlug, setSelectedSlug } = useSelectedChannel();
+  const [days, setDays] = useState(28);
 
   const dashboard = useQuery(api.analytics.dashboardSnapshot, { ownerId }) as
     | AnalyticsDashboardSnapshot
@@ -111,7 +113,7 @@ export default function AnalyticsPage() {
       ? {
           ownerId,
           channelId: selected.channelId as Id<"channels">,
-          days: 90,
+          days: 365,
         }
       : "skip",
   ) as TrendRow[] | undefined;
@@ -158,9 +160,16 @@ export default function AnalyticsPage() {
   }, []);
 
   const loading = overview === undefined || summary === undefined || refreshStatus === undefined;
-  const hasTrend = (trend?.length ?? 0) > 0;
-  const anyChannelData =
-    (summary?.some((s) => s.subscriberCount > 0 || s.totalViews > 0) ?? false);
+  const filteredTrend = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setUTCHours(0, 0, 0, 0);
+    cutoff.setUTCDate(cutoff.getUTCDate() - (days - 1));
+    const firstDate = cutoff.toISOString().slice(0, 10);
+    return (trend ?? []).filter((point) => point.date >= firstDate);
+  }, [trend, days]);
+  const hasTrend = filteredTrend.length > 0;
+  const anyChannelData = refreshStatus?.some((row) => Boolean(row.latestSnapshotDate)) ?? false;
+  const snapshotChannelIds = new Set((refreshStatus ?? []).filter(row => Boolean(row.latestSnapshotDate)).map(row => row.channelId));
   const analyticsScope = useMemo(() => {
     if (!refreshStatus) return [];
     return selected
@@ -174,6 +183,22 @@ export default function AnalyticsPage() {
 
   return (
     <div className={styles.dashboard}>
+      <header className={styles.pageHeader}>
+        <div><h1>Analytics</h1><p>Channel performance and data health.</p></div>
+        <div className={styles.filters}>
+          <label>Channel
+            <select value={selected?.slug ?? ""} onChange={(event) => setSelectedSlug(event.target.value || null)}>
+              <option value="">All channels</option>
+              {(summary ?? []).map((row) => <option key={row.channelId} value={row.slug}>{row.name}</option>)}
+            </select>
+          </label>
+          <label>History
+            <select value={days} onChange={(event) => setDays(Number(event.target.value))} disabled={!selected}>
+              <option value={7}>Last 7 days</option><option value={28}>Last 28 days</option><option value={90}>Last 90 days</option><option value={365}>Last 365 days</option>
+            </select>
+          </label>
+        </div>
+      </header>
       <AnalyticsHero
         loading={loading}
         selected={selected}
@@ -183,6 +208,7 @@ export default function AnalyticsPage() {
         videoCount={overview?.videoCount ?? 0}
         channelCount={overview?.channelCount ?? 0}
         freshness={dataFreshness}
+        hasSnapshot={analyticsScope.some((row) => Boolean(row.latestSnapshotDate))}
       />
 
       {loading ? (
@@ -192,15 +218,7 @@ export default function AnalyticsPage() {
         </div>
       ) : (
         <>
-          <AnalyticsRefreshHealth rows={refreshStatus ?? []} selectedSlug={selected?.slug ?? null} />
-
-          {!selected && (
-            <AnalyticsSnapshotMap
-              rows={summary ?? []}
-              freshness={dataFreshness}
-            />
-          )}
-
+          <div className={styles.mainLayout}><div className={styles.mainColumn}>
           {/* Charts gate: nothing populated until stats-refresh has run. */}
           {!anyChannelData && !hasTrend ? (
             <EmptyState
@@ -209,10 +227,17 @@ export default function AnalyticsPage() {
               icon={<IconAnalytics width={24} height={24} />}
             />
           ) : selected ? (
-            <PerChannelCharts row={selected} trend={trend ?? []} freshness={dataFreshness} />
+            trend === undefined ? <SkeletonList rows={2} /> : hasTrend
+              ? <PerChannelCharts row={selected} trend={filteredTrend} freshness={dataFreshness} days={days} />
+              : <EmptyState title="No snapshots in this period" description="Choose a longer history range or check the channel's data health." icon={<IconAnalytics width={24} height={24} />} />
           ) : (
-            <FleetComparison rows={summary ?? []} freshness={dataFreshness} />
+            <FleetComparison rows={summary ?? []} freshness={dataFreshness} snapshotChannelIds={snapshotChannelIds} />
           )}
+
+          {!selected && anyChannelData && <AnalyticsSnapshotMap rows={(summary ?? []).filter(row => snapshotChannelIds.has(row.channelId))} freshness={dataFreshness} />}
+          </div><aside className={styles.insights}><h2>Insights</h2>
+            <AnalyticsRefreshHealth rows={refreshStatus ?? []} selectedSlug={selected?.slug ?? null} />
+          </aside></div>
 
           <QualityLearningPanel
             state={qualityLearning.state}
@@ -238,6 +263,7 @@ function AnalyticsHero({
   videoCount,
   channelCount,
   freshness,
+  hasSnapshot,
 }: {
   loading: boolean;
   selected: SummaryRow | null;
@@ -247,6 +273,7 @@ function AnalyticsHero({
   videoCount: number;
   channelCount: number;
   freshness: AnalyticsDataFreshness;
+  hasSnapshot: boolean;
 }) {
   const scoped = selected ?? {
     subscriberCount: totalSubscribers,
@@ -258,17 +285,17 @@ function AnalyticsHero({
     <section className={styles.learningHero} aria-busy={loading}>
       <div className={styles.heroLead}>
         <span className={styles.eyebrow}>YouTube analytics</span>
-        <h1>{selected ? selected.name : "Portfolio analytics"}</h1>
+        <h2>{selected ? selected.name : "Portfolio analytics"}</h2>
         <p>{freshness.state === "current"
-          ? "Observed reach, committed spend, and released inventory."
-          : `${freshness.detail} Spend and released inventory remain current records.`}</p>
+          ? "Observed reach, recorded spend, and upload records."
+          : `${freshness.detail} Spend and upload IDs remain recorded.`}</p>
       </div>
 
       <div className={styles.metricRail}>
         <HeroMetric
           index="01"
           label={freshness.state === "current" ? "Observed views" : "Recorded views"}
-          value={loading ? "—" : compact(scoped.totalViews)}
+          value={loading || !hasSnapshot ? "—" : compact(scoped.totalViews)}
           hint={freshness.state === "current"
             ? (selected ? "Latest channel snapshot" : "Latest fleet snapshots")
             : freshness.detail}
@@ -276,7 +303,7 @@ function AnalyticsHero({
         <HeroMetric
           index="02"
           label={freshness.state === "current" ? "Subscribers" : "Recorded subscribers"}
-          value={loading ? "—" : compact(scoped.subscriberCount)}
+          value={loading || !hasSnapshot ? "—" : compact(scoped.subscriberCount)}
           hint={freshness.state === "current"
             ? (selected ? "Current observed audience" : `${channelCount} channels in scope`)
             : freshness.detail}
@@ -291,9 +318,9 @@ function AnalyticsHero({
         />
         <HeroMetric
           index="04"
-          label="Published inventory"
+          label="Recorded upload IDs"
           value={loading ? "—" : scoped.videoCount}
-          hint="Observed released videos"
+          hint="Runs with saved pipeline receipts; visibility not verified"
         />
       </div>
     </section>
@@ -358,7 +385,7 @@ function FleetEfficiencyField({
     <figure className={styles.efficiencyField}>
       <figcaption>
         <span>{freshness.state === "current" ? "Reach / spend field" : "Recorded reach / spend"}</span>
-        <small>Node size = published inventory</small>
+        <small>Node size = recorded upload IDs</small>
       </figcaption>
       <div className={styles.fieldPlot}>
         <svg viewBox="0 0 720 255" role="img" aria-label={`${freshness.label}: channel reach compared with production spend`}>
@@ -389,7 +416,7 @@ function FleetEfficiencyField({
               ) : null}
               <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
               <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
-                <title>{`${node.name}: ${compact(node.totalViews)} ${freshness.state === "current" ? "observed" : "recorded"} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos.`}</title>
+                <title>{`${node.name}: ${compact(node.totalViews)} ${freshness.state === "current" ? "observed" : "recorded"} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} recorded upload IDs.`}</title>
               </circle>
               {node.label ? (
                 <text x={node.label.x} y={node.label.y} textAnchor={node.label.anchor} className={styles.fieldNodeLabel}>
@@ -433,6 +460,7 @@ function FleetEfficiencyField({
 }
 
 function emptyAnalyticsDetail(rows: RefreshStatusRow[], selectedSlug: string | null): string {
+  if (!selectedSlug && rows.length) return "Connect a channel to YouTube to start collecting analytics snapshots.";
   const scoped = selectedSlug ? rows.find((row) => row.slug === selectedSlug) : rows[0];
   return scoped
     ? analyticsRefreshHealth(scoped).detail
@@ -521,10 +549,12 @@ function PerChannelCharts({
   row,
   trend,
   freshness,
+  days,
 }: {
   row: SummaryRow;
   trend: TrendRow[];
   freshness: AnalyticsDataFreshness;
+  days: number;
 }) {
   const label = (d: string) => d.slice(5); // MM-DD
   const subs: ChartSeries = {
@@ -545,13 +575,13 @@ function PerChannelCharts({
   const revenue: ChartSeries = {
     name: "Revenue / day",
     color: C_AMBER,
-    points: trend.map((t) => ({
+    points: trend.filter((t) => t.estimatedRevenueUsd != null).map((t) => ({
       label: label(t.date),
       value: t.estimatedRevenueUsd ?? 0,
     })),
   };
   const videos: ChartSeries = {
-    name: "Published inventory",
+    name: "YouTube video count",
     color: "var(--color-running)",
     points: trend.map((t) => ({ label: label(t.date), value: t.videoCount })),
   };
@@ -563,13 +593,13 @@ function PerChannelCharts({
   return (
     <section className={styles.trendRoom}>
       <AnalyticsSectionHeading
-        eyebrow="90 days"
+        eyebrow={`Last ${days} days`}
         title={`${row.name}${freshness.state === "current" ? " trend" : " recorded trend"}`}
         detail={freshness.state === "current" ? "Daily and cumulative signals." : freshness.detail}
       />
       <div className={styles.trendSummary}>
-        <span><small>Observed view change</small><strong>{viewChange >= 0 ? "+" : ""}{compact(viewChange)}</strong><em>first to latest snapshot</em></span>
-        <span><small>Subscriber change</small><strong>{subscriberChange >= 0 ? "+" : ""}{compact(subscriberChange)}</strong><em>first to latest snapshot</em></span>
+        <span><small>Observed view change</small><strong>{trend.length < 2 ? "—" : `${viewChange >= 0 ? "+" : ""}${compact(viewChange)}`}</strong><em>first to latest snapshot</em></span>
+        <span><small>Subscriber change</small><strong>{trend.length < 2 ? "—" : `${subscriberChange >= 0 ? "+" : ""}${compact(subscriberChange)}`}</strong><em>first to latest snapshot</em></span>
         <span><small>Evidence points</small><strong>{trend.length}</strong><em>persisted daily rows</em></span>
         <span><small>Latest observation</small><strong>{latest?.date ?? "—"}</strong><em>not a forecast</em></span>
       </div>
@@ -577,12 +607,12 @@ function PerChannelCharts({
         <Chart title="Cumulative subscribers" series={[subs]} />
         <Chart title="Subscriber delta / day" series={[delta]} />
         <Chart title="Cumulative views" series={[views]} />
-        <Chart
+        {revenue.points.length > 0 && <Chart
           title="Estimated revenue / day"
           series={[revenue]}
           formatValue={(n) => `$${n.toFixed(0)}`}
-        />
-        <Chart title="Published inventory" series={[videos]} formatValue={(n) => `${Math.round(n)}`} />
+        />}
+        <Chart title="YouTube video count" series={[videos]} formatValue={(n) => `${Math.round(n)}`} />
       </div>
     </section>
   );
@@ -593,16 +623,16 @@ type FleetMetric = "totalViews" | "subscriberCount" | "videoCount" | "costTotal"
 const FLEET_METRICS: readonly { key: FleetMetric; label: string }[] = [
   { key: "totalViews", label: "Views" },
   { key: "subscriberCount", label: "Subscribers" },
-  { key: "videoCount", label: "Published" },
+  { key: "videoCount", label: "Upload IDs" },
   { key: "costTotal", label: "Spend" },
 ];
 
 /** A categorical fleet comparison must use ranked bars, not a line that falsely
  * suggests the channels form a time sequence. */
-function FleetComparison({ rows, freshness }: { rows: SummaryRow[]; freshness: AnalyticsDataFreshness }) {
+function FleetComparison({ rows, freshness, snapshotChannelIds }: { rows: SummaryRow[]; freshness: AnalyticsDataFreshness; snapshotChannelIds: ReadonlySet<string> }) {
   const [metric, setMetric] = useState<FleetMetric>("totalViews");
   const [visibleLimit, setVisibleLimit] = useState(ANALYTICS_FLEET_PAGE_SIZE);
-  const ranked = [...rows].sort((left, right) => right[metric] - left[metric]);
+  const ranked = analyticsFleetRowsForMetric(rows, metric, snapshotChannelIds).sort((left, right) => right[metric] - left[metric]);
   const visible = ranked.slice(0, visibleLimit);
   const remaining = Math.max(0, ranked.length - visible.length);
   const peak = Math.max(1, ...ranked.map((row) => row[metric]));
@@ -638,16 +668,19 @@ function FleetComparison({ rows, freshness }: { rows: SummaryRow[]; freshness: A
             <span className={styles.rankingIndex}>{String(index + 1).padStart(2, "0")}</span>
             <span className={styles.rankingIdentity}>
               <strong>{row.name}</strong>
-              <small>{row.niche ?? "Niche not set"} · {row.videoCount} published</small>
+              <small>{row.niche ?? "Niche not set"} · {row.videoCount} recorded upload IDs</small>
             </span>
             <span className={styles.rankingBar} aria-hidden="true">
-              <i style={{ transform: `scaleX(${Math.max(0.015, row[metric] / peak)})` }} />
+              <i style={{ transform: `scaleX(${Math.max(0, row[metric] / peak)})` }} />
             </span>
             <strong className={styles.rankingValue}>{formatMetric(row[metric])}</strong>
             <span className={styles.rankingArrow}>↗</span>
           </Link>
         ))}
       </div>
+      {(metric === "totalViews" || metric === "subscriberCount") && ranked.length < rows.length && (
+        <p>{rows.length - ranked.length} channel{rows.length - ranked.length === 1 ? " has" : "s have"} no saved analytics snapshot and {rows.length - ranked.length === 1 ? "is" : "are"} omitted from this comparison.</p>
+      )}
       {remaining > 0 ? (
         <div className={styles.comparisonPaging}>
           <span>Showing {visible.length} of {ranked.length}</span>

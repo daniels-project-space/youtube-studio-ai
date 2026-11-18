@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 
 import {
   ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY,
@@ -274,6 +275,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "thumbnail candidate worker is not deployed" }, { status: 503 });
     }
     const body = candidateRequestBody(await request.json());
+    const requestOptions = privateTriggerRequestOptions(process.env);
     const convex = convexClient();
     const shell = await convex.mutation(thumbnailRefreshRuntimeApi.createCandidateShell, {
       ownerId: actor.ownerId,
@@ -385,7 +387,7 @@ export async function POST(request: Request) {
       const handle = await tasks.trigger(triggerRequest.taskId, triggerRequest.payload, {
         concurrencyKey: triggerRequest.concurrencyKey,
         idempotencyKey,
-      });
+      }, requestOptions);
       await convex.mutation(thumbnailRefreshRuntimeApi.markCandidateDispatchQueued, {
         ownerId: actor.ownerId,
         candidateRunId: shell.candidateRunId,
@@ -416,6 +418,7 @@ export async function POST(request: Request) {
     if (error instanceof StudioAuthError) {
       return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
     }
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "Could not create thumbnail candidate";
     const status = /invalid|must|unrecognized|requires|retained|source|replay/i.test(message) ? 422 : 500;
     return NextResponse.json({ ok: false, error: message }, { status });

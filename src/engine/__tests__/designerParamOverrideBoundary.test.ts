@@ -62,4 +62,16 @@ assert.deepEqual(
   "the operator surface only forwards craft controls; format duration is selected once at channel-design time",
 );
 
+assert.deepEqual(sanitizeParamOverrides({
+  script_gen: { endWithSummary: "false" },
+  visual_matter: { enabled: "true" },
+  narration_tts: { chapterCards: "invalid" },
+  assemble: { deblurIntro: false },
+}), {
+  script_gen: { endWithSummary: false },
+  visual_matter: { enabled: true },
+  assemble: { deblurIntro: false },
+}, "toggle overrides must not turn the string false into true or accept arbitrary values");
+const disabledSummary = designPipeline({ family: "narrated_stock", paramOverrides: { script_gen: { endWithSummary: "false" } } });
+assert.equal(disabledSummary.pipeline.find(entry => entry.block === "script_gen")?.params?.endWithSummary, false);
 console.log("designer param-override authority boundary tests passed");

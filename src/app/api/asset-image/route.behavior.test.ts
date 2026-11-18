@@ -89,6 +89,18 @@ test("persistent read failures clear shared state and preserve unavailable respo
   assert.equal(f.calls.length, 4);
 });
 
+test("missing objects are distinguished from storage failures", async () => {
+  const missing = fixture(async () => { throw Object.assign(new Error("missing"), { name: "NoSuchKey" }); });
+  assert.equal((await missing.get()).status, 404);
+  const unavailable = fixture(async () => { throw new Error("network timeout"); });
+  const response = await unavailable.get();
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "private media storage is unavailable" });
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const bucket = fixture(async () => { throw Object.assign(new Error("missing bucket"), { name: "NoSuchBucket", $metadata: { httpStatusCode: 404 } }); });
+  assert.equal((await bucket.get()).status, 503);
+});
+
 test("different keys remain isolated and overflow does not deny unrelated reads", async () => {
   let release!: (bytes: Uint8Array) => void;
   const pending = new Promise<Uint8Array>(resolve => { release = resolve; });

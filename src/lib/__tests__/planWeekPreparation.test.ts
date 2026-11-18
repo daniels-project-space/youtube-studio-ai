@@ -35,6 +35,7 @@ import {
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
 import { sha256Hex } from "@/lib/sha256";
+import { createHrsQwenNarrationSourceEvidence } from "@/lib/hyperYoutubeQwenNarrationEvidence";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
@@ -472,6 +473,32 @@ assert.equal(
   preparedNarration.narrationKey,
   "a prepared narration binds an exact script, measured receipt, timing map, and canonical retained audio key",
 );
+assert.throws(
+  () => assertPlanWeekPreparedNarrationBinding({ prepared: preparedNarration, manifest, requireQwenEvidence: true }),
+  /no verified Qwen3 provider evidence/,
+  "legacy unproven audio cannot be silently reused by Automation",
+);
+const qwenChunk = {
+  schema: "hrs-qwen3-tts-receipt/v1" as const, route: "hyper-render-service" as const, modelId: "qwen3-tts" as const,
+  projectId: "00000000-0000-4000-8000-000000000001", jobId: "00000000-0000-4000-8000-000000000002",
+  generation: 0, environmentId: "00000000-0000-4000-8000-000000000003", environmentSha256: "a".repeat(64),
+  idempotencyKey: "fixture", requestSha256: "b".repeat(64), textSha256: "d".repeat(64), instructionSha256: "e".repeat(64),
+  speaker: "Ryan" as const, language: "English" as const, seed: 1, audioSha256: "f".repeat(64), audioFormat: "wav" as const,
+  byteLength: 2_048, contentType: "audio/wav" as const,
+  output: { bucket: "fixture", key: "fixture.wav", sha256: "f".repeat(64), bytes: 2_048, contentType: "audio/wav" as const },
+  costStatus: "unreported" as const,
+};
+const qwenEvidence = createHrsQwenNarrationSourceEvidence({ speaker: "Ryan", language: "English",
+  source: { narrationKey: preparedNarration.narrationKey, sha256: preparedNarration.audioSha256, byteLength: preparedNarration.audioByteLength,
+    durationSec: preparedNarration.narrationDurationSec, transcriptSha256: preparedNarration.narrationTranscriptSha256,
+    assembly: "concat_audio_with_gaps/v1", gapPlanSha256: "a".repeat(64), mode: "sentence", voiceFx: null },
+  sourceChunks: [{ ordinal: 0, textSha256: qwenChunk.textSha256, audioSha256: qwenChunk.audioSha256, byteLength: qwenChunk.byteLength, receipt: qwenChunk }], preflightReceipts: [] });
+const qwenPrepared = { ...preparedNarration, narrationPerformanceEvidence: { ...preparedNarration.narrationPerformanceEvidence, qwenProviderEvidence: qwenEvidence } };
+assert.doesNotThrow(() => assertPlanWeekPreparedNarrationBinding({ prepared: qwenPrepared, manifest, requireQwenEvidence: true }));
+assert.doesNotThrow(() => assertPlanWeekPreparedNarrationBinding({ prepared: qwenPrepared, manifest, requireQwenEvidence: true, expectedQwenVoice: { speaker: "Ryan", language: "English" } }));
+assert.throws(() => assertPlanWeekPreparedNarrationBinding({ prepared: qwenPrepared, manifest, requireQwenEvidence: true, expectedQwenVoice: { speaker: "Serena", language: "English" } }), /voice does not match/);
+assert.throws(() => assertPlanWeekPreparedNarrationBinding({ prepared: { ...qwenPrepared, narrationPerformanceEvidence: { ...qwenPrepared.narrationPerformanceEvidence,
+  qwenProviderEvidence: { ...qwenEvidence, source: { ...qwenEvidence.source, transcriptSha256: "9".repeat(64) } } } }, manifest, requireQwenEvidence: true }), /binding mismatch/);
 assert.throws(
   () => assertPlanWeekPreparedNarrationBinding({
     prepared: { ...preparedNarration, narrationKey: "owner/foreign/narration.mp3" },

@@ -1,16 +1,32 @@
 /* Studio overview: operational detail without repeating the navigation shell. */
 .dashboard { display: grid; gap: 1.25rem; padding-bottom: 2rem; min-width: 0; }
+.mediaActivity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 0.42fr); gap: 1rem; align-items: start; min-width: 0; }
+.activityPanel { min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 0.8rem; }
+.activityList { display: grid; }
+.activityRow { display: flex; align-items: center; gap: 0.6rem; min-width: 0; min-height: 54px; padding: 0.45rem 0; border-top: 1px solid var(--color-border); }
+.activityRow:hover { color: var(--color-fg); background: rgba(255,255,255,.035); }
+.activityIcon { display: grid; place-items: center; color: var(--color-muted); flex: 0 0 24px; }
+.activityRow .rowCopy { flex: 1; }
+.activityRow .rowCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activityFoot { border-top: 1px solid var(--color-border); padding-top: 0.65rem; color: var(--color-muted); font-size: 0.75rem; }
+@media (max-width: 1000px) { .mediaActivity { grid-template-columns: minmax(0, 1fr); } }
 .headerActions, .relayControls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .pageHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
-.pageHeading h1 { margin: 0; font: 650 2rem/1.2 var(--font-sans); letter-spacing: -.045em; }
+.pageHeading h1 { margin: 0; font: 600 2rem/1.2 var(--font-display); letter-spacing: 0; }
 .pageHeading p { margin: .4rem 0 0; color: var(--color-muted); font-size: .875rem; }
+.schedulePosture { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem; padding: .85rem 1rem; border: 1px solid #765c5d; border-radius: 8px; background: #362c30; color: #f2e6e3; }
+.schedulePosture > svg { flex: none; color: #e5b7a9; }
+.schedulePosture > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .9rem; flex: 1 1 16rem; }
+.schedulePosture strong { font-size: .95rem; }
+.schedulePosture small { color: #d7c7c4; font-size: .8rem; }
+.schedulePosture > a { color: #f2d5c9; font-size: .85rem; min-height: 40px; display: inline-flex; align-items: center; gap: .35rem; }
 .dashboard :is(a,button,summary):focus-visible { outline: 2px solid var(--color-blueprint); outline-offset: 3px; }
 .dashboard :is(a,button,summary) { scroll-margin-block: 9rem; }
 .commandCenter { display: grid; gap: .75rem; min-width: 0; }
 .decisionCard, .dataWidget, .workPanel, .runsWidget {
   min-width: 0; border: 1px solid var(--color-border-strong);
-  background: linear-gradient(120deg,rgba(115,221,255,.035),rgba(167,139,250,.03) 65%,rgba(255,115,86,.025)),rgba(10,15,25,.82);
-  backdrop-filter: blur(20px); border-radius: 16px;
+  background: rgba(38,37,39,.82);
+  backdrop-filter: blur(20px); border-radius: 8px;
 }
 .decisionCard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.2rem; border-left: 3px solid var(--decision-color,var(--color-blueprint)); }
 .decisionCard[data-tone="attention"] { --decision-color: var(--color-failed); }
@@ -18,7 +34,7 @@
 .decisionCard > a { min-height: 44px; font-size: .875rem; flex-shrink: 0; }
 .decisionCopy { min-width: 0; flex: 1 1 14rem; display: grid; gap: .25rem; }
 .eyebrow { color: var(--color-muted); font-size: .875rem; font-weight: 600; }
-.decisionCopy h2 { margin: 0; font: 650 1.4rem/1.25 var(--font-sans); letter-spacing: -.025em; overflow-wrap: anywhere; }
+.decisionCopy h2 { margin: 0; font: 650 1.4rem/1.25 var(--font-sans); letter-spacing: 0; overflow-wrap: anywhere; }
 .decisionCopy p { margin: 0; font-size: .875rem; color: var(--color-muted); }
 .widgetGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .75rem; align-items: start; }
 .dataWidget { overflow: hidden; }
@@ -83,17 +99,16 @@
 .empty strong, .empty small { font-size: .875rem; line-height: 1.4; }
 .empty strong { color: var(--color-fg); font-weight: 600; }
 .relay { min-width: 0; }
-.relayViewport { display: flex; gap: .75rem; overflow-x: auto; padding: 4px 4px 10px; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
-.relayCard { display: grid; align-content: start; flex: 0 0 min(17rem,85%); min-width: 0; border: 1px solid var(--color-border); border-radius: 13px; overflow: hidden; background: rgba(12,16,27,.7); scroll-snap-align: start; }
-.relayCard > div:first-child { border-radius: 0 !important; }
-.relayCardBody { display: flex; align-items: center; gap: .6rem; padding: .75rem; }
+.relayViewport { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .65rem; }
+.relayCard { display: block; min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: rgba(38,37,39,.82); }
+.relayCardBody { display: flex; align-items: center; gap: .7rem; padding: .65rem; min-height: 78px; }
 .relayCardBody > span { min-width: 0; flex: 1; display: grid; gap: .2rem; }
 .relayCardBody strong { font-size: .9375rem; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .relayCardBody small { font-size: .875rem; color: var(--color-muted); text-transform: capitalize; }
 .relayCardBody > i { font-style: normal; color: var(--color-muted); }
 .relayControls button { font-size: 1.2rem; }
-.relaySkeletons { width: 100%; display: flex; gap: .75rem; }
-.relaySkeletons span { flex: 1; min-height: 170px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 13px; }
+.relaySkeletons { grid-column: 1 / -1; width: 100%; display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: .65rem; }
+.relaySkeletons span { min-height: 78px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; }
 .emptyRelay { display: flex; align-items: center; min-height: 64px; font-size: .9375rem; color: var(--color-muted); }
 .runsWidget > summary { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: 1rem; min-height: 64px; list-style: none; cursor: pointer; }
 .runsSummaryMark { color: var(--color-accent); }
@@ -106,10 +121,12 @@
 .runsBodyHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; font-size: .875rem; color: var(--color-muted); }
 .dashboard :is(.issueList > a,.activeRow,.queueRow,.relayCard,.relayControls button):hover { border-color: var(--color-border-strong); background-color: rgba(255,255,255,.055); }
 @media (max-width: 1050px) {
+  .relayViewport { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .widgetGrid { grid-template-columns: repeat(auto-fit,minmax(min(100%,15rem),1fr)); }
   .workbench { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
+  .relayViewport { grid-template-columns: 1fr; }
   .headerActions { width: 100%; }
   .headerActions > * { flex: 1; min-height: 44px; }
   .decisionCard { padding: .9rem; }

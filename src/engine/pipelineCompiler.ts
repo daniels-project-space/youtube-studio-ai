@@ -12,6 +12,7 @@ import {
   type NovitaVideoRenderAssessment,
 } from "./goldenExecution";
 import type { GenerationProfileId } from "./runtimeCapability";
+export { materializeRuntimePipelineParams } from "./materializeRuntimePipelineParams";
 
 /**
  * The render tier every pipeline resolves to unless a caller explicitly selects
@@ -59,24 +60,6 @@ export class PipelinePolicyError extends Error {
     super(message);
     this.name = "PipelinePolicyError";
   }
-}
-
-/**
- * Freeze the parameter set that the runner will execute into the persisted
- * pipeline before validation, fingerprinting, and spend reservation. Runtime
- * operator presets must never live only in a side map: doing so lets a more
- * expensive configuration bypass the compiler's budget contract.
- */
-export function materializeRuntimePipelineParams(
-  entries: readonly PipelineEntry[],
-  paramsByBlock: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
-): PipelineEntry[] {
-  return entries.map((entry) => {
-    const effectiveParams = paramsByBlock[entry.block];
-    return effectiveParams
-      ? { ...entry, params: { ...effectiveParams } }
-      : entry;
-  });
 }
 
 /**

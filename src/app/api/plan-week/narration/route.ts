@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { privateTriggerRequestOptions, PrivateTriggerTargetError } from "@/lib/privateTriggerTarget";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { assertPlanWeekPreparedNarrationArgs } from "@/lib/planWeekPreparedNarrationArgs";
 import { planWeekPreparedNarrationKey, planWeekPreparedNarrationAudioKey } from "@/lib/planWeekPreparation";
+import { sha256Hex } from "@/lib/sha256";
+import { canonicalJson } from "@/lib/canonicalJson";
 
 export const runtime = "nodejs";
 
@@ -26,14 +29,18 @@ export async function POST(request: Request) {
     if (!process.env.TRIGGER_SECRET_KEY) {
       return NextResponse.json({ ok: false, error: "weekly narration preparation is not activated (no TRIGGER_SECRET_KEY)", inactive: true }, { status: 503 });
     }
+    const requestOptions = privateTriggerRequestOptions(process.env);
+    const idempotencyScope = payload.legacyScriptRunId
+      ? `plan-week-narration-reconcile:${sha256Hex(canonicalJson({ ownerId: actor.ownerId, manifestSha256: payload.manifestSha256, runId: payload.legacyScriptRunId }))}`
+      : `plan-week-narration:${actor.ownerId}:${payload.manifestSha256}`;
     const idempotencyKey = await idempotencyKeys.create(
-      `plan-week-narration:${actor.ownerId}:${payload.manifestSha256}`,
+      idempotencyScope,
       { scope: "global" },
     );
     const handle = await tasks.trigger("plan-week-prepared-narration", payload, {
       concurrencyKey: `plan-week-narration:${actor.ownerId}:${payload.channelId}`,
       idempotencyKey,
-    });
+    }, requestOptions);
     const scope = { ownerId: payload.ownerId, channelSlug: payload.channelSlug, batchId: payload.batchId, itemId: payload.itemId };
     return NextResponse.json({
       ok: true,
@@ -44,6 +51,7 @@ export async function POST(request: Request) {
     }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    if (error instanceof PrivateTriggerTargetError) return NextResponse.json({ ok: false, error: error.message, inactive: true }, { status: 503 });
     const message = error instanceof Error ? error.message : "could not queue weekly narration preparation";
     return NextResponse.json({ ok: false, error: message }, { status: /invalid|requires|must |outside|canonical/u.test(message) ? 422 : 500 });
   }

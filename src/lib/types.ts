@@ -27,6 +27,7 @@ export type RunRow = {
   automaticResumeLastError?: string;
   channelName: string;
   channelSlug: string;
+  manualPrivate?: boolean;
   /** Whether this run carries the immutable execution plan required for a live recovery decision. */
   pipelineSource?: "frozen" | "legacy_inferred";
   stageProgress?: RunStageProgressSummary;

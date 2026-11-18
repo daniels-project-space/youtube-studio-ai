@@ -26,12 +26,14 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
 import { persistPreparedResult } from "@/lib/preparedResultStorage";
-import { PREPARED_METADATA_READ, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
+import { PREPARED_METADATA_READ, assertPreparedMetadataSize, decodePreparedMetadata, preparedObjectAbsent as objectNotFound } from "@/lib/preparedMediaStorage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claimPreparedGeneration } from "@/lib/preparedGenerationClaim";
+import { createWeeklyScriptCallBudget } from "@/lib/weeklyScriptCallBudget";
 import { createModelUsageScope } from "@/lib/modelUsage";
-import { synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
+import { assertScriptGenerationFeasible, synthScript, type Script, type ScriptRequest } from "@/lib/scriptGen";
 import { assertWeeklyPreparationVersionsSupported } from "@/lib/weeklyPreparationVersionAdmission";
+import { weeklyScriptNarrationTiming, weeklyScriptParams } from "@/lib/narrationTimingPlan";
 
 async function readPreparationManifest(payload: PlanWeekPreparedScriptArgs): Promise<PlanWeekPreparationManifest> {
   const bytes = await getObjectBytes(payload.manifestKey, undefined, PREPARED_METADATA_READ);
@@ -72,11 +74,17 @@ function routeSeed(manifest: PlanWeekPreparationManifest): ChannelProgramRouteRu
   return value === undefined ? undefined : parseChannelProgramRouteRunSeed(value);
 }
 
-function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
+export function buildWeeklyScriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): ScriptRequest {
   const seed = seedRecord(manifest);
   const route = routeSeed(manifest);
-  const moduleConfig = manifest.execution.moduleConfig;
-  const scriptConfig = moduleConfig.script_gen ?? {};
+  const scriptConfig = weeklyScriptParams(manifest.execution);
+  const timing = weeklyScriptNarrationTiming(manifest.execution);
+  if (payload.maxSeconds !== undefined && payload.maxSeconds !== timing.targetSeconds) {
+    throw new Error("weekly script duration differs from the frozen pipeline");
+  }
+  if (payload.style !== undefined && payload.style !== timing.style) {
+    throw new Error("weekly script style differs from the frozen pipeline");
+  }
   const narrative = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
     ? (seed.styleDNA as Record<string, unknown>).narrative
     : undefined;
@@ -85,10 +93,11 @@ function scriptRequest(manifest: PlanWeekPreparationManifest, payload: PlanWeekP
     channelName: typeof seed.channelName === "string" ? seed.channelName : undefined,
     persona: typeof seed.persona === "string" ? seed.persona : undefined,
     niche: typeof seed.niche === "string" ? seed.niche : undefined,
-    style: payload.style ?? (typeof scriptConfig.style === "string" ? scriptConfig.style : undefined),
+    style: timing.style ?? undefined,
+    genre: timing.genre ?? undefined,
     qualityProfile: "production",
     language: payload.language ?? (typeof scriptConfig.language === "string" ? scriptConfig.language : undefined),
-    maxSeconds: payload.maxSeconds,
+    maxSeconds: timing.targetSeconds,
     endWithSummary: scriptConfig.endWithSummary === false ? false : true,
     sentenceGapSec: typeof scriptConfig.sentenceGapSec === "number" ? scriptConfig.sentenceGapSec : undefined,
     ttsSpeed: typeof scriptConfig.ttsSpeed === "number" ? scriptConfig.ttsSpeed : undefined,
@@ -158,14 +167,17 @@ export const planWeekPreparedScriptTask = task({
       return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
     }
 
+    const request = buildWeeklyScriptRequest(manifest, payload);
+    assertScriptGenerationFeasible(request);
     await bootstrapSecrets(() => undefined, { services: ["openrouter"], required: ["OPENROUTER_API_KEY"] });
-    const request = scriptRequest(manifest, payload);
     await claimPreparedGeneration("script", manifest, { payload, request });
     const usage = createModelUsageScope();
+    const callBudget = createWeeklyScriptCallBudget(payload.maxCostUsd, usage.snapshot);
     let script: Script;
     await usage.run(async () => {
-      script = await synthScript(request);
+      script = await callBudget.run(() => synthScript(request));
     });
+    callBudget.assertComplete();
     const modelUsage = usage.snapshot();
     if (modelUsage.unpricedCalls > 0) {
       throw new Error("weekly prepared script usage is unpriced; refusing an automatic success");
@@ -184,10 +196,12 @@ export const planWeekPreparedScriptTask = task({
       topic: manifest.plan.topic,
       script: script!,
       scriptSha256: sha256Hex(canonicalJson(script!)),
+      narrationTiming: weeklyScriptNarrationTiming(manifest.execution),
       createdAt: Date.now(),
     };
     assertPlanWeekPreparedScriptBinding({ prepared, manifest });
     const body = new TextEncoder().encode(canonicalJson(prepared));
+    assertPreparedMetadataSize(body);
     await persistPreparedResult(sidecarKey, body, "application/json", { "plan-week-prepared-script": "v1" });
     const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
     return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };

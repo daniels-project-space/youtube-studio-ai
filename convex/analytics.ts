@@ -169,6 +169,7 @@ export const channelSummary = query({
           name: ch.name,
           slug: ch.slug,
           niche: ch.identity?.niche ?? null,
+          hasAnalytics: latest !== null,
           subscriberCount: latest?.subscriberCount ?? 0,
           totalViews: latest?.totalViews ?? 0,
           videoCount,

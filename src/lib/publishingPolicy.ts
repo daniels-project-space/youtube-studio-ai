@@ -219,7 +219,7 @@ export function isGenerationDue(args: {
   cadence?: string;
 }): boolean {
   const schedule = args.schedule;
-  if (schedule?.enabled === false) return false;
+  if (schedule?.enabled !== true) return false;
   const timezone = validTimeZone(schedule?.timezone);
   const localTime = schedule?.localTime ?? "09:00";
   const match = /^(\d{2}):(\d{2})$/.exec(localTime);
